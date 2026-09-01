@@ -66,7 +66,8 @@ describe("resource-management pages", () => {
       display_name: "Mobile App",
       id: ids.application,
       organization_id: "org_0123456789abcdef",
-      slug: "mobile-app"
+      slug: "mobile-app",
+      status: "active"
     } });
     const applicationView = render(<ApplicationsPage />);
     await user.type(screen.getByLabelText("Display name"), "Mobile App");
@@ -87,7 +88,8 @@ describe("resource-management pages", () => {
       display_name: "Production",
       id: ids.environment,
       kind: "production",
-      slug: "production"
+      slug: "production",
+      status: "active"
     } });
     render(<EnvironmentsPage />);
     await user.type(screen.getByLabelText("Application ID"), ids.application);
@@ -101,6 +103,97 @@ describe("resource-management pages", () => {
       expect.anything(),
       { body: { display_name: "Production", kind: "production", slug: "production" }, method: "POST" }
     );
+  });
+
+  it("requires explicit application disable confirmation and never restores revoked credentials on enable", async () => {
+    const user = userEvent.setup();
+    const active = {
+      created_at: instant,
+      display_name: "Mobile App",
+      id: ids.application,
+      organization_id: "org_0123456789abcdef",
+      slug: "mobile-app",
+      status: "active" as const
+    };
+    adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { body?: unknown; method?: string }) => {
+      if (path.startsWith("/admin/v1/applications?") && !options?.method) {
+        return Promise.resolve({ data: { items: [active], page: { has_more: false } } });
+      }
+      if (path === `/admin/v1/applications/${ids.application}/disable` && options?.method === "POST") {
+        return Promise.resolve({ data: { ...active, disabled_at: "2026-08-29T00:10:00Z", status: "disabled" } });
+      }
+      if (path === `/admin/v1/applications/${ids.application}/enable` && options?.method === "POST") {
+        return Promise.resolve({ data: active });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    render(<ApplicationsPage />);
+    await user.click(screen.getByRole("button", { name: "Load applications" }));
+    await screen.findByText(ids.application);
+    await user.click(screen.getByRole("button", { name: "Disable" }));
+    expect(screen.getByRole("button", { name: "Disable application" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Reason"), "Compromised client release");
+    await user.click(screen.getByLabelText("I understand active credentials in this application will be revoked."));
+    await user.click(screen.getByRole("button", { name: "Disable application" }));
+
+    await screen.findByRole("button", { name: "Enable" });
+    expect(adminRequestMock).toHaveBeenCalledWith(
+      `/admin/v1/applications/${ids.application}/disable`,
+      expect.anything(),
+      { body: { reason: "Compromised client release" }, method: "POST" }
+    );
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledWith(
+      `/admin/v1/applications/${ids.application}/enable`,
+      expect.anything(),
+      { method: "POST" }
+    ));
+  });
+
+  it("scopes environment lifecycle actions to the exact environment", async () => {
+    const user = userEvent.setup();
+    const active = {
+      application_id: ids.application,
+      created_at: instant,
+      display_name: "Production",
+      id: ids.environment,
+      kind: "production" as const,
+      slug: "production",
+      status: "active" as const
+    };
+    adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { body?: unknown; method?: string }) => {
+      if (path === `/admin/v1/applications/${ids.application}/environments` && !options?.method) {
+        return Promise.resolve({ data: { items: [active] } });
+      }
+      if (path === `/admin/v1/environments/${ids.environment}/disable` && options?.method === "POST") {
+        return Promise.resolve({ data: { ...active, disabled_at: "2026-08-29T00:10:00Z", status: "disabled" } });
+      }
+      if (path === `/admin/v1/environments/${ids.environment}/enable` && options?.method === "POST") {
+        return Promise.resolve({ data: active });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    render(<EnvironmentsPage />);
+    await user.type(screen.getByLabelText("Application ID"), ids.application);
+    await user.click(screen.getByRole("button", { name: "Load environments" }));
+    await screen.findByText(ids.environment);
+    await user.click(screen.getByRole("button", { name: "Disable" }));
+    await user.type(screen.getByLabelText("Reason"), "Isolate production traffic");
+    await user.click(screen.getByLabelText("I understand active credentials in this environment will be revoked."));
+    await user.click(screen.getByRole("button", { name: "Disable environment" }));
+
+    await screen.findByRole("button", { name: "Enable" });
+    expect(adminRequestMock).toHaveBeenCalledWith(
+      `/admin/v1/environments/${ids.environment}/disable`,
+      expect.anything(),
+      { body: { reason: "Isolate production traffic" }, method: "POST" }
+    );
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledWith(
+      `/admin/v1/environments/${ids.environment}/enable`,
+      expect.anything(),
+      { method: "POST" }
+    ));
   });
 
   it("clears write-only secret plaintext before the request completes and never persists it", async () => {

@@ -5,9 +5,30 @@ import type {
   EnvironmentResource,
   OrganizationResource
 } from "../api/resources";
-import type { AuditRouteSearch, RequestRouteSearch } from "./route-search";
+import type {
+  AnalyticsRouteSearch,
+  AuditRouteSearch,
+  ConfigurationRouteSearch,
+  FeatureRouteSearch,
+  InstallationFamilyRouteSearch,
+  InstallationRouteSearch,
+  RequestRouteSearch,
+  RouteSimulatorRouteSearch,
+  SelfTestRouteSearch,
+  UserRouteSearch
+} from "./route-search";
 
-export interface WorkspaceSearch extends Partial<AuditRouteSearch>, Partial<RequestRouteSearch> {
+export interface WorkspaceSearch extends
+  Partial<AnalyticsRouteSearch>,
+  Partial<AuditRouteSearch>,
+  Partial<ConfigurationRouteSearch>,
+  Partial<FeatureRouteSearch>,
+  Partial<InstallationFamilyRouteSearch>,
+  Partial<InstallationRouteSearch>,
+  Partial<RequestRouteSearch>,
+  Partial<RouteSimulatorRouteSearch>,
+  Partial<SelfTestRouteSearch>,
+  Partial<UserRouteSearch> {
   application?: string;
   environment?: string;
   organization?: string;
@@ -25,7 +46,7 @@ export interface WorkspaceContextValue {
   search: WorkspaceSearch;
   selectApplication: (slug: string) => void;
   selectEnvironment: (slug: string) => void;
-  updateSearch: (patch: Partial<WorkspaceSearch>) => void;
+  updateSearch: (patch: Partial<WorkspaceSearch>, options?: { replace?: boolean }) => void;
 }
 
 export const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined);

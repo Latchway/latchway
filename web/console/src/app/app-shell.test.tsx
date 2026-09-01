@@ -326,7 +326,7 @@ describe("AppShell", () => {
       "Users", "Installation families", "Installations", "Component definitions", "Features", "Routes", "Upstreams", "Models & pricing",
       "Secrets", "Access policies", "Limit plans", "User overrides", "Abuse controls",
       "Requests", "Usage", "Cost", "Latency", "Errors", "Attestation failures",
-      "Configuration revisions", "Route simulator", "Self-tests", "Audit log", "System health"
+      "Configuration revisions", "Route simulator", "Self-tests", "Audit log", "System health", "Settings"
     ];
     for (const label of labels) {
       expect(within(navigation).getByText(label, { exact: true }).closest("a")).toBeTruthy();
@@ -342,10 +342,10 @@ describe("AppShell", () => {
       const url = requestURL(input);
       if (url === "/admin/v1/auth/session") return new Response(JSON.stringify(adminSession), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === "/admin/v1/organizations?page_size=200") return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:00:00Z", display_name: "Example Org", id: organizationID, slug: "example" }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
-      if (url === `/admin/v1/applications?organization_id=${organizationID}&page_size=200`) return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: applicationID, organization_id: organizationID, slug: "habitify" }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === `/admin/v1/applications?organization_id=${organizationID}&page_size=200`) return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: applicationID, organization_id: organizationID, slug: "habitify", status: "active" }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === `/admin/v1/applications/${applicationID}/environments`) return new Response(JSON.stringify({ items: [
-        { active_revision_id: "rev_0123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production", slug: "production" },
-        { active_revision_id: "rev_1123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Staging", id: "env_1123456789abcdef", kind: "staging", slug: "staging" }
+        { active_revision_id: "rev_0123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production", slug: "production", status: "active" },
+        { active_revision_id: "rev_1123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Staging", id: "env_1123456789abcdef", kind: "staging", slug: "staging", status: "active" }
       ] }), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === "/admin/v1/environments/env_0123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:01:00Z", created_by: "adm_0123456789abcdef", document: { apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig", metadata: {}, spec: {} }, environment_id: "env_0123456789abcdef", id: "rev_2123456789abcdef", state: "valid", version: 2 }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === "/admin/v1/environments/env_1123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });

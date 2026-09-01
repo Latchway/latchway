@@ -1347,9 +1347,20 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "storePromptBodies": { "type": "boolean", "default": false },
-        "storeResponseBodies": { "type": "boolean", "default": false },
-        "bodyRetention": { "$ref": "#/$defs/Duration" }
+        "storePromptBodies": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserved for a future contract version. Latchway v1 rejects activation when this value is true."
+        },
+        "storeResponseBodies": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserved for a future contract version. Latchway v1 rejects activation when this value is true."
+        },
+        "bodyRetention": {
+          "$ref": "#/$defs/Duration",
+          "description": "Reserved duration for a future body-storage contract; it does not enable storage in v1."
+        }
       }
     }
   },

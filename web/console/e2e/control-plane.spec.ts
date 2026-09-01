@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const ids = {
@@ -79,6 +80,7 @@ async function installAdminFixture(
   const selfTestScheduleBodies: Array<Record<string, unknown>> = [];
   const selfTestScheduleAuthorizations: Array<{ authorization?: string; cookie?: string; csrf?: string }> = [];
   let apiTokens: Array<Record<string, unknown>> = [];
+  let selfTestRun: Record<string, unknown> | undefined;
   let selfTestSchedules: Array<Record<string, unknown>> = [];
   let secretItems: Array<Record<string, unknown>> = options.includePrimarySecret === false ? [] : [{
     algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment,
@@ -150,15 +152,15 @@ async function installAdminFixture(
       apiTokens = apiTokens.map((token) => token.id === ids.apiToken ? { ...token, revoked: true } : token);
       return route.fulfill({ status: 204 });
     }
-    if (url.pathname === "/admin/v1/applications" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" }], page: { has_more: false } });
+    if (url.pathname === "/admin/v1/applications" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app", status: "active" }], page: { has_more: false } });
     if (url.pathname === "/admin/v1/applications" && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; applicationBodies.push(body);
-      return json(route, 201, { created_at: instant, display_name: body.display_name, id: ids.application, organization_id: ids.organization, slug: body.slug });
+      return json(route, 201, { created_at: instant, display_name: body.display_name, id: ids.application, organization_id: ids.organization, slug: body.slug, status: "active" });
     }
-    if (url.pathname === `/admin/v1/applications/${ids.application}/environments` && request.method() === "GET") return json(route, 200, { items: [{ application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" }] });
+    if (url.pathname === `/admin/v1/applications/${ids.application}/environments` && request.method() === "GET") return json(route, 200, { items: [{ application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production", status: "active" }] });
     if (url.pathname === `/admin/v1/applications/${ids.application}/environments` && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; environmentBodies.push(body);
-      return json(route, 201, { application_id: ids.application, created_at: instant, display_name: body.display_name, id: ids.environment, kind: body.kind, slug: body.slug });
+      return json(route, 201, { application_id: ids.application, created_at: instant, display_name: body.display_name, id: ids.environment, kind: body.kind, slug: body.slug, status: "active" });
     }
     if (url.pathname === "/admin/v1/secrets" && request.method() === "GET") return json(route, 200, { items: secretItems, page: { has_more: false } });
     if (url.pathname === "/admin/v1/secrets" && request.method() === "POST") {
@@ -355,11 +357,13 @@ async function installAdminFixture(
       selfTestSchedules = [disabled];
       return json(route, 200, disabled);
     }
+    if (url.pathname === `/admin/v1/self-tests/${ids.selfTest}` && request.method() === "GET" && selfTestRun) return json(route, 200, selfTestRun);
     if (url.pathname === "/admin/v1/self-tests") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       selfTestBodies.push(body);
       const kind = typeof body.kind === "string" ? body.kind : "local";
-      return json(route, 202, { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind, state: "passed" });
+      selfTestRun = { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind, state: "passed" };
+      return json(route, 202, selfTestRun);
     }
     if (url.pathname === `/admin/v1/users/${ids.user}` && request.method() === "GET") return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: userStatus, ...(userOverride ? { limit_plan_override: userOverride } : {}) });
     if (url.pathname === `/admin/v1/users/${ids.user}/limit-override` && request.method() === "PUT") {
@@ -398,6 +402,75 @@ test("mutation proof records and rejects a same-origin non-Admin write", async (
   expect(status).toBe(405);
   expect(fixture.mutations).toEqual([{ csrf: null, path: "/v1/responses" }]);
   expect(nonAdminMutations(fixture.mutations)).toEqual(fixture.mutations);
+});
+
+test("authenticated console has no automated WCAG A or AA violations", async ({ page }) => {
+  await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("keyboard navigation reaches content, traps the command dialog, and restores focus", async ({ browserName, page }) => {
+  await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  const skipLink = page.getByRole("link", { name: "Skip to main content" });
+  if (browserName === "webkit") {
+    // WebKit follows the host Safari preference that can omit links from sequential Tab order.
+    await skipLink.focus();
+  } else {
+    await page.keyboard.press("Tab");
+  }
+  await expect(skipLink).toBeFocused();
+  await skipLink.press("Enter");
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  const commandTrigger = page.getByRole("button", { name: "Search or jump" });
+  await commandTrigger.focus();
+  await commandTrigger.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Go to an operator task" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByPlaceholder("Feature, request, setup, health…")).toBeFocused();
+  const closeButton = dialog.getByRole("button", { name: "Close command palette" });
+  await closeButton.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("link").last()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeButton).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(commandTrigger).toBeFocused();
+});
+
+test("@mobile authenticated incident navigation fits a phone viewport", async ({ page }) => {
+  await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+
+  const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(primaryNavigation).toBeVisible();
+  await primaryNavigation.getByRole("link", { name: /^Requests/ }).click();
+  await expect(page.getByRole("heading", { name: "Understand what happened." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh requests" })).toBeVisible();
+  const viewport = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
+  expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1);
 });
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -688,7 +761,18 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByText("750 ms")).toBeVisible();
   await expect(page.getByText(/closed, sanitized vocabulary/)).toBeVisible();
 
+  expectOnlyAdminMutations(fixture.mutations);
+  expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
+});
+
+test("audit filters and inspected detail survive a fresh browser reload", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: /^Audit log/ }).click();
+
   const filteredAudit = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/admin/v1/audit-events" &&
@@ -804,7 +888,11 @@ test("owner manages administrators without persisting password material", async 
   await page.getByRole("button", { name: "Reset password" }).last().click();
   await page.getByLabel("Replacement password").fill("replacement administrator password");
   await page.getByRole("button", { name: "Reset and revoke credentials" }).click();
-  await page.getByRole("button", { name: "Disable" }).last().click();
+  await page.getByRole("button", { name: "Review disable" }).last().click();
+  await expect(page.getByRole("heading", { name: "Disable second-owner@example.test?" })).toBeVisible();
+  await expect(page.getByText(/does not restore revoked sessions or API tokens/i)).toBeVisible();
+  await page.getByLabel(/immediately removes organization access/i).check();
+  await page.getByRole("button", { name: "Disable and revoke credentials" }).click();
   await expect(page.getByRole("button", { name: "Enable" })).toBeVisible();
   expect(fixture.administratorBodies).toEqual([
     { display_name: "Second Owner", email: "second-owner@example.test", password: "temporary administrator password", role: "viewer" },
@@ -816,10 +904,12 @@ test("owner manages administrators without persisting password material", async 
   expectOnlyAdminMutations(fixture.mutations);
 });
 
-test("owner stores a one-time API token explicitly and can revoke its metadata", async ({ page }) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://127.0.0.1:4174"
-  });
+test("owner stores a one-time API token explicitly and can revoke its metadata", async ({ browserName, page }) => {
+  if (browserName === "chromium") {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: "http://127.0.0.1:4174"
+    });
+  }
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
@@ -835,12 +925,16 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
   await expect(page.getByText("This is the only time Latchway will show this credential.")).toBeVisible();
   await expect(page.getByLabel("One-time API token")).toHaveValue(oneTimeAPIToken);
   await page.getByRole("button", { name: "Copy token — clipboard may retain it" }).click();
-  await expect(page.getByText("Copied. The operating system clipboard may retain this credential.")).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(oneTimeAPIToken);
+  await expect(page.getByText(/Copied\. The operating system clipboard may retain this credential\.|Clipboard access was unavailable\./)).toBeVisible();
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(oneTimeAPIToken);
   await page.getByRole("button", { name: "Dismiss token" }).click();
   await expect(page.getByLabel("One-time API token")).toHaveCount(0);
   const tokenRow = page.getByRole("row", { name: /mobile-ci/ });
-  await tokenRow.getByRole("button", { name: "Revoke" }).click();
+  await tokenRow.getByRole("button", { name: "Review revoke" }).click();
+  await expect(page.getByRole("heading", { name: "Revoke mobile-ci?" })).toBeVisible();
+  await expect(page.getByText(/cannot recover or reactivate this token/i)).toBeVisible();
+  await page.getByLabel(/immediately and permanently revokes this token/i).check();
+  await page.getByRole("button", { name: "Revoke API token" }).click();
   await expect(tokenRow.getByText("Revoked")).toBeVisible();
   expect(fixture.apiTokenBodies).toEqual([
     { name: "mobile-ci", scopes: ["inspect_users", "run_self_tests"] },

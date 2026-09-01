@@ -82,7 +82,7 @@ latchway routes simulate rev_... --feature FEATURE \
   --claims-file claims.json
 ```
 
-The client cannot override a limit or trusted input estimate. For structured
+The client cannot override a limit or trusted server input bound. For structured
 protocols, unsupported rich input fails closed when hard input/total or
 input-priced cost enforcement needs a conservative proof. Unknown provider
 usage is charged conservatively rather than refunded.

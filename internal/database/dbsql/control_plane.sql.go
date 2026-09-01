@@ -74,7 +74,7 @@ INSERT INTO applications (
     created_at,
     updated_at
 ) VALUES ($1, $2, $3, $4, 'active', $5, $5)
-RETURNING application_id, organization_id, slug, display_name, status, created_at, updated_at
+RETURNING application_id, organization_id, slug, display_name, status, disabled_at, created_at, updated_at
 `
 
 type CreateApplicationParams struct {
@@ -91,6 +91,7 @@ type CreateApplicationRow struct {
 	Slug           string             `db:"slug" json:"slug"`
 	DisplayName    string             `db:"display_name" json:"display_name"`
 	Status         string             `db:"status" json:"status"`
+	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
@@ -110,6 +111,7 @@ func (q *Queries) CreateApplication(ctx context.Context, arg CreateApplicationPa
 		&i.Slug,
 		&i.DisplayName,
 		&i.Status,
+		&i.DisabledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -128,7 +130,7 @@ INSERT INTO environments (
     created_at,
     updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
-RETURNING environment_id, organization_id, application_id, slug, display_name, kind, status, created_at, updated_at
+RETURNING environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at
 `
 
 type CreateEnvironmentParams struct {
@@ -149,6 +151,7 @@ type CreateEnvironmentRow struct {
 	DisplayName    string             `db:"display_name" json:"display_name"`
 	Kind           string             `db:"kind" json:"kind"`
 	Status         string             `db:"status" json:"status"`
+	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
@@ -172,6 +175,7 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		&i.DisplayName,
 		&i.Kind,
 		&i.Status,
+		&i.DisabledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -219,10 +223,9 @@ func (q *Queries) CreateOrganization(ctx context.Context, organizationID string,
 }
 
 const listApplications = `-- name: ListApplications :many
-SELECT application_id, organization_id, slug, display_name, status, created_at, updated_at
+SELECT application_id, organization_id, slug, display_name, status, disabled_at, created_at, updated_at
 FROM applications
 WHERE organization_id = $1
-  AND status = 'active'
   AND (
       $2::timestamptz IS NULL
       OR (created_at, application_id) > (
@@ -240,6 +243,7 @@ type ListApplicationsRow struct {
 	Slug           string             `db:"slug" json:"slug"`
 	DisplayName    string             `db:"display_name" json:"display_name"`
 	Status         string             `db:"status" json:"status"`
+	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
@@ -264,6 +268,7 @@ func (q *Queries) ListApplications(ctx context.Context, organizationID string, c
 			&i.Slug,
 			&i.DisplayName,
 			&i.Status,
+			&i.DisabledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -278,11 +283,10 @@ func (q *Queries) ListApplications(ctx context.Context, organizationID string, c
 }
 
 const listEnvironments = `-- name: ListEnvironments :many
-SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, created_at, updated_at
+SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at
 FROM environments
 WHERE organization_id = $1
   AND application_id = $2
-  AND status = 'active'
 ORDER BY created_at, environment_id
 `
 
@@ -294,6 +298,7 @@ type ListEnvironmentsRow struct {
 	DisplayName    string             `db:"display_name" json:"display_name"`
 	Kind           string             `db:"kind" json:"kind"`
 	Status         string             `db:"status" json:"status"`
+	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
@@ -315,6 +320,7 @@ func (q *Queries) ListEnvironments(ctx context.Context, organizationID string, a
 			&i.DisplayName,
 			&i.Kind,
 			&i.Status,
+			&i.DisabledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

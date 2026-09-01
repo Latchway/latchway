@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { adminRequest, RevisionSchema, type ConfigurationPlan, type ConfigurationRevision, type ConfigurationValidation } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { ConfigurationRouteSearchSchema } from "../app/route-search";
+import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
+import { useOptionalWorkspace } from "../app/workspace-context-value";
 import {
   applyConfigurationSliceChange,
   cloneConfigurationDocument,
@@ -42,13 +45,17 @@ function PlanResult({ plan }: { plan?: ConfigurationPlan }) {
 
 function ConfigurationAreaEditor({ definition }: { definition: ConfigurationAreaDefinition }) {
   const session = useConsoleSession();
-  const [environmentID, setEnvironmentID] = useState("");
+  const workspace = useOptionalWorkspace();
+  const routeSearch = ConfigurationRouteSearchSchema.parse(workspace?.search ?? {});
+  const routeEnvironmentID = routeSearch.environment_id;
+  const [environmentID, setEnvironmentID] = useState(routeEnvironmentID ?? "");
   const [source, setSource] = useState<ConfigurationRevision>();
   const [sourceETag, setSourceETag] = useState<string>();
   const [document, setDocument] = useState<JSONRecord>();
   const [collectionKey, setCollectionKey] = useState(definition.collections[0]?.key ?? "");
   const [editorKey, setEditorKey] = useState<string>();
   const [editorValue, setEditorValue] = useState("");
+  const [editorInitialValue, setEditorInitialValue] = useState("");
   const [deletionTarget, setDeletionTarget] = useState<AreaResource>();
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
   const [validation, setValidation] = useState<ConfigurationValidation>();
@@ -59,31 +66,58 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
   const collection = definition.collections.find((candidate) => candidate.key === collectionKey) ?? definition.collections[0];
   const resources = useMemo(() => document && collection ? listAreaResources(document, collection) : [], [collection, document]);
   const changed = Boolean(source && document && JSON.stringify(source.document) !== JSON.stringify(document));
-  if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to edit {definition.title.toLowerCase()}.</h1></section>;
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
+  const editorChanged = editorKey !== undefined && editorValue !== editorInitialValue;
+  const dirty = changed || editorChanged;
+  const sourceMatchesEnvironment = source?.environment_id === environmentID;
+  useDirtyEditProtection(dirty);
+  const canConfigure = session.data?.session?.capabilities.includes("activate_configuration") ?? false;
 
   function clearTransient(): void {
-    setEditorKey(undefined); setEditorValue(""); setDeletionTarget(undefined); setDeletionConfirmation(""); setValidation(undefined); setPlan(undefined); setResult(undefined);
+    setEditorKey(undefined); setEditorValue(""); setEditorInitialValue(""); setDeletionTarget(undefined); setDeletionConfirmation(""); setValidation(undefined); setPlan(undefined); setResult(undefined);
   }
 
-  async function load(): Promise<void> {
-    if (!environmentPattern.test(environmentID)) { setProblem(localProblem("Enter a canonical environment ID before loading configuration.")); return; }
+  async function load(targetEnvironmentID = environmentID): Promise<void> {
+    if (!environmentPattern.test(targetEnvironmentID)) { setProblem(localProblem("Enter a canonical environment ID before loading configuration.")); return; }
     setBusy(true); setProblem(undefined);
     try {
-      const active = await adminRequest(`/admin/v1/environments/${environmentID}/config`, RevisionSchema);
+      const active = await adminRequest(`/admin/v1/environments/${targetEnvironmentID}/config`, RevisionSchema);
+      if (active.data.environment_id !== targetEnvironmentID) throw new Error("The active revision did not match the selected environment.");
       if (!validStrongETag(active.etag)) throw new Error("The Admin API omitted the active strong ETag required for safe editing.");
       const copied = cloneConfigurationDocument(active.data.document);
-      setSource(active.data); setSourceETag(active.etag); setDocument(copied); clearTransient();
+      setEnvironmentID(targetEnvironmentID); setSource(active.data); setSourceETag(active.etag); setDocument(copied); clearTransient();
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
+  function selectEnvironment(): void {
+    if (!environmentPattern.test(environmentID)) { setProblem(localProblem("Enter a canonical environment ID before loading configuration.")); return; }
+    if (workspace && routeEnvironmentID !== environmentID) {
+      workspace.updateSearch({ environment_id: environmentID });
+      return;
+    }
+    void load(environmentID);
+  }
+
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !routeEnvironmentID) return;
+    // A validated URL selection is the external signal that restores this editor.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironmentID(routeEnvironmentID);
+    void load(routeEnvironmentID);
+    // Loading is intentionally keyed only by canonical route state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeEnvironmentID, session.data?.mode]);
+
+  if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to edit {definition.title.toLowerCase()}.</h1></section>;
+
   function edit(resource: AreaResource): void {
-    setEditorKey(resource.key); setEditorValue(JSON.stringify(resource.value, null, 2)); setDeletionTarget(undefined); setDeletionConfirmation(""); setProblem(undefined);
+    const value = JSON.stringify(resource.value, null, 2);
+    setEditorKey(resource.key); setEditorValue(value); setEditorInitialValue(value); setDeletionTarget(undefined); setDeletionConfirmation(""); setProblem(undefined);
   }
 
   function add(): void {
     if (!collection || collection.kind === "feature-fields") return;
-    setEditorKey(""); setEditorValue(JSON.stringify(collection.template, null, 2)); setDeletionTarget(undefined); setDeletionConfirmation(""); setProblem(undefined);
+    const value = JSON.stringify(collection.template, null, 2);
+    setEditorKey(""); setEditorValue(value); setEditorInitialValue(value); setDeletionTarget(undefined); setDeletionConfirmation(""); setProblem(undefined);
   }
 
   function stageResource(): void {
@@ -91,7 +125,7 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
     try {
       const parsed = JSON.parse(editorValue) as unknown;
       const updated = upsertAreaResource(document, collection, editorKey || undefined, parsed);
-      setDocument(updated.document); setEditorKey(undefined); setEditorValue(""); setProblem(undefined); setValidation(undefined); setPlan(undefined); setResult(undefined);
+      setDocument(updated.document); setEditorKey(undefined); setEditorValue(""); setEditorInitialValue(""); setProblem(undefined); setValidation(undefined); setPlan(undefined); setResult(undefined);
     } catch (error) {
       setProblem(localProblem(error instanceof Error ? error.message : "The resource JSON is invalid."));
     }
@@ -116,7 +150,7 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
   }
 
   async function submit(activate: boolean): Promise<void> {
-    if (!source || !document || !collection || !changed) return;
+    if (!source || !document || !collection || !changed || !sourceMatchesEnvironment) return;
     setBusy(true); setProblem(undefined); setValidation(undefined); setPlan(undefined); setResult(undefined);
     try {
       const applied = await applyConfigurationSliceChange({ activate, description: `Admin console ${definition.title} targeted edit`, document, environmentID, sourceRevisionID: source.id });
@@ -129,17 +163,18 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
 
   return <div className="control-page">
     <section className="page-heading"><div><p className="eyebrow">AI Configuration</p><h1>{definition.title}</h1><p>{definition.description}</p></div></section>
-    <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => { setEnvironmentID(event.target.value); setSource(undefined); setSourceETag(undefined); setDocument(undefined); clearTransient(); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load active configuration</button></div>
+    <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => setEnvironmentID(event.target.value)} /></label><button className="secondary-action" disabled={busy} onClick={selectEnvironment} type="button">Load active configuration</button></div>
     <ProblemNotice problem={problem} />
     {source && document && collection ? <>
       <section className="resource-context"><span>Source revision <code>{source.id}</code></span><span>Version {source.version}</span><span>Strong ETag <code>{sourceETag}</code></span><span>{changed ? "Staged changes" : "No staged changes"}</span></section>
+      {!sourceMatchesEnvironment ? <p className="control-notice" role="status"><strong>Environment selection changed</strong><span>Load the newly selected environment before editing or publishing. The currently displayed revision remains scoped to <code>{source.environment_id}</code>.</span></p> : null}
       {definition.collections.length > 1 ? <label className="collection-selector">Resource collection<select value={collection.key} onChange={(event) => { setCollectionKey(event.target.value); clearTransient(); }}>{definition.collections.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}</select></label> : null}
       <section className="detail-card"><div className="detail-card__heading"><div><h2>{collection.label}</h2><p>{collection.description}</p><p>Canonical slice: <code>{collection.canonicalPath}</code></p></div>{collection.kind !== "feature-fields" ? <button className="secondary-action" disabled={busy} onClick={add} type="button">Add resource</button> : null}</div>
         <div className="resource-list">{resources.length ? resources.map((resource) => <article className="resource-list__item" key={resource.key}><div><strong>{resource.label}</strong><small>{collection.canonicalPath}</small></div><div className="resource-actions"><button className="small-action" disabled={busy} onClick={() => edit(resource)} type="button">Edit {resource.label}</button>{collection.deletable ? <button className="small-action small-action--danger" disabled={busy} onClick={() => { setDeletionTarget(resource); setDeletionConfirmation(""); setEditorKey(undefined); setEditorValue(""); }} type="button">Delete {resource.label}</button> : null}</div></article>) : <p>No resources in this canonical slice.</p>}</div>
       </section>
-      {editorKey !== undefined ? <section className="control-form"><h2>{editorKey ? `Edit ${editorKey}` : `Add ${collection.label.toLowerCase()} resource`}</h2><p>Only this resource wrapper is editable here. The rest of the active immutable document remains represented in the staged clone.</p><textarea aria-label="Resource JSON" className="code-editor" maxLength={1_048_576} onChange={(event) => setEditorValue(event.target.value)} rows={22} spellCheck={false} value={editorValue} /><div className="button-row"><button className="primary-action" disabled={busy || !editorValue} onClick={stageResource} type="button">Stage resource</button><button className="secondary-action" disabled={busy} onClick={() => { setEditorKey(undefined); setEditorValue(""); }} type="button">Cancel edit</button></div></section> : null}
+      {editorKey !== undefined ? <section className="control-form"><h2>{editorKey ? `Edit ${editorKey}` : `Add ${collection.label.toLowerCase()} resource`}</h2><p>Only this resource wrapper is editable here. The rest of the active immutable document remains represented in the staged clone.</p><textarea aria-label="Resource JSON" className="code-editor" maxLength={1_048_576} onChange={(event) => setEditorValue(event.target.value)} rows={22} spellCheck={false} value={editorValue} /><div className="button-row"><button className="primary-action" disabled={busy || !editorValue || !sourceMatchesEnvironment} onClick={stageResource} type="button">Stage resource</button><button className="secondary-action" disabled={busy} onClick={() => { setEditorKey(undefined); setEditorValue(""); setEditorInitialValue(""); }} type="button">Cancel edit</button></div></section> : null}
       {deletionTarget ? <section className="control-form destructive-confirmation"><h2>Stage deletion of {deletionTarget.label}</h2><p>This removes only <code>{deletionTarget.key}</code> from <code>{collection.canonicalPath}</code>. Server validation and activation are still required.</p><label>Type <strong>{deletionTarget.key}</strong> to confirm<input autoComplete="off" maxLength={128} value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} /></label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || deletionConfirmation !== deletionTarget.key} onClick={stageDelete} type="button">Stage resource deletion</button><button className="secondary-action" disabled={busy} onClick={() => { setDeletionTarget(undefined); setDeletionConfirmation(""); }} type="button">Cancel deletion</button></div></section> : null}
-      <section className="control-form"><h2>Validate and activate the targeted merge</h2><p>The console clones exact active revision <code>{source.id}</code> on the server. A stale base is rejected. The full preserved document is then replaced on that draft with its strong ETag, validated, planned, and optionally activated with the newest strong ETag.</p><div className="button-row"><button className="secondary-action" disabled={busy || !changed} onClick={discard} type="button">Discard staged changes</button><button className="secondary-action" disabled={!canConfigure || busy || !changed} onClick={() => void submit(false)} type="button">Validate and plan</button><button className="primary-action" disabled={!canConfigure || busy || !changed} onClick={() => void submit(true)} type="button">Validate and activate</button></div>{!canConfigure ? <small>The activate_configuration capability is required to create, validate, or activate a revision.</small> : null}</section>
+      <section className="control-form"><h2>Validate and activate the targeted merge</h2><p>The console clones exact active revision <code>{source.id}</code> on the server. A stale base is rejected. The full preserved document is then replaced on that draft with its strong ETag, validated, planned, and optionally activated with the newest strong ETag.</p><div className="button-row"><button className="secondary-action" disabled={busy || !changed} onClick={discard} type="button">Discard staged changes</button><button className="secondary-action" disabled={!canConfigure || busy || !changed || !sourceMatchesEnvironment} onClick={() => void submit(false)} type="button">Validate and plan</button><button className="primary-action" disabled={!canConfigure || busy || !changed || !sourceMatchesEnvironment} onClick={() => void submit(true)} type="button">Validate and activate</button></div>{!canConfigure ? <small>The activate_configuration capability is required to create, validate, or activate a revision.</small> : null}</section>
       <ValidationResult report={validation} /><PlanResult plan={plan} />{result ? <p className="resource-result">Revision <code>{result.id}</code> is <strong>{result.state}</strong>.</p> : null}
     </> : null}
   </div>;

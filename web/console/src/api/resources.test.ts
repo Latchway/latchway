@@ -33,7 +33,8 @@ describe("resource-management response schemas", () => {
         display_name: "Mobile",
         id: "app_0123456789abcdef",
         organization_id: "org_0123456789abcdef",
-        slug: "mobile"
+        slug: "mobile",
+        status: "active"
       }],
       page: { has_more: false }
     }).items).toHaveLength(1);

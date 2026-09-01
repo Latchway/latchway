@@ -106,6 +106,57 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 		t.Fatalf("unknown user should fail closed: %v", err)
 	}
 
+	// Challenge creation must participate in the same app-first lifecycle lock
+	// as exchange/refresh. Otherwise disable can invalidate the visible rows,
+	// miss a concurrently committed challenge, and leave that proof reusable
+	// after the scope is enabled again.
+	disabler, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatalf("begin challenge-scope disable fixture: %v", err)
+	}
+	defer func() { _ = disabler.Rollback(ctx) }()
+	if _, err := disabler.Exec(ctx, `
+		SELECT 1 FROM applications
+		WHERE organization_id = $1 AND application_id = $2
+		FOR UPDATE
+	`, fixture.organizationID, fixture.applicationID); err != nil {
+		t.Fatalf("lock challenge application scope: %v", err)
+	}
+	racingInput := withChallengeProof(input, challengeRequestURI, now, "challenge-store-disable-race")
+	creationResult := make(chan error, 1)
+	go func() {
+		_, createErr := store.Create(ctx, racingInput)
+		creationResult <- createErr
+	}()
+	waitForActiveCredentialApplicationLock(t, ctx, pool)
+	if _, err := disabler.Exec(ctx, `
+		UPDATE applications
+		SET status = 'disabled',
+		    disabled_at = GREATEST(created_at, statement_timestamp()),
+		    updated_at = GREATEST(updated_at, created_at, statement_timestamp())
+		WHERE organization_id = $1 AND application_id = $2
+	`, fixture.organizationID, fixture.applicationID); err != nil {
+		t.Fatalf("stage challenge application disable: %v", err)
+	}
+	if err := disabler.Commit(ctx); err != nil {
+		t.Fatalf("commit challenge application disable: %v", err)
+	}
+	if err := <-creationResult; !errors.Is(err, ErrSessionScope) {
+		t.Fatalf("challenge creation crossed application disable: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE applications
+		SET status = 'active', disabled_at = NULL,
+		    updated_at = GREATEST(updated_at, statement_timestamp())
+		WHERE organization_id = $1 AND application_id = $2
+	`, fixture.organizationID, fixture.applicationID); err != nil {
+		t.Fatalf("restore challenge application scope: %v", err)
+	}
+	var challengeCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_challenges`).Scan(&challengeCount); err != nil || challengeCount != 1 {
+		t.Fatalf("disable race persisted challenge count=%d error=%v", challengeCount, err)
+	}
+
 	if _, err := pool.Exec(ctx, `
 		UPDATE session_challenges SET binding_hash = $2 WHERE session_challenge_id = $1
 	`, challenge.ID, make([]byte, sha256.Size)); err != nil {
@@ -186,6 +237,31 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM session_challenges").Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("remaining challenge count=%d err=%v", remaining, err)
 	}
+}
+
+func waitForActiveCredentialApplicationLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%active_credential_application_lock%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect active credential application lock: %v", err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("credential creation did not wait for the application lifecycle lock")
 }
 
 func TestSessionExchangePostgreSQL(t *testing.T) {

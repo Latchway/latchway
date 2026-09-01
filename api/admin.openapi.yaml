@@ -30,6 +30,7 @@ tags:
   - name: Secrets
   - name: API tokens
   - name: Administrators
+  - name: Administrator sessions
   - name: Users
   - name: Installations
   - name: Installation families
@@ -176,6 +177,43 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Application' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}/disable:
+    post:
+      tags: [Applications]
+      operationId: disableApplication
+      summary: Disable an application and revoke every active client credential in its scope.
+      description: Child environment statuses are preserved. The supplied reason is never copied into the audit ledger; only its presence is recorded.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisableResourceRequest' }
+      responses:
+        '200':
+          description: Disabled application. Active legacy and component session and refresh credentials were revoked transactionally.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}/enable:
+    post:
+      tags: [Applications]
+      operationId: enableApplication
+      summary: Re-enable an application for future eligibility.
+      description: Previously revoked credentials remain revoked and child environment statuses are unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enabled application.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/applications/{applicationId}/environments:
     get:
       tags: [Environments]
@@ -212,6 +250,43 @@ paths:
       responses:
         '201':
           description: Environment created without an active configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Environment' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/disable:
+    post:
+      tags: [Environments]
+      operationId: disableEnvironment
+      summary: Disable an environment and revoke every active client credential in its scope.
+      description: The supplied reason is never copied into the audit ledger; only its presence is recorded.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisableResourceRequest' }
+      responses:
+        '200':
+          description: Disabled environment. Active legacy and component session and refresh credentials were revoked transactionally.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Environment' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/enable:
+    post:
+      tags: [Environments]
+      operationId: enableEnvironment
+      summary: Re-enable an environment for future eligibility.
+      description: Previously revoked credentials remain revoked. A disabled parent application still blocks all execution and mutations.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enabled environment.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Environment' }
@@ -648,6 +723,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Administrator' }
         '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/admin-sessions:
+    get:
+      tags: [Administrator sessions]
+      operationId: listAdminSessions
+      summary: List redaction-safe administrator sessions in the active organization.
+      description: |
+        Requires `manage_owners`. Returns administrator identity and lifecycle
+        metadata only. Token hints, hashes, CSRF material, network metadata, and
+        revocation reasons are never returned. `current` is true only when the
+        request itself authenticated with that cookie session; bearer-token
+        requests report false for every item.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Bounded administrator-session metadata page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSessionMetadataPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/admin-sessions/{adminSessionId}/revoke:
+    post:
+      tags: [Administrator sessions]
+      operationId: revokeAdminSession
+      summary: Revoke one administrator session in the active organization.
+      description: |
+        Requires `manage_owners`. The persisted revocation reason is fixed by
+        the server and cannot be supplied by the caller. Retrying a successfully
+        revoked same-tenant session is idempotent; missing or cross-tenant IDs
+        return `resource_not_found`. Revoking the current cookie session clears
+        its cookies after the transaction commits.
+      parameters:
+        - $ref: '#/components/parameters/AdminSessionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Session revoked. }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users:
     get:
@@ -1299,6 +1412,36 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuditEvent' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/events:
+    get:
+      tags: [System]
+      operationId: streamAdminEvents
+      summary: Stream redaction-safe refresh hints for live operational views.
+      description: |
+        Emits only bounded topic names for requests, usage, configuration, audit,
+        self-tests, and health. It never includes resource identifiers, request or
+        response content, identity claims, credentials, proofs, provider errors, or
+        counts. The stream is deliberately closed at least once per minute so the
+        reconnect reauthenticates the administrator credential; every reconnect must
+        rehydrate canonical state through the ordinary Admin API. The server also
+        revalidates the durable cookie session or API token before every refresh poll,
+        so revocation, expiry, administrator disablement, and membership changes close
+        an established stream without waiting for the one-minute cap. Events deliberately
+        omit `id` fields; `Last-Event-ID` is ignored and is not a replay contract.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilterOptional'
+      responses:
+        '200':
+          description: Authenticated Server-Sent Events refresh stream.
+          headers:
+            X-Accel-Buffering:
+              schema: { type: string, const: 'no' }
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Versioned `ready`, `refresh`, `unavailable`, and `reconnect` events plus comment heartbeats.
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/self-test-schedules:
     get:
       tags: [Self-tests]
@@ -1545,6 +1688,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/AdminUserID' }
+    AdminSessionID:
+      name: adminSessionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AdminSessionID' }
     UserID:
       name: userId
       in: path
@@ -1637,6 +1785,9 @@ components:
     AdminUserID:
       type: string
       pattern: '^adm_[A-Za-z0-9_-]{16,128}$'
+    AdminSessionID:
+      type: string
+      pattern: '^asn_[A-Za-z0-9_-]{16,128}$'
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
@@ -1763,15 +1914,28 @@ components:
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string, minLength: 1, maxLength: 128 }
+    DisableResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: '^[^\r\n\x00]+$'
+          description: Bounded operator explanation used only to establish that a reason was supplied; its value is never persisted in audit data.
     Application:
       type: object
       additionalProperties: false
-      required: [id, organization_id, slug, display_name, created_at]
+      required: [id, organization_id, slug, display_name, status, created_at]
       properties:
         id: { $ref: '#/components/schemas/ApplicationID' }
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        disabled_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
     ApplicationPage:
       type: object
@@ -1783,13 +1947,15 @@ components:
     Environment:
       type: object
       additionalProperties: false
-      required: [id, application_id, slug, display_name, kind, created_at]
+      required: [id, application_id, slug, display_name, kind, status, created_at]
       properties:
         id: { $ref: '#/components/schemas/EnvironmentID' }
         application_id: { $ref: '#/components/schemas/ApplicationID' }
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string }
         kind: { type: string, enum: [development, staging, production] }
+        status: { type: string, enum: [active, disabled] }
+        disabled_at: { type: string, format: date-time, nullable: true }
         active_revision_id: { $ref: '#/components/schemas/RevisionID' }
         created_at: { type: string, format: date-time }
     CreateConfigurationRevisionRequest:
@@ -2158,6 +2324,31 @@ components:
       required: [items, page]
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Administrator' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    AdminSessionMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, administrator, created_at, last_seen_at, expires_at, status, current]
+      properties:
+        id: { $ref: '#/components/schemas/AdminSessionID' }
+        administrator:
+          type: object
+          additionalProperties: false
+          required: [id, email]
+          properties:
+            id: { $ref: '#/components/schemas/AdminUserID' }
+            email: { type: string, format: email, maxLength: 320 }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, expired, revoked] }
+        current: { type: boolean }
+    AdminSessionMetadataPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/AdminSessionMetadata' } }
         page: { $ref: '#/components/schemas/PageInfo' }
     CreateAdministratorRequest:
       type: object
@@ -3009,7 +3200,7 @@ components:
     SystemStatus:
       type: object
       additionalProperties: false
-      required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
+      required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready, server_capabilities]
       properties:
         server_version: { type: string }
         contract_version: { type: string, const: 1.0.0 }
@@ -3025,6 +3216,28 @@ components:
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
         ready: { type: boolean }
+        server_capabilities:
+          type: array
+          description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
+          minItems: 14
+          maxItems: 14
+          uniqueItems: true
+          prefixItems:
+            - { const: app_attest }
+            - { const: play_integrity }
+            - { const: firebase_app_check }
+            - { const: turnstile }
+            - { const: component_delegation }
+            - { const: cost_limits }
+            - { const: openai_responses }
+            - { const: openai_chat }
+            - { const: openai_embeddings }
+            - { const: anthropic_messages }
+            - { const: opaque_http }
+            - { const: configuration_import_export }
+            - { const: admin_session_management }
+            - { const: admin_event_stream }
+          items: false
     DoctorCheck:
       type: object
       additionalProperties: false

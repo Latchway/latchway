@@ -2,9 +2,12 @@
 
 This is the canonical merged implementation plan as of 2026-09-01. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
-and Mintlify addendum. The version 1 source candidate is implemented and
-locally source-converged; release promotion remains blocked on protected
-external evidence.
+and Mintlify addendum. A historical version 1 tuple passed local source
+convergence. The current core working tree adds Admin-session,
+configuration-transfer, Admin event-stream, and lifecycle-concurrency work and
+passes its complete local implementation gates, but it is not committed or
+reconverged, so it is not yet a clean source candidate. Release promotion also
+remains blocked on protected external evidence.
 
 ## Architectural truth
 
@@ -25,7 +28,7 @@ abstractions. Public documentation is a tested product surface whose canonical
 source lives in the core monorepo; `latchway-docs` is its generated deployment
 mirror.
 
-## Candidate coordinates
+## Last clean checkpoint coordinates
 
 | Field | Version 1 source coordinate |
 | --- | --- |
@@ -42,7 +45,7 @@ mirror.
 | Android source | `349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7` |
 | React Native source | `2d78f588671d35512c6d0d244c89ec61e6a48cfa` |
 | Mintlify mirror source | `ce4ea1e1cf56404da7146b98ca2744b194050fd5` |
-| Release state | `unreleased`; pushed branch source candidates only |
+| Release state | `unreleased`; historical local checkpoint only; current exact branch heads are unpushed and the core working tree is dirty |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
 checkpoint. It is not rewritten by this plan.
@@ -60,7 +63,7 @@ checkpoint. It is not rewritten by this plan.
 
 ## Execution status
 
-### Phase 0: Reconcile architecture and completion policy — source complete
+### Phase 0: Reconcile architecture and completion policy — historical checkpoint complete
 
 - [x] Reconcile the master, status, compatibility, and completion ledgers.
 - [x] Preserve legacy ADRs without number collisions and record ADRs 0017–0034.
@@ -69,7 +72,7 @@ checkpoint. It is not rewritten by this plan.
 - [x] Establish the strict framework compatibility registry, schema, generator,
   and adversarial validation.
 
-### Phase 1: Capability decisions — source complete
+### Phase 1: Capability decisions — historical checkpoint complete
 
 - [x] Exercise request-time seams for OpenAI JavaScript, Vercel AI SDK,
   LangChain JavaScript, SwiftOpenAI, Apple Foundation Models, MacPaw/OpenAI,
@@ -87,7 +90,7 @@ source. A historical development-signed root-app observation exists. iOS
 extensions are delegated-only because Apple's App Attest runtime rejects key
 generation from iOS app extensions.
 
-### Phase 2: Contract and schema — source complete and frozen
+### Phase 2: Contract and schema — historical checkpoint complete; current delta unbound
 
 - [x] Define Installation Family, Client Component, Component Definition,
   delegation, component sessions/refresh/revocation, claims, policy/quota
@@ -103,8 +106,12 @@ generation from iOS app extensions.
   post-freeze `api/**` drift.
 - [x] Regenerate the final draft bundle after contract convergence and bind its
   exact checksum and core commit into every SDK lock.
+- [ ] Regenerate the draft bundle after the current Admin-session,
+  configuration-transfer, server-capability, and Admin event-stream API delta;
+  bind the resulting immutable checkpoint into every SDK lock before calling
+  the current tree converged.
 
-### Phase 3: Server runtime — source complete
+### Phase 3: Server runtime — historical checkpoint complete
 
 - [x] Implement families, definitions, components, keys, delegations,
   independent session/refresh families, and encrypted rotation-result storage.
@@ -140,7 +147,7 @@ eligibility. The explicit step-up endpoint nevertheless requires valid direct
 evidence and fails closed on component, bundle, key, DPoP, provider, family, or
 parent mismatch.
 
-### Phase 4: SDK transport primitives — source complete and converged
+### Phase 4: SDK transport primitives — historical checkpoint converged
 
 - [x] Implement feature-bound Swift, Kotlin, JavaScript, and React Native
   transports with wire-2 metadata, origin restrictions, cancellation,
@@ -148,9 +155,12 @@ parent mismatch.
 - [x] Keep native keys, refresh tokens, and device proofs outside the React
   Native JavaScript bridge.
 - [x] Finish the atomic cross-repository commit/lock convergence and run the
-  common source gate from clean worktrees.
+  common source gate from clean worktrees for the recorded historical tuple.
+- [ ] Repeat commit/lock convergence and the clean source gate for the current
+  core contract delta.
 
-### Phase 5: iOS Installation Family SDK — source complete, external proof open
+### Phase 5: iOS Installation Family SDK — historical checkpoint complete,
+external proof open
 
 - [x] Implement `LatchwayAppExtensions`, component preparation, component-local
   Keychain storage, session restore/sign-out, diagnostics, and host/widget/share
@@ -184,7 +194,7 @@ iOS app extensions, so no Action/SSO direct-step-up claim exists in version 1.
 Android direct component step-up is also unsupported; Play Integrity continues
 to apply to supported Android application trust surfaces.
 
-### Phase 6: Framework adapters — source complete at experimental scope
+### Phase 6: Framework adapters — historical checkpoint complete at experimental scope
 
 - [x] Implement and locally test OpenAI JavaScript 7.8.0, Vercel AI SDK 7.0.85,
   LangChain OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React
@@ -196,7 +206,8 @@ to apply to supported Android application trust surfaces.
 - [ ] Run hosted common conformance and physical native proof before elevating
   any experimental entry to supported.
 
-### Phase 7: Admin and operator experience — source complete
+### Phase 7: Admin and operator experience — current local gates pass;
+convergence open
 
 - [x] Implement family/component list/detail, trust graph, provenance, feature
   grants, session/refresh failures, requests, usage, cost, quotas, and audit.
@@ -206,8 +217,28 @@ to apply to supported Android application trust surfaces.
   reference.
 - [x] Pass dashboard lint, typecheck, unit tests, deterministic builds,
   Playwright, and a real PostgreSQL-backed first-run browser test.
+- [x] Implement canonical Admin-session inventory and immediate revoke across
+  Admin API, CLI, and Console without exposing credentials.
+- [x] Implement server-capability negotiation and clear read-only safe mode;
+  add bounded redaction-safe YAML/JSON configuration transfer with immutable
+  strong-ETag staging, exact JSON/YAML numeric preservation, server
+  validation/plan review, and explicit activation.
+- [x] Implement authenticated Admin SSE refresh hints with no row data,
+  periodic principal revalidation, reconnect behavior, and polling/manual
+  fallback when `admin_event_stream` is absent.
+- [x] Pass `make check`, including all Go tests and vet, 343 script tests, 164
+  Console Vitest tests, production build, and 34 Playwright tests with one
+  explicitly opt-in live-stack case skipped; also pass `make test-race`, the
+  bounded fuzz corpus, and real PostgreSQL Admin/session/App Attest/
+  configuration/lifecycle lock-order suites.
+- [x] Close the reviewed root-challenge and App Attest post-disable insertion
+  races, configuration and family/component lock-order deadlocks, and pin
+  lifecycle transactions to explicit `READ COMMITTED` semantics.
+- [ ] Commit the fully checked delta, regenerate the contract, and reconverge
+  all repositories.
 
-### Phase 8: Public documentation — source complete locally
+### Phase 8: Public documentation — historical checkpoint complete locally;
+current synchronization open
 
 - [x] Separate canonical public MDX from maintainer plans and make the external
   docs repository a generated, ownership-checked mirror.
@@ -218,14 +249,16 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the local 127-page Mintlify validation suite.
 - [x] Synchronize the final authored pages to the generated mirror and rerun
-  the mirror's complete local suite at the exact final source coordinate;
+  the mirror's complete local suite at the recorded historical source coordinate;
   core checkpoint `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3` and mirror commit
   `ce4ea1e1cf56404da7146b98ca2744b194050fd5` passed.
+- [ ] Regenerate and synchronize the current source delta, then rerun the
+  canonical and mirror suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
   and validate the production URL after the branch merges.
 
-### Phase 9: Operations, supply chain, and final convergence — source complete;
-external execution open
+### Phase 9: Operations, supply chain, and final convergence — implementation
+exists; current source reconvergence and external execution open
 
 - [x] Implement telemetry, reconciliation/retention jobs, key rotation,
   backup/restore, upgrade/rollback, multi-replica, load/failure, and cloud
@@ -233,9 +266,16 @@ external execution open
 - [x] Implement multi-architecture image, vulnerability/license scan, SPDX
   SBOM, signing, provenance, exact-candidate receipt, and protected promotion
   workflows.
-- [x] Validate the final source, release workflows, Cloudflare dry-run,
+- [x] Validate the recorded historical source, release workflows, Cloudflare dry-run,
   Compose/Cloud Run/AWS definitions, security scanners, and deterministic builds
-  locally.
+  locally for the recorded historical tuple.
+- [x] Pass the complete current core implementation gate, race detector,
+  bounded fuzz corpus, and real PostgreSQL lifecycle/lock-order suites.
+- [ ] Commit the current delta, regenerate all derived contracts and docs,
+  synchronize locks, and pass clean cross-repository source conformance.
+- [ ] Reauthenticate GitHub CLI and push only the already-authorized audited
+  branch histories; do not infer a merge, tag, release, deployment, or
+  publication from that push.
 - [ ] Build and observe one final immutable multi-architecture image in the
   protected registry and run all external domains against its exact digests.
 - [ ] Publish signed tags, GitHub releases, OCI image, packages, and docs only
@@ -263,3 +303,10 @@ No source edit, local test, manually written receipt, prior-candidate result, or
 version string may substitute for protected exact-candidate evidence. The draft
 coordinate stays unreleased and no `v1.0.0` tag or public package is authorized
 until the finalizer closes every applicable domain without skips or drift.
+
+Offline/local device build, install, and launch may proceed when it does not
+contact ngrok or a live provider and does not collect Apple App Attest evidence.
+Any scoped ngrok/provider/App Attest device proof requires the exact phrase
+`I authorize the scoped ngrok device proof.` That phrase has not been supplied
+for the current run. Physical Android verification is intentionally deferred
+because no Android device is available.

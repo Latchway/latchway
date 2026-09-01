@@ -9,6 +9,7 @@ import { AppShell } from "./app-shell";
 import { NotFoundPage } from "../pages/not-found-page";
 import { OverviewPage } from "../pages/overview-page";
 import { SystemHealthPage } from "../pages/system-health-page";
+import { SettingsPage } from "../pages/settings-page";
 import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
 import { InstallationFamiliesPage } from "../pages/installation-families-page";
@@ -49,8 +50,16 @@ import {
   UserOverridesPage
 } from "../pages/resource-management-pages";
 import {
+  parseAnalyticsRouteSearch,
+  parseConfigurationRouteSearch,
   parseAuditRouteSearch,
-  parseRequestRouteSearch
+  parseFeatureRouteSearch,
+  parseInstallationFamilyRouteSearch,
+  parseInstallationRouteSearch,
+  parseRequestRouteSearch,
+  parseRouteSimulatorRouteSearch,
+  parseSelfTestRouteSearch,
+  parseUserRouteSearch
 } from "./route-search";
 
 const rootRoute = createRootRoute({
@@ -69,42 +78,43 @@ const systemHealthRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system-health"
 });
+const settingsRoute = createRoute({ component: SettingsPage, getParentRoute: () => rootRoute, path: "/settings" });
 
 const setupRoute = createRoute({ component: SetupWizardPage, getParentRoute: () => rootRoute, path: "/setup" });
-const configurationRoute = createRoute({ component: ConfigurationEditorPage, getParentRoute: () => rootRoute, path: "/configuration" });
+const configurationRoute = createRoute({ component: ConfigurationEditorPage, getParentRoute: () => rootRoute, path: "/configuration", validateSearch: parseConfigurationRouteSearch });
 const applicationsRoute = createRoute({ component: ApplicationsPage, getParentRoute: () => rootRoute, path: "/applications" });
 const environmentsRoute = createRoute({ component: EnvironmentsPage, getParentRoute: () => rootRoute, path: "/environments" });
 const administratorsRoute = createRoute({ component: AdministratorsPage, getParentRoute: () => rootRoute, path: "/administrators" });
 const apiTokensRoute = createRoute({ component: APITokensPage, getParentRoute: () => rootRoute, path: "/api-tokens" });
-const authenticationProvidersRoute = createRoute({ component: AuthenticationProvidersPage, getParentRoute: () => rootRoute, path: "/authentication-providers" });
+const authenticationProvidersRoute = createRoute({ component: AuthenticationProvidersPage, getParentRoute: () => rootRoute, path: "/authentication-providers", validateSearch: parseConfigurationRouteSearch });
 const attestationRoute = createRoute({ component: AttestationConfigurationPage, getParentRoute: () => rootRoute, path: "/attestation" });
-const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users" });
-const installationsRoute = createRoute({ component: InstallationsPage, getParentRoute: () => rootRoute, path: "/installations" });
-const installationFamiliesRoute = createRoute({ component: InstallationFamiliesPage, getParentRoute: () => rootRoute, path: "/installation-families" });
-const componentDefinitionsRoute = createRoute({ component: ComponentDefinitionsConfigurationPage, getParentRoute: () => rootRoute, path: "/component-definitions" });
-const featuresRoute = createRoute({ component: FeaturesConfigurationPage, getParentRoute: () => rootRoute, path: "/features" });
-const routesRoute = createRoute({ component: RoutesConfigurationPage, getParentRoute: () => rootRoute, path: "/routes" });
+const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users", validateSearch: parseUserRouteSearch });
+const installationsRoute = createRoute({ component: InstallationsPage, getParentRoute: () => rootRoute, path: "/installations", validateSearch: parseInstallationRouteSearch });
+const installationFamiliesRoute = createRoute({ component: InstallationFamiliesPage, getParentRoute: () => rootRoute, path: "/installation-families", validateSearch: parseInstallationFamilyRouteSearch });
+const componentDefinitionsRoute = createRoute({ component: ComponentDefinitionsConfigurationPage, getParentRoute: () => rootRoute, path: "/component-definitions", validateSearch: parseConfigurationRouteSearch });
+const featuresRoute = createRoute({ component: FeaturesConfigurationPage, getParentRoute: () => rootRoute, path: "/features", validateSearch: parseFeatureRouteSearch });
+const routesRoute = createRoute({ component: RoutesConfigurationPage, getParentRoute: () => rootRoute, path: "/routes", validateSearch: parseConfigurationRouteSearch });
 const upstreamsRoute = createRoute({ component: UpstreamsConfigurationPage, getParentRoute: () => rootRoute, path: "/upstreams" });
-const modelsPricingRoute = createRoute({ component: ModelsPricingConfigurationPage, getParentRoute: () => rootRoute, path: "/models-pricing" });
+const modelsPricingRoute = createRoute({ component: ModelsPricingConfigurationPage, getParentRoute: () => rootRoute, path: "/models-pricing", validateSearch: parseConfigurationRouteSearch });
 const secretsRoute = createRoute({ component: SecretsPage, getParentRoute: () => rootRoute, path: "/secrets" });
-const accessPoliciesRoute = createRoute({ component: AccessPoliciesConfigurationPage, getParentRoute: () => rootRoute, path: "/access-policies" });
+const accessPoliciesRoute = createRoute({ component: AccessPoliciesConfigurationPage, getParentRoute: () => rootRoute, path: "/access-policies", validateSearch: parseConfigurationRouteSearch });
 const limitPlansRoute = createRoute({ component: LimitPlansConfigurationPage, getParentRoute: () => rootRoute, path: "/limit-plans" });
 const userOverridesRoute = createRoute({ component: UserOverridesPage, getParentRoute: () => rootRoute, path: "/user-overrides" });
-const abuseControlsRoute = createRoute({ component: AbuseControlsConfigurationPage, getParentRoute: () => rootRoute, path: "/abuse-controls" });
+const abuseControlsRoute = createRoute({ component: AbuseControlsConfigurationPage, getParentRoute: () => rootRoute, path: "/abuse-controls", validateSearch: parseConfigurationRouteSearch });
 const requestsRoute = createRoute({
   component: RequestsPage,
   getParentRoute: () => rootRoute,
   path: "/requests",
   validateSearch: parseRequestRouteSearch
 });
-const usageRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/usage" });
-const costRoute = createRoute({ component: CostPage, getParentRoute: () => rootRoute, path: "/cost" });
-const latencyRoute = createRoute({ component: LatencyPage, getParentRoute: () => rootRoute, path: "/latency" });
-const errorsRoute = createRoute({ component: ErrorsPage, getParentRoute: () => rootRoute, path: "/errors" });
-const attestationFailuresRoute = createRoute({ component: AttestationFailuresPage, getParentRoute: () => rootRoute, path: "/attestation-failures" });
+const usageRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/usage", validateSearch: parseAnalyticsRouteSearch });
+const costRoute = createRoute({ component: CostPage, getParentRoute: () => rootRoute, path: "/cost", validateSearch: parseAnalyticsRouteSearch });
+const latencyRoute = createRoute({ component: LatencyPage, getParentRoute: () => rootRoute, path: "/latency", validateSearch: parseAnalyticsRouteSearch });
+const errorsRoute = createRoute({ component: ErrorsPage, getParentRoute: () => rootRoute, path: "/errors", validateSearch: parseAnalyticsRouteSearch });
+const attestationFailuresRoute = createRoute({ component: AttestationFailuresPage, getParentRoute: () => rootRoute, path: "/attestation-failures", validateSearch: parseAnalyticsRouteSearch });
 const configurationRevisionsRoute = createRoute({ component: ConfigurationRevisionsPage, getParentRoute: () => rootRoute, path: "/configuration-revisions" });
-const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator" });
-const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests" });
+const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator", validateSearch: parseRouteSimulatorRouteSearch });
+const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests", validateSearch: parseSelfTestRouteSearch });
 const auditRoute = createRoute({
   component: AuditPageView,
   getParentRoute: () => rootRoute,
@@ -120,7 +130,7 @@ const routeTree = rootRoute.addChildren([
   accessPoliciesRoute, limitPlansRoute, userOverridesRoute, abuseControlsRoute,
   requestsRoute, usageRoute, costRoute, latencyRoute, errorsRoute, attestationFailuresRoute,
   configurationRevisionsRoute, routeSimulatorRoute, selfTestsRoute, auditRoute,
-  systemHealthRoute
+  systemHealthRoute, settingsRoute
 ]);
 
 interface CreateAppRouterOptions {

@@ -159,7 +159,7 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 	command.Flags().StringVar(&appVersion, "app-version", "", "simulated client app version (reported as currently non-decisional)")
 	command.Flags().BoolVar(&authenticated, "authenticated", true, "simulate an authenticated principal")
 	command.Flags().BoolVar(&streaming, "streaming", false, "simulate a streaming request")
-	command.Flags().Int64Var(&requestedInput, "requested-input-tokens", 0, "requested input-token estimate (reported as currently non-decisional)")
+	command.Flags().Int64Var(&requestedInput, "requested-input-tokens", 0, "bounded untrusted input-token estimate used only by policy and scheduling")
 	command.Flags().Int64Var(&requestedOutput, "requested-output-max", 0, "requested output-token maximum used by the production clamp and reservation projection")
 	command.Flags().Int64Var(&rewrittenRequestBytes, "rewritten-request-bytes", 0, "hypothetical exact post-rewrite bytes required by trusted input projection")
 	command.Flags().Int64Var(&framingUnitCount, "framing-unit-count", 0, "hypothetical exact message/item/input count required by trusted input projection")

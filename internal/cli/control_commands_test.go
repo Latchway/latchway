@@ -409,6 +409,16 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 	}
 }
 
+func TestRouteSimulationHelpDistinguishesUntrustedEstimateFromTrustedProjection(t *testing.T) {
+	command := newRoutesSimulateCommand(&options{}, &controlCommandOptions{})
+	flag := command.Flags().Lookup("requested-input-tokens")
+	if flag == nil || !strings.Contains(flag.Usage, "untrusted") ||
+		!strings.Contains(flag.Usage, "policy and scheduling") ||
+		strings.Contains(flag.Usage, "non-decisional") {
+		t.Fatalf("requested-input-tokens help does not preserve the trust boundary: %#v", flag)
+	}
+}
+
 func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *testing.T) {
 	token := strings.Repeat("self-test-control-token-", 2)
 	t.Setenv("TEST_LATCHWAY_SELF_TEST_TOKEN", token)

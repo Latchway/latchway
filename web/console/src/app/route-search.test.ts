@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AnalyticsRouteSearchSchema,
   AuditRouteSearchSchema,
+  ConfigurationRouteSearchSchema,
+  FeatureRouteSearchSchema,
+  InstallationFamilyRouteSearchSchema,
+  InstallationRouteSearchSchema,
+  parseAnalyticsRouteSearch,
   parseAuditRouteSearch,
+  parseConfigurationRouteSearch,
+  parseInstallationFamilyRouteSearch,
   parseRequestRouteSearch,
-  RequestRouteSearchSchema
+  parseRouteSimulatorRouteSearch,
+  RequestRouteSearchSchema,
+  RouteSimulatorRouteSearchSchema,
+  SelfTestRouteSearchSchema,
+  UserRouteSearchSchema
 } from "./route-search";
 
 describe("request route search", () => {
@@ -86,7 +98,7 @@ describe("request route search", () => {
 });
 
 describe("audit route search", () => {
-  it("parses every audit-list filter and strips request-only state", () => {
+  it("parses every audit route field and strips request-only state", () => {
     expect(parseAuditRouteSearch({
       action: "admin.user_block",
       actor_id: "tok_0123456789abcdef",
@@ -97,6 +109,7 @@ describe("audit route search", () => {
       end: "2026-08-30T00:00:00Z",
       environment: "production",
       environment_id: "env_0123456789abcdef",
+      event: "aud_0123456789abcdef",
       organization: "example",
       reason: "security_response",
       resource_id: "usr_0123456789abcdef",
@@ -113,6 +126,7 @@ describe("audit route search", () => {
       end: "2026-08-30T00:00:00Z",
       environment: "production",
       environment_id: "env_0123456789abcdef",
+      event: "aud_0123456789abcdef",
       organization: "example",
       reason: "security_response",
       resource_id: "usr_0123456789abcdef",
@@ -125,9 +139,111 @@ describe("audit route search", () => {
 
   it("rejects secret-bearing reasons and invalid time windows", () => {
     expect(AuditRouteSearchSchema.safeParse({ reason: "rotated_api_token" }).success).toBe(false);
+    expect(AuditRouteSearchSchema.safeParse({ event: "req_0123456789abcdef" }).success).toBe(false);
     expect(AuditRouteSearchSchema.safeParse({
       end: "2026-08-29T00:00:00Z",
       start: "2026-08-29T00:00:00Z"
     }).success).toBe(false);
+  });
+});
+
+describe("configuration route search", () => {
+  it("retains only a canonical environment selection and workspace slugs", () => {
+    expect(parseConfigurationRouteSearch({
+      application: "mobile-app",
+      environment: "production",
+      environment_id: "env_0123456789abcdef",
+      request: "req_0123456789abcdef"
+    })).toEqual({
+      application: "mobile-app",
+      environment: "production",
+      environment_id: "env_0123456789abcdef"
+    });
+  });
+
+  it("rejects an untyped or truncated environment identifier", () => {
+    expect(ConfigurationRouteSearchSchema.safeParse({ environment_id: "app_0123456789abcdef" }).success).toBe(false);
+    expect(ConfigurationRouteSearchSchema.safeParse({ environment_id: "env_short" }).success).toBe(false);
+  });
+});
+
+describe("shareable operational route search", () => {
+  it("retains a complete bounded Installation Family drill-down", () => {
+    expect(parseInstallationFamilyRouteSearch({
+      component_id: "cmp_0123456789abcdef",
+      cursor: "next-family-page",
+      environment_id: "env_0123456789abcdef",
+      family_id: "fam_0123456789abcdef",
+      user_id: "usr_0123456789abcdef"
+    })).toEqual({
+      component_id: "cmp_0123456789abcdef",
+      cursor: "next-family-page",
+      environment_id: "env_0123456789abcdef",
+      family_id: "fam_0123456789abcdef",
+      user_id: "usr_0123456789abcdef"
+    });
+    expect(InstallationFamilyRouteSearchSchema.safeParse({ component_id: "cmp_0123456789abcdef", environment_id: "env_0123456789abcdef" }).success).toBe(false);
+    expect(InstallationFamilyRouteSearchSchema.safeParse({ family_id: "fam_0123456789abcdef" }).success).toBe(false);
+  });
+
+  it("requires environment scope for user, installation, and self-test selections", () => {
+    expect(UserRouteSearchSchema.safeParse({ user_id: "usr_0123456789abcdef" }).success).toBe(false);
+    expect(InstallationRouteSearchSchema.safeParse({ installation_id: "ins_0123456789abcdef" }).success).toBe(false);
+    expect(SelfTestRouteSearchSchema.safeParse({ self_test_id: "tst_0123456789abcdef" }).success).toBe(false);
+    expect(SelfTestRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", schedule_id: "sts_0123456789abcdef", self_test_id: "tst_0123456789abcdef" }).success).toBe(true);
+  });
+
+  it("accepts only complete ordered analytics windows", () => {
+    expect(parseAnalyticsRouteSearch({
+      end: "2026-08-30T00:00:00Z",
+      environment_id: "env_0123456789abcdef",
+      interval: "hour",
+      start: "2026-08-29T00:00:00Z"
+    })).toMatchObject({ interval: "hour" });
+    expect(AnalyticsRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-29T00:00:00Z", environment_id: "env_0123456789abcdef", interval: "day", start: "2026-08-30T00:00:00Z" }).success).toBe(false);
+  });
+
+  it("keeps only non-PII simulator request shape and strips sensitive local state", () => {
+    const parsed = parseRouteSimulatorRouteSearch({
+      app_version: "1.2.3-beta",
+      authenticated: "true",
+      claims: "{\"plan\":\"premium\"}",
+      confirmation: "REVOKE",
+      credential: "provider-key",
+      environment_id: "env_0123456789abcdef",
+      feature: "assistant",
+      framing_unit_count: 2,
+      platform: "react_native_ios",
+      reason: "operator prose",
+      requested_input_tokens: 100,
+      requested_output_max: "200",
+      revision_id: "rev_0123456789abcdef",
+      rewritten_request_bytes: 4096,
+      streaming: "false",
+      token: "secret-token",
+      trust_level: "app_verified"
+    });
+    expect(parsed).toEqual({
+      app_version: "1.2.3-beta",
+      authenticated: true,
+      environment_id: "env_0123456789abcdef",
+      feature: "assistant",
+      framing_unit_count: "2",
+      platform: "react_native_ios",
+      requested_input_tokens: "100",
+      requested_output_max: "200",
+      revision_id: "rev_0123456789abcdef",
+      rewritten_request_bytes: "4096",
+      streaming: false,
+      trust_level: "app_verified"
+    });
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", feature: "assistant" }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", framing_unit_count: 4097 }).success).toBe(false);
+  });
+
+  it("keeps feature selection canonical and drops route-foreign sensitive values", () => {
+    expect(FeatureRouteSearchSchema.parse({ feature: "assistant", reason: "never-share", secret: "never-share" })).toEqual({ feature: "assistant" });
+    expect(FeatureRouteSearchSchema.safeParse({ feature: "Assistant display name" }).success).toBe(false);
   });
 });

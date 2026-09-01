@@ -1029,6 +1029,100 @@ func (store *Store) AuthenticateAPIToken(ctx context.Context, plaintext string) 
 	return principal, nil
 }
 
+// RevalidatePrincipal reloads the durable authorization behind an already
+// authenticated request without touching credential usage timestamps. It is
+// intended for bounded long-lived responses, which must notice revocation,
+// expiry, administrator disablement, and membership changes before their next
+// protected read.
+func (store *Store) RevalidatePrincipal(ctx context.Context, principal Principal) (Principal, error) {
+	if store == nil || store.pool == nil || ctx == nil ||
+		id.Validate(principal.OrganizationID, id.Organization) != nil ||
+		id.Validate(principal.AdminUserID, id.AdminUser) != nil {
+		return Principal{}, ErrAdminAuthentication
+	}
+
+	now := store.now().UTC()
+	refreshed := Principal{
+		OrganizationID: principal.OrganizationID,
+		AdminUserID:    principal.AdminUserID,
+		Method:         principal.Method,
+		CredentialID:   principal.CredentialID,
+	}
+	var role string
+	switch principal.Method {
+	case AuthenticationSession:
+		if id.Validate(principal.CredentialID, id.AdminSession) != nil {
+			return Principal{}, ErrAdminAuthentication
+		}
+		err := store.pool.QueryRow(ctx, `
+			SELECT membership.role, session.expires_at
+			FROM admin_sessions AS session
+			JOIN admin_users AS administrator
+			  ON administrator.admin_user_id = session.admin_user_id
+			JOIN admin_memberships AS membership
+			  ON membership.organization_id = session.organization_id
+			 AND membership.admin_user_id = session.admin_user_id
+			WHERE session.admin_session_id = $1
+			  AND session.organization_id = $2
+			  AND session.admin_user_id = $3
+			  AND session.revoked_at IS NULL
+			  AND session.expires_at > $4
+			  AND administrator.status = 'active'
+			  AND membership.status = 'active'
+		`, principal.CredentialID, principal.OrganizationID, principal.AdminUserID, now).Scan(
+			&role, &refreshed.CredentialExpiresAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Principal{}, ErrAdminAuthentication
+		}
+		if err != nil {
+			return Principal{}, fmt.Errorf("revalidate admin session: %w", err)
+		}
+	case AuthenticationAPIToken:
+		if id.Validate(principal.CredentialID, id.AdminAPIToken) != nil {
+			return Principal{}, ErrAdminAuthentication
+		}
+		var scopes []string
+		err := store.pool.QueryRow(ctx, `
+			SELECT membership.role, token.scopes, token.expires_at
+			FROM admin_api_tokens AS token
+			JOIN admin_users AS administrator
+			  ON administrator.admin_user_id = token.admin_user_id
+			JOIN admin_memberships AS membership
+			  ON membership.organization_id = token.organization_id
+			 AND membership.admin_user_id = token.admin_user_id
+			WHERE token.admin_api_token_id = $1
+			  AND token.organization_id = $2
+			  AND token.admin_user_id = $3
+			  AND token.revoked_at IS NULL
+			  AND (token.expires_at IS NULL OR token.expires_at > $4)
+			  AND administrator.status = 'active'
+			  AND membership.status = 'active'
+		`, principal.CredentialID, principal.OrganizationID, principal.AdminUserID, now).Scan(
+			&role, &scopes, &refreshed.CredentialExpiresAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Principal{}, ErrAdminAuthentication
+		}
+		if err != nil {
+			return Principal{}, fmt.Errorf("revalidate admin API token: %w", err)
+		}
+		scope, err := capabilitiesFromStrings(scopes)
+		if err != nil {
+			return Principal{}, fmt.Errorf("read revalidated API token scope: %w", err)
+		}
+		refreshed.scope = &scope
+	default:
+		return Principal{}, ErrAdminAuthentication
+	}
+
+	refreshed.Role = Role(role)
+	if err := refreshed.Role.Validate(); err != nil {
+		return Principal{}, fmt.Errorf("read revalidated administrator role: %w", err)
+	}
+	return refreshed, nil
+}
+
 // RevokeAPIToken revokes an active token and records the mutation.
 func (store *Store) RevokeAPIToken(
 	ctx context.Context,

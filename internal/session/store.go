@@ -312,6 +312,9 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 		return IssuedSession{}, fmt.Errorf("begin session exchange: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, input.challenge.OrganizationID, input.challenge.Binding.ApplicationID, input.challenge.EnvironmentID); err != nil {
+		return IssuedSession{}, err
+	}
 	if err := consumeChallenge(ctx, tx, input.challenge, now); err != nil {
 		return IssuedSession{}, err
 	}

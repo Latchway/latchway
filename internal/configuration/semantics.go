@@ -1300,8 +1300,12 @@ func privacySemanticIssues(privacy map[string]any) []Issue {
 	prompt, _ := privacy["storePromptBodies"].(bool)
 	response, _ := privacy["storeResponseBodies"].(bool)
 	_, retention := privacy["bodyRetention"]
-	if (prompt || response) && !retention {
-		return []Issue{errorIssue("body_retention_required", "/spec/privacy/bodyRetention", "Body storage requires an explicit bounded retention period.")}
+	if prompt || response {
+		return []Issue{errorIssue(
+			"body_storage_unsupported_v1",
+			"/spec/privacy",
+			"Prompt and response body storage is reserved but unsupported in Latchway v1; both storage flags must remain false.",
+		)}
 	}
 	if retention {
 		duration, err := parseConfigDuration(stringValue(privacy, "bodyRetention"))

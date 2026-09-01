@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,20 @@ func TestPageRequestParameters(t *testing.T) {
 	for _, page := range invalid {
 		if _, _, err := page.parameters(id.Organization); err == nil {
 			t.Fatalf("parameters(%+v) accepted invalid page", page)
+		}
+	}
+}
+
+func TestValidateLifecycleReason(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"incident review", strings.Repeat("r", 500), "évidence"} {
+		if err := validateLifecycleReason(value); err != nil {
+			t.Fatalf("validateLifecycleReason(%q) = %v", value, err)
+		}
+	}
+	for _, value := range []string{"", " reason", "reason ", "line\nbreak", "nul\x00byte", strings.Repeat("r", 501), string([]byte{0xff})} {
+		if err := validateLifecycleReason(value); err == nil {
+			t.Fatalf("validateLifecycleReason(%q) accepted unsafe input", value)
 		}
 	}
 }

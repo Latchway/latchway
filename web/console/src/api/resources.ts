@@ -17,6 +17,7 @@ const OrganizationID = opaqueID("org");
 const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
 const OptionalInstant = Instant.optional();
+const NullableInstant = Instant.nullish();
 const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
@@ -40,10 +41,12 @@ export const OrganizationResourcePageSchema: z.ZodType<AdminSchema<"Organization
 export const ApplicationResourceSchema: z.ZodType<AdminSchema<"Application">> = z
   .object({
     created_at: Instant,
+    disabled_at: NullableInstant,
     display_name: z.string().min(1).max(200),
     id: ApplicationID,
     organization_id: OrganizationID,
-    slug: Identifier
+    slug: Identifier,
+    status: z.enum(["active", "disabled"])
   })
   .strict();
 
@@ -59,10 +62,12 @@ export const EnvironmentResourceSchema: z.ZodType<AdminSchema<"Environment">> = 
     active_revision_id: RevisionID.optional(),
     application_id: ApplicationID,
     created_at: Instant,
+    disabled_at: NullableInstant,
     display_name: z.string().min(1).max(200),
     id: EnvironmentID,
     kind: z.enum(["development", "staging", "production"]),
-    slug: Identifier
+    slug: Identifier,
+    status: z.enum(["active", "disabled"])
   })
   .strict();
 

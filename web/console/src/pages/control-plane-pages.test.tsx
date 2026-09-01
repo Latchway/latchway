@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,7 +41,8 @@ vi.mock("../api/session", () => ({
   })
 }));
 
-import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, InstallationsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { dispatchAdminRefresh } from "../api/admin-events";
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
@@ -101,6 +102,12 @@ function analyticsFixture() {
   };
 }
 
+function localDateTime(value: string): string {
+  const parsed = new Date(value);
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 function routeSimulationFixture() {
   return {
     allowed: true, application_id: "app_0123456789abcdef", environment_id: "env_0123456789abcdef",
@@ -117,8 +124,8 @@ function routeSimulationFixture() {
 
 function renderInWorkspace(children: ReactNode, search: WorkspaceSearch) {
   const organization = { created_at: "2026-08-29T00:00:00Z", display_name: "Example", id: "org_0123456789abcdef", slug: "example" };
-  const application = { created_at: "2026-08-29T00:00:00Z", display_name: "Mobile App", id: "app_0123456789abcdef", organization_id: organization.id, slug: "mobile-app" };
-  const environment = { application_id: application.id, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production" };
+  const application = { created_at: "2026-08-29T00:00:00Z", display_name: "Mobile App", id: "app_0123456789abcdef", organization_id: organization.id, slug: "mobile-app", status: "active" as const };
+  const environment = { application_id: application.id, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production", status: "active" as const };
   const updateSearch = vi.fn();
   const value: WorkspaceContextValue = {
     application,
@@ -211,6 +218,9 @@ describe("rich usage and route-simulator views", () => {
     });
     expect(screen.getByLabelText("Status")).toHaveValue("failed");
     expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-5-mini");
+    const initialLoads = adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/requests?")).length;
+    dispatchAdminRefresh(["requests"]);
+    await waitFor(() => expect(adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/requests?")).length).toBe(initialLoads + 1));
   });
 
   it("writes edited request filters back as validated shareable search state", async () => {
@@ -293,6 +303,9 @@ describe("rich usage and route-simulator views", () => {
     });
     expect(screen.getByLabelText("Reason code")).toHaveValue("security_response");
     expect(screen.getByLabelText("Descriptive source")).toHaveValue("console");
+    const initialLoads = adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/audit-events?")).length;
+    dispatchAdminRefresh(["audit"]);
+    await waitFor(() => expect(adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/audit-events?")).length).toBe(initialLoads + 1));
   });
 
   it("keeps audit pagination server-side by writing the returned cursor to URL state", async () => {
@@ -352,6 +365,195 @@ describe("rich usage and route-simulator views", () => {
     expect(await screen.findByRole("heading", { name: "Field-level diff" })).toBeInTheDocument();
     expect(screen.getByText("Redacted by contract")).toBeInTheDocument();
     expect(adminRequestMock).toHaveBeenLastCalledWith(`/admin/v1/audit-events/${event.id}`, expect.anything());
+  });
+
+  it("restores an exact audit detail from validated deep-link state on reload", async () => {
+    const event = {
+      action: "admin.environment_disable",
+      actor: "admin_user:adm_00000000000000000000000000",
+      actor_id: "adm_00000000000000000000000000",
+      actor_kind: "admin_user",
+      changes: [],
+      environment_id: "env_0123456789abcdef",
+      id: "aud_00000000000000000000000000",
+      reason: "security_response",
+      request_id: "arq_00000000000000000000000000",
+      resource_id: "env_0123456789abcdef",
+      resource_type: "environment",
+      result: "succeeded",
+      source: "console",
+      summary: { changes: [] },
+      target: "environment:env_0123456789abcdef",
+      timestamp: "2026-08-29T00:00:00Z"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => path.endsWith(event.id)
+      ? { data: event }
+      : { data: { items: [event], page: { has_more: false } } });
+
+    renderInWorkspace(<AuditPageView />, { event: event.id });
+
+    expect(await screen.findByRole("heading", { name: "Audit detail" })).toBeInTheDocument();
+    expect(screen.getByText(event.id)).toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/audit-events/${event.id}`, expect.anything());
+  });
+
+  it("writes a selected immutable audit event to shareable route state", async () => {
+    const event = {
+      action: "admin.environment_disable",
+      actor: "admin_user:adm_00000000000000000000000000",
+      changes: [],
+      id: "aud_00000000000000000000000000",
+      result: "succeeded",
+      source: "console",
+      target: "environment:env_0123456789abcdef",
+      timestamp: "2026-08-29T00:00:00Z"
+    };
+    adminRequestMock.mockResolvedValue({ data: { items: [event], page: { has_more: false } } });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<AuditPageView />, {});
+
+    await user.click(await screen.findByRole("button", { name: event.target }));
+
+    expect(updateSearch).toHaveBeenCalledWith({ event: event.id });
+  });
+
+  it("restores and closes an exact pseudonymous user detail from workspace URL state", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const userID = "usr_0123456789abcdef";
+    const selected = { created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: userID, identity_providers: ["firebase"], normalized_claims: { plan: "subscriber" }, status: "active" };
+    adminRequestMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/users?")) return { data: { items: [selected], page: { has_more: false } } };
+      if (path === `/admin/v1/users/${userID}?environment_id=${environmentID}`) return { data: selected };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<UsersPage />, { environment_id: environmentID, user_id: userID });
+
+    expect(await screen.findByRole("heading", { name: "User detail" })).toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/users/${userID}?environment_id=${environmentID}`, expect.anything());
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({ user_id: undefined });
+  });
+
+  it("restores and closes an exact legacy installation without sharing revocation state", async () => {
+    const installation = {
+      attestation_provider: "app_attest", created_at: "2026-08-29T00:00:00Z", dpop_jkt: "A".repeat(43),
+      environment_id: "env_0123456789abcdef", id: "ins_0123456789abcdef", last_seen_at: "2026-08-29T00:01:00Z",
+      platform: "react_native_ios", status: "active", trust_expires_at: "2026-08-30T00:00:00Z", trust_level: "app_verified",
+      user_id: "usr_0123456789abcdef"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/installations?")) return { data: { items: [installation], page: { has_more: false } } };
+      if (path === `/admin/v1/installations/${installation.id}`) return { data: installation };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<InstallationsPage />, { environment_id: installation.environment_id, installation_id: installation.id });
+
+    expect(await screen.findByRole("heading", { name: "Installation detail" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Review revoke" }));
+    expect(screen.getByRole("heading", { name: "Revoke this installation?" })).toBeInTheDocument();
+    expect(updateSearch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({ installation_id: undefined });
+  });
+
+  it("restores a complete analytics window and writes filter edits as replacement URL state", async () => {
+    const search: WorkspaceSearch = {
+      end: "2026-08-29T01:00:00Z",
+      environment_id: "env_0123456789abcdef",
+      interval: "hour",
+      start: "2026-08-29T00:00:00Z"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => path.includes("/summary")
+      ? { data: analyticsFixture() }
+      : { data: { interval: path.includes("interval=day") ? "day" : "hour", points: [] } });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<UsagePage />, search);
+
+    expect(await screen.findByRole("heading", { name: "Feature usage" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Environment ID")).toHaveValue(search.environment_id);
+    expect(screen.getByLabelText("Start")).toHaveValue(localDateTime(search.start!));
+    expect(screen.getByLabelText("End")).toHaveValue(localDateTime(search.end!));
+    const initialLoads = adminRequestMock.mock.calls.length;
+    dispatchAdminRefresh(["usage"]);
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledTimes(initialLoads + 2));
+    await user.selectOptions(screen.getByLabelText("Interval"), "day");
+    await user.click(screen.getByRole("button", { name: "Load usage" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({
+      end: new Date(search.end!).toISOString(),
+      environment_id: search.environment_id,
+      interval: "day",
+      start: new Date(search.start!).toISOString()
+    });
+  });
+
+  it("restores only non-PII route-simulator shape and never writes claims to URL state", async () => {
+    const search: WorkspaceSearch = {
+      app_version: "1.2.3",
+      authenticated: true,
+      environment_id: "env_0123456789abcdef",
+      feature: "assistant",
+      framing_unit_count: "1",
+      platform: "react_native_ios",
+      requested_input_tokens: "99",
+      requested_output_max: "100",
+      revision_id: "rev_0123456789abcdef",
+      rewritten_request_bytes: "1024",
+      streaming: false,
+      trust_level: "app_verified"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => path.endsWith("/config") ? { data: {
+      created_at: "2026-08-29T00:00:00Z", created_by: "adm_0123456789abcdef",
+      document: { spec: { features: [{ id: "assistant" }] } }, environment_id: search.environment_id,
+      id: search.revision_id, state: "active", version: 1
+    } } : { data: routeSimulationFixture() });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<RouteSimulatorPage />, search);
+
+    await waitFor(() => expect(screen.getByText(/Selected active revision/)).toBeInTheDocument());
+    expect(screen.getByLabelText("Requested input tokens (explanatory)")).toHaveValue(99);
+    expect(screen.getByLabelText("Requested output maximum")).toHaveValue(100);
+    fireEvent.change(screen.getByLabelText("Normalized claims JSON"), { target: { value: '{"plan":"private-value"}' } });
+    await user.click(screen.getByRole("button", { name: "Simulate route" }));
+
+    expect(await screen.findByRole("heading", { name: "Allowed" })).toBeInTheDocument();
+    const patch = updateSearch.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(patch).toMatchObject({ environment_id: search.environment_id, feature: "assistant", requested_input_tokens: "99", revision_id: search.revision_id });
+    expect(patch).not.toHaveProperty("claims");
+    expect(JSON.stringify(patch)).not.toMatch(/private-value|credential|reason|secret|bearer|authorization/i);
+  });
+
+  it("restores selected self-test run and schedule IDs while keeping bearer material local", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const run = { checks: [{ name: "usage", safe_detail: "Bounded usage passed.", state: "passed" }], completed_at: "2026-08-29T00:00:01Z", created_at: "2026-08-29T00:00:00Z", id: "tst_0123456789abcdef", kind: "upstream", state: "passed" };
+    const schedule = {
+      application_id: "app_0123456789abcdef", authorization_credential_id: "tok_0123456789abcdef", config_revision_id: "rev_0123456789abcdef",
+      created_at: "2026-08-29T00:00:00Z", daily_cost_limit_nano_usd: 240_000_000, environment_id: environmentID,
+      id: "sts_0123456789abcdef", interval_seconds: 3600, kind: "upstream", max_cost_nano_usd: 10_000_000, model: "canary",
+      next_run_at: "2026-08-29T01:00:00Z", status: "active", updated_at: "2026-08-29T00:00:00Z", upstream: "primary"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => {
+      if (path === `/admin/v1/self-tests/${run.id}`) return { data: run };
+      if (path.startsWith("/admin/v1/self-test-schedules?")) return { data: { items: [schedule], page: { has_more: false } } };
+      if (path === `/admin/v1/self-test-schedules/${schedule.id}`) return { data: schedule };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<SelfTestsPage />, { environment_id: environmentID, schedule_id: schedule.id, self_test_id: run.id });
+
+    expect(await screen.findByRole("heading", { name: "upstream self-test" })).toBeInTheDocument();
+    expect(await screen.findByText(`${schedule.id} · active`)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Durable Admin API token/)).toHaveValue("");
+    const initialLoads = adminRequestMock.mock.calls.length;
+    dispatchAdminRefresh(["self_tests"]);
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledTimes(initialLoads + 3));
+    await user.click(screen.getByRole("button", { name: "Close run" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({ self_test_id: undefined });
+    await user.click(screen.getByRole("button", { name: "Close schedule" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({ schedule_id: undefined });
+    expect(JSON.stringify(updateSearch.mock.calls)).not.toContain("tok_0123456789abcdef");
   });
 
   it("links a selected pseudonymous user to an exact Installation Family filter", async () => {
@@ -428,6 +630,47 @@ describe("rich usage and route-simulator views", () => {
     });
     expect(await screen.findByRole("status")).toHaveTextContent("Block user completed");
     expect(screen.getAllByText("blocked")).toHaveLength(2);
+  });
+
+  it("reviews irreversible installation credential impact before revocation", async () => {
+    const installation = {
+      attestation_provider: "app_attest",
+      created_at: "2026-08-29T00:00:00Z",
+      dpop_jkt: "A".repeat(43),
+      environment_id: "env_0123456789abcdef",
+      id: "ins_0123456789abcdef",
+      last_seen_at: "2026-08-29T00:01:00Z",
+      platform: "react_native_ios",
+      status: "active",
+      trust_expires_at: "2026-08-30T00:00:00Z",
+      trust_level: "app_verified",
+      user_id: "usr_0123456789abcdef"
+    };
+    adminRequestMock.mockImplementation(async (path: string, _schema: unknown, options?: { body?: unknown; method?: string }) => {
+      if (path.startsWith("/admin/v1/installations?")) return { data: { items: [installation], page: { has_more: false } } };
+      if (path === `/admin/v1/installations/${installation.id}/revoke` && options?.method === "POST") {
+        return { data: { ...installation, revoked_at: "2026-08-29T00:02:00Z", status: "revoked" } };
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    render(<InstallationsPage />);
+    await user.type(screen.getByLabelText("Environment ID"), installation.environment_id);
+    await user.click(screen.getByRole("button", { name: "List installations" }));
+    await user.click(await screen.findByRole("button", { name: "Review revoke" }));
+
+    expect(screen.getByRole("heading", { name: "Revoke this installation?" })).toBeInTheDocument();
+    expect(screen.getByText(/Installation revocation is terminal/)).toBeInTheDocument();
+    expect(screen.getByText(/Revoked sessions, refresh tokens, and attestation keys stay revoked/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Revoke installation credentials" });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText("Operator reason"), "confirmed compromised device");
+    await user.click(screen.getByLabelText(/immediately and permanently revokes this installation/i));
+    await user.click(confirm);
+
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/installations/${installation.id}/revoke`, expect.anything(), { body: { reason: "confirmed compromised device" }, method: "POST" });
+    expect(await screen.findByText("revoked")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Revoke this installation?" })).not.toBeInTheDocument();
   });
 
   it("renders bounded per-user, latency, rate, dimension, and provenance analytics", async () => {

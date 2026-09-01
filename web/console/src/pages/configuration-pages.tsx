@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   adminRequest,
@@ -16,10 +16,12 @@ import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
 import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { SecretResourcePageSchema } from "../api/resources";
+import { ConfigurationRouteSearchSchema } from "../app/route-search";
+import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import { buildNativeSnippets, buildNativeTemplate } from "./native-template";
 import { createValidateActivate, findOrCreateApplication, findOrCreateEnvironment } from "./setup-wizard-api";
-import { resumeSetupWorkspace, type SetupWizardWorkspace } from "./setup-wizard-state";
+import { canonicalConfigurationJSON, resumeSetupWorkspace, type SetupWizardWorkspace } from "./setup-wizard-state";
 
 const environmentPattern = "env_[A-Za-z0-9_-]{16,128}";
 
@@ -41,6 +43,14 @@ function ValidationResult({ report }: { report?: ConfigurationValidation }) {
   </section> : null;
 }
 
+function comparableDocument(text: string): string {
+  try {
+    return canonicalConfigurationJSON(JSON.parse(text) as unknown);
+  } catch {
+    return text;
+  }
+}
+
 export function SetupWizardPage() {
   const session = useConsoleSession();
   const selectedWorkspace = useOptionalWorkspace();
@@ -48,7 +58,7 @@ export function SetupWizardPage() {
   const [createdWorkspace, setWorkspace] = useState<SetupWizardWorkspace>();
   const [editedDocument, setDocument] = useState<string>(); const [createdSecretName, setSecretName] = useState<string>();
   const [appliedRevision, setRevision] = useState<ConfigurationRevision>(); const [appliedValidation, setValidation] = useState<ConfigurationValidation>(); const [test, setTest] = useState<SelfTestRun>();
-  const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [actionResumeNotice, setResumeNotice] = useState<string>();
+  const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [actionResumeNotice, setResumeNotice] = useState<string>(); const [formDirty, setFormDirty] = useState(false); const [persistedDocument, setPersistedDocument] = useState<string>();
   const organizationID = session.data?.session?.organization_id ?? "";
   const canConfigure = session.data?.session?.capabilities.includes("activate_configuration") ?? false;
   const canManageSecrets = session.data?.session?.capabilities.includes("manage_secrets") ?? false;
@@ -69,6 +79,9 @@ export function SetupWizardPage() {
     : undefined;
   const workspace = createdWorkspace ?? serverWorkspace;
   const document = editedDocument ?? (serverWorkspace && latest ? JSON.stringify(latest.document, null, 2) : "");
+  const baselineDocument = persistedDocument ?? (serverWorkspace && latest ? canonicalConfigurationJSON(latest.document) : "");
+  const documentDirty = Boolean(document) && comparableDocument(document) !== baselineDocument;
+  useDirtyEditProtection(formDirty || documentDirty);
   const revision = appliedRevision ?? (serverWorkspace ? latest : undefined);
   const validation = appliedValidation ?? (serverWorkspace ? latest?.validation : undefined);
   const secrets = useQuery({
@@ -120,6 +133,7 @@ export function SetupWizardPage() {
       const environment = await findOrCreateEnvironment({ applicationID: application.id, displayName: String(form.get("environment_name")), kind: environmentKind, slug: environmentSlug });
       const next = { applicationID: application.id, applicationSlug, clientSurface, cloudProjectNumber: String(cloudProject), environmentID: environment.id, environmentSlug, upstreamAuthentication, plannedSecretName, selfTestMaximumCostNanoUsd }; setWorkspace(next);
       setDocument(template);
+      setFormDirty(false);
       setResumeNotice("Application and environment resolved by stable slugs. Repeating this step reuses the exact matching resources.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["organization", organizationID, "applications", "workspace-switcher"] }),
@@ -138,7 +152,7 @@ export function SetupWizardPage() {
       const upstream = parsed.spec.upstreams[0];
       if (!upstream) throw new Error("The configuration has no upstream to receive this credential reference.");
       upstream.authentication = { type: "bearer", secretRef: `secret/${name}` };
-      setDocument(JSON.stringify(parsed, null, 2)); form.reset();
+      setDocument(JSON.stringify(parsed, null, 2)); setFormDirty(false); form.reset();
       await queryClient.invalidateQueries({ queryKey: ["environment", workspace.environmentID, "setup-wizard", "secrets"] });
     } catch (error) { setProblem(problemFromError(error)); const field = form.elements.namedItem("secret_value"); if (field instanceof HTMLInputElement) field.value = ""; } finally { setBusy(false); }
   }
@@ -148,6 +162,11 @@ export function SetupWizardPage() {
     try {
       const parsed = JSON.parse(document) as unknown; const result = await createValidateActivate({ document: parsed, environmentID: workspace.environmentID, activate });
       setRevision(result.revision); setValidation(result.report);
+      if (activate && result.report.valid && result.revision.state === "active") {
+        setDocument(JSON.stringify(result.revision.document, null, 2));
+        setPersistedDocument(canonicalConfigurationJSON(result.revision.document));
+        setFormDirty(false);
+      }
       await queryClient.invalidateQueries({ queryKey: ["environment", workspace.environmentID, "configuration-revisions", "latest"] });
     } catch (error) { setProblem(error instanceof SyntaxError ? { code: "invalid_json", detail: "The configuration editor must contain exactly one JSON object.", retryable: false, status: 0, title: "Invalid configuration JSON" } : problemFromError(error)); } finally { setBusy(false); }
   }
@@ -166,7 +185,7 @@ export function SetupWizardPage() {
     {secrets.error ? <ProblemNotice problem={problemFromError(secrets.error)} /> : null}
     {resumeNotice ? <p className="control-notice"><strong>Resumable setup</strong><span>{resumeNotice}</span></p> : null}
     {!workspace ? <section className="wizard-card"><h2>Application, environment, identity, and native proof</h2><p>The owner and organization were created by secure bootstrap. Define the first application environment and the identifiers the verifiers must pin.</p>
-      <form className="control-form" onSubmit={(event) => void createWorkspace(event)}>
+      <form className="control-form" onChange={() => setFormDirty(true)} onSubmit={(event) => void createWorkspace(event)}>
         <div className="form-field-grid"><label>Organization slug<input defaultValue={selectedWorkspace?.organization?.slug} name="organization_slug" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Application name<input defaultValue={selectedWorkspace?.application?.display_name} name="application_name" required /></label><label>Application slug<input defaultValue={selectedWorkspace?.application?.slug} name="application_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label></div>
         <div className="form-field-grid"><label>Environment name<input defaultValue={selectedWorkspace?.environment?.display_name ?? "Production"} name="environment_name" required /></label><label>Environment slug<input defaultValue={selectedWorkspace?.environment?.slug ?? "production"} name="environment_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label><label>Environment kind<select defaultValue={selectedWorkspace?.environment?.kind ?? "production"} name="environment_kind" required><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label><label>Firebase project ID<input name="firebase_project" pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" required /></label><label>Mobile SDK surface<select defaultValue="react_native" name="client_surface" required><option value="react_native">React Native iOS + Android</option><option value="native">Native Swift + Kotlin</option></select><small>The generated Component Definitions bind the exact runtime platforms; create a separate application environment for a second surface.</small></label></div>
         <fieldset><legend>Apple App Attest</legend><p>The signing or distribution method selects one exact Apple launch-validation category. Development signing is allowed only in a development or staging Latchway environment.</p><div className="form-field-grid"><label>App ID prefix<input name="app_id_prefix" required /></label><label>Bundle ID<input name="bundle_id" required /></label><label>Signing or distribution<select defaultValue="app_store" name="apple_distribution" required><option value="development">Development-signed physical build</option><option value="testflight">TestFlight</option><option value="app_store">App Store</option><option value="ad_hoc_enterprise">Ad hoc or enterprise</option></select></label><label>Allowed CFBundleVersion (build number)<input name="bundle_version" placeholder="1" required /><small>Use the exact CFBundleVersion/CURRENT_PROJECT_VERSION, not CFBundleShortVersionString/MARKETING_VERSION.</small></label></div></fieldset>
@@ -177,7 +196,7 @@ export function SetupWizardPage() {
         <fieldset><legend>Hard token limits</legend><p>These limits are enforced from the server-rewritten request and provider-reported settlement. The total-token calendar bound covers input plus output.</p><div className="form-field-grid"><label>Daily input-token maximum<input defaultValue={100000} min={1} name="daily_input_token_maximum" required type="number" /></label><label>Daily output-token maximum<input defaultValue={100000} min={1} name="daily_output_token_maximum" required type="number" /></label><label>Daily total-token maximum<input defaultValue={200000} min={1} name="daily_total_token_maximum" required type="number" /></label><label>Per-request input-token maximum<input defaultValue={20000} min={1} name="per_request_input_token_maximum" required type="number" /></label></div></fieldset>
         <button className="primary-action" disabled={!canConfigure || busy} type="submit">{busy ? "Creating…" : "Create application and environment"}</button>
       </form></section> : <>
-      <section className="wizard-card"><h2>Write-only upstream credential</h2>{workspace.upstreamAuthentication === "bearer" ? <><p>The generated upstream requires this server-held secret. The value is sent once, cleared from the form, and never returned.</p><form className="filter-bar" onSubmit={(event) => void createSecret(event)}><label>Secret name<input defaultValue={workspace.plannedSecretName} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Secret value<input autoComplete="off" name="secret_value" required type="password" /></label><button className="primary-action" disabled={!canManageSecrets || busy || secrets.isPending || Boolean(secretName)} type="submit">{secretName ? "Credential added" : secrets.isPending ? "Checking credential…" : "Add credential"}</button></form></> : <p className="control-notice">You explicitly selected a no-auth upstream. Do not use this mode for OpenAI or another target that requires a credential.</p>}</section>
+      <section className="wizard-card"><h2>Write-only upstream credential</h2>{workspace.upstreamAuthentication === "bearer" ? <><p>The generated upstream requires this server-held secret. The value is sent once, cleared from the form, and never returned.</p><form className="filter-bar" onChange={() => setFormDirty(true)} onSubmit={(event) => void createSecret(event)}><label>Secret name<input defaultValue={workspace.plannedSecretName} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Secret value<input autoComplete="off" name="secret_value" required type="password" /></label><button className="primary-action" disabled={!canManageSecrets || busy || secrets.isPending || Boolean(secretName)} type="submit">{secretName ? "Credential added" : secrets.isPending ? "Checking credential…" : "Add credential"}</button></form></> : <p className="control-notice">You explicitly selected a no-auth upstream. Do not use this mode for OpenAI or another target that requires no credential.</p>}</section>
       <section className="wizard-card"><h2>Schema-backed full configuration document</h2><p>The generated document includes exact {workspace.clientSurface === "react_native" ? "React Native" : "native Swift and Kotlin"} root Component Definitions, platform identifiers, direct attestation, and the assistant feature grant. All identity, attestation, upstream, model, feature, route, pricing, session, privacy, and limit areas remain server validated.</p><textarea aria-label="Full configuration JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} rows={32} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={busy || !credentialReady} onClick={() => void applyConfiguration(false)} type="button">Validate and plan only</button><button className="primary-action" disabled={!canConfigure || busy || !credentialReady} onClick={() => void applyConfiguration(true)} type="button">Validate and activate with ETag</button></div><ValidationResult report={validation} />{revision ? <p className="resource-result">Revision <code>{revision.id}</code> is <strong>{revision.state}</strong>.</p> : null}</section>
       <section className="wizard-card"><h2>Bounded upstream self-test</h2><p>This sends one non-streaming and one streaming Responses request with a one-token server clamp, trusted input preflight, operator cost ceiling, provider usage reconciliation, and safe error normalization.</p><button className="primary-action" disabled={!canTest || busy || !credentialReady || revision?.state !== "active"} onClick={() => void runSelfTest()} type="button">Run bounded upstream self-test</button>{test ? <p className="resource-result">Self-test <code>{test.id}</code>: <strong>{test.state}</strong></p> : null}</section>
       <section className="wizard-card"><h2>Platform SDK snippets</h2><p>These snippets identify only your gateway and client-visible Latchway configuration; they contain no provider key. Use the generated application resource ID shown below, not the application slug.</p>{workspace.clientSurface === "react_native" ? <><h3>React Native</h3><pre>{snippets?.reactNative}</pre></> : <><h3>iOS</h3><pre>{snippets?.ios}</pre><h3>Android</h3><pre>{snippets?.android}</pre></>}</section>
@@ -196,10 +215,23 @@ export function ConfigurationEditorPage({
   areaTitle = "Full-document editor",
   canonicalPaths = []
 }: ConfigurationEditorPageProps = {}) {
-  const session = useConsoleSession(); const [environment, setEnvironment] = useState(""); const [document, setDocument] = useState(""); const [active, setActive] = useState<ConfigurationRevision>(); const [validation, setValidation] = useState<ConfigurationValidation>(); const [plan, setPlan] = useState<ConfigurationPlan>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const routeSearch = ConfigurationRouteSearchSchema.parse(workspace?.search ?? {}); const routeEnvironment = routeSearch.environment_id; const [environment, setEnvironment] = useState(routeEnvironment ?? ""); const [document, setDocument] = useState(""); const [baselineDocument, setBaselineDocument] = useState(""); const [active, setActive] = useState<ConfigurationRevision>(); const [validation, setValidation] = useState<ConfigurationValidation>(); const [plan, setPlan] = useState<ConfigurationPlan>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const dirty = Boolean(document) && comparableDocument(document) !== baselineDocument;
+  const activeMatchesEnvironment = !active || active.environment_id === environment;
+  useDirtyEditProtection(dirty);
+  const canConfigure = session.data?.session?.capabilities.includes("activate_configuration") ?? false;
+  async function pull(targetEnvironment = environment): Promise<void> { setBusy(true); setProblem(undefined); try { const response = await adminRequest(`/admin/v1/environments/${targetEnvironment}/config`, RevisionSchema); if (response.data.environment_id !== targetEnvironment) throw new Error("The active revision did not match the selected environment."); const serialized = JSON.stringify(response.data.document, null, 2); setEnvironment(targetEnvironment); setActive(response.data); setDocument(serialized); setBaselineDocument(canonicalConfigurationJSON(response.data.document)); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
+  function selectEnvironment(): void { if (!new RegExp(`^${environmentPattern}$`, "u").test(environment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading configuration.", retryable: false, status: 0, title: "Invalid environment" }); return; } if (workspace && routeEnvironment !== environment) { workspace.updateSearch({ environment_id: environment }); return; } void pull(environment); }
+  async function apply(activate: boolean): Promise<void> { if (!activeMatchesEnvironment) return; setBusy(true); setProblem(undefined); setPlan(undefined); try { const result = await createValidateActivate({ document: JSON.parse(document) as unknown, environmentID: environment, activate }); setActive(result.revision); setValidation(result.report); setPlan(result.plan); if (activate && result.report.valid && result.revision.state === "active") { setDocument(JSON.stringify(result.revision.document, null, 2)); setBaselineDocument(canonicalConfigurationJSON(result.revision.document)); } } catch (error) { setProblem(error instanceof SyntaxError ? { code: "invalid_json", detail: "The editor must contain exactly one JSON object.", retryable: false, status: 0, title: "Invalid JSON" } : problemFromError(error)); } finally { setBusy(false); } }
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !routeEnvironment) return;
+    // A validated deep link restores the exact environment revision.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(routeEnvironment);
+    void pull(routeEnvironment);
+    // Pulling is intentionally keyed only by canonical route state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeEnvironment, session.data?.mode]);
   if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to edit configuration.</h1></section>;
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
-  async function pull(): Promise<void> { setBusy(true); setProblem(undefined); try { const response = await adminRequest(`/admin/v1/environments/${environment}/config`, RevisionSchema); setActive(response.data); setDocument(JSON.stringify(response.data.document, null, 2)); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
-  async function apply(activate: boolean): Promise<void> { setBusy(true); setProblem(undefined); setPlan(undefined); try { const result = await createValidateActivate({ document: JSON.parse(document) as unknown, environmentID: environment, activate }); setActive(result.revision); setValidation(result.report); setPlan(result.plan); } catch (error) { setProblem(error instanceof SyntaxError ? { code: "invalid_json", detail: "The editor must contain exactly one JSON object.", retryable: false, status: 0, title: "Invalid JSON" } : problemFromError(error)); } finally { setBusy(false); } }
-  return <div className="control-page"><section className="page-heading"><div><p className="eyebrow">AI Configuration</p><h1>{areaTitle}</h1><p>{areaDescription}</p></div></section>{canonicalPaths.length ? <p className="resource-result">Canonical document area: {canonicalPaths.map((path, index) => <span key={path}>{index ? ", " : ""}<code>{path}</code></span>)}</p> : null}<div className="filter-bar"><label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><button className="secondary-action" disabled={busy || !environment} onClick={() => void pull()} type="button">Pull active revision</button></div><ProblemNotice problem={problem} /><textarea aria-label="Configuration document JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} placeholder="Pull an active revision or paste one complete EnvironmentConfig JSON object." rows={34} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={busy || !document || !environment} onClick={() => void apply(false)} type="button">Dry-run validate and diff</button><button className="primary-action" disabled={!canConfigure || busy || !document || !environment} onClick={() => void apply(true)} type="button">Apply with ETag</button></div><ValidationResult report={validation} />{plan ? <section className="detail-card"><h2>Redacted structural diff</h2><ul>{plan.changes.map((change, index) => <li key={`${change.path}-${index}`}><strong>{change.operation}</strong> <code>{change.path}</code>{change.summary ? ` — ${change.summary}` : ""}</li>)}</ul></section> : null}{active ? <p className="resource-result">Revision <code>{active.id}</code> is <strong>{active.state}</strong>.</p> : null}</div>;
+  return <div className="control-page"><section className="page-heading"><div><p className="eyebrow">AI Configuration</p><h1>{areaTitle}</h1><p>{areaDescription}</p></div></section>{canonicalPaths.length ? <p className="resource-result">Canonical document area: {canonicalPaths.map((path, index) => <span key={path}>{index ? ", " : ""}<code>{path}</code></span>)}</p> : null}<div className="filter-bar"><label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><button className="secondary-action" disabled={busy || !environment} onClick={selectEnvironment} type="button">Pull active revision</button></div><ProblemNotice problem={problem} />{!activeMatchesEnvironment ? <p className="control-notice" role="status"><strong>Environment selection changed</strong><span>Pull the newly selected environment before validating or applying this document.</span></p> : null}<textarea aria-label="Configuration document JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} placeholder="Pull an active revision or paste one complete EnvironmentConfig JSON object." rows={34} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={busy || !document || !environment || !activeMatchesEnvironment} onClick={() => void apply(false)} type="button">Dry-run validate and diff</button><button className="primary-action" disabled={!canConfigure || busy || !document || !environment || !activeMatchesEnvironment} onClick={() => void apply(true)} type="button">Apply with ETag</button></div><ValidationResult report={validation} />{plan ? <section className="detail-card"><h2>Redacted structural diff</h2><ul>{plan.changes.map((change, index) => <li key={`${change.path}-${index}`}><strong>{change.operation}</strong> <code>{change.path}</code>{change.summary ? ` — ${change.summary}` : ""}</li>)}</ul></section> : null}{active ? <p className="resource-result">Revision <code>{active.id}</code> is <strong>{active.state}</strong>.</p> : null}</div>;
 }

@@ -101,7 +101,7 @@ class PublicReferenceTests(unittest.TestCase):
                 operation = path_item.get(method)
                 if isinstance(operation, dict):
                     operations.append(operation["operationId"])
-        self.assertEqual(len(operations), 70)
+        self.assertEqual(len(operations), 77)
         for operation_id in operations:
             self.assertEqual(rendered.count(f"`{operation_id}`"), 1, operation_id)
         for exact_path in (

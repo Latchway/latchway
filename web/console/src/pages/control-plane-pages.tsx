@@ -22,6 +22,7 @@ import {
   UsageSummarySchema,
   UsageTimeseriesSchema,
   setApplicationUserBlocked,
+  UserSchema,
   UserPageSchema,
   type ApplicationUser,
   type ApplicationUserPage,
@@ -43,13 +44,25 @@ import {
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
 import {
+  AnalyticsRouteSearchSchema,
+  type AnalyticsRouteSearch,
   AuditRouteSearchSchema,
   type AuditRouteSearch,
+  InstallationRouteSearchSchema,
+  type InstallationRouteSearch,
   RequestRouteSearchSchema,
-  type RequestRouteSearch
+  type RequestRouteSearch,
+  RouteSimulatorRouteSearchSchema,
+  type RouteSimulatorRouteSearch,
+  SelfTestRouteSearchSchema,
+  type SelfTestRouteSearch,
+  UserRouteSearchSchema,
+  type UserRouteSearch
 } from "../app/route-search";
 import { EnvironmentRequired } from "../app/workspace-context";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
+import { useAdminRefreshTopic } from "../app/use-admin-refresh";
+import { ImmediateOperationConfirmation } from "../components/immediate-operation-confirmation";
 
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 const environmentInputPattern = environmentPattern.source;
@@ -202,6 +215,7 @@ function auditSearchCandidate(base: AuditRouteSearch, draft: AuditFilterDraft) {
     cursor: undefined,
     end: canonicalInstant(draft.end),
     environment_id: present(draft.environment_id),
+    event: undefined,
     reason: present(draft.reason),
     resource_id: present(draft.resource_id),
     resource_type: present(draft.resource_type),
@@ -348,7 +362,9 @@ const operationLabels: Record<UserOperationAction, string> = {
 
 export function UsersPage() {
   const session = useConsoleSession();
-  const [environment, setEnvironment] = useState("");
+  const workspace = useOptionalWorkspace();
+  const routeSearch = UserRouteSearchSchema.parse(workspace?.search ?? {});
+  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
   const [page, setPage] = useState<ApplicationUserPage>();
   const [selected, setSelected] = useState<ApplicationUser>();
   const [effective, setEffective] = useState<EffectiveConfiguration>();
@@ -365,23 +381,58 @@ export function UsersPage() {
   const [completion, setCompletion] = useState("");
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
+  const canonicalSearchKey = JSON.stringify({ cursor: routeSearch.cursor, environment_id: routeSearch.environment_id, user_id: routeSearch.user_id });
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // Browser navigation restores the bounded list and selected pseudonymous user.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(routeSearch.environment_id ?? "");
+    if (routeSearch.environment_id) void restore(routeSearch);
+    else { setPage(undefined); clearSelectedUser(); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
   const canMutate = session.data.session?.capabilities.includes("revoke_installations") ?? false;
 
-  async function load(cursor?: string): Promise<void> {
+  function clearSelectedUser(): void {
+    setSelected(undefined); setEffective(undefined); setImpact(undefined); setCompletion("");
+    setTypedConfirmation(""); setAcknowledged(false); setReason("");
+  }
+
+  async function restore(search: UserRouteSearch): Promise<void> {
+    if (!search.environment_id) return;
     setBusy(true); setProblem(undefined);
     try {
       const result = await adminRequest(
-        queryPath("/admin/v1/users", { environment_id: environment, page_size: "50", cursor }),
+        queryPath("/admin/v1/users", { environment_id: search.environment_id, page_size: "50", cursor: search.cursor }),
         UserPageSchema
       );
-      setPage(result.data); setSelected(undefined); setEffective(undefined); setImpact(undefined);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+      if (result.data.items.some((item) => item.environment_id !== search.environment_id)) throw new Error("user_context");
+      let detail: ApplicationUser | undefined;
+      if (search.user_id) {
+        const response = await adminRequest(queryPath(`/admin/v1/users/${search.user_id}`, { environment_id: search.environment_id }), UserSchema);
+        if (response.data.id !== search.user_id || response.data.environment_id !== search.environment_id) throw new Error("user_context");
+        detail = response.data;
+      }
+      setPage(result.data); clearSelectedUser(); setSelected(detail);
+    } catch (error) {
+      clearSelectedUser();
+      setProblem(error instanceof Error && error.message === "user_context" ? { code: "invalid_response", detail: "The user list or detail did not match the selected environment and pseudonymous user ID.", retryable: true, status: 0, title: "User context mismatch" } : problemFromError(error));
+    } finally { setBusy(false); }
   }
 
   function selectUser(user: ApplicationUser): void {
-    setSelected(user); setEffective(undefined); setImpact(undefined); setCompletion("");
-    setTypedConfirmation(""); setAcknowledged(false); setReason("");
+    clearSelectedUser();
+    if (workspace) workspace.updateSearch({ user_id: user.id }, { replace: false });
+    else setSelected(user);
+  }
+
+  function applyUserFilters(): void {
+    const candidate = UserRouteSearchSchema.safeParse({ ...routeSearch, cursor: undefined, environment_id: environment || undefined, user_id: undefined });
+    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment ID.")); return; }
+    if (workspace) workspace.updateSearch({ cursor: undefined, environment_id: candidate.data.environment_id, user_id: undefined });
+    else void restore(candidate.data);
   }
 
   async function explain(user: ApplicationUser): Promise<void> {
@@ -430,8 +481,8 @@ export function UsersPage() {
 
   return <div className="control-page">
     <PageHeading eyebrow="Identity" title="Application users">Pseudonymous identities, normalized claims, status, and overrides. Raw provider subjects and tokens never appear here.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
+    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); applyUserFilters(); }}>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); clearSelectedUser(); }} /></label>
       <FormActions busy={busy}>List users</FormActions>
     </form>
     <ProblemNotice problem={problem} />
@@ -441,9 +492,9 @@ export function UsersPage() {
         user.identity_providers.join(", "), time(user.last_seen_at),
         <button className="small-action" onClick={() => selectUser(user)} type="button">Inspect</button>
       ])} />
-      {page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}
+      {page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => { const next = UserRouteSearchSchema.parse({ ...routeSearch, cursor: page.page.next_cursor, environment_id: environment, user_id: undefined }); if (workspace) workspace.updateSearch({ cursor: next.cursor, environment_id: next.environment_id, user_id: undefined }, { replace: false }); else void restore(next); }} type="button">Next page</button> : null}
     </> : null}
-    {selected ? <aside className="detail-card"><h2>User detail</h2><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div></dl><p><a className="secondary-action" href={queryPath("/installation-families", { environment_id: environment, user_id: selected.id })}>View this user's installation families</a></p><h3>Normalized safe claims</h3><pre>{JSON.stringify(selected.normalized_claims, null, 2)}</pre>
+    {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>User detail</h2><button className="small-action" onClick={() => { if (workspace) workspace.updateSearch({ user_id: undefined }); else clearSelectedUser(); }} type="button">Close</button></div><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div></dl><p><a className="secondary-action" href={queryPath("/installation-families", { environment_id: environment, user_id: selected.id })}>View this user's installation families</a></p><h3>Normalized safe claims</h3><pre>{JSON.stringify(selected.normalized_claims, null, 2)}</pre>
       <h3>Explain effective access and limits</h3>
       <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); void explain(selected); }}>
         <label>Feature<input pattern={identifierInputPattern} required value={effectiveFeature} onChange={(event) => setEffectiveFeature(event.target.value)} /></label>
@@ -468,40 +519,80 @@ export function UsersPage() {
 
 export function InstallationsPage() {
   const session = useConsoleSession();
-  const [environment, setEnvironment] = useState("");
+  const workspace = useOptionalWorkspace();
+  const routeSearch = InstallationRouteSearchSchema.parse(workspace?.search ?? {});
+  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
   const [page, setPage] = useState<InstallationPage>();
   const [selected, setSelected] = useState<Installation>();
+  const [revocationTarget, setRevocationTarget] = useState<Installation>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
+  const canonicalSearchKey = JSON.stringify({ cursor: routeSearch.cursor, environment_id: routeSearch.environment_id, installation_id: routeSearch.installation_id });
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // Browser navigation restores the bounded list and selected legacy installation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(routeSearch.environment_id ?? "");
+    setRevocationTarget(undefined);
+    if (routeSearch.environment_id) void restore(routeSearch);
+    else { setPage(undefined); setSelected(undefined); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
   const canRevoke = session.data.session?.capabilities.includes("revoke_installations") ?? false;
 
-  async function load(cursor?: string): Promise<void> {
+  async function restore(search: InstallationRouteSearch): Promise<void> {
+    if (!search.environment_id) return;
     setBusy(true); setProblem(undefined);
     try {
-      const result = await adminRequest(queryPath("/admin/v1/installations", { environment_id: environment, page_size: "50", cursor }), InstallationPageSchema);
-      setPage(result.data); setSelected(undefined);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+      const result = await adminRequest(queryPath("/admin/v1/installations", { environment_id: search.environment_id, page_size: "50", cursor: search.cursor }), InstallationPageSchema);
+      if (result.data.items.some((item) => item.environment_id !== search.environment_id)) throw new Error("installation_context");
+      let detail: Installation | undefined;
+      if (search.installation_id) {
+        const response = await adminRequest(`/admin/v1/installations/${search.installation_id}`, InstallationSchema);
+        if (response.data.id !== search.installation_id || response.data.environment_id !== search.environment_id) throw new Error("installation_context");
+        detail = response.data;
+      }
+      setPage(result.data); setSelected(detail); setRevocationTarget(undefined);
+    } catch (error) {
+      setSelected(undefined); setRevocationTarget(undefined);
+      setProblem(error instanceof Error && error.message === "installation_context" ? { code: "invalid_response", detail: "The installation list or detail did not match the selected environment and installation ID.", retryable: true, status: 0, title: "Installation context mismatch" } : problemFromError(error));
+    } finally { setBusy(false); }
   }
-  async function revoke(installation: Installation): Promise<void> {
+  function applyInstallationFilters(): void {
+    const candidate = InstallationRouteSearchSchema.safeParse({ ...routeSearch, cursor: undefined, environment_id: environment || undefined, installation_id: undefined });
+    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment ID.")); return; }
+    if (workspace) workspace.updateSearch({ cursor: undefined, environment_id: candidate.data.environment_id, installation_id: undefined });
+    else void restore(candidate.data);
+  }
+  function selectInstallation(installation: Installation): void {
+    setRevocationTarget(undefined);
+    if (workspace) workspace.updateSearch({ installation_id: installation.id }, { replace: false });
+    else setSelected(installation);
+  }
+  async function revoke(installation: Installation, reason: string): Promise<void> {
     setBusy(true); setProblem(undefined);
     try {
-      const result = await adminRequest(`/admin/v1/installations/${installation.id}/revoke`, InstallationSchema, { method: "POST", body: { reason: "console operator revocation" } });
-      setSelected(result.data);
+      const result = await adminRequest(`/admin/v1/installations/${installation.id}/revoke`, InstallationSchema, { method: "POST", body: { reason } });
+      if (result.data.id !== installation.id || result.data.environment_id !== environment) throw new Error("installation_context");
+      setSelected((current) => current?.id === installation.id ? result.data : current);
       setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === installation.id ? result.data : item) } : current);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+      setRevocationTarget(undefined);
+    } catch (error) { setProblem(error instanceof Error && error.message === "installation_context" ? { code: "invalid_response", detail: "The revoked installation response did not match the selected environment and installation ID.", retryable: true, status: 0, title: "Installation context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
   }
   return <div className="control-page">
     <PageHeading eyebrow="Identity" title="Installations">Installation-bound public keys and normalized trust status without raw attestation evidence or DPoP proofs.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List installations</FormActions>
+    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); applyInstallationFilters(); }}>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); setSelected(undefined); setRevocationTarget(undefined); }} /></label><FormActions busy={busy}>List installations</FormActions>
     </form>
     <ProblemNotice problem={problem} />
     {page ? <><Table headers={["Installation", "Platform", "Status", "Trust", "Last seen", ""]} rows={page.items.map((item) => [
-      <button className="link-button" onClick={() => setSelected(item)} type="button">{item.id}</button>, item.platform, item.status, item.trust_level, time(item.last_seen_at),
-      <button className="small-action" disabled={!canRevoke || busy || item.status === "revoked"} onClick={() => void revoke(item)} type="button">Revoke</button>
-    ])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
-    {selected ? <aside className="detail-card"><h2>Installation detail</h2><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
+      <button className="link-button" onClick={() => selectInstallation(item)} type="button">{item.id}</button>, item.platform, item.status, item.trust_level, time(item.last_seen_at),
+      <button className="small-action" disabled={!canRevoke || busy || item.status === "revoked"} onClick={() => setRevocationTarget(item)} type="button">Review revoke</button>
+    ])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => { const next = InstallationRouteSearchSchema.parse({ ...routeSearch, cursor: page.page.next_cursor, environment_id: environment, installation_id: undefined }); if (workspace) workspace.updateSearch({ cursor: next.cursor, environment_id: next.environment_id, installation_id: undefined }, { replace: false }); else void restore(next); }} type="button">Next page</button> : null}</> : null}
+    {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this installation's trust and credential boundary." affectedScope={<><code>{revocationTarget.id}</code>, its sessions, refresh tokens, and attestation keys</>} busy={busy} confirmLabel="Revoke installation credentials" credentialRestoration="Never. Revoked sessions, refresh tokens, and attestation keys stay revoked; the client must establish a new installation identity." heading="Revoke this installation?" key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={(reason) => { if (reason) void revoke(revocationTarget, reason); }} requiresReason reversibility="No. Installation revocation is terminal." summary="The server revokes this installation together with its active sessions, refresh tokens, and attestation keys in one operation." timing="Immediately after the server accepts the revocation" /> : null}
+    {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>Installation detail</h2><button className="small-action" onClick={() => { setRevocationTarget(undefined); if (workspace) workspace.updateSearch({ installation_id: undefined }); else setSelected(undefined); }} type="button">Close</button></div><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
   </div>;
 }
 
@@ -669,13 +760,19 @@ function RequestsWorkspacePage() {
   }, [workspace?.environment?.id, routeSearch.request, session.data?.mode]);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (session.data?.mode !== "configured" || !workspace) return;
     // Browser back/forward is an external state source for this editable draft.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFilters(requestFilterDraft(routeSearch));
     // Keep the editable form synchronized with browser back/forward and reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonicalFilterKey]);
+
+  useAdminRefreshTopic("requests", () => {
+    if (session.data?.mode !== "configured" || !effectiveEnvironment) return;
+    void load(activeSearch, effectiveEnvironment);
+    if (routeSearch.request) void loadRequest(routeSearch.request, effectiveEnvironment);
+  }, session.data?.mode === "configured" && Boolean(effectiveEnvironment));
 
   if (session.data?.mode !== "configured") return <AccessRequired />;
 
@@ -771,30 +868,66 @@ function FocusedAnalytics({ focus, series, summary }: { focus: AnalyticsFocus; s
 
 function AnalyticsPage({ focus }: { focus: AnalyticsFocus }) {
   const session = useConsoleSession();
+  const workspace = useOptionalWorkspace();
+  const routeSearch = AnalyticsRouteSearchSchema.parse(workspace?.search ?? {});
   const now = new Date(); const yesterday = new Date(now.getTime() - 86_400_000);
-  const [environment, setEnvironment] = useState("");
-  const [start, setStart] = useState(yesterday.toISOString().slice(0, 16));
-  const [end, setEnd] = useState(now.toISOString().slice(0, 16));
-  const [interval, setInterval] = useState<"hour" | "day">("hour");
+  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
+  const [start, setStart] = useState(localDateTime(routeSearch.start) || yesterday.toISOString().slice(0, 16));
+  const [end, setEnd] = useState(localDateTime(routeSearch.end) || now.toISOString().slice(0, 16));
+  const [interval, setInterval] = useState<"hour" | "day">(routeSearch.interval ?? "hour");
   const [summary, setSummary] = useState<UsageSummary>(); const [series, setSeries] = useState<UsageTimeseries>();
   const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const canonicalSearchKey = JSON.stringify({ end: routeSearch.end, environment_id: routeSearch.environment_id, interval: routeSearch.interval, start: routeSearch.start });
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // Browser navigation restores the complete bounded analytics window.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(routeSearch.environment_id ?? "");
+    if (routeSearch.start) setStart(localDateTime(routeSearch.start));
+    if (routeSearch.end) setEnd(localDateTime(routeSearch.end));
+    setInterval(routeSearch.interval ?? "hour");
+    if (routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval) void load(routeSearch);
+    else { setSummary(undefined); setSeries(undefined); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
+  useAdminRefreshTopic("usage", () => {
+    if (session.data?.mode === "configured" && routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval) void load(routeSearch);
+  }, session.data?.mode === "configured" && Boolean(routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval));
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function load(): Promise<void> {
+  async function load(search: AnalyticsRouteSearch): Promise<void> {
+    if (!search.environment_id || !search.start || !search.end || !search.interval) return;
     setBusy(true); setProblem(undefined);
     try {
-      const query = { environment_id: environment, start: new Date(start).toISOString(), end: new Date(end).toISOString() };
+      const query = { environment_id: search.environment_id, start: search.start, end: search.end };
       const [summaryResult, seriesResult] = await Promise.all([
         adminRequest(queryPath("/admin/v1/usage/summary", { ...query, breakdown_limit: "50" }), UsageSummarySchema),
-        adminRequest(queryPath("/admin/v1/usage/timeseries", { ...query, interval }), UsageTimeseriesSchema)
+        adminRequest(queryPath("/admin/v1/usage/timeseries", { ...query, interval: search.interval }), UsageTimeseriesSchema)
       ]);
+      if (seriesResult.data.interval !== search.interval) throw new Error("analytics_context");
       setSummary(summaryResult.data); setSeries(seriesResult.data);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+    } catch (error) { setProblem(error instanceof Error && error.message === "analytics_context" ? { code: "invalid_response", detail: "The analytics time series did not match the selected interval.", retryable: true, status: 0, title: "Analytics context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
+  }
+  function applyAnalyticsFilters(): void {
+    const candidate = AnalyticsRouteSearchSchema.safeParse({
+      ...routeSearch,
+      end: canonicalInstant(end),
+      environment_id: environment || undefined,
+      interval,
+      start: canonicalInstant(start)
+    });
+    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment and ensure the end time is later than the start time.")); return; }
+    if (workspace) {
+      const changed = JSON.stringify({ end: candidate.data.end, environment_id: candidate.data.environment_id, interval: candidate.data.interval, start: candidate.data.start }) !== canonicalSearchKey;
+      workspace.updateSearch({ end: candidate.data.end, environment_id: candidate.data.environment_id, interval: candidate.data.interval, start: candidate.data.start });
+      if (!changed) void load(candidate.data);
+    } else void load(candidate.data);
   }
   const copy = analyticsCopy[focus];
   return <div className="control-page">
     <PageHeading eyebrow="Observability" title={copy.title}>{copy.description}</PageHeading>
-    <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
+    <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); applyAnalyticsFilters(); }}>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setSummary(undefined); setSeries(undefined); }} /></label>
       <label>Start<input required type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} /></label>
       <label>End<input required type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
       <label>Interval<select value={interval} onChange={(event) => setInterval(event.target.value as "hour" | "day")}><option value="hour">Hourly</option><option value="day">Daily</option></select></label>
@@ -839,14 +972,25 @@ export function AuditPageView() {
         source: search.source,
         start: search.start
       }), AuditPageSchema)).data);
-      setSelected(undefined);
     }
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
   async function inspect(eventID: string): Promise<void> {
     setBusy(true); setProblem(undefined);
-    try { setSelected((await adminRequest(`/admin/v1/audit-events/${eventID}`, AuditEventSchema)).data); }
-    catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+    try {
+      const event = (await adminRequest(`/admin/v1/audit-events/${eventID}`, AuditEventSchema)).data;
+      if (event.id !== eventID) throw new Error("audit_context");
+      setSelected(event);
+    }
+    catch (error) { setProblem(error instanceof Error && error.message === "audit_context" ? { code: "invalid_response", detail: "The audit detail did not match the selected immutable event.", retryable: true, status: 0, title: "Audit detail mismatch" } : problemFromError(error)); } finally { setBusy(false); }
+  }
+
+  function selectEvent(eventID: string): void {
+    if (workspace) {
+      workspace.updateSearch({ event: eventID });
+      return;
+    }
+    void inspect(eventID);
   }
 
   function updateFilter(name: keyof AuditFilterDraft, value: string): void {
@@ -863,7 +1007,7 @@ export function AuditPageView() {
     setProblem(undefined);
     if (workspace) {
       const changed = auditListKey(candidate.data) !== canonicalListKey;
-      workspace.updateSearch(auditSearchPatch(candidate.data));
+      workspace.updateSearch({ ...auditSearchPatch(candidate.data), event: undefined });
       if (!changed) void load(candidate.data);
       return;
     }
@@ -880,7 +1024,7 @@ export function AuditPageView() {
     setFilters(auditFilterDraft());
     setProblem(undefined);
     if (workspace) {
-      workspace.updateSearch(auditSearchPatch(cleared));
+      workspace.updateSearch({ ...auditSearchPatch(cleared), event: undefined });
       return;
     }
     setStandaloneSearch(cleared);
@@ -889,7 +1033,7 @@ export function AuditPageView() {
 
   function nextPage(cursor: string): void {
     const next = AuditRouteSearchSchema.parse({ ...activeSearch, cursor });
-    if (workspace) workspace.updateSearch({ cursor: next.cursor });
+    if (workspace) workspace.updateSearch({ cursor: next.cursor, event: undefined });
     else { setStandaloneSearch(next); void load(next); }
   }
 
@@ -911,6 +1055,24 @@ export function AuditPageView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonicalFilterKey]);
 
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    if (routeSearch.event) {
+      // URL navigation is the external signal that starts the detail query.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void inspect(routeSearch.event);
+      return;
+    }
+    // Browser history can independently close the shareable audit detail.
+    setSelected(undefined);
+    // Inspection is intentionally keyed only by validated URL state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeSearch.event, session.data?.mode]);
+
+  useAdminRefreshTopic("audit", () => {
+    if (session.data?.mode === "configured") void load(activeSearch);
+  }, session.data?.mode === "configured");
+
   if (session.data?.mode !== "configured") return <AccessRequired />;
 
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Audit log">Append-only, tenant-scoped administrative outcomes with explicit source, environment, reason code, and value-free field changes.</PageHeading>
@@ -927,8 +1089,8 @@ export function AuditPageView() {
       <label>Start<input step="1" type="datetime-local" value={filters.start} onChange={(event) => updateFilter("start", event.target.value)} /></label><label>End<input step="1" type="datetime-local" value={filters.end} onChange={(event) => updateFilter("end", event.target.value)} /></label>
       <FormActions busy={busy}>Apply filters</FormActions><button className="secondary-action" disabled={busy} onClick={resetFilters} type="button">Reset filters</button>
     </form><ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Time", "Actor", "Descriptive source", "Environment", "Action", "Target", "Reason", "Result", "Request"]} rows={page.items.map((event) => [time(event.timestamp), event.actor, event.source, event.environment_id ?? "Instance", event.action, <button className="link-button" disabled={busy} onClick={() => void inspect(event.id)} type="button">{event.target}</button>, event.reason ?? "—", event.result, event.request_id || "—"])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => nextPage(page.page.next_cursor ?? "")} type="button">Next page</button> : null}</> : null}
-    {selected ? <aside className="detail-card"><div className="detail-card__heading"><div><p className="eyebrow">Immutable event</p><h2>Audit detail</h2></div><button className="small-action" onClick={() => setSelected(undefined)} type="button">Close</button></div>
+    {page ? <><Table headers={["Time", "Actor", "Descriptive source", "Environment", "Action", "Target", "Reason", "Result", "Request"]} rows={page.items.map((event) => [time(event.timestamp), event.actor, event.source, event.environment_id ?? "Instance", event.action, <button className="link-button" disabled={busy} onClick={() => selectEvent(event.id)} type="button">{event.target}</button>, event.reason ?? "—", event.result, event.request_id || "—"])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => nextPage(page.page.next_cursor ?? "")} type="button">Next page</button> : null}</> : null}
+    {selected ? <aside className="detail-card"><div className="detail-card__heading"><div><p className="eyebrow">Immutable event</p><h2>Audit detail</h2></div><button className="small-action" onClick={() => { if (workspace) workspace.updateSearch({ event: undefined }); else setSelected(undefined); }} type="button">Close</button></div>
       <dl><div><dt>Event</dt><dd>{selected.id}</dd></div><div><dt>Occurred</dt><dd>{time(selected.timestamp)}</dd></div><div><dt>Actor</dt><dd>{selected.actor}</dd></div><div><dt>Descriptive source</dt><dd>{selected.source}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id ?? "Instance"}</dd></div><div><dt>Reason</dt><dd>{selected.reason ?? "Not supplied"}</dd></div><div><dt>Result</dt><dd>{selected.result}</dd></div><div><dt>Request</dt><dd>{selected.request_id || "—"}</dd></div></dl>
       <h3>Field-level diff</h3><Table headers={["Field", "Operation", "Classification", "Value"]} rows={selected.changes.map((change) => [change.field, change.operation, change.classification, change.redacted ? "Redacted by contract" : "Value not retained"])} />
       <details><summary>Redaction-safe raw JSON</summary><pre>{JSON.stringify(selected, null, 2)}</pre></details>
@@ -937,23 +1099,46 @@ export function AuditPageView() {
 }
 
 export function RouteSimulatorPage() {
-  const session = useConsoleSession(); const [result, setResult] = useState<RouteSimulation>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
-  const [environment, setEnvironment] = useState(""); const [revision, setRevision] = useState(""); const [feature, setFeature] = useState("");
+  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const routeSearch = RouteSimulatorRouteSearchSchema.parse(workspace?.search ?? {}); const [result, setResult] = useState<RouteSimulation>(); const [resultSearchKey, setResultSearchKey] = useState<string>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? ""); const [revision, setRevision] = useState(routeSearch.revision_id ?? ""); const [feature, setFeature] = useState(routeSearch.feature ?? "");
+  const [platform, setPlatform] = useState(routeSearch.platform ?? "react_native_ios"); const [trustLevel, setTrustLevel] = useState(routeSearch.trust_level ?? "app_verified"); const [appVersion, setAppVersion] = useState(routeSearch.app_version ?? "");
+  const [requestedInputTokens, setRequestedInputTokens] = useState(routeSearch.requested_input_tokens ?? "0"); const [requestedOutputMaximum, setRequestedOutputMaximum] = useState(routeSearch.requested_output_max ?? "0"); const [rewrittenRequestBytes, setRewrittenRequestBytes] = useState(routeSearch.rewritten_request_bytes ?? "1024"); const [framingUnitCount, setFramingUnitCount] = useState(routeSearch.framing_unit_count ?? "1");
+  const [authenticated, setAuthenticated] = useState(routeSearch.authenticated ?? true); const [streamingSimulation, setStreamingSimulation] = useState(routeSearch.streaming ?? false);
   const [contextRevision, setContextRevision] = useState<string>(); const [contextFeatures, setContextFeatures] = useState<string[]>([]);
+  const canonicalSearchKey = JSON.stringify(routeSearch);
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // Browser navigation restores only redaction-safe simulator inputs; claims and results remain local.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(routeSearch.environment_id ?? ""); setRevision(routeSearch.revision_id ?? ""); setFeature(routeSearch.feature ?? "");
+    setPlatform(routeSearch.platform ?? "react_native_ios"); setTrustLevel(routeSearch.trust_level ?? "app_verified"); setAppVersion(routeSearch.app_version ?? "");
+    setRequestedInputTokens(routeSearch.requested_input_tokens ?? "0"); setRequestedOutputMaximum(routeSearch.requested_output_max ?? "0"); setRewrittenRequestBytes(routeSearch.rewritten_request_bytes ?? "1024"); setFramingUnitCount(routeSearch.framing_unit_count ?? "1");
+    setAuthenticated(routeSearch.authenticated ?? true); setStreamingSimulation(routeSearch.streaming ?? false);
+    if (routeSearch.environment_id) void loadContext(routeSearch.environment_id, routeSearch, false);
+    else { setContextRevision(undefined); setContextFeatures([]); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function loadContext(): Promise<void> {
-    if (!environmentPattern.test(environment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading route context.", retryable: false, status: 0, title: "Invalid route context" }); return; }
-    setBusy(true); setProblem(undefined); setResult(undefined);
+  async function loadContext(targetEnvironment = environment, selection: RouteSimulatorRouteSearch = routeSearch, canonicalize = true): Promise<void> {
+    if (!environmentPattern.test(targetEnvironment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading route context.", retryable: false, status: 0, title: "Invalid route context" }); return; }
+    setBusy(true); setProblem(undefined);
+    if (canonicalize) { setResult(undefined); setResultSearchKey(undefined); }
     try {
-      const active = await adminRequest(`/admin/v1/environments/${environment}/config`, RevisionSchema);
+      const active = await adminRequest(`/admin/v1/environments/${targetEnvironment}/config`, RevisionSchema);
+      if (active.data.environment_id !== targetEnvironment) throw new Error("context");
       const spec = active.data.document.spec;
       if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error("context");
       const configuredFeatures = (spec as Record<string, unknown>).features;
       if (!Array.isArray(configuredFeatures) || configuredFeatures.length > 256) throw new Error("context");
       const ids = configuredFeatures.map((item) => item && typeof item === "object" && !Array.isArray(item) ? String((item as Record<string, unknown>).id ?? "") : "");
       if (ids.some((id) => !identifierPattern.test(id)) || new Set(ids).size !== ids.length) throw new Error("context");
-      setContextRevision(active.data.id); setContextFeatures(ids); setRevision(active.data.id); setFeature(ids[0] ?? "");
-    } catch (error) { setProblem(error instanceof Error && error.message === "context" ? { code: "invalid_response", detail: "The active revision did not contain a bounded canonical feature list.", retryable: true, status: 0, title: "Route context unavailable" } : problemFromError(error)); }
+      if (selection.revision_id && selection.revision_id !== active.data.id) throw new Error("context_selection");
+      if (selection.feature && !ids.includes(selection.feature)) throw new Error("context_selection");
+      const selectedFeature = selection.feature ?? ids[0] ?? "";
+      setContextRevision(active.data.id); setContextFeatures(ids); setRevision(active.data.id); setFeature(selectedFeature);
+      if (canonicalize && workspace) workspace.updateSearch({ environment_id: targetEnvironment, feature: selectedFeature || undefined, revision_id: active.data.id });
+    } catch (error) { setProblem(error instanceof Error && error.message === "context_selection" ? { code: "context_mismatch", detail: "The selected revision or feature is not active in this environment.", retryable: false, status: 0, title: "Route context changed" } : error instanceof Error && error.message === "context" ? { code: "invalid_response", detail: "The active revision did not match the environment or contain a bounded canonical feature list.", retryable: true, status: 0, title: "Route context unavailable" } : problemFromError(error)); }
     finally { setBusy(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -962,27 +1147,57 @@ export function RouteSimulatorPage() {
       const claims = JSON.parse(String(form.get("claims") ?? "{}")) as unknown;
       if (!claims || Array.isArray(claims) || typeof claims !== "object" || Object.keys(claims).length > 64) throw new Error("claims");
       if (contextRevision && revision !== contextRevision) throw new Error("context_selection");
+      const safeSearchCandidate = {
+        ...routeSearch,
+        app_version: appVersion || undefined,
+        authenticated,
+        environment_id: environment || undefined,
+        feature,
+        framing_unit_count: framingUnitCount,
+        platform,
+        requested_input_tokens: requestedInputTokens || "0",
+        requested_output_max: requestedOutputMaximum || "0",
+        revision_id: revision,
+        rewritten_request_bytes: rewrittenRequestBytes || "0",
+        streaming: streamingSimulation,
+        trust_level: trustLevel
+      };
+      const safeSearch = workspace ? RouteSimulatorRouteSearchSchema.parse(safeSearchCandidate) : undefined;
       const response = await adminRequest(`/admin/v1/config-revisions/${revision}/simulate`, RouteSimulationSchema, { method: "POST", body: {
-        feature, platform: String(form.get("platform")), trust_level: String(form.get("trust")),
-        principal: { authenticated: form.get("authenticated") === "on", claims },
-        request: { streaming: form.get("streaming") === "on", app_version: String(form.get("app_version") ?? ""), requested_input_tokens: Number(form.get("requested_input") ?? 0), requested_output_max: Number(form.get("requested_output") ?? 0), rewritten_request_bytes: Number(form.get("rewritten_request_bytes") ?? 0), framing_unit_count: Number(form.get("framing_unit_count") ?? 0) }
+        feature, platform, trust_level: trustLevel,
+        principal: { authenticated, claims },
+        request: { streaming: streamingSimulation, app_version: appVersion, requested_input_tokens: Number(requestedInputTokens || 0), requested_output_max: Number(requestedOutputMaximum || 0), rewritten_request_bytes: Number(rewrittenRequestBytes || 0), framing_unit_count: Number(framingUnitCount || 0) }
       }});
       if (response.data.revision_id !== revision || response.data.feature !== feature || (environment && response.data.environment_id !== environment)) throw new Error("context_result");
-      setResult(response.data);
+      setResult(response.data); setResultSearchKey(safeSearch ? JSON.stringify(safeSearch) : undefined);
+      if (workspace && safeSearch) workspace.updateSearch({
+        app_version: safeSearch.app_version,
+        authenticated: safeSearch.authenticated,
+        environment_id: safeSearch.environment_id,
+        feature: safeSearch.feature,
+        framing_unit_count: safeSearch.framing_unit_count,
+        platform: safeSearch.platform,
+        requested_input_tokens: safeSearch.requested_input_tokens,
+        requested_output_max: safeSearch.requested_output_max,
+        revision_id: safeSearch.revision_id,
+        rewritten_request_bytes: safeSearch.rewritten_request_bytes,
+        streaming: safeSearch.streaming,
+        trust_level: safeSearch.trust_level
+      });
     } catch (error) { setProblem(error instanceof SyntaxError || (error instanceof Error && error.message === "claims") ? { code: "invalid_claims", detail: "Normalized claims must be one JSON object with at most 64 properties.", retryable: false, status: 0, title: "Invalid simulator input" } : error instanceof Error && error.message === "context_selection" ? { code: "context_mismatch", detail: "The revision no longer matches the loaded active environment context. Reload context before simulating.", retryable: false, status: 0, title: "Route context changed" } : error instanceof Error && error.message === "context_result" ? { code: "invalid_response", detail: "The simulation result did not match the selected revision, feature, and environment context.", retryable: true, status: 0, title: "Route context mismatch" } : problemFromError(error)); }
     finally { setBusy(false); }
   }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Route simulator">The server executes the exact compiled production CEL and resolver. This performs no quota reservation and no upstream dispatch.</PageHeading>
-    <section className="filter-bar"><label>Environment context ID<input pattern={environmentInputPattern} value={environment} onChange={(event) => { setEnvironment(event.target.value); setContextRevision(undefined); setContextFeatures([]); }} /></label><button className="secondary-action" disabled={busy || !environment} onClick={() => void loadContext()} type="button">Load active route context</button>{contextRevision ? <span>Selected active revision <code>{contextRevision}</code> with {contextFeatures.length} feature{contextFeatures.length === 1 ? "" : "s"}.</span> : null}</section>
+    <section className="filter-bar"><label>Environment context ID<input pattern={environmentInputPattern} value={environment} onChange={(event) => { setEnvironment(event.target.value); setContextRevision(undefined); setContextFeatures([]); setResult(undefined); }} /></label><button className="secondary-action" disabled={busy || !environment} onClick={() => void loadContext(environment, { ...routeSearch, environment_id: environment, feature: undefined, revision_id: undefined })} type="button">Load active route context</button>{contextRevision ? <span>Selected active revision <code>{contextRevision}</code> with {contextFeatures.length} feature{contextFeatures.length === 1 ? "" : "s"}.</span> : null}</section>
     <form className="control-form" onSubmit={(event) => void submit(event)}>
       <div className="form-field-grid"><label>Revision ID<input name="revision" pattern={revisionPattern} required value={revision} onChange={(event) => setRevision(event.target.value)} /></label><label>Feature<input list="route-context-feature-options" name="feature" pattern={identifierInputPattern} required value={feature} onChange={(event) => setFeature(event.target.value)} /><datalist id="route-context-feature-options">{contextFeatures.map((id) => <option key={id} value={id} />)}</datalist></label></div>
-      <div className="form-field-grid"><label>Platform<select name="platform" defaultValue="react_native_ios"><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="node">Node</option></select></label><label>Trust level<select name="trust" defaultValue="app_verified"><option value="none">None</option><option value="identity_only">Identity only</option><option value="app_verified">App verified</option><option value="device_verified">Device verified</option><option value="strong_device_verified">Strong device verified</option><option value="debug">Debug</option></select></label></div>
+      <div className="form-field-grid"><label>Platform<select name="platform" value={platform} onChange={(event) => setPlatform(event.target.value as typeof platform)}><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="node">Node</option></select></label><label>Trust level<select name="trust" value={trustLevel} onChange={(event) => setTrustLevel(event.target.value as typeof trustLevel)}><option value="none">None</option><option value="identity_only">Identity only</option><option value="app_verified">App verified</option><option value="device_verified">Device verified</option><option value="strong_device_verified">Strong device verified</option><option value="debug">Debug</option></select></label></div>
       <label>Normalized claims JSON<textarea defaultValue="{}" name="claims" rows={6} spellCheck={false} /></label>
-      <div className="form-field-grid"><label>App version (explanatory)<input maxLength={128} name="app_version" /></label><label>Requested input tokens (explanatory)<input min={0} name="requested_input" type="number" /></label><label>Requested output maximum<input min={0} name="requested_output" type="number" /></label></div>
-      <div className="form-field-grid"><label>Rewritten request bytes<input defaultValue={1024} max={104_857_600} min={0} name="rewritten_request_bytes" type="number" /><small>Hypothetical exact post-rewrite body size for reservation projection.</small></label><label>Framing unit count<input defaultValue={1} max={4096} min={0} name="framing_unit_count" type="number" /><small>Messages, input items, or embedding inputs after adapter validation.</small></label></div>
-      <label className="check-field"><input defaultChecked name="authenticated" type="checkbox" />Authenticated principal</label><label className="check-field"><input name="streaming" type="checkbox" />Streaming request</label><FormActions busy={busy}>Simulate route</FormActions>
+      <div className="form-field-grid"><label>App version (explanatory)<input maxLength={128} name="app_version" pattern="[A-Za-z0-9._+-]+" value={appVersion} onChange={(event) => setAppVersion(event.target.value)} /></label><label>Requested input tokens (explanatory)<input max={2_147_483_647} min={0} name="requested_input" type="number" value={requestedInputTokens} onChange={(event) => setRequestedInputTokens(event.target.value)} /></label><label>Requested output maximum<input max={2_147_483_647} min={0} name="requested_output" type="number" value={requestedOutputMaximum} onChange={(event) => setRequestedOutputMaximum(event.target.value)} /></label></div>
+      <div className="form-field-grid"><label>Rewritten request bytes<input max={104_857_600} min={0} name="rewritten_request_bytes" type="number" value={rewrittenRequestBytes} onChange={(event) => setRewrittenRequestBytes(event.target.value)} /><small>Hypothetical exact post-rewrite body size for reservation projection.</small></label><label>Framing unit count<input max={4096} min={0} name="framing_unit_count" type="number" value={framingUnitCount} onChange={(event) => setFramingUnitCount(event.target.value)} /><small>Messages, input items, or embedding inputs after adapter validation.</small></label></div>
+      <label className="check-field"><input checked={authenticated} name="authenticated" onChange={(event) => setAuthenticated(event.target.checked)} type="checkbox" />Authenticated principal</label><label className="check-field"><input checked={streamingSimulation} name="streaming" onChange={(event) => setStreamingSimulation(event.target.checked)} type="checkbox" />Streaming request</label><FormActions busy={busy}>Simulate route</FormActions>
     </form><ProblemNotice problem={problem} />
-    {result ? <section className={`simulation-result ${result.allowed ? "simulation-result--allowed" : "simulation-result--denied"}`}><h2>{result.allowed ? "Allowed" : "Denied"}</h2><dl><div><dt>Application</dt><dd>{result.application_id}</dd></div><div><dt>Environment</dt><dd>{result.environment_id} ({result.environment_kind})</dd></div><div><dt>Revision</dt><dd>{result.revision_id}</dd></div><div><dt>Access expression</dt><dd>{result.matched_access_expression ?? "—"}</dd></div><div><dt>Limit plan</dt><dd>{result.limit_plan ?? "—"}</dd></div><div><dt>Route</dt><dd>{result.route ?? "—"}</dd></div><div><dt>Upstream</dt><dd>{result.upstream ?? "—"}</dd></div><div><dt>Physical model</dt><dd>{result.physical_model ?? "—"}</dd></div><div><dt>Pricing</dt><dd>{result.pricing_confidence ?? "—"}</dd></div></dl>
+    {result && (!workspace || resultSearchKey === canonicalSearchKey) ? <section className={`simulation-result ${result.allowed ? "simulation-result--allowed" : "simulation-result--denied"}`}><h2>{result.allowed ? "Allowed" : "Denied"}</h2><dl><div><dt>Application</dt><dd>{result.application_id}</dd></div><div><dt>Environment</dt><dd>{result.environment_id} ({result.environment_kind})</dd></div><div><dt>Revision</dt><dd>{result.revision_id}</dd></div><div><dt>Access expression</dt><dd>{result.matched_access_expression ?? "—"}</dd></div><div><dt>Limit plan</dt><dd>{result.limit_plan ?? "—"}</dd></div><div><dt>Route</dt><dd>{result.route ?? "—"}</dd></div><div><dt>Upstream</dt><dd>{result.upstream ?? "—"}</dd></div><div><dt>Physical model</dt><dd>{result.physical_model ?? "—"}</dd></div><div><dt>Pricing</dt><dd>{result.pricing_confidence ?? "—"}</dd></div></dl>
       {result.reservation ? <><h3>Exact conservative reservation</h3><dl><div><dt>Applied output maximum</dt><dd>{result.reservation.applied_output_maximum.toLocaleString()}</dd></div><div><dt>Total token bound</dt><dd>{result.reservation.total_token_bound.toLocaleString()}</dd></div><div><dt>Cost bound</dt><dd>{result.reservation.cost_bound_known ? `${result.reservation.cost_nano_usd_bound.toLocaleString()} nano-USD` : "not applicable / unknown"}</dd></div><div><dt>Input accounting</dt><dd>{result.reservation.input_accounting.required ? `${result.reservation.input_accounting.profile_id}: ${result.reservation.input_accounting.input_token_bound.toLocaleString()} tokens` : "not required"}</dd></div></dl><Table headers={["Metric", "Algorithm", "Units", "Applicable", "Durable"]} rows={result.reservation.allocations.map((allocation) => [allocation.metric, allocation.algorithm, allocation.units, allocation.applicable ? "yes" : "no", allocation.durable ? "yes" : "no"])} /></> : null}
       {result.limits?.length ? <><h3>Applicable limits</h3><Table headers={["Metric", "Algorithm", "Scope", "Window / timezone", "Maximum", "Per request", "Capacity", "Refill / second"]} rows={result.limits.map((limit) => [limit.metric, limit.algorithm, limit.scope.join(", "), [limit.window, limit.timezone].filter(Boolean).join(" / ") || "—", limit.maximum ?? "—", limit.per_request_maximum ?? "—", limit.capacity ?? "—", limit.refill_per_second ?? "—"])} /></> : null}
       <h3>Bounded facts</h3><Table headers={["Fact", "Value"]} rows={[["feature", result.facts.feature], ["platform", result.facts.platform], ["trust_level", result.facts.trust_level], ["authenticated", result.facts.authenticated ? "true" : "false"], ["normalized_claims", JSON.stringify(result.facts.normalized_claims)], ["streaming", result.facts.streaming ? "true" : "false"], ["app_version", result.facts.app_version || "—"], ["requested_input_tokens", result.facts.requested_input_tokens], ["requested_output_max", result.facts.requested_output_max], ["rewritten_request_bytes", result.facts.rewritten_request_bytes], ["framing_unit_count", result.facts.framing_unit_count]]} />
@@ -992,28 +1207,76 @@ export function RouteSimulatorPage() {
 }
 
 export function SelfTestsPage() {
-  const session = useConsoleSession(); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local");
-  const [scheduleKind, setScheduleKind] = useState<"upstream" | "openrouter">("upstream"); const [scheduleEnvironment, setScheduleEnvironment] = useState(""); const [schedules, setSchedules] = useState<SelfTestSchedule[]>(); const [selectedSchedule, setSelectedSchedule] = useState<SelfTestSchedule>();
+  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const routeSearch = SelfTestRouteSearchSchema.parse(workspace?.search ?? {}); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local"); const [runEnvironment, setRunEnvironment] = useState(routeSearch.environment_id ?? "");
+  const [scheduleKind, setScheduleKind] = useState<"upstream" | "openrouter">("upstream"); const [scheduleEnvironment, setScheduleEnvironment] = useState(routeSearch.environment_id ?? ""); const [schedules, setSchedules] = useState<SelfTestSchedule[]>(); const [selectedSchedule, setSelectedSchedule] = useState<SelfTestSchedule>();
+  const canonicalSearchKey = JSON.stringify({ environment_id: routeSearch.environment_id, schedule_id: routeSearch.schedule_id, self_test_id: routeSearch.self_test_id });
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // Browser navigation restores only stable run, schedule, and environment identifiers.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRunEnvironment(routeSearch.environment_id ?? ""); setScheduleEnvironment(routeSearch.environment_id ?? "");
+    if (routeSearch.environment_id) void restoreSelfTests(routeSearch);
+    else { setRun(undefined); setSchedules(undefined); setSelectedSchedule(undefined); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
+  useAdminRefreshTopic("self_tests", () => {
+    if (session.data?.mode === "configured" && routeSearch.environment_id) void restoreSelfTests(routeSearch);
+  }, session.data?.mode === "configured" && Boolean(routeSearch.environment_id));
   if (session.data?.mode !== "configured") return <AccessRequired />;
   const canRun = session.data.session?.capabilities.includes("run_self_tests") ?? false;
+  async function restoreSelfTests(search: SelfTestRouteSearch): Promise<void> {
+    if (!search.environment_id) return;
+    setBusy(true); setProblem(undefined);
+    try {
+      let restoredRun: SelfTestRun | undefined;
+      if (search.self_test_id) {
+        const response = await adminRequest(`/admin/v1/self-tests/${search.self_test_id}`, SelfTestSchema);
+        if (response.data.id !== search.self_test_id) throw new Error("self_test_context");
+        restoredRun = response.data;
+      }
+      const page = await adminRequest(queryPath("/admin/v1/self-test-schedules", { environment_id: search.environment_id }), SelfTestSchedulePageSchema);
+      if (page.data.items.some((schedule) => schedule.environment_id !== search.environment_id)) throw new Error("self_test_context");
+      let restoredSchedule: SelfTestSchedule | undefined;
+      if (search.schedule_id) {
+        const response = await adminRequest(`/admin/v1/self-test-schedules/${search.schedule_id}`, SelfTestScheduleSchema);
+        if (response.data.id !== search.schedule_id || response.data.environment_id !== search.environment_id) throw new Error("self_test_context");
+        restoredSchedule = response.data;
+      }
+      setRun(restoredRun); setSchedules(page.data.items); setSelectedSchedule(restoredSchedule);
+    } catch (error) {
+      setRun(undefined); setSelectedSchedule(undefined);
+      setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The self-test run or schedule did not match the selected identifiers and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error));
+    } finally { setBusy(false); }
+  }
   async function start(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
     try {
-      const body: Record<string, string | number> = { kind, environment_id: String(form.get("environment")) };
+      const body: Record<string, string | number> = { kind, environment_id: runEnvironment };
       if (kind !== "local") {
         body.upstream = String(form.get("upstream")); body.model = String(form.get("model"));
         body.max_cost_nano_usd = Number(form.get("max_cost_nano_usd"));
       }
-      setRun((await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body })).data);
+      const created = (await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body })).data;
+      setRun(created);
+      if (workspace) workspace.updateSearch({ environment_id: runEnvironment, self_test_id: created.id }, { replace: false });
     }
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
-  async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { setRun((await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
+  async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { const refreshed = (await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data; if (refreshed.id !== run.id) throw new Error("self_test_context"); setRun(refreshed); } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The refreshed self-test did not match the selected run ID.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); } }
   async function loadSchedules(): Promise<void> {
     if (!environmentPattern.test(scheduleEnvironment)) return;
+    const search = SelfTestRouteSearchSchema.parse({ ...routeSearch, environment_id: scheduleEnvironment, schedule_id: undefined });
+    if (workspace) {
+      const changed = JSON.stringify({ environment_id: search.environment_id, schedule_id: search.schedule_id, self_test_id: search.self_test_id }) !== canonicalSearchKey;
+      workspace.updateSearch({ environment_id: search.environment_id, schedule_id: undefined });
+      if (!changed) void restoreSelfTests(search);
+      return;
+    }
     setBusy(true); setProblem(undefined);
     try {
       const page = await adminRequest(queryPath("/admin/v1/self-test-schedules", { environment_id: scheduleEnvironment }), SelfTestSchedulePageSchema);
+      if (page.data.items.some((schedule) => schedule.environment_id !== scheduleEnvironment)) throw new Error("self_test_context");
       setSchedules(page.data.items); setSelectedSchedule(page.data.items[0]);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
@@ -1024,24 +1287,28 @@ export function SelfTestsPage() {
         daily_cost_limit_nano_usd: Number(form.get("daily_cost_limit_nano_usd")), environment_id: scheduleEnvironment,
         interval_seconds: Number(form.get("interval_seconds")), kind: scheduleKind, max_cost_nano_usd: Number(form.get("max_cost_nano_usd")), model: String(form.get("model")), upstream: String(form.get("upstream"))
       }, bearerToken })).data;
+      if (created.environment_id !== scheduleEnvironment) throw new Error("self_test_context");
       setSchedules((current) => [created, ...(current ?? []).filter((item) => item.id !== created.id)]); setSelectedSchedule(created);
-    } catch (error) { setProblem(problemFromError(error)); } finally { if (tokenInput instanceof HTMLInputElement) tokenInput.value = ""; setBusy(false); }
+      if (workspace) workspace.updateSearch({ environment_id: scheduleEnvironment, schedule_id: created.id }, { replace: false });
+    } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The created schedule did not match the selected environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { if (tokenInput instanceof HTMLInputElement) tokenInput.value = ""; setBusy(false); }
   }
   async function selectSchedule(schedule: SelfTestSchedule): Promise<void> {
+    if (workspace) { workspace.updateSearch({ environment_id: schedule.environment_id, schedule_id: schedule.id }, { replace: false }); return; }
     setBusy(true); setProblem(undefined);
-    try { setSelectedSchedule((await adminRequest(`/admin/v1/self-test-schedules/${schedule.id}`, SelfTestScheduleSchema)).data); }
-    catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+    try { const selected = (await adminRequest(`/admin/v1/self-test-schedules/${schedule.id}`, SelfTestScheduleSchema)).data; if (selected.id !== schedule.id || selected.environment_id !== schedule.environment_id) throw new Error("self_test_context"); setSelectedSchedule(selected); }
+    catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The selected schedule did not match the requested schedule and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
   }
   async function disableSchedule(): Promise<void> {
     if (!selectedSchedule) return; setBusy(true); setProblem(undefined);
     try {
       const disabled = (await adminRequest(`/admin/v1/self-test-schedules/${selectedSchedule.id}`, SelfTestScheduleSchema, { method: "DELETE" })).data;
+      if (disabled.id !== selectedSchedule.id || disabled.environment_id !== selectedSchedule.environment_id) throw new Error("self_test_context");
       setSelectedSchedule(disabled); setSchedules((current) => current?.map((item) => item.id === disabled.id ? disabled : item));
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+    } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The disabled schedule did not match the selected schedule and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
   }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
-    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the complete protocol-specific request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
-    {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
+    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required value={runEnvironment} onChange={(event) => setRunEnvironment(event.target.value)} /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the complete protocol-specific request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
+    {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button><button className="small-action" disabled={busy} onClick={() => { if (workspace) workspace.updateSearch({ self_test_id: undefined }); else setRun(undefined); }} type="button">Close run</button></div></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
     <section className="detail-card"><h2>Scheduled credential-aware self-tests</h2><p>Each schedule pins one active configuration revision and one durable API-token ID. Browser session values and provider secret values are never stored in the schedule.</p>
       <div className="filter-bar"><label>Scheduled environment ID<input pattern={environmentInputPattern} required value={scheduleEnvironment} onChange={(event) => { setScheduleEnvironment(event.target.value); setSchedules(undefined); setSelectedSchedule(undefined); }} /></label><button className="secondary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} onClick={() => void loadSchedules()} type="button">Load schedules</button></div>
       <form className="control-form" onSubmit={(event) => void createSchedule(event)}><div className="form-field-grid"><label>Scheduled test kind<select value={scheduleKind} onChange={(event) => setScheduleKind(event.target.value as "upstream" | "openrouter")}><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label><label>Durable Admin API token<input autoComplete="off" maxLength={2048} minLength={32} name="authorization_token" required type="password" /><small>Enter an active token scoped to run_self_tests. It is sent once as Authorization Bearer and cleared immediately; only its stable credential ID is bound.</small></label></div>
@@ -1050,7 +1317,7 @@ export function SelfTestsPage() {
         <label>Cadence (seconds)<input defaultValue={3600} max={2_592_000} min={3600} name="interval_seconds" required step={1} type="number" /><small>Allowed range: one hour through 30 days. Missed intervals coalesce to one run.</small></label><button className="primary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} type="submit">Create schedule</button>
       </form>
       {schedules ? <Table headers={["Schedule", "Target", "Cadence", "Per run / UTC day", "State"]} rows={schedules.map((schedule) => [<button className="table-link" onClick={() => void selectSchedule(schedule)} type="button">{schedule.id}</button>, `${schedule.upstream} / ${schedule.model}`, `${schedule.interval_seconds.toLocaleString()} s`, `${schedule.max_cost_nano_usd.toLocaleString()} / ${schedule.daily_cost_limit_nano_usd.toLocaleString()}`, schedule.status])} /> : null}
-      {selectedSchedule ? <section className="detail-card"><div className="detail-card__heading"><div><h3>Schedule detail</h3><p>{selectedSchedule.id} · {selectedSchedule.status}</p></div><button className="secondary-action" disabled={!canRun || busy || selectedSchedule.status !== "active"} onClick={() => void disableSchedule()} type="button">Disable schedule</button></div><dl><div><dt>Application / environment</dt><dd>{selectedSchedule.application_id} / {selectedSchedule.environment_id}</dd></div><div><dt>Pinned configuration</dt><dd>{selectedSchedule.config_revision_id}</dd></div><div><dt>Authorization credential</dt><dd>{selectedSchedule.authorization_credential_id}</dd></div><div><dt>Target</dt><dd>{selectedSchedule.kind}: {selectedSchedule.upstream} / {selectedSchedule.model}</dd></div><div><dt>Cost ceilings</dt><dd>{selectedSchedule.max_cost_nano_usd.toLocaleString()} per run / {selectedSchedule.daily_cost_limit_nano_usd.toLocaleString()} per UTC day</dd></div><div><dt>Cadence</dt><dd>{selectedSchedule.interval_seconds.toLocaleString()} seconds</dd></div><div><dt>Next run</dt><dd>{selectedSchedule.next_run_at ? new Date(selectedSchedule.next_run_at).toLocaleString() : "Disabled"}</dd></div><div><dt>Last run</dt><dd>{selectedSchedule.last_self_test_id ?? "—"}</dd></div></dl></section> : null}
+      {selectedSchedule ? <section className="detail-card"><div className="detail-card__heading"><div><h3>Schedule detail</h3><p>{selectedSchedule.id} · {selectedSchedule.status}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRun || busy || selectedSchedule.status !== "active"} onClick={() => void disableSchedule()} type="button">Disable schedule</button><button className="small-action" disabled={busy} onClick={() => { if (workspace) workspace.updateSearch({ schedule_id: undefined }); else setSelectedSchedule(undefined); }} type="button">Close schedule</button></div></div><dl><div><dt>Application / environment</dt><dd>{selectedSchedule.application_id} / {selectedSchedule.environment_id}</dd></div><div><dt>Pinned configuration</dt><dd>{selectedSchedule.config_revision_id}</dd></div><div><dt>Authorization credential</dt><dd>{selectedSchedule.authorization_credential_id}</dd></div><div><dt>Target</dt><dd>{selectedSchedule.kind}: {selectedSchedule.upstream} / {selectedSchedule.model}</dd></div><div><dt>Cost ceilings</dt><dd>{selectedSchedule.max_cost_nano_usd.toLocaleString()} per run / {selectedSchedule.daily_cost_limit_nano_usd.toLocaleString()} per UTC day</dd></div><div><dt>Cadence</dt><dd>{selectedSchedule.interval_seconds.toLocaleString()} seconds</dd></div><div><dt>Next run</dt><dd>{selectedSchedule.next_run_at ? new Date(selectedSchedule.next_run_at).toLocaleString() : "Disabled"}</dd></div><div><dt>Last run</dt><dd>{selectedSchedule.last_self_test_id ?? "—"}</dd></div></dl></section> : null}
     </section>
   </div>;
 }

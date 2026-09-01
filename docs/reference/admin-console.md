@@ -99,6 +99,16 @@ relevant totals, denominators, distributions, attribution, or provenance; they
 are not aliases for the complete Usage page and do not create another
 analytics source of truth.
 
+Live operational views use the authenticated `/admin/v1/events` Server-Sent
+Events endpoint. The stream carries only closed refresh-topic names for
+requests, usage, configuration, audit, self-tests, and health; it never carries
+resource IDs, identity data, counts, bodies, credentials, proofs, or provider
+errors. A topic hint causes the visible view to reload its canonical bounded
+Admin API query. The server sends heartbeats, closes every connection within
+one minute, and requires the browser to reauthenticate on reconnect, which also
+bounds the effect of administrator-session revocation. Reconnects always
+rehydrate canonical state because event IDs are not a durable replay log.
+
 ## Resource workflows
 
 Applications are listed within the administrator session's organization.

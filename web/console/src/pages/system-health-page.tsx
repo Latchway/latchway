@@ -1,5 +1,6 @@
 import { EndpointCard } from "../components/endpoint-card";
 import { overallHealthState, useSystemHealth } from "../api/health";
+import { useAdminRefreshTopic } from "../app/use-admin-refresh";
 import { SystemStatusPanel } from "../components/system-status-panel";
 import { SystemDoctorPanel } from "../components/system-doctor-panel";
 
@@ -11,6 +12,8 @@ export function SystemHealthPage() {
   async function refresh(): Promise<void> {
     await Promise.all([liveness.refetch(), readiness.refetch()]);
   }
+
+  useAdminRefreshTopic("health", refresh);
 
   return (
     <div className="health-page">

@@ -618,6 +618,7 @@ func (api *API) systemStatus(w http.ResponseWriter, r *http.Request) {
 		"server_version": build.Version, "contract_version": build.ContractVersion,
 		"protocol_versions": buildinfo.SupportedProtocolVersions(), "role": api.role,
 		"database_schema_version": databaseVersion, "ready": ready,
+		"server_capabilities": serverCapabilities(),
 	})
 }
 

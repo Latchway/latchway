@@ -262,11 +262,140 @@ func TestStorePostgreSQL(t *testing.T) {
 	if principal.Role != RoleOwner || principal.AdminUserID != bootstrap.AdminUserID {
 		t.Fatalf("session principal = %+v", principal)
 	}
+	refreshedPrincipal, err := store.RevalidatePrincipal(ctx, principal)
+	if err != nil || refreshedPrincipal.OrganizationID != principal.OrganizationID ||
+		refreshedPrincipal.AdminUserID != principal.AdminUserID ||
+		refreshedPrincipal.CredentialID != principal.CredentialID ||
+		refreshedPrincipal.Role != principal.Role ||
+		refreshedPrincipal.Method != AuthenticationSession ||
+		refreshedPrincipal.CredentialExpiresAt == nil ||
+		!refreshedPrincipal.CredentialExpiresAt.Equal(session.ExpiresAt) {
+		t.Fatalf("RevalidatePrincipal(session) = %+v, error = %v", refreshedPrincipal, err)
+	}
 	if err := store.ValidateSessionCSRF(ctx, session.SessionID, session.CSRFToken.Reveal()); err != nil {
 		t.Fatalf("ValidateSessionCSRF() error = %v", err)
 	}
 	if err := store.ValidateSessionCSRF(ctx, session.SessionID, session.Token.Reveal()); !errors.Is(err, ErrAdminAuthentication) {
 		t.Fatalf("ValidateSessionCSRF(wrong token) error = %v", err)
+	}
+	expiringSession, err := store.CreateSession(ctx, CreateSessionInput{
+		OrganizationID: bootstrap.OrganizationID,
+		AdminUserID:    bootstrap.AdminUserID,
+		Lifetime:       5 * time.Minute,
+		RequestID:      mustIdentifier(t, id.AdminRequest),
+	})
+	if err != nil {
+		t.Fatalf("CreateSession(expiring) error = %v", err)
+	}
+	revokedSession, err := store.CreateSession(ctx, CreateSessionInput{
+		OrganizationID: bootstrap.OrganizationID,
+		AdminUserID:    bootstrap.AdminUserID,
+		Lifetime:       time.Hour,
+		RequestID:      mustIdentifier(t, id.AdminRequest),
+	})
+	if err != nil {
+		t.Fatalf("CreateSession(managed revocation) error = %v", err)
+	}
+	revokedPrincipal, err := store.AuthenticateSession(ctx, revokedSession.Token.Reveal())
+	if err != nil {
+		t.Fatalf("AuthenticateSession(managed revocation) error = %v", err)
+	}
+	managedRevokeRequestID := mustIdentifier(t, id.AdminRequest)
+	if err := store.RevokeManagedAdminSession(ctx, principal, revokedSession.SessionID, managedRevokeRequestID); err != nil {
+		t.Fatalf("RevokeManagedAdminSession() error = %v", err)
+	}
+	if _, err := store.RevalidatePrincipal(ctx, revokedPrincipal); !errors.Is(err, ErrAdminAuthentication) {
+		t.Fatalf("RevalidatePrincipal(revoked session) error = %v", err)
+	}
+	if err := store.RevokeManagedAdminSession(ctx, principal, revokedSession.SessionID, mustIdentifier(t, id.AdminRequest)); err != nil {
+		t.Fatalf("RevokeManagedAdminSession(idempotent) error = %v", err)
+	}
+	instant = instant.Add(6 * time.Minute)
+	principal, err = store.AuthenticateSession(ctx, session.Token.Reveal())
+	if err != nil {
+		t.Fatalf("AuthenticateSession(current after clock advance) error = %v", err)
+	}
+	sessions, err := store.ListAdminSessions(ctx, principal, AdminSessionPageRequest{Size: 200})
+	if err != nil {
+		t.Fatalf("ListAdminSessions() error = %v", err)
+	}
+	statuses := make(map[string]AdminSessionMetadata, len(sessions))
+	currentCount := 0
+	for _, item := range sessions {
+		statuses[item.ID] = item
+		if item.Current {
+			currentCount++
+		}
+		if item.Administrator.ID != bootstrap.AdminUserID || item.Administrator.Email != "owner@example.com" {
+			t.Fatalf("ListAdminSessions() administrator = %+v", item.Administrator)
+		}
+	}
+	if statuses[session.SessionID].Status != AdminSessionActive || !statuses[session.SessionID].Current ||
+		statuses[expiringSession.SessionID].Status != AdminSessionExpired || statuses[expiringSession.SessionID].Current ||
+		statuses[revokedSession.SessionID].Status != AdminSessionRevoked || statuses[revokedSession.SessionID].Current ||
+		currentCount != 1 {
+		t.Fatalf("ListAdminSessions() statuses=%+v current_count=%d", statuses, currentCount)
+	}
+	var storedManagedReason string
+	var managedAuditCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT revoke_reason
+		FROM admin_sessions
+		WHERE admin_session_id = $1
+	`, revokedSession.SessionID).Scan(&storedManagedReason); err != nil {
+		t.Fatalf("read managed session revoke reason: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM audit_events
+		WHERE action = 'admin.session_revoke'
+		  AND resource_type = 'admin_session'
+		  AND resource_id = $1
+	`, revokedSession.SessionID).Scan(&managedAuditCount); err != nil {
+		t.Fatalf("count managed session revoke audits: %v", err)
+	}
+	if storedManagedReason != managedSessionRevokeReason || managedAuditCount != 1 {
+		t.Fatalf("managed session reason=%q audit_count=%d", storedManagedReason, managedAuditCount)
+	}
+	viewerPrincipal, err := store.AuthenticateAPIToken(ctx, viewerToken.Token.Reveal())
+	if err != nil {
+		t.Fatalf("AuthenticateAPIToken(viewer session-list authorization) error = %v", err)
+	}
+	if _, err := store.ListAdminSessions(ctx, viewerPrincipal, AdminSessionPageRequest{Size: 50}); !errors.Is(err, ErrAdminAuthentication) {
+		t.Fatalf("ListAdminSessions(viewer) error = %v", err)
+	}
+
+	otherOrganizationID := mustIdentifier(t, id.Organization)
+	otherMembershipID := mustIdentifier(t, id.AdminMembership)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO organizations (
+			organization_id, slug, display_name, status, created_at, updated_at
+		) VALUES ($1, 'other-organization', 'Other Organization', 'active', $2, $2)
+	`, otherOrganizationID, instant); err != nil {
+		t.Fatalf("create cross-tenant organization fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_memberships (
+			admin_membership_id, organization_id, admin_user_id, role, status,
+			created_by_admin_user_id, created_at, updated_at
+		) VALUES ($1, $2, $3, 'admin', 'active', $3, $4, $4)
+	`, otherMembershipID, otherOrganizationID, bootstrap.AdminUserID, instant); err != nil {
+		t.Fatalf("create cross-tenant membership fixture: %v", err)
+	}
+	otherSession, err := store.CreateSession(ctx, CreateSessionInput{
+		OrganizationID: otherOrganizationID,
+		AdminUserID:    bootstrap.AdminUserID,
+		Lifetime:       time.Hour,
+		RequestID:      mustIdentifier(t, id.AdminRequest),
+	})
+	if err != nil {
+		t.Fatalf("CreateSession(cross-tenant) error = %v", err)
+	}
+	if err := store.RevokeManagedAdminSession(ctx, principal, otherSession.SessionID, mustIdentifier(t, id.AdminRequest)); !errors.Is(err, ErrAdminNotFound) {
+		t.Fatalf("RevokeManagedAdminSession(cross-tenant) error = %v", err)
+	}
+	if _, err := store.AuthenticateSession(ctx, otherSession.Token.Reveal()); err != nil {
+		t.Fatalf("cross-tenant session changed by revocation probe: %v", err)
 	}
 	actor, err := NewAdminUserActor(bootstrap.AdminUserID)
 	if err != nil {
@@ -318,6 +447,13 @@ func TestStorePostgreSQL(t *testing.T) {
 		apiPrincipal.Allows(RunSelfTests, AuthorizationContext{}) {
 		t.Fatalf("API principal scope is incorrect")
 	}
+	refreshedAPIPrincipal, err := store.RevalidatePrincipal(ctx, apiPrincipal)
+	if err != nil || !refreshedAPIPrincipal.Allows(ManageSecrets, AuthorizationContext{}) ||
+		refreshedAPIPrincipal.Allows(RunSelfTests, AuthorizationContext{}) ||
+		refreshedAPIPrincipal.CredentialID != apiPrincipal.CredentialID ||
+		refreshedAPIPrincipal.Method != AuthenticationAPIToken {
+		t.Fatalf("RevalidatePrincipal(API token) = %+v, error = %v", refreshedAPIPrincipal, err)
+	}
 	if err := store.RevokeAPIToken(
 		ctx,
 		apiToken.APITokenID,
@@ -332,6 +468,9 @@ func TestStorePostgreSQL(t *testing.T) {
 	}
 	if err := store.RevokeAPIToken(ctx, apiToken.APITokenID, actor, mustIdentifier(t, id.AdminRequest), "rotation"); err != nil {
 		t.Fatalf("RevokeAPIToken() error = %v", err)
+	}
+	if _, err := store.RevalidatePrincipal(ctx, apiPrincipal); !errors.Is(err, ErrAdminAuthentication) {
+		t.Fatalf("RevalidatePrincipal(revoked API token) error = %v", err)
 	}
 	if _, err := store.AuthenticateAPIToken(ctx, apiToken.Token.Reveal()); !errors.Is(err, ErrAdminAuthentication) {
 		t.Fatalf("AuthenticateAPIToken(revoked) error = %v", err)

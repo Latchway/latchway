@@ -53,6 +53,9 @@ type API struct {
 	logger          *slog.Logger
 	loginLimiter    *failureLimiter
 	operations      *operationalStore
+	events          adminEventSource
+	eventPrincipals adminEventPrincipalSource
+	eventStream     adminEventStreamSettings
 	policyResolver  *policy.Resolver
 	role            string
 	diagnostics     diagnostics.Dependencies
@@ -139,6 +142,7 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
 		operations: newOperationalStore(pool), policyResolver: policyResolver, role: "all",
+		eventStream: defaultAdminEventStreamSettings(),
 	}
 	for _, option := range options {
 		if option == nil {
@@ -151,6 +155,8 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if api.operations == nil {
 		return nil, errors.New("admin API operational store is nil")
 	}
+	api.events = api.operations
+	api.eventPrincipals = api.auth
 	if api.policyResolver == nil {
 		return nil, errors.New("admin API policy resolver is nil")
 	}
@@ -189,8 +195,12 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
 		protected.With(api.mutationProtection).Post("/applications", api.createApplication)
+		protected.With(api.mutationProtection).Post("/applications/{applicationID}/disable", api.disableApplication)
+		protected.With(api.mutationProtection).Post("/applications/{applicationID}/enable", api.enableApplication)
 		protected.Get("/applications/{applicationID}/environments", api.environments)
 		protected.With(api.mutationProtection).Post("/applications/{applicationID}/environments", api.createEnvironment)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/disable", api.disableEnvironment)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/enable", api.enableEnvironment)
 		protected.Get("/environments/{environmentID}/config", api.activeConfiguration)
 		protected.Get("/environments/{environmentID}/config-revisions", api.configurationRevisions)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions", api.createConfigurationRevision)
@@ -214,6 +224,8 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/disable", api.disableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/enable", api.enableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-password", api.resetAdministratorPassword)
+		protected.Get("/admin-sessions", api.adminSessions)
+		protected.With(api.mutationProtection).Post("/admin-sessions/{adminSessionID}/revoke", api.revokeManagedAdminSession)
 		protected.Get("/users", api.users)
 		protected.Get("/users/{userID}", api.user)
 		protected.Get("/users/{userID}/effective-configuration", api.effectiveUserConfiguration)
@@ -242,6 +254,7 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/usage/timeseries", api.usageTimeseries)
 		protected.Get("/audit-events", api.auditEvents)
 		protected.Get("/audit-events/{auditEventID}", api.auditEvent)
+		protected.Get("/events", api.adminEvents)
 		protected.Get("/self-test-schedules", api.selfTestSchedules)
 		protected.With(api.mutationProtection).Post("/self-test-schedules", api.createSelfTestSchedule)
 		protected.Get("/self-test-schedules/{scheduleID}", api.selfTestSchedule)
@@ -518,6 +531,33 @@ func (api *API) createApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, item)
 }
 
+type disableResourceRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (api *API) disableApplication(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[disableResourceRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The application disable request is invalid."))
+		return
+	}
+	item, err := api.control.DisableApplication(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "applicationID"), request.Reason)
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (api *API) enableApplication(w http.ResponseWriter, r *http.Request) {
+	item, err := api.control.EnableApplication(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "applicationID"))
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (api *API) environments(w http.ResponseWriter, r *http.Request) {
 	items, err := api.control.ListEnvironments(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "applicationID"))
 	if err != nil {
@@ -548,6 +588,29 @@ func (api *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func (api *API) disableEnvironment(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[disableResourceRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The environment disable request is invalid."))
+		return
+	}
+	item, err := api.control.DisableEnvironment(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "environmentID"), request.Reason)
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (api *API) enableEnvironment(w http.ResponseWriter, r *http.Request) {
+	item, err := api.control.EnableEnvironment(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "environmentID"))
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (api *API) activeConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -1318,8 +1381,16 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.organization_create", "admin_request"
 	case strings.HasSuffix(path, "/applications"):
 		return "admin.application_create", "admin_request"
+	case strings.HasSuffix(path, "/disable") && strings.Contains(path, "/applications/"):
+		return "admin.application_disable", "admin_request"
+	case strings.HasSuffix(path, "/enable") && strings.Contains(path, "/applications/"):
+		return "admin.application_enable", "admin_request"
 	case strings.HasSuffix(path, "/environments"):
 		return "admin.environment_create", "admin_request"
+	case strings.HasSuffix(path, "/disable") && strings.Contains(path, "/environments/"):
+		return "admin.environment_disable", "admin_request"
+	case strings.HasSuffix(path, "/enable") && strings.Contains(path, "/environments/"):
+		return "admin.environment_enable", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
 		return "admin.configuration_revision_create", "admin_request"
 	case strings.Contains(path, "/config-revisions/") && method == http.MethodPatch:
@@ -1342,6 +1413,8 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.api_token_create", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodDelete:
 		return "admin.api_token_revoke", "admin_request"
+	case strings.HasSuffix(path, "/revoke") && strings.Contains(path, "/admin-sessions/"):
+		return "admin.session_revoke", "admin_request"
 	case strings.HasSuffix(path, "/limit-override") && method == http.MethodPut:
 		return "admin.user_limit_override_replace", "admin_request"
 	case strings.HasSuffix(path, "/limit-override") && method == http.MethodDelete:

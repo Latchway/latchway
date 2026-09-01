@@ -18,11 +18,12 @@ packages, live providers, physical devices, or production support.
 | Framework support | None claimed | Registry-driven, version-pinned conformance required |
 
 The released `0.5.1` bundle and SDK locks remain byte-frozen historical
-coordinates at their normative commits. The current source emits a distinct,
-deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
-historical coordinate. The component-attestation additions invalidated earlier
-intermediate draft hashes. The current SDK locks now converge on contract source
-checkpoint `a59a2c1c807aec50093ae6346492a05148c72899` and bundle SHA-256
+coordinates at their normative commits. The last clean version 1 checkpoint
+emitted a distinct, deterministic draft `1.0.0` bundle; it must not overwrite
+or silently amend the historical coordinate. The component-attestation
+additions invalidated earlier intermediate draft hashes. The SDK locks
+converged at that checkpoint on contract source
+`a59a2c1c807aec50093ae6346492a05148c72899` and bundle SHA-256
 `3a88fb69b911724da849229f34f735608e829bcfb0658087313c8d31441e9927`.
 The clean core implementation checkpoint is
 `82c9d3663a0532210d6a99ebecaa179f05797115`. Its canonical SDK-bundle and
@@ -30,6 +31,33 @@ public-documentation checkpoint is
 `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3`, synchronized to the branch-source
 Mintlify mirror at `ce4ea1e1cf56404da7146b98ca2744b194050fd5`; none of these
 coordinates is a released package or production documentation deployment.
+
+The current uncommitted core working tree changes the Admin API after that
+bundle. It adds Admin-session inventory/revoke, configuration import/export,
+stable server-capability negotiation, and authenticated Admin SSE refresh
+hints. Exact JSON/YAML numeric preservation and explicit `READ COMMITTED`
+application→environment lifecycle locking are covered by the complete current
+local gates. The historical bundle hash and locks must not be presented as
+binding this delta. Regeneration, immutable checkpointing, SDK lock
+synchronization, and clean source conformance remain required.
+
+## Admin capability negotiation
+
+The current local server source advertises a stable ordered
+`server_capabilities` list containing `app_attest`, `play_integrity`,
+`firebase_app_check`, `turnstile`, `component_delegation`, `cost_limits`,
+`openai_responses`, `openai_chat`, `openai_embeddings`,
+`anthropic_messages`, `opaque_http`, `configuration_import_export`,
+`admin_session_management`, and `admin_event_stream`. The Console Settings
+surface requires protocol 2 and every listed capability except
+`admin_event_stream` before enabling mutations. Missing protocol or required
+capabilities activates read-only safe mode. `admin_event_stream` is optional:
+older servers retain polling and manual refresh instead of being treated as
+mutation-incompatible.
+
+These are current local source facts covered by the complete core
+implementation gate, race detector, bounded fuzz corpus, and real PostgreSQL
+suites; they are not published-contract or deployed-server claims.
 
 ## Framework registry
 
@@ -79,15 +107,19 @@ consume generated registry output rather than maintain a second table.
 The registry and its strict schema are deterministic members of the draft
 `1.0.0` contract bundle under `compatibility/`. Contract validation checks the
 schema, semantic policy, generated Markdown, archive closure, and checksums.
-The final bundle, exact contract checkpoint, bundle hash, wire-2 constants,
+At the last clean checkpoint, the bundle, exact contract checkpoint, bundle
+hash, wire-2 constants,
 component-attestation vector, and other generated fixtures are synchronized
-across all four SDK locks. The clean local source-conformance gate passes.
+across all four SDK locks, and the clean local source-conformance gate passed.
+That report predates the current Admin API delta and must be rerun.
 
 ## Current SDK source checkpoints
 
-These coordinates record the source-converged version 1 implementations. They
-are pushed branch source candidates, not package-publication,
-production-support, or released-coordinate claims.
+These coordinates record the last clean, locally source-converged version 1
+implementations. They are historical local checkpoints, not the current dirty
+core state and not package-publication, production-support, or
+released-coordinate claims. Every current local implementation branch is
+ahead of its remote-tracking ref; no exact current head is claimed as pushed.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
@@ -97,7 +129,8 @@ production-support, or released-coordinate claims.
 | React Native `@latchway/react-native` | `2d78f588671d35512c6d0d244c89ec61e6a48cfa` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-owned component descriptor lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and a Debug-only native App Intent delegated-request path are implemented, fully checked, and source-pinned. The Release App Intent fixture has no Latchway request path and fails closed. Predecessor `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a development-signed iPad root-app App Attest/Firebase/real-upstream run; the current Debug App Intent still requires physical invocation, and protected Apple distribution/extension-matrix plus physical Android evidence remain required. |
 
 The historical wire-1 locks remain recoverable from their immutable repository
-history. Current locks all point to the draft version 1 checkpoint named above.
+history. The checked-in SDK locks point to the last clean draft version 1
+checkpoint named above; they do not yet bind the uncommitted Admin API delta.
 
 ## Header compatibility
 

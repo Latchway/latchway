@@ -244,7 +244,19 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 	nonceHash := sha256.Sum256(nonceBytes)
 	proofJTIHash := sha256.Sum256([]byte(input.DPoPProofJTI))
 	dpopURIHash := sha256.Sum256([]byte(normalizedDPoPURI))
-	command, err := store.pool.Exec(ctx, `
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Challenge{}, fmt.Errorf("begin session challenge creation: %w", err)
+	}
+	defer rollbackSigning(tx)
+	// Disable takes the application lock first and then consumes every challenge
+	// in scope. Holding the matching share locks through insertion prevents a
+	// challenge from appearing after that revocation scan and becoming usable
+	// if the scope is later re-enabled.
+	if err := lockActiveCredentialScope(ctx, tx, input.OrganizationID, input.ApplicationID, input.EnvironmentID); err != nil {
+		return Challenge{}, err
+	}
+	command, err := tx.Exec(ctx, `
 		INSERT INTO session_challenges (
 			session_challenge_id, organization_id, application_id, environment_id,
 			application_user_id, identity_provider_key, platform, dpop_jkt,
@@ -295,6 +307,9 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 	}
 	if command.RowsAffected() != 1 {
 		return Challenge{}, ErrSessionScope
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Challenge{}, fmt.Errorf("commit session challenge creation: %w", err)
 	}
 	return Challenge{
 		ID: challengeID, Nonce: nonce, Binding: binding, BindingHash: bindingHash,

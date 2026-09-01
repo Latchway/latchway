@@ -263,6 +263,176 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	}
 }
 
+func TestStorePostgreSQLDisabledScopePreservesTenantScopedConfigurationHistory(t *testing.T) {
+	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("LATCHWAY_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := isolatedConfigurationPool(t, ctx, databaseURL)
+	principal, scope := seedConfigurationTenant(t, ctx, pool)
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID, Document: validConfigurationDocument(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report, validateErr := store.ValidateRevision(ctx, principal, active.ID); validateErr != nil || !report.Valid {
+		t.Fatalf("validate active revision report=%+v error=%v", report, validateErr)
+	}
+	active, err = store.ActivateRevision(ctx, principal, active.ID, active.ETag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID, BaseRevisionID: active.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertHistoryReadable := func(label string) {
+		t.Helper()
+		if revision, getErr := store.GetRevision(ctx, principal, draft.ID); getErr != nil || revision.ID != draft.ID {
+			t.Fatalf("%s GetRevision() revision=%+v error=%v", label, revision, getErr)
+		}
+		items, listErr := store.ListRevisions(ctx, principal, scope.EnvironmentID, PageRequest{Size: 10})
+		if listErr != nil || len(items) != 2 {
+			t.Fatalf("%s ListRevisions() items=%d error=%v", label, len(items), listErr)
+		}
+		if _, activeErr := store.GetActiveRevision(ctx, principal, scope.EnvironmentID); !errors.Is(activeErr, ErrNotFound) {
+			t.Fatalf("%s GetActiveRevision() error=%v, want ErrNotFound", label, activeErr)
+		}
+		if _, replaceErr := store.ReplaceDraft(ctx, principal, draft.ID, draft.ETag, validConfigurationDocument(t)); !errors.Is(replaceErr, ErrNotFound) {
+			t.Fatalf("%s ReplaceDraft() error=%v, want ErrNotFound", label, replaceErr)
+		}
+	}
+
+	disabledAt := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `
+		UPDATE environments
+		SET status = 'disabled', disabled_at = $2, updated_at = $2
+		WHERE environment_id = $1
+	`, scope.EnvironmentID, disabledAt); err != nil {
+		t.Fatal(err)
+	}
+	assertHistoryReadable("disabled environment")
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE environments
+		SET status = 'active', disabled_at = NULL, updated_at = $2
+		WHERE environment_id = $1
+	`, scope.EnvironmentID, disabledAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE applications
+		SET status = 'disabled', disabled_at = $2, updated_at = $2
+		WHERE application_id = $1
+	`, scope.ApplicationID, disabledAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	assertHistoryReadable("disabled parent application")
+
+	crossTenant := principal
+	crossTenant.OrganizationID = mustConfigID(t, id.Organization)
+	if _, err := store.GetRevision(ctx, crossTenant, draft.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant GetRevision() error=%v", err)
+	}
+	if _, err := store.ListRevisions(ctx, crossTenant, scope.EnvironmentID, PageRequest{Size: 10}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant ListRevisions() error=%v", err)
+	}
+}
+
+func TestStorePostgreSQLConfigurationMutationLocksParentBeforeEnvironment(t *testing.T) {
+	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("LATCHWAY_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool := isolatedConfigurationPool(t, ctx, databaseURL)
+	principal, scope := seedConfigurationTenant(t, ctx, pool)
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	applicationBlocker, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationBlocker.Rollback(context.Background()) })
+	if _, err := applicationBlocker.Exec(ctx,
+		`SELECT 1 FROM applications WHERE application_id = $1 FOR UPDATE`, scope.ApplicationID); err != nil {
+		t.Fatal(err)
+	}
+
+	waiter, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = waiter.Rollback(context.Background()) })
+	done := make(chan error, 1)
+	go func() {
+		_, _, queryErr := store.environment(ctx, waiter, principal.OrganizationID, scope.EnvironmentID, true)
+		done <- queryErr
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database() AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%lock parent application for configuration mutation%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("configuration mutation did not wait on the parent application lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	environmentProbe, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := environmentProbe.Exec(ctx,
+		`SELECT 1 FROM environments WHERE environment_id = $1 FOR UPDATE NOWAIT`, scope.EnvironmentID); err != nil {
+		_ = environmentProbe.Rollback(context.Background())
+		var databaseError *pgconn.PgError
+		if errors.As(err, &databaseError) && databaseError.Code == "55P03" {
+			t.Fatal("configuration mutation locked the environment before its parent application")
+		}
+		t.Fatal(err)
+	}
+	if err := environmentProbe.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := applicationBlocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := waiter.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStorePostgreSQLSimulationSnapshotIsExecutableTenantScopedAndRedacted(t *testing.T) {
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
 	if databaseURL == "" {

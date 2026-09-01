@@ -2159,6 +2159,35 @@ func TestValidatorRejectsIncoherentRouteRetryBackoff(t *testing.T) {
 	}
 }
 
+func TestValidatorRejectsReservedBodyStorageInV1(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"storePromptBodies", "storeResponseBodies"} {
+		t.Run(field, func(t *testing.T) {
+			document := configurationObject(t)
+			objectValue(document, "spec")["privacy"] = map[string]any{
+				field:           true,
+				"bodyRetention": "1h",
+			}
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+				t.Fatalf("reserved v1 setting must remain schema-readable: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "body_storage_unsupported_v1") {
+				t.Fatalf("reserved body storage accepted: report=%+v compiled=%s", report, compiled)
+			}
+		})
+	}
+}
+
 func TestStructuralDiffNeverIncludesValues(t *testing.T) {
 	t.Parallel()
 

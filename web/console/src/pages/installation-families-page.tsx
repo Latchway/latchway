@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import {
   adminRequest,
@@ -12,13 +12,31 @@ import {
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import {
+  InstallationFamilyRouteSearchSchema,
+  type InstallationFamilyRouteSearch
+} from "../app/route-search";
+import { useOptionalWorkspace } from "../app/workspace-context-value";
+import { ImmediateOperationConfirmation } from "../components/immediate-operation-confirmation";
 
 const environmentInputPattern = "env_[A-Za-z0-9_-]{16,128}";
 const applicationUserInputPattern = "usr_[A-Za-z0-9_-]{16,128}";
 const compatibilityReference = "https://docs.latchway.dev/reference/compatibility";
 
-function initialFilter(name: "environment_id" | "user_id"): string {
-  return typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get(name) ?? "";
+function initialRouteSearch(): InstallationFamilyRouteSearch {
+  if (typeof window === "undefined") return {};
+  const candidate = InstallationFamilyRouteSearchSchema.safeParse(Object.fromEntries(new URLSearchParams(window.location.search)));
+  return candidate.success ? candidate.data : {};
+}
+
+function routePatch(search: InstallationFamilyRouteSearch): Partial<InstallationFamilyRouteSearch> {
+  return {
+    component_id: search.component_id,
+    cursor: search.cursor,
+    environment_id: search.environment_id,
+    family_id: search.family_id,
+    user_id: search.user_id
+  };
 }
 
 function PageHeading({ children }: { children: ReactNode }) {
@@ -70,9 +88,9 @@ function FamilyMetrics({ family }: { family: InstallationFamily }) {
   return <section className="metric-grid"><article><span>Components</span><strong>{family.component_count.toLocaleString()}</strong></article><article><span>Requests</span><strong>{family.request_count.toLocaleString()}</strong></article><article><span>Input tokens</span><strong>{family.usage.input_tokens.toLocaleString()}</strong></article><article><span>Output tokens</span><strong>{family.usage.output_tokens.toLocaleString()}</strong></article><article><span>Total tokens</span><strong>{family.usage.total_tokens.toLocaleString()}</strong></article><article><span>Cost</span><strong>{cost(family.usage.cost_nano_usd)}</strong></article></section>;
 }
 
-function ComponentDetail({ component, busy, canRevoke, familyActive, hasReason, onReattest, onRevoke }: { component: ClientComponent; busy: boolean; canRevoke: boolean; familyActive: boolean; hasReason: boolean; onReattest: () => void; onRevoke: () => void }) {
+function ComponentDetail({ component, busy, canRevoke, familyActive, onClose, onReattest, onRevoke }: { component: ClientComponent; busy: boolean; canRevoke: boolean; familyActive: boolean; onClose: () => void; onReattest: () => void; onRevoke: () => void }) {
   const terminal = component.status === "revoked" || component.status === "replaced";
-  return <section className="detail-card" aria-labelledby="component-detail-heading"><div className="detail-card__heading"><div><p className="eyebrow">Client component</p><h2 id="component-detail-heading">{component.definition_id}</h2><p>{component.id} · {label(component.platform)} · {label(component.kind)}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRevoke || busy || !hasReason || !familyActive || component.status !== "active"} onClick={onReattest} type="button">Require re-attestation</button><button className="primary-action primary-action--danger" disabled={!canRevoke || busy || !hasReason || terminal} onClick={onRevoke} type="button">Revoke component</button></div></div>
+  return <section className="detail-card" aria-labelledby="component-detail-heading"><div className="detail-card__heading"><div><p className="eyebrow">Client component</p><h2 id="component-detail-heading">{component.definition_id}</h2><p>{component.id} · {label(component.platform)} · {label(component.kind)}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRevoke || busy || !familyActive || component.status !== "active"} onClick={onReattest} type="button">Review re-attestation</button><button className="primary-action primary-action--danger" disabled={!canRevoke || busy || terminal} onClick={onRevoke} type="button">Review component revocation</button><button className="small-action" disabled={busy} onClick={onClose} type="button">Close component</button></div></div>
     {component.is_root ? <p className="control-notice component-warning"><strong>Root boundary</strong><span>Revoking this root revokes the complete family and every descendant credential.</span></p> : null}
     <p><small>Re-attestation expires this component subtree's trust and refresh credentials while already-issued access grants live only to their existing expiry. Sibling components are unchanged unless this is the root.</small></p>
     <h3>Trust provenance</h3><dl><div><dt>Trust source</dt><dd>{label(component.trust_source)}</dd></div><div><dt>Provider</dt><dd>{component.attestation_provider ?? "—"}</dd></div><div><dt>Parent component</dt><dd>{component.parent_component_id ?? "root"}</dd></div><div><dt>Parent attestation event</dt><dd>{component.parent_attestation_event_id ?? "—"}</dd></div><div><dt>Verified</dt><dd>{time(component.trust_verified_at)}</dd></div><div><dt>Trust expires</dt><dd>{time(component.trust_expires_at)}</dd></div></dl>
@@ -85,56 +103,103 @@ function ComponentDetail({ component, busy, canRevoke, familyActive, hasReason, 
 
 export function InstallationFamiliesPage() {
   const session = useConsoleSession();
-  const [environment, setEnvironment] = useState(() => initialFilter("environment_id"));
-  const [userID, setUserID] = useState(() => initialFilter("user_id"));
+  const workspace = useOptionalWorkspace();
+  const routeSearch = InstallationFamilyRouteSearchSchema.parse(workspace?.search ?? {});
+  const [standaloneSearch, setStandaloneSearch] = useState<InstallationFamilyRouteSearch>(initialRouteSearch);
+  const activeSearch = workspace ? routeSearch : standaloneSearch;
+  const [environment, setEnvironment] = useState(activeSearch.environment_id ?? "");
+  const [userID, setUserID] = useState(activeSearch.user_id ?? "");
   const [page, setPage] = useState<InstallationFamilyPage>();
   const [family, setFamily] = useState<InstallationFamily>();
   const [component, setComponent] = useState<ClientComponent>();
-  const [reason, setReason] = useState("console operator revocation");
+  const [pendingOperation, setPendingOperation] = useState<"family-renewal" | "family-revoke" | "component-reattestation" | "component-revoke">();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
+  const canonicalSearchKey = JSON.stringify(routePatch(activeSearch));
+  useEffect(() => {
+    if (session.data?.mode !== "configured") return;
+    // Browser navigation is an external state source for the safe filter draft and selected detail.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEnvironment(activeSearch.environment_id ?? "");
+    setUserID(activeSearch.user_id ?? "");
+    if (activeSearch.environment_id) void restore(activeSearch);
+    else { setPage(undefined); setFamily(undefined); setComponent(undefined); setPendingOperation(undefined); }
+    // The validated URL key is the canonical restore trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in before inspecting installation families.</h1><p>Family and component trust is available only through the authenticated Admin API.</p></section>;
   const canRevoke = session.data.session?.capabilities.includes("revoke_installations") ?? false;
 
-  async function list(cursor?: string): Promise<void> {
+  async function restore(search: InstallationFamilyRouteSearch): Promise<void> {
+    if (!search.environment_id) return;
     setBusy(true); setProblem(undefined);
     try {
-      const response = await adminRequest(queryPath("/admin/v1/installation-families", { environment_id: environment, user_id: userID || undefined, page_size: "50", cursor }), InstallationFamilyPageSchema);
-      if (response.data.items.some((item) => item.environment_id !== environment)) throw new Error("family_context");
-      setPage(response.data); setFamily(undefined); setComponent(undefined);
+      const response = await adminRequest(queryPath("/admin/v1/installation-families", { environment_id: search.environment_id, user_id: search.user_id, page_size: "50", cursor: search.cursor }), InstallationFamilyPageSchema);
+      if (response.data.items.some((item) => item.environment_id !== search.environment_id)) throw new Error("family_context");
+      let restoredFamily: InstallationFamily | undefined;
+      let restoredComponent: ClientComponent | undefined;
+      if (search.family_id) {
+        const detail = await adminRequest(`/admin/v1/installation-families/${search.family_id}`, InstallationFamilySchema);
+        if (detail.data.id !== search.family_id || detail.data.environment_id !== search.environment_id || !detail.data.components) throw new Error("family_context");
+        restoredFamily = detail.data;
+      }
+      if (search.component_id) {
+        if (!restoredFamily) throw new Error("component_context");
+        const detail = await adminRequest(`/admin/v1/client-components/${search.component_id}`, ClientComponentSchema);
+        if (detail.data.id !== search.component_id || detail.data.installation_family_id !== restoredFamily.id || detail.data.environment_id !== search.environment_id || !restoredFamily.components?.some((item) => item.id === detail.data.id)) throw new Error("component_context");
+        restoredComponent = detail.data;
+      }
+      setPage(response.data); setFamily(restoredFamily); setComponent(restoredComponent); setPendingOperation(undefined);
     } catch (error) {
-      setProblem(error instanceof Error && error.message === "family_context" ? { code: "invalid_response", detail: "The family page contained an item outside the selected environment.", retryable: true, status: 0, title: "Family scope mismatch" } : problemFromError(error));
+      setFamily(undefined); setComponent(undefined); setPendingOperation(undefined);
+      setProblem(error instanceof Error && error.message === "component_context"
+        ? { code: "invalid_response", detail: "The component detail did not match the selected family and environment.", retryable: true, status: 0, title: "Component detail mismatch" }
+        : error instanceof Error && error.message === "family_context"
+          ? { code: "invalid_response", detail: "The family list or detail did not match the selected environment and identifiers.", retryable: true, status: 0, title: "Family scope mismatch" }
+          : problemFromError(error));
     } finally { setBusy(false); }
   }
 
-  async function loadFamily(familyID: string): Promise<InstallationFamily | undefined> {
-    setBusy(true); setProblem(undefined);
-    try {
-      const response = await adminRequest(`/admin/v1/installation-families/${familyID}`, InstallationFamilySchema);
-      if (response.data.id !== familyID || response.data.environment_id !== environment || !response.data.components) throw new Error("family_context");
-      setFamily(response.data); setComponent(undefined);
-      return response.data;
-    } catch (error) {
-      setFamily(undefined); setComponent(undefined);
-      setProblem(error instanceof Error && error.message === "family_context" ? { code: "invalid_response", detail: "The family detail did not match the selected family and environment.", retryable: true, status: 0, title: "Family detail mismatch" } : problemFromError(error));
-      return undefined;
-    } finally { setBusy(false); }
+  function navigate(search: InstallationFamilyRouteSearch, replace: boolean): void {
+    if (workspace) workspace.updateSearch(routePatch(search), { replace });
+    else setStandaloneSearch(search);
   }
 
-  async function loadComponent(componentID: string): Promise<void> {
+  function applyFilters(): void {
+    const candidate = InstallationFamilyRouteSearchSchema.safeParse({
+      ...activeSearch,
+      component_id: undefined,
+      cursor: undefined,
+      environment_id: environment || undefined,
+      family_id: undefined,
+      user_id: userID || undefined
+    });
+    if (!candidate.success) {
+      setProblem({ code: "request_invalid", detail: "Enter canonical environment and optional pseudonymous-user identifiers.", retryable: false, status: 0, title: "Invalid family filters" });
+      return;
+    }
+    if (JSON.stringify(routePatch(candidate.data)) === canonicalSearchKey) void restore(candidate.data);
+    else navigate(candidate.data, true);
+  }
+
+  function selectFamily(familyID: string): void {
+    navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined, family_id: familyID }), false);
+  }
+
+  function selectComponent(componentID: string): void {
     if (!family) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const response = await adminRequest(`/admin/v1/client-components/${componentID}`, ClientComponentSchema);
-      if (response.data.id !== componentID || response.data.installation_family_id !== family.id || response.data.environment_id !== environment) throw new Error("component_context");
-      setComponent(response.data);
-    } catch (error) {
-      setComponent(undefined);
-      setProblem(error instanceof Error && error.message === "component_context" ? { code: "invalid_response", detail: "The component detail did not match the selected family and environment.", retryable: true, status: 0, title: "Component detail mismatch" } : problemFromError(error));
-    } finally { setBusy(false); }
+    navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: componentID, family_id: family.id }), false);
   }
 
-  async function revokeFamily(): Promise<void> {
+  function closeFamily(): void {
+    navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined, family_id: undefined }), true);
+  }
+
+  function closeComponent(): void {
+    navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined }), true);
+  }
+
+  async function revokeFamily(reason: string): Promise<void> {
     if (!family) return;
     setBusy(true); setProblem(undefined);
     try {
@@ -143,13 +208,14 @@ export function InstallationFamiliesPage() {
       setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === response.data.id ? response.data : item) } : current);
       const exact = await adminRequest(`/admin/v1/installation-families/${family.id}`, InstallationFamilySchema);
       if (exact.data.id !== family.id || exact.data.environment_id !== environment || !exact.data.components) throw new Error("family_context");
-      setFamily(exact.data); setComponent(undefined);
+      setFamily(exact.data); setComponent(undefined); setPendingOperation(undefined);
+      if (activeSearch.component_id) navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined }), true);
     } catch (error) {
       setProblem(error instanceof Error && error.message === "family_context" ? { code: "invalid_response", detail: "The revoked family response did not match the selected family and environment.", retryable: true, status: 0, title: "Family detail mismatch" } : problemFromError(error));
     } finally { setBusy(false); }
   }
 
-  async function requireFamilyRenewal(): Promise<void> {
+  async function requireFamilyRenewal(reason: string): Promise<void> {
     if (!family) return;
     setBusy(true); setProblem(undefined);
     try {
@@ -158,13 +224,14 @@ export function InstallationFamiliesPage() {
       setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === response.data.id ? response.data : item) } : current);
       const exact = await adminRequest(`/admin/v1/installation-families/${family.id}`, InstallationFamilySchema);
       if (exact.data.id !== family.id || exact.data.environment_id !== environment || !exact.data.components) throw new Error("family_context");
-      setFamily(exact.data); setComponent(undefined);
+      setFamily(exact.data); setComponent(undefined); setPendingOperation(undefined);
+      if (activeSearch.component_id) navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined }), true);
     } catch (error) {
       setProblem(error instanceof Error && error.message === "family_context" ? { code: "invalid_response", detail: "The renewed family response did not match the selected family and environment.", retryable: true, status: 0, title: "Family detail mismatch" } : problemFromError(error));
     } finally { setBusy(false); }
   }
 
-  async function revokeComponent(): Promise<void> {
+  async function revokeComponent(reason: string): Promise<void> {
     if (!family || !component) return;
     setBusy(true); setProblem(undefined);
     try {
@@ -174,12 +241,13 @@ export function InstallationFamiliesPage() {
       if (exact.data.id !== family.id || exact.data.environment_id !== environment || !exact.data.components) throw new Error("component_context");
       setFamily(exact.data); setComponent(response.data);
       setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === exact.data.id ? { ...item, status: exact.data.status, revoked_at: exact.data.revoked_at, revocation_reason: exact.data.revocation_reason, updated_at: exact.data.updated_at } : item) } : current);
+      setPendingOperation(undefined);
     } catch (error) {
       setProblem(error instanceof Error && error.message === "component_context" ? { code: "invalid_response", detail: "The revoked component response did not match the selected family and environment.", retryable: true, status: 0, title: "Component detail mismatch" } : problemFromError(error));
     } finally { setBusy(false); }
   }
 
-  async function requireComponentReattestation(): Promise<void> {
+  async function requireComponentReattestation(reason: string): Promise<void> {
     if (!family || !component) return;
     setBusy(true); setProblem(undefined);
     try {
@@ -189,6 +257,7 @@ export function InstallationFamiliesPage() {
       if (exact.data.id !== family.id || exact.data.environment_id !== environment || !exact.data.components) throw new Error("component_context");
       setFamily(exact.data); setComponent(response.data);
       setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === exact.data.id ? { ...exact.data, components: undefined } : item) } : current);
+      setPendingOperation(undefined);
     } catch (error) {
       setProblem(error instanceof Error && error.message === "component_context" ? { code: "invalid_response", detail: "The re-attested component response did not match the selected family and environment.", retryable: true, status: 0, title: "Component detail mismatch" } : problemFromError(error));
     } finally { setBusy(false); }
@@ -196,10 +265,14 @@ export function InstallationFamiliesPage() {
 
   return <div className="control-page"><PageHeading>Inspect the complete root-and-delegated trust boundary, independent component sessions, feature grants, usage, cost, and revocation state. Raw attestation evidence, private keys, refresh grants, and provider bodies never appear here.</PageHeading>
     <section className="compatibility-reference"><div><strong>Framework support is versioned separately.</strong><span>Check the generated registry before treating an SDK or framework adapter as supported.</span></div><a href={compatibilityReference} rel="noreferrer" target="_blank">Open compatibility reference</a></section>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void list(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); setFamily(undefined); setComponent(undefined); }} /></label><label>User ID (optional)<input pattern={applicationUserInputPattern} value={userID} onChange={(event) => { setUserID(event.target.value); setPage(undefined); setFamily(undefined); setComponent(undefined); }} /></label><button className="primary-action" disabled={busy} type="submit">{busy ? "Working…" : "List families"}</button></form>
+    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); setFamily(undefined); setComponent(undefined); setPendingOperation(undefined); }} /></label><label>User ID (optional)<input pattern={applicationUserInputPattern} value={userID} onChange={(event) => { setUserID(event.target.value); setPage(undefined); setFamily(undefined); setComponent(undefined); setPendingOperation(undefined); }} /></label><button className="primary-action" disabled={busy} type="submit">{busy ? "Working…" : "List families"}</button></form>
     <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Family", "Platform", "Status", "Root trust", "Components", "Requests", "Cost", "Last activity"]} rows={page.items.map((item) => [<button className="link-button" disabled={busy} onClick={() => void loadFamily(item.id)} type="button">{item.id}</button>, label(item.platform), item.status, label(item.root_trust_source), item.component_count, item.request_count, cost(item.usage.cost_nano_usd), time(item.last_seen_at)])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void list(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
-    {family ? <section className="detail-card family-detail"><div className="detail-card__heading"><div><p className="eyebrow">Installation Family</p><h2>{family.id}</h2><p>{label(family.platform)} · {family.status} · user {family.user_id}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRevoke || busy || !reason.trim() || family.status !== "active"} onClick={() => void requireFamilyRenewal()} type="button">Require containing-app renewal</button><button className="primary-action primary-action--danger" disabled={!canRevoke || busy || !reason.trim() || family.status === "revoked"} onClick={() => void revokeFamily()} type="button">Revoke family</button></div></div><p><small>Renewal expires family trust and refresh credentials. Existing access grants are not revoked early and live only to their current expiry.</small></p><label className="revocation-reason">Operator reason<input maxLength={100} minLength={1} required value={reason} onChange={(event) => setReason(event.target.value)} /></label><dl><div><dt>Root component</dt><dd>{family.root_component_id}</dd></div><div><dt>Root trust</dt><dd>{label(family.root_trust_source)}</dd></div><div><dt>Root trust expires</dt><dd>{time(family.root_trust_expires_at)}</dd></div><div><dt>Created</dt><dd>{time(family.created_at)}</dd></div><div><dt>Last activity</dt><dd>{time(family.last_seen_at)}</dd></div><div><dt>Revocation</dt><dd>{family.revocation_reason ?? "—"}</dd></div></dl><FamilyMetrics family={family} /><TrustGraph disabled={busy} family={family} onSelect={(componentID) => void loadComponent(componentID)} /><h3>Component inventory</h3><Table headers={["Definition", "Kind", "Trust", "Features", "Session", "Closed sessions", "Reuse", "Requests", "Cost"]} rows={(family.components ?? []).map((item) => [<button className="link-button" disabled={busy} onClick={() => void loadComponent(item.id)} type="button">{item.definition_id}</button>, label(item.kind), label(item.trust_source), item.granted_features.join(", "), item.session_status ?? "—", item.session_failure_count, item.refresh_reuse_count, item.request_count, cost(item.usage.cost_nano_usd)])} /></section> : null}
-    {component && family ? <ComponentDetail busy={busy} canRevoke={canRevoke} component={component} familyActive={family.status === "active"} hasReason={Boolean(reason.trim())} onReattest={() => void requireComponentReattestation()} onRevoke={() => void revokeComponent()} /> : null}
+    {page ? <><Table headers={["Family", "Platform", "Status", "Root trust", "Components", "Requests", "Cost", "Last activity"]} rows={page.items.map((item) => [<button className="link-button" disabled={busy} onClick={() => selectFamily(item.id)} type="button">{item.id}</button>, label(item.platform), item.status, label(item.root_trust_source), item.component_count, item.request_count, cost(item.usage.cost_nano_usd), time(item.last_seen_at)])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => navigate(InstallationFamilyRouteSearchSchema.parse({ ...activeSearch, component_id: undefined, cursor: page.page.next_cursor, family_id: undefined }), false)} type="button">Next page</button> : null}</> : null}
+    {family ? <section className="detail-card family-detail"><div className="detail-card__heading"><div><p className="eyebrow">Installation Family</p><h2>{family.id}</h2><p>{label(family.platform)} · {family.status} · user {family.user_id}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRevoke || busy || family.status !== "active"} onClick={() => setPendingOperation("family-renewal")} type="button">Review containing-app renewal</button><button className="primary-action primary-action--danger" disabled={!canRevoke || busy || family.status === "revoked"} onClick={() => setPendingOperation("family-revoke")} type="button">Review family revocation</button><button className="small-action" disabled={busy} onClick={closeFamily} type="button">Close family</button></div></div><p><small>Renewal expires family trust and refresh credentials. Existing access grants are not revoked early and live only to their current expiry.</small></p><dl><div><dt>Root component</dt><dd>{family.root_component_id}</dd></div><div><dt>Root trust</dt><dd>{label(family.root_trust_source)}</dd></div><div><dt>Root trust expires</dt><dd>{time(family.root_trust_expires_at)}</dd></div><div><dt>Created</dt><dd>{time(family.created_at)}</dd></div><div><dt>Last activity</dt><dd>{time(family.last_seen_at)}</dd></div><div><dt>Revocation</dt><dd>{family.revocation_reason ?? "—"}</dd></div></dl><FamilyMetrics family={family} /><TrustGraph disabled={busy} family={family} onSelect={selectComponent} /><h3>Component inventory</h3><Table headers={["Definition", "Kind", "Trust", "Features", "Session", "Closed sessions", "Reuse", "Requests", "Cost"]} rows={(family.components ?? []).map((item) => [<button className="link-button" disabled={busy} onClick={() => selectComponent(item.id)} type="button">{item.definition_id}</button>, label(item.kind), label(item.trust_source), item.granted_features.join(", "), item.session_status ?? "—", item.session_failure_count, item.refresh_reuse_count, item.request_count, cost(item.usage.cost_nano_usd)])} /></section> : null}
+    {family && pendingOperation === "family-renewal" ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately blocks future refresh and provisioning until the containing application establishes fresh direct trust." affectedScope={<><code>{family.id}</code> and all components in this family</>} busy={busy} confirmLabel="Require fresh family trust" credentialRestoration="No old refresh credential is restored. The containing application must establish fresh direct trust and obtain new credentials." heading="Require containing-app renewal?" key={pendingOperation} onCancel={() => setPendingOperation(undefined)} onConfirm={(confirmedReason) => { if (confirmedReason) void requireFamilyRenewal(confirmedReason); }} requiresReason reversibility="Service can recover through a fresh direct-trust flow, but this operation cannot be undone." summary="Family trust and rotating refresh credentials expire as soon as the server commits this action. Already-issued access grants remain usable only until their existing expiry." timing="Immediately for future refresh and provisioning; existing access grants are not cut short" /> : null}
+    {family && pendingOperation === "family-revoke" ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes the complete Installation Family credential boundary." affectedScope={<><code>{family.id}</code>, its root, every descendant component, and every component session and refresh chain</>} busy={busy} confirmLabel="Revoke complete family" credentialRestoration="Never. The revoked family and credentials stay revoked; the application must establish a new trust boundary." heading="Revoke this Installation Family?" key={pendingOperation} onCancel={() => setPendingOperation(undefined)} onConfirm={(confirmedReason) => { if (confirmedReason) void revokeFamily(confirmedReason); }} requiresReason reversibility="No. Family revocation is terminal." summary="This revokes the family root, every component key, and every component session and refresh chain as soon as the server commits the action." timing="Immediately after the server accepts the revocation" /> : null}
+    {component && family ? <ComponentDetail busy={busy} canRevoke={canRevoke} component={component} familyActive={family.status === "active"} onClose={closeComponent} onReattest={() => setPendingOperation("component-reattestation")} onRevoke={() => setPendingOperation("component-revoke")} /> : null}
+    {component && family && pendingOperation === "component-reattestation" ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately expires trust and refresh credentials in the stated component subtree." affectedScope={component.is_root ? <><code>{component.id}</code> is the root, so the complete family is affected</> : <><code>{component.id}</code> and its delegated descendants; sibling components remain unchanged</>} busy={busy} confirmLabel="Require fresh component trust" credentialRestoration="No old refresh credential is restored. The affected component subtree must establish fresh trust and obtain new credentials." heading={`Require fresh trust for ${component.definition_id}?`} key={`${pendingOperation}-${component.id}`} onCancel={() => setPendingOperation(undefined)} onConfirm={(confirmedReason) => { if (confirmedReason) void requireComponentReattestation(confirmedReason); }} requiresReason reversibility="Service can recover through fresh attestation, but this operation cannot be undone." summary="Trust and refresh credentials expire for this component subtree when the server commits the action. Already-issued access grants remain usable only until their existing expiry." timing="Immediately for future refresh; existing access grants are not cut short" /> : null}
+    {component && family && pendingOperation === "component-revoke" ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes the stated component credential scope." affectedScope={component.is_root ? <><code>{component.id}</code> is the root, so the complete family and every descendant are revoked</> : <><code>{component.id}</code> and its delegated descendants; sibling components remain unchanged</>} busy={busy} confirmLabel="Revoke component credential scope" credentialRestoration="Never. Revoked component keys and credentials stay revoked; the client must provision a new component identity." heading={`Revoke ${component.definition_id}?`} key={`${pendingOperation}-${component.id}`} onCancel={() => setPendingOperation(undefined)} onConfirm={(confirmedReason) => { if (confirmedReason) void revokeComponent(confirmedReason); }} requiresReason reversibility="No. Component revocation is terminal." summary="This revokes the component key, its delegated descendants, and their session and refresh chains when the server commits the action." timing="Immediately after the server accepts the revocation" /> : null}
   </div>;
 }

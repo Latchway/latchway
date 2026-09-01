@@ -364,8 +364,7 @@ func (store *operationalStore) listUsers(
 		    LIMIT 1
 		) AS override ON true
 		WHERE e.organization_id = $1 AND e.environment_id = $2
-		  AND organization.status = 'active' AND application.status = 'active'
-		  AND e.status = 'active' AND u.status <> 'deleted'
+		  AND organization.status = 'active' AND u.status <> 'deleted'
 		  AND ($3::timestamptz IS NULL OR (u.created_at, u.application_user_id) > ($3, $4))
 		ORDER BY u.created_at, u.application_user_id
 		LIMIT $5
@@ -409,6 +408,41 @@ type rowScanner interface {
 
 type rowQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// lockActiveOperationalScope makes resource mutations linearizable with
+// application/environment disable while preserving read-only forensic access.
+func lockActiveOperationalScope(ctx context.Context, tx pgx.Tx, organizationID, applicationID, environmentID string) error {
+	var marker int
+	if err := tx.QueryRow(ctx, `
+		/* active_operational_application_lock */
+		SELECT 1
+		FROM applications AS application
+		JOIN organizations AS organization
+		  ON organization.organization_id = application.organization_id
+		WHERE application.organization_id = $1 AND application.application_id = $2
+		  AND application.status = 'active' AND application.disabled_at IS NULL
+		  AND organization.status = 'active' AND organization.disabled_at IS NULL
+		FOR SHARE OF application
+	`, organizationID, applicationID).Scan(&marker); errors.Is(err, pgx.ErrNoRows) {
+		return errOperationalNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock active operational application: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		/* active_operational_environment_lock */
+		SELECT 1
+		FROM environments AS environment
+		WHERE environment.organization_id = $1 AND environment.application_id = $2
+		  AND environment.environment_id = $3
+		  AND environment.status = 'active' AND environment.disabled_at IS NULL
+		FOR SHARE
+	`, organizationID, applicationID, environmentID).Scan(&marker); errors.Is(err, pgx.ErrNoRows) {
+		return errOperationalNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock active operational environment: %w", err)
+	}
+	return nil
 }
 
 func queryApplicationUser(
@@ -462,7 +496,7 @@ func queryApplicationUser(
 		) AS override ON true
 		WHERE e.organization_id = $1 AND e.environment_id = $2
 		  AND u.application_user_id = $3 AND u.status <> 'deleted'
-		  AND organization.status = 'active' AND application.status = 'active' AND e.status = 'active'
+		  AND organization.status = 'active'
 	`, organizationID, environmentID, userID)
 	item, err := scanApplicationUser(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -546,6 +580,7 @@ func (store *operationalStore) setUserBlocked(
 		  ON organization.organization_id = e.organization_id
 		WHERE e.organization_id = $1 AND e.environment_id = $2
 		  AND organization.status = 'active' AND application.status = 'active' AND e.status = 'active'
+		FOR SHARE OF application, e
 	`, principal.OrganizationID, environmentID).Scan(&applicationID); errors.Is(err, pgx.ErrNoRows) {
 		return useroverride.ApplicationUser{}, errOperationalNotFound
 	} else if err != nil {
@@ -741,7 +776,7 @@ func (store *operationalStore) listInstallations(
 		JOIN organizations AS organization
 		  ON organization.organization_id = environment.organization_id
 		WHERE installation.organization_id = $1 AND installation.environment_id = $2
-		  AND organization.status = 'active' AND application.status = 'active' AND environment.status = 'active'
+		  AND organization.status = 'active'
 		  AND ($3::timestamptz IS NULL OR (installation.created_at, installation.installation_id) > ($3, $4))
 		ORDER BY installation.created_at, installation.installation_id
 		LIMIT $5
@@ -820,7 +855,7 @@ func queryInstallation(
 		JOIN organizations AS organization
 		  ON organization.organization_id = environment.organization_id
 		WHERE installation.organization_id = $1 AND installation.installation_id = $2
-		  AND organization.status = 'active' AND application.status = 'active' AND environment.status = 'active'
+		  AND organization.status = 'active'
 	`, organizationID, installationID)
 	item, err := scanInstallation(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -882,6 +917,9 @@ func (store *operationalStore) revokeInstallation(
 	}
 	if status != "active" && status != "revoked" {
 		return installationDocument{}, errOperationalCorrupt
+	}
+	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
+		return installationDocument{}, err
 	}
 	var now time.Time
 	if err := tx.QueryRow(ctx, "SELECT transaction_timestamp()").Scan(&now); err != nil {
@@ -1933,8 +1971,7 @@ func (store *operationalStore) ensureEnvironment(ctx context.Context, organizati
 		    JOIN organizations AS organization
 		      ON organization.organization_id = environment.organization_id
 		    WHERE environment.organization_id = $1 AND environment.environment_id = $2
-		      AND organization.status = 'active' AND application.status = 'active'
-		      AND environment.status = 'active'
+		      AND organization.status = 'active'
 		)
 	`, organizationID, environmentID).Scan(&exists)
 	if err != nil {
@@ -2267,7 +2304,7 @@ func (store *operationalStore) startSelfTest(
 		WHERE environment.organization_id = $1 AND environment.environment_id = $2
 		  AND organization.status = 'active' AND application.status = 'active'
 		  AND environment.status = 'active'
-		FOR SHARE OF environment
+		FOR SHARE OF environment, application
 	`, principal.OrganizationID, input.Environment).Scan(&now, &activeConfiguration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return selfTestDocument{}, errOperationalNotFound

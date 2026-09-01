@@ -10,6 +10,7 @@ import {
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { ImmediateOperationConfirmation } from "../components/immediate-operation-confirmation";
 
 const capabilityChoices = [
   ["activate_configuration", "Activate configuration"],
@@ -17,8 +18,7 @@ const capabilityChoices = [
   ["manage_owners", "Manage administrators"],
   ["manage_secrets", "Manage secrets"],
   ["revoke_installations", "Revoke installations"],
-  ["run_self_tests", "Run self-tests"],
-  ["view_prompt_bodies", "View prompt bodies"]
+  ["run_self_tests", "Run self-tests"]
 ] as const;
 
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
@@ -43,6 +43,7 @@ export function APITokensPage() {
   const session = useConsoleSession();
   const [tokens, setTokens] = useState<APITokenMetadata[]>();
   const [issued, setIssued] = useState<CreatedAPIToken>();
+  const [revocationTarget, setRevocationTarget] = useState<APITokenMetadata>();
   const [copyStatus, setCopyStatus] = useState<string>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
@@ -56,6 +57,7 @@ export function APITokensPage() {
     setProblem(undefined);
     try {
       setTokens((await adminRequest("/admin/v1/api-tokens", APITokenPageSchema)).data.items);
+      setRevocationTarget(undefined);
     } catch (error) {
       setProblem(problemFromError(error));
     } finally {
@@ -131,6 +133,7 @@ export function APITokensPage() {
       await adminRequest(`/admin/v1/api-tokens/${tokenID}`, z.undefined(), { method: "DELETE" });
       setTokens((current) => current?.map((token) => token.id === tokenID ? { ...token, revoked: true } : token));
       if (issued?.metadata.id === tokenID) dismissToken();
+      setRevocationTarget(undefined);
     } catch (error) {
       setProblem(problemFromError(error));
     } finally {
@@ -156,6 +159,7 @@ export function APITokensPage() {
     </section> : null}
     <div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load API tokens</button></div>
     <ProblemNotice problem={problem} />
-    {tokens ? tokens.length === 0 ? <div className="control-notice"><strong>No API tokens</strong><span>No scoped automation credentials have been created for this administrator.</span></div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody>{tokens.map((token) => <tr key={token.id}><td>{token.name}<br /><small>{token.id}</small></td><td>{token.scopes.join(", ")}</td><td>{displayInstant(token.created_at)}</td><td>{displayInstant(token.expires_at)}</td><td>{token.revoked ? "Revoked" : "Active"}</td><td><button className="small-action" disabled={busy || token.revoked} onClick={() => void revoke(token.id)} type="button">Revoke</button></td></tr>)}</tbody></table></div> : null}
+    {tokens ? tokens.length === 0 ? <div className="control-notice"><strong>No API tokens</strong><span>No scoped automation credentials have been created for this administrator.</span></div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody>{tokens.map((token) => <tr key={token.id}><td>{token.name}<br /><small>{token.id}</small></td><td>{token.scopes.join(", ")}</td><td>{displayInstant(token.created_at)}</td><td>{displayInstant(token.expires_at)}</td><td>{token.revoked ? "Revoked" : "Active"}</td><td><button className="small-action" disabled={busy || token.revoked} onClick={() => setRevocationTarget(token)} type="button">Review revoke</button></td></tr>)}</tbody></table></div> : null}
+    {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this token and stops future authorization with its plaintext." affectedScope={<><code>{revocationTarget.id}</code> ({revocationTarget.name}) with scopes {revocationTarget.scopes.join(", ")}</>} busy={busy} confirmLabel="Revoke API token" credentialRestoration="Never. Latchway cannot recover or reactivate this token; create and distribute a replacement credential if automation must continue." heading={`Revoke ${revocationTarget.name}?`} key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={() => void revoke(revocationTarget.id)} reversibility="No. API-token revocation is terminal." summary="Future requests using this token are denied. Durable self-test schedules bound to it can no longer authorize future runs and are not silently rebound." timing="Immediately after the server accepts the revocation" /> : null}
   </div>;
 }

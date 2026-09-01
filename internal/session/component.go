@@ -649,6 +649,9 @@ func (store *Store) CreateComponentSession(ctx context.Context, input ComponentS
 		return IssuedSession{}, fmt.Errorf("begin component session exchange: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, preflight.OrganizationID, preflight.ApplicationID, preflight.EnvironmentID); err != nil {
+		return IssuedSession{}, err
+	}
 	var installationStatus string
 	if err := tx.QueryRow(ctx, `
 		SELECT status FROM installations

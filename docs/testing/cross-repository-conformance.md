@@ -7,6 +7,40 @@ only local Git checkouts and an optional directory of independently produced
 external evidence. It never fetches a default branch, queries a registry,
 creates a tag, contacts a device or cloud, or publishes an artifact.
 
+## Current status (2026-09-01)
+
+The last passing source report covers a historical clean six-repository tuple.
+It does not cover the current core working tree, which contains uncommitted
+Admin-session, configuration-transfer, server-capability, and Admin SSE API and
+Console changes plus lifecycle-concurrency hardening. The complete local core
+implementation gate, race detector, bounded fuzz corpus, and real PostgreSQL
+Admin/session/App Attest/configuration/lifecycle lock-order suites pass, but a
+source report cannot accept the delta until every repository is clean and the
+changed contract, locks, generated documentation, and mirror are synchronized
+at exact commits.
+
+An earlier diagnostic source-scope run correctly failed the required
+clean-worktree, documentation-mirror, and SDK contract-lock checks, with React
+Native pin validation consequently blocked. Further local implementation
+changes have landed since that diagnostic. No dirty-tree bundle hash is an
+immutable candidate coordinate, and a passing current source report is not
+possible before commit, regeneration, and synchronization.
+
+All six local implementation branches are ahead of their remote-tracking refs.
+The active GitHub CLI credential is invalid, so their exact current heads are
+not pushed or remotely verified. No local version 1 tag exists. Promotion and
+release scope have not passed, and no GitHub release, registry artifact,
+package publication, production documentation deployment, or protected
+external-domain receipt is claimed.
+
+Offline/local device build, install, and launch may proceed when it does not
+contact ngrok or a live provider and does not collect Apple App Attest evidence.
+Starting or reusing ngrok, contacting a provider for device proof, collecting
+live App Attest evidence, or producing a protected device receipt requires the
+exact phrase `I authorize the scoped ngrok device proof.` That phrase has not
+been supplied for the current run. Physical Android verification was
+intentionally skipped because no Android device is available.
+
 ## Evidence scopes
 
 `source` scope proves local source alignment. It requires:

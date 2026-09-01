@@ -147,8 +147,7 @@ func (store *operationalStore) listInstallationFamilies(
 		) AS stats ON true
 		WHERE family.organization_id = $1 AND family.environment_id = $2
 		  AND ($3::text IS NULL OR family.application_user_id = $3)
-		  AND organization.status = 'active' AND application.status = 'active'
-		  AND environment.status = 'active'
+		  AND organization.status = 'active'
 		  AND ($4::timestamptz IS NULL OR
 		       (family.created_at, family.installation_family_id) > ($4, $5))
 		ORDER BY family.created_at, family.installation_family_id
@@ -249,8 +248,7 @@ func queryInstallationFamily(
 		      AND request.installation_family_id = family.installation_family_id
 		) AS stats ON true
 		WHERE family.organization_id = $1 AND family.installation_family_id = $2
-		  AND organization.status = 'active' AND application.status = 'active'
-		  AND environment.status = 'active'
+		  AND organization.status = 'active'
 	`, organizationID, familyID)
 	item, err := scanInstallationFamily(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -303,8 +301,7 @@ func (store *operationalStore) listClientComponents(
 	rows, err := store.pool.Query(ctx, clientComponentSelect+`
 		WHERE component.organization_id = $1 AND component.environment_id = $2
 		  AND ($3::text IS NULL OR component.installation_family_id = $3)
-		  AND organization.status = 'active' AND application.status = 'active'
-		  AND environment.status = 'active'
+		  AND organization.status = 'active'
 		  AND ($4::timestamptz IS NULL OR
 		       (component.created_at, component.client_component_id) > ($4, $5))
 		ORDER BY component.created_at, component.client_component_id
@@ -430,8 +427,7 @@ func queryClientComponent(
 ) (clientComponentDocument, error) {
 	row := queryer.QueryRow(ctx, clientComponentSelect+`
 		WHERE component.organization_id = $1 AND component.client_component_id = $2
-		  AND organization.status = 'active' AND application.status = 'active'
-		  AND environment.status = 'active'
+		  AND organization.status = 'active'
 	`, organizationID, componentID)
 	item, err := scanClientComponent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -581,6 +577,52 @@ func validateOperationalRevocationReason(reason, fallback string) (string, error
 	return reason, nil
 }
 
+// installationFamilyScope resolves immutable scope identifiers without taking
+// a target-row lock. Callers use them to acquire application and environment
+// lifecycle locks before locking the family itself.
+func installationFamilyScope(
+	ctx context.Context,
+	queryer rowQueryer,
+	organizationID string,
+	familyID string,
+) (string, string, error) {
+	var applicationID, environmentID string
+	if err := queryer.QueryRow(ctx, `
+		SELECT application_id, environment_id
+		FROM installation_families
+		WHERE organization_id = $1 AND installation_family_id = $2
+	`, organizationID, familyID).Scan(&applicationID, &environmentID); errors.Is(err, pgx.ErrNoRows) {
+		return "", "", errOperationalNotFound
+	} else if err != nil {
+		return "", "", fmt.Errorf("locate installation family scope: %w", err)
+	}
+	return applicationID, environmentID, nil
+}
+
+// clientComponentScope resolves the immutable family and lifecycle scope
+// without taking a target-row lock. Component mutations subsequently lock the
+// family and component separately, in that order.
+func clientComponentScope(
+	ctx context.Context,
+	queryer rowQueryer,
+	organizationID string,
+	componentID string,
+) (string, string, string, error) {
+	var familyID, applicationID, environmentID string
+	if err := queryer.QueryRow(ctx, `
+		SELECT installation_family_id, application_id, environment_id
+		FROM client_components
+		WHERE organization_id = $1 AND client_component_id = $2
+	`, organizationID, componentID).Scan(
+		&familyID, &applicationID, &environmentID,
+	); errors.Is(err, pgx.ErrNoRows) {
+		return "", "", "", errOperationalNotFound
+	} else if err != nil {
+		return "", "", "", fmt.Errorf("locate client component scope: %w", err)
+	}
+	return familyID, applicationID, environmentID, nil
+}
+
 func (store *operationalStore) revokeInstallationFamily(
 	ctx context.Context,
 	principal adminauth.Principal,
@@ -605,15 +647,25 @@ func (store *operationalStore) revokeInstallationFamily(
 	}
 	defer rollbackOperational(tx)
 
-	var applicationID, environmentID, userID, rootInstallationID, status string
+	applicationID, environmentID, err := installationFamilyScope(
+		ctx, tx, principal.OrganizationID, familyID,
+	)
+	if err != nil {
+		return installationFamilyDocument{}, err
+	}
+	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
+		return installationFamilyDocument{}, err
+	}
+	var userID, rootInstallationID, status string
 	if err := tx.QueryRow(ctx, `
-		SELECT application_id, environment_id, application_user_id,
-		       root_installation_id, status
+		/* operational_lock_installation_family */
+		SELECT application_user_id, root_installation_id, status
 		FROM installation_families
 		WHERE organization_id = $1 AND installation_family_id = $2
+		  AND application_id = $3 AND environment_id = $4
 		FOR UPDATE
-	`, principal.OrganizationID, familyID).Scan(
-		&applicationID, &environmentID, &userID, &rootInstallationID, &status,
+	`, principal.OrganizationID, familyID, applicationID, environmentID).Scan(
+		&userID, &rootInstallationID, &status,
 	); errors.Is(err, pgx.ErrNoRows) {
 		return installationFamilyDocument{}, errOperationalNotFound
 	} else if err != nil {
@@ -699,15 +751,25 @@ func (store *operationalStore) requireInstallationFamilyRenewal(
 	}
 	defer rollbackOperational(tx)
 
-	var applicationID, environmentID, userID, rootInstallationID, status string
+	applicationID, environmentID, err := installationFamilyScope(
+		ctx, tx, principal.OrganizationID, familyID,
+	)
+	if err != nil {
+		return installationFamilyDocument{}, err
+	}
+	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
+		return installationFamilyDocument{}, err
+	}
+	var userID, rootInstallationID, status string
 	if err := tx.QueryRow(ctx, `
-		SELECT application_id, environment_id, application_user_id,
-		       root_installation_id, status
+		/* operational_lock_installation_family */
+		SELECT application_user_id, root_installation_id, status
 		FROM installation_families
 		WHERE organization_id = $1 AND installation_family_id = $2
+		  AND application_id = $3 AND environment_id = $4
 		FOR UPDATE
-	`, principal.OrganizationID, familyID).Scan(
-		&applicationID, &environmentID, &userID, &rootInstallationID, &status,
+	`, principal.OrganizationID, familyID, applicationID, environmentID).Scan(
+		&userID, &rootInstallationID, &status,
 	); errors.Is(err, pgx.ErrNoRows) {
 		return installationFamilyDocument{}, errOperationalNotFound
 	} else if err != nil {
@@ -780,19 +842,41 @@ func (store *operationalStore) revokeClientComponent(
 	}
 	defer rollbackOperational(tx)
 
-	var familyID, applicationID, environmentID, userID, rootInstallationID string
+	familyID, applicationID, environmentID, err := clientComponentScope(
+		ctx, tx, principal.OrganizationID, componentID,
+	)
+	if err != nil {
+		return clientComponentDocument{}, err
+	}
+	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
+		return clientComponentDocument{}, err
+	}
+	var rootInstallationID string
+	if err := tx.QueryRow(ctx, `
+		/* operational_lock_component_family */
+		SELECT root_installation_id
+		FROM installation_families
+		WHERE organization_id = $1 AND installation_family_id = $2
+		  AND application_id = $3 AND environment_id = $4
+		FOR UPDATE
+	`, principal.OrganizationID, familyID, applicationID, environmentID).Scan(
+		&rootInstallationID,
+	); errors.Is(err, pgx.ErrNoRows) {
+		return clientComponentDocument{}, errOperationalNotFound
+	} else if err != nil {
+		return clientComponentDocument{}, fmt.Errorf("lock client component family: %w", err)
+	}
+	var userID string
 	var isRoot bool
 	if err := tx.QueryRow(ctx, `
-		SELECT component.installation_family_id, component.application_id,
-		       component.environment_id, component.application_user_id,
-		       family.root_installation_id, component.is_root
-		FROM client_components AS component
-		JOIN installation_families AS family
-		  ON family.installation_family_id = component.installation_family_id
-		WHERE component.organization_id = $1 AND component.client_component_id = $2
-		FOR UPDATE OF component, family
-	`, principal.OrganizationID, componentID).Scan(
-		&familyID, &applicationID, &environmentID, &userID, &rootInstallationID, &isRoot,
+		/* operational_lock_client_component */
+		SELECT application_user_id, is_root
+		FROM client_components
+		WHERE organization_id = $1 AND client_component_id = $2
+		  AND installation_family_id = $3 AND application_id = $4 AND environment_id = $5
+		FOR UPDATE
+	`, principal.OrganizationID, componentID, familyID, applicationID, environmentID).Scan(
+		&userID, &isRoot,
 	); errors.Is(err, pgx.ErrNoRows) {
 		return clientComponentDocument{}, errOperationalNotFound
 	} else if err != nil {
@@ -880,22 +964,41 @@ func (store *operationalStore) requireClientComponentReattestation(
 	}
 	defer rollbackOperational(tx)
 
-	var familyID, applicationID, environmentID, userID, rootInstallationID string
-	var componentStatus, familyStatus string
+	familyID, applicationID, environmentID, err := clientComponentScope(
+		ctx, tx, principal.OrganizationID, componentID,
+	)
+	if err != nil {
+		return clientComponentDocument{}, err
+	}
+	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
+		return clientComponentDocument{}, err
+	}
+	var rootInstallationID, familyStatus string
+	if err := tx.QueryRow(ctx, `
+		/* operational_lock_component_family */
+		SELECT root_installation_id, status
+		FROM installation_families
+		WHERE organization_id = $1 AND installation_family_id = $2
+		  AND application_id = $3 AND environment_id = $4
+		FOR UPDATE
+	`, principal.OrganizationID, familyID, applicationID, environmentID).Scan(
+		&rootInstallationID, &familyStatus,
+	); errors.Is(err, pgx.ErrNoRows) {
+		return clientComponentDocument{}, errOperationalNotFound
+	} else if err != nil {
+		return clientComponentDocument{}, fmt.Errorf("lock component family for re-attestation: %w", err)
+	}
+	var userID, componentStatus string
 	var isRoot bool
 	if err := tx.QueryRow(ctx, `
-		SELECT component.installation_family_id, component.application_id,
-		       component.environment_id, component.application_user_id,
-		       family.root_installation_id, component.is_root,
-		       component.status, family.status
-		FROM client_components AS component
-		JOIN installation_families AS family
-		  ON family.installation_family_id = component.installation_family_id
-		WHERE component.organization_id = $1 AND component.client_component_id = $2
-		FOR UPDATE OF component, family
-	`, principal.OrganizationID, componentID).Scan(
-		&familyID, &applicationID, &environmentID, &userID, &rootInstallationID,
-		&isRoot, &componentStatus, &familyStatus,
+		/* operational_lock_client_component */
+		SELECT application_user_id, is_root, status
+		FROM client_components
+		WHERE organization_id = $1 AND client_component_id = $2
+		  AND installation_family_id = $3 AND application_id = $4 AND environment_id = $5
+		FOR UPDATE
+	`, principal.OrganizationID, componentID, familyID, applicationID, environmentID).Scan(
+		&userID, &isRoot, &componentStatus,
 	); errors.Is(err, pgx.ErrNoRows) {
 		return clientComponentDocument{}, errOperationalNotFound
 	} else if err != nil {

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -211,6 +212,101 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 		t.Fatalf("create environment status = %d, body = %s", environment.Code, environment.Body.String())
 	}
 
+	secondLogin := performJSON(t, handler, http.MethodPost, "/admin/v1/auth/login", map[string]string{
+		"email": bootstrapBody["email"], "password": bootstrapBody["password"],
+		"organization_id": session.OrganizationID,
+	}, nil, "", "https://console.example.test")
+	if secondLogin.Code != http.StatusOK {
+		t.Fatalf("second login status = %d, body = %s", secondLogin.Code, secondLogin.Body.String())
+	}
+	secondCookies := secondLogin.Result().Cookies()
+	if len(secondCookies) != 2 {
+		t.Fatalf("second login cookie count = %d", len(secondCookies))
+	}
+	type adminSessionItem struct {
+		ID            string `json:"id"`
+		Administrator struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"administrator"`
+		CreatedAt  time.Time `json:"created_at"`
+		LastSeenAt time.Time `json:"last_seen_at"`
+		ExpiresAt  time.Time `json:"expires_at"`
+		Status     string    `json:"status"`
+		Current    bool      `json:"current"`
+	}
+	type adminSessionPage struct {
+		Items []adminSessionItem `json:"items"`
+		Page  struct {
+			HasMore    bool   `json:"has_more"`
+			NextCursor string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	firstSessionPageResponse := performGET(handler, "/admin/v1/admin-sessions?page_size=1", cookies[0])
+	if firstSessionPageResponse.Code != http.StatusOK {
+		t.Fatalf("first administrator-session page status/body = %d %s", firstSessionPageResponse.Code, firstSessionPageResponse.Body.String())
+	}
+	var firstSessionPage adminSessionPage
+	decodeResponse(t, firstSessionPageResponse, &firstSessionPage)
+	if len(firstSessionPage.Items) != 1 || !firstSessionPage.Page.HasMore || firstSessionPage.Page.NextCursor == "" {
+		t.Fatalf("unexpected first administrator-session page: %+v", firstSessionPage)
+	}
+	secondSessionPageResponse := performGET(handler, "/admin/v1/admin-sessions?page_size=1&cursor="+url.QueryEscape(firstSessionPage.Page.NextCursor), cookies[0])
+	if secondSessionPageResponse.Code != http.StatusOK {
+		t.Fatalf("second administrator-session page status/body = %d %s", secondSessionPageResponse.Code, secondSessionPageResponse.Body.String())
+	}
+	var secondSessionPage adminSessionPage
+	decodeResponse(t, secondSessionPageResponse, &secondSessionPage)
+	if len(secondSessionPage.Items) != 1 || secondSessionPage.Page.HasMore || secondSessionPage.Items[0].ID == firstSessionPage.Items[0].ID {
+		t.Fatalf("unexpected second administrator-session page: %+v", secondSessionPage)
+	}
+	allSessions := append(firstSessionPage.Items, secondSessionPage.Items...)
+	currentSessionID := ""
+	otherSessionID := ""
+	for _, item := range allSessions {
+		if item.ID == "" || item.Administrator.ID == "" || item.Administrator.Email != bootstrapBody["email"] ||
+			item.CreatedAt.IsZero() || item.LastSeenAt.IsZero() || item.ExpiresAt.IsZero() || item.Status != "active" {
+			t.Fatalf("unsafe or incomplete administrator-session item: %+v", item)
+		}
+		if item.Current {
+			if currentSessionID != "" {
+				t.Fatal("administrator-session page identified multiple current sessions")
+			}
+			currentSessionID = item.ID
+		} else {
+			otherSessionID = item.ID
+		}
+	}
+	if currentSessionID == "" || otherSessionID == "" {
+		t.Fatalf("administrator-session current mapping is incomplete: %+v", allSessions)
+	}
+	for _, forbidden := range []string{"token_hint", "token_hash", "csrf_token", "revoke_reason", "ip_address"} {
+		if bytes.Contains(firstSessionPageResponse.Body.Bytes(), []byte(forbidden)) || bytes.Contains(secondSessionPageResponse.Body.Bytes(), []byte(forbidden)) {
+			t.Fatalf("administrator-session response exposed forbidden field %q", forbidden)
+		}
+	}
+	if invalidSessionPage := performGET(handler, "/admin/v1/admin-sessions?page_size=201", cookies[0]); invalidSessionPage.Code != http.StatusBadRequest {
+		t.Fatalf("invalid administrator-session page status/body = %d %s", invalidSessionPage.Code, invalidSessionPage.Body.String())
+	}
+	unauthenticatedSessions := performGET(handler, "/admin/v1/admin-sessions", nil)
+	if unauthenticatedSessions.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated administrator-session list status = %d", unauthenticatedSessions.Code)
+	}
+	systemStatus := performGET(handler, "/admin/v1/system", cookies[0])
+	if systemStatus.Code != http.StatusOK {
+		t.Fatalf("system status = %d, body = %s", systemStatus.Code, systemStatus.Body.String())
+	}
+	var systemDocument struct {
+		ServerCapabilities []serverCapability `json:"server_capabilities"`
+	}
+	decodeResponse(t, systemStatus, &systemDocument)
+	if !reflect.DeepEqual(systemDocument.ServerCapabilities, serverCapabilities()) {
+		t.Fatalf("system server capabilities = %q, want %q", systemDocument.ServerCapabilities, serverCapabilities())
+	}
+	if unauthenticatedSystem := performGET(handler, "/admin/v1/system", nil); unauthenticatedSystem.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated system status = %d", unauthenticatedSystem.Code)
+	}
+
 	apiTokenResponse := performJSON(t, handler, http.MethodPost, "/admin/v1/api-tokens", map[string]any{
 		"name": "automation", "scopes": []string{"inspect_users"},
 	}, cookies[0], csrf, "https://console.example.test")
@@ -237,6 +333,34 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 	if escalation.Code != http.StatusForbidden {
 		t.Fatalf("API-token scope escalation status/body = %d %s", escalation.Code, escalation.Body.String())
 	}
+	unauthorizedSessionList := performBearerGET(handler, "/admin/v1/admin-sessions", createdToken.Token)
+	if unauthorizedSessionList.Code != http.StatusForbidden {
+		t.Fatalf("API-token administrator-session list status/body = %d %s", unauthorizedSessionList.Code, unauthorizedSessionList.Body.String())
+	}
+	managerTokenResponse := performJSON(t, handler, http.MethodPost, "/admin/v1/api-tokens", map[string]any{
+		"name": "session-manager", "scopes": []string{"manage_owners"},
+	}, cookies[0], csrf, "https://console.example.test")
+	if managerTokenResponse.Code != http.StatusCreated {
+		t.Fatalf("create session-manager token status/body = %d %s", managerTokenResponse.Code, managerTokenResponse.Body.String())
+	}
+	var managerToken struct {
+		Token string `json:"token"`
+	}
+	decodeResponse(t, managerTokenResponse, &managerToken)
+	managedSessionListResponse := performBearerGET(handler, "/admin/v1/admin-sessions", managerToken.Token)
+	if managedSessionListResponse.Code != http.StatusOK {
+		t.Fatalf("manage_owners API-token session list status/body = %d %s", managedSessionListResponse.Code, managedSessionListResponse.Body.String())
+	}
+	var managedSessionList adminSessionPage
+	decodeResponse(t, managedSessionListResponse, &managedSessionList)
+	if len(managedSessionList.Items) != 2 {
+		t.Fatalf("manage_owners API-token session list = %+v", managedSessionList)
+	}
+	for _, item := range managedSessionList.Items {
+		if item.Current {
+			t.Fatalf("API-token-authenticated session list marked a cookie session current: %+v", item)
+		}
+	}
 	tokenList := performGET(handler, "/admin/v1/api-tokens", cookies[0])
 	if tokenList.Code != http.StatusOK || bytes.Contains(tokenList.Body.Bytes(), []byte(createdToken.Token)) {
 		t.Fatalf("API token metadata list status/body = %d %s", tokenList.Code, tokenList.Body.String())
@@ -249,12 +373,39 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 		t.Fatalf("revoked API token session status = %d, want %d", afterRevoke.Code, http.StatusUnauthorized)
 	}
 
+	missingSessionCSRF := performJSON(t, handler, http.MethodPost, "/admin/v1/admin-sessions/"+otherSessionID+"/revoke", nil, cookies[0], "", "https://console.example.test")
+	if missingSessionCSRF.Code != http.StatusForbidden {
+		t.Fatalf("missing-CSRF administrator-session revoke status/body = %d %s", missingSessionCSRF.Code, missingSessionCSRF.Body.String())
+	}
+	revokedSession := performBearerJSON(t, handler, http.MethodPost, "/admin/v1/admin-sessions/"+otherSessionID+"/revoke", nil, managerToken.Token)
+	if revokedSession.Code != http.StatusNoContent {
+		t.Fatalf("administrator-session revoke status/body = %d %s", revokedSession.Code, revokedSession.Body.String())
+	}
+	idempotentSessionRevoke := performJSON(t, handler, http.MethodPost, "/admin/v1/admin-sessions/"+otherSessionID+"/revoke", nil, cookies[0], csrf, "https://console.example.test")
+	if idempotentSessionRevoke.Code != http.StatusNoContent {
+		t.Fatalf("idempotent administrator-session revoke status/body = %d %s", idempotentSessionRevoke.Code, idempotentSessionRevoke.Body.String())
+	}
+	if afterSessionRevoke := performGET(handler, "/admin/v1/auth/session", secondCookies[0]); afterSessionRevoke.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked administrator cookie session status = %d, want %d", afterSessionRevoke.Code, http.StatusUnauthorized)
+	}
+
 	missingCSRF := performJSON(t, handler, http.MethodPost, "/admin/v1/applications", applicationBody, cookies[0], "", "https://console.example.test")
 	if missingCSRF.Code != http.StatusForbidden {
 		t.Fatalf("missing-CSRF mutation status = %d, want %d", missingCSRF.Code, http.StatusForbidden)
 	}
+	selfRevoked := performJSON(t, handler, http.MethodPost, "/admin/v1/admin-sessions/"+currentSessionID+"/revoke", nil, cookies[0], csrf, "https://console.example.test")
+	if selfRevoked.Code != http.StatusNoContent {
+		t.Fatalf("current administrator-session revoke status/body = %d %s", selfRevoked.Code, selfRevoked.Body.String())
+	}
+	clearedCookies := selfRevoked.Result().Cookies()
+	if len(clearedCookies) != 2 || clearedCookies[0].MaxAge != -1 || clearedCookies[1].MaxAge != -1 {
+		t.Fatalf("current administrator-session revoke did not clear both cookies: %+v", clearedCookies)
+	}
+	if afterSelfRevoke := performGET(handler, "/admin/v1/auth/session", cookies[0]); afterSelfRevoke.Code != http.StatusUnauthorized {
+		t.Fatalf("self-revoked administrator session status = %d, want %d", afterSelfRevoke.Code, http.StatusUnauthorized)
+	}
 
-	assertAdministrativePersistence(t, ctx, pool, bootstrapToken, bootstrapBody["password"], createdToken.Token)
+	assertAdministrativePersistence(t, ctx, pool, bootstrapToken, bootstrapBody["password"], createdToken.Token, managerToken.Token)
 }
 
 func TestAuditRejectedMutationPostgreSQLIndeterminateCorrelation(t *testing.T) {
@@ -421,10 +572,12 @@ func assertAdministrativePersistence(t *testing.T, ctx context.Context, pool *pg
 
 	expectedEvents := map[string]int{
 		"admin.bootstrap_owner:succeeded":    1,
-		"admin.session_create:succeeded":     1,
+		"admin.session_create:succeeded":     2,
+		"admin.session_revoke:succeeded":     2,
+		"admin.session_revoke:denied":        1,
 		"admin.application_create:succeeded": 2,
 		"admin.environment_create:succeeded": 1,
-		"admin.api_token_create:succeeded":   1,
+		"admin.api_token_create:succeeded":   2,
 		"admin.api_token_create:denied":      1,
 		"admin.api_token_revoke:succeeded":   1,
 		"admin.bootstrap_owner:denied":       1,

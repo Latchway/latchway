@@ -201,6 +201,9 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 	if err != nil {
 		return Revision{}, err
 	}
+	if _, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true); err != nil {
+		return Revision{}, err
+	}
 	if revision.storedState != StateDraft && revision.storedState != StateInvalid {
 		return Revision{}, ErrConflict
 	}
@@ -253,6 +256,10 @@ func (store *Store) ValidateRevision(ctx context.Context, principal adminauth.Pr
 	if err != nil {
 		return ValidationReport{}, err
 	}
+	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
+	if err != nil {
+		return ValidationReport{}, err
+	}
 	if revision.storedState == StateValid {
 		if revision.Validation == nil {
 			return ValidationReport{}, errors.New("validated configuration revision has no report")
@@ -266,10 +273,6 @@ func (store *Store) ValidateRevision(ctx context.Context, principal adminauth.Pr
 	// a secret reference indefinitely. Serialize it with secret lifecycle
 	// writes on the shared environment row so destruction cannot race a draft
 	// into the valid state after the reference check.
-	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
-	if err != nil {
-		return ValidationReport{}, err
-	}
 	report, compiled := store.validator.Validate(revision.Document, environment, store.now().UTC())
 	reportJSON, err := json.Marshal(report)
 	if err != nil {
@@ -317,6 +320,9 @@ func (store *Store) PlanRevision(ctx context.Context, principal adminauth.Princi
 	}
 	if target.State != StateValid || target.Validation == nil || !target.Validation.Valid {
 		return Plan{}, ErrConfigurationInvalid
+	}
+	if _, _, err := store.environment(ctx, store.pool, principal.OrganizationID, target.EnvironmentID, false); err != nil {
+		return Plan{}, err
 	}
 	active, err := store.activeRevision(ctx, store.pool, principal.OrganizationID, target.EnvironmentID)
 	if err != nil {
@@ -507,7 +513,14 @@ func (store *Store) GetRevision(ctx context.Context, principal adminauth.Princip
 	if id.Validate(revisionID, id.ConfigRevision) != nil {
 		return Revision{}, ErrInvalid
 	}
-	return store.revision(ctx, store.pool, principal.OrganizationID, revisionID, false)
+	revision, err := store.revision(ctx, store.pool, principal.OrganizationID, revisionID, false)
+	if err != nil {
+		return Revision{}, err
+	}
+	if err := store.ensureHistoryEnvironment(ctx, principal.OrganizationID, revision.EnvironmentID); err != nil {
+		return Revision{}, err
+	}
+	return revision, nil
 }
 
 // GetActiveRevision returns the Admin API representation selected by the
@@ -515,6 +528,9 @@ func (store *Store) GetRevision(ctx context.Context, principal adminauth.Princip
 func (store *Store) GetActiveRevision(ctx context.Context, principal adminauth.Principal, environmentID string) (Revision, error) {
 	if id.Validate(environmentID, id.Environment) != nil {
 		return Revision{}, ErrInvalid
+	}
+	if _, _, err := store.environment(ctx, store.pool, principal.OrganizationID, environmentID, false); err != nil {
+		return Revision{}, err
 	}
 	return store.activeRevision(ctx, store.pool, principal.OrganizationID, environmentID)
 }
@@ -528,6 +544,9 @@ func (store *Store) ListRevisions(ctx context.Context, principal adminauth.Princ
 	}
 	if page.BeforeID != "" && id.Validate(page.BeforeID, id.ConfigRevision) != nil {
 		return nil, ErrInvalid
+	}
+	if err := store.ensureHistoryEnvironment(ctx, principal.OrganizationID, environmentID); err != nil {
+		return nil, err
 	}
 	var before any
 	var beforeID any
@@ -631,6 +650,18 @@ func (store *Store) activeSnapshotRevisionID(ctx context.Context, scope TenantSc
 		 AND revision.environment_id = active_revision.environment_id
 		 AND revision.config_revision_id = active_revision.config_revision_id
 		 AND revision.status = 'valid'
+		JOIN environments AS environment
+		  ON environment.organization_id = active_revision.organization_id
+		 AND environment.application_id = active_revision.application_id
+		 AND environment.environment_id = active_revision.environment_id
+		 AND environment.status = 'active' AND environment.disabled_at IS NULL
+		JOIN applications AS application
+		  ON application.organization_id = active_revision.organization_id
+		 AND application.application_id = active_revision.application_id
+		 AND application.status = 'active' AND application.disabled_at IS NULL
+		JOIN organizations AS organization
+		  ON organization.organization_id = active_revision.organization_id
+		 AND organization.status = 'active' AND organization.disabled_at IS NULL
 		WHERE active_revision.organization_id = $1
 		  AND active_revision.application_id = $2
 		  AND active_revision.environment_id = $3
@@ -658,6 +689,18 @@ func (store *Store) loadActiveSnapshot(ctx context.Context, scope TenantScope) (
 		 AND revision.environment_id = active_revision.environment_id
 		 AND revision.config_revision_id = active_revision.config_revision_id
 		 AND revision.status = 'valid'
+		JOIN environments AS environment
+		  ON environment.organization_id = active_revision.organization_id
+		 AND environment.application_id = active_revision.application_id
+		 AND environment.environment_id = active_revision.environment_id
+		 AND environment.status = 'active' AND environment.disabled_at IS NULL
+		JOIN applications AS application
+		  ON application.organization_id = active_revision.organization_id
+		 AND application.application_id = active_revision.application_id
+		 AND application.status = 'active' AND application.disabled_at IS NULL
+		JOIN organizations AS organization
+		  ON organization.organization_id = active_revision.organization_id
+		 AND organization.status = 'active' AND organization.disabled_at IS NULL
 		WHERE active_revision.organization_id = $1
 		  AND active_revision.application_id = $2
 		  AND active_revision.environment_id = $3
@@ -822,6 +865,33 @@ func scanRevision(row rowScanner) (Revision, error) {
 }
 
 func (store *Store) environment(ctx context.Context, query databaseQuery, organizationID, environmentID string, forUpdate bool) (EnvironmentDescriptor, string, error) {
+	if forUpdate {
+		// Application and environment lifecycle mutations lock the parent
+		// application before the environment. Acquire the shared parent lock in a
+		// separate statement so PostgreSQL cannot choose the opposite row-mark
+		// order for a combined FOR UPDATE/FOR SHARE query.
+		var applicationID string
+		if err := query.QueryRow(ctx, `
+			/* lock parent application for configuration mutation */
+			SELECT application.application_id
+			FROM environments AS environment
+			JOIN applications AS application
+			  ON application.organization_id = environment.organization_id
+			 AND application.application_id = environment.application_id
+			JOIN organizations AS organization
+			  ON organization.organization_id = environment.organization_id
+			WHERE environment.organization_id = $1
+			  AND environment.environment_id = $2
+			  AND environment.status = 'active'
+			  AND application.status = 'active'
+			  AND organization.status = 'active'
+			FOR SHARE OF application
+		`, organizationID, environmentID).Scan(&applicationID); errors.Is(err, pgx.ErrNoRows) {
+			return EnvironmentDescriptor{}, "", ErrNotFound
+		} else if err != nil {
+			return EnvironmentDescriptor{}, "", fmt.Errorf("lock configuration parent application: %w", err)
+		}
+	}
 	statement := `
 		SELECT organization.organization_id, application.application_id, environment.environment_id,
 			organization.slug, application.slug, environment.slug, environment.kind
@@ -886,6 +956,33 @@ func (store *Store) environment(ctx context.Context, query databaseQuery, organi
 		return EnvironmentDescriptor{}, "", fmt.Errorf("iterate configuration secret references: %w", err)
 	}
 	return descriptor, activeRevisionID, nil
+}
+
+// ensureHistoryEnvironment preserves tenant-scoped forensic access to immutable
+// configuration history after an environment or its parent application is
+// disabled. Mutation and active-runtime paths deliberately continue to use
+// environment, whose active-state predicates fail closed.
+func (store *Store) ensureHistoryEnvironment(ctx context.Context, organizationID, environmentID string) error {
+	var present bool
+	if err := store.pool.QueryRow(ctx, `
+		SELECT true
+		FROM environments AS environment
+		JOIN applications AS application
+		  ON application.organization_id = environment.organization_id
+		 AND application.application_id = environment.application_id
+		JOIN organizations AS organization
+		  ON organization.organization_id = environment.organization_id
+		WHERE environment.organization_id = $1
+		  AND environment.environment_id = $2
+	`, organizationID, environmentID).Scan(&present); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("read configuration history environment: %w", err)
+	}
+	if !present {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func canonicalDocument(document json.RawMessage) (json.RawMessage, error) {

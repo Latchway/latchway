@@ -319,7 +319,7 @@ func lockEnvironment(ctx context.Context, tx pgx.Tx, scope AdminScope) (string, 
 		JOIN organizations o ON o.organization_id = e.organization_id
 		WHERE e.organization_id = $1 AND e.environment_id = $2
 		  AND e.status = 'active' AND a.status = 'active' AND o.status = 'active'
-		FOR UPDATE OF e
+		FOR UPDATE OF e FOR SHARE OF a
 	`, scope.OrganizationID, scope.EnvironmentID).Scan(&applicationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
@@ -356,7 +356,7 @@ func lockActiveEnvironment(ctx context.Context, tx pgx.Tx, scope AdminScope, lim
 		  AND e.status = 'active' AND a.status = 'active' AND o.status = 'active'
 		  AND r.status = 'valid' AND active.revision_status = 'valid'
 		  AND r.compiled_document IS NOT NULL
-		FOR UPDATE OF e, active
+		FOR UPDATE OF e, active FOR SHARE OF a
 	`, scope.OrganizationID, scope.EnvironmentID, limitPlan).Scan(&applicationID, &planExists)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, ErrNotFound

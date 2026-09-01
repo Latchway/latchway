@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/latchway/latchway/internal/id"
-	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/spf13/cobra"
 )
 
@@ -85,11 +85,15 @@ func newConfigCommand(opts *options) *cobra.Command {
 
 func newConfigPullCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	var environmentID string
+	var documentFormat string
 	command := &cobra.Command{
 		Use: "pull", Short: "Pull the active redaction-safe configuration", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if id.Validate(environmentID, id.Environment) != nil {
 				return errors.New("environment ID is invalid")
+			}
+			if documentFormat != "" && documentFormat != "json" && documentFormat != "yaml" {
+				return errors.New("configuration document format must be json or yaml")
 			}
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
@@ -100,10 +104,18 @@ func newConfigPullCommand(opts *options, root *controlCommandOptions) *cobra.Com
 			if err != nil {
 				return err
 			}
-			if opts.output == "json" {
-				var document any
-				if err := json.Unmarshal(revision.Document, &document); err != nil {
+			if documentFormat != "" || opts.output == "json" {
+				document, err := decodeConfigurationDocument(bytes.NewReader(revision.Document), maxConfigurationCLIBytes)
+				if err != nil {
 					return errors.New("admin API returned a malformed configuration document")
+				}
+				if documentFormat == "yaml" {
+					encoded, encodeErr := encodeConfigurationYAML(document)
+					if encodeErr != nil {
+						return errors.New("admin API returned a malformed configuration document")
+					}
+					_, err = opts.stdout.Write(encoded)
+					return err
 				}
 				return printControlJSON(opts, document)
 			}
@@ -113,6 +125,7 @@ func newConfigPullCommand(opts *options, root *controlCommandOptions) *cobra.Com
 		},
 	}
 	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&documentFormat, "format", "", "configuration document format: json or yaml (defaults to global output behavior)")
 	_ = command.MarkFlagRequired("environment")
 	return command
 }
@@ -294,8 +307,8 @@ func newConfigRollbackCommand(opts *options, root *controlCommandOptions) *cobra
 }
 
 func addConfigurationInputFlags(command *cobra.Command, input *configurationInputOptions) {
-	command.Flags().StringVar(&input.file, "file", "", "configuration JSON file (regular file, maximum 1 MiB)")
-	command.Flags().BoolVar(&input.fromStdin, "from-stdin", false, "read configuration JSON from standard input")
+	command.Flags().StringVar(&input.file, "file", "", "configuration YAML or JSON file (regular file, maximum 1 MiB)")
+	command.Flags().BoolVar(&input.fromStdin, "from-stdin", false, "read configuration YAML or JSON from standard input")
 }
 
 func readConfigurationInput(command *cobra.Command, input *configurationInputOptions) (any, error) {
@@ -320,17 +333,14 @@ func readConfigurationInput(command *cobra.Command, input *configurationInputOpt
 	} else {
 		reader = command.InOrStdin()
 	}
-	value, err := jsonsafe.DecodeReader(reader, maxConfigurationCLIBytes)
+	value, err := decodeConfigurationDocument(reader, maxConfigurationCLIBytes)
 	if closeFile != nil {
 		if closeErr := closeFile.Close(); err == nil && closeErr != nil {
 			err = fmt.Errorf("close configuration file: %w", closeErr)
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read configuration JSON: %w", err)
-	}
-	if _, ok := value.(map[string]any); !ok {
-		return nil, errors.New("configuration JSON must be an object")
+		return nil, fmt.Errorf("read configuration YAML or JSON: %w", err)
 	}
 	return value, nil
 }

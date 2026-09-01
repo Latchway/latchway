@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceContext, type WorkspaceContextValue } from "../app/workspace-context-value";
 
 const { adminRequestMock } = vi.hoisted(() => ({ adminRequestMock: vi.fn() }));
 
@@ -41,9 +42,50 @@ function revision(id: string, document: JSONRecord, state: "active" | "draft", v
   return { activated_at: state === "active" ? instant : undefined, created_at: instant, created_by: "adm_0123456789abcdef", document, environment_id: environment, id, state, version };
 }
 
+function workspaceValue(search: WorkspaceContextValue["search"], updateSearch = vi.fn()): WorkspaceContextValue {
+  const organization = { created_at: instant, display_name: "Example", id: "org_0123456789abcdef", slug: "example" };
+  const application = { created_at: instant, display_name: "Mobile", id: "app_0123456789abcdef", organization_id: organization.id, slug: "mobile", status: "active" as const };
+  const selectedEnvironment = { application_id: application.id, created_at: instant, display_name: "Production", id: environment, kind: "production" as const, slug: "production", status: "active" as const };
+  return {
+    application,
+    applications: [application],
+    environment: selectedEnvironment,
+    environments: [selectedEnvironment],
+    invalidApplication: false,
+    invalidEnvironment: false,
+    isLoading: false,
+    organization,
+    search,
+    selectApplication: vi.fn(),
+    selectEnvironment: vi.fn(),
+    updateSearch
+  };
+}
+
 beforeEach(() => { adminRequestMock.mockReset(); });
 
 describe("dedicated configuration area editor", () => {
+  it("loads the exact environment from validated deep-link state after a reload", async () => {
+    const document = documentFixture();
+    adminRequestMock.mockResolvedValue({ data: revision(activeID, document, "active", 1), etag: '"active-etag"' });
+    render(<WorkspaceContext.Provider value={workspaceValue({ environment_id: environment })}><ConfigurationAreaEditor definition={configurationAreas.upstreams} /></WorkspaceContext.Provider>);
+
+    expect(screen.getByLabelText("Environment ID")).toHaveValue(environment);
+    expect(await screen.findByRole("button", { name: "Edit openai" })).toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/environments/${environment}/config`, expect.anything());
+  });
+
+  it("writes a validated environment selection to route search before loading", async () => {
+    const updateSearch = vi.fn();
+    const user = userEvent.setup();
+    render(<WorkspaceContext.Provider value={workspaceValue({}, updateSearch)}><ConfigurationAreaEditor definition={configurationAreas.upstreams} /></WorkspaceContext.Provider>);
+    await user.type(screen.getByLabelText("Environment ID"), environment);
+    await user.click(screen.getByRole("button", { name: "Load active configuration" }));
+
+    expect(updateSearch).toHaveBeenCalledWith({ environment_id: environment });
+    expect(adminRequestMock).not.toHaveBeenCalled();
+  });
+
   it("cancels a staged deletion without changing the resource or calling a mutation", async () => {
     const user = userEvent.setup(); const document = documentFixture();
     adminRequestMock.mockResolvedValue({ data: revision(activeID, document, "active", 1), etag: '"active-etag"' });
@@ -79,6 +121,8 @@ describe("dedicated configuration area editor", () => {
     await user.click(await screen.findByRole("button", { name: "Edit openai" }));
     const edited = { ...((original.spec as JSONRecord).upstreams as JSONRecord[])[0], baseUrl: "https://gateway.example.test/v1" };
     fireEvent.change(screen.getByLabelText("Resource JSON"), { target: { value: JSON.stringify(edited, null, 2) } });
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(false);
     await user.click(screen.getByRole("button", { name: "Stage resource" }));
     expect(screen.getByText("Staged changes")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Validate and activate" }));

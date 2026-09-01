@@ -79,6 +79,27 @@ active owner cannot be demoted or disabled. Because a local password belongs
 to the global administrator identity, an owner-driven reset is rejected when
 that identity also belongs to another organization.
 
+## Administrator sessions
+
+An owner API token scoped with `manage_owners` can list bounded,
+redaction-safe session metadata for the active organization and immediately
+revoke one session:
+
+```bash
+latchway admin sessions list
+latchway admin sessions list --page-size 50 --cursor CURSOR
+latchway admin sessions revoke asn_...
+```
+
+List output contains only the session ID, administrator ID and email,
+lifecycle timestamps, status, and `current` flag. It never contains session or
+CSRF credentials, token hints or hashes, network metadata, or revocation
+reasons. Because the CLI authenticates with an API token rather than a browser
+cookie, `current` is always false in a valid CLI response. The revoke command
+has no `--reason`: the server records its fixed reason, treats a repeated
+same-organization revoke as idempotent, and reports missing or
+cross-organization IDs as not found.
+
 ## API tokens
 
 List and revoke only the current administrator's token metadata through the
@@ -111,21 +132,43 @@ outside its own effective scope.
 
 ## Immutable configuration
 
+Application and environment lifecycle controls are separate from immutable
+configuration activation:
+
+```bash
+latchway applications disable app_... --reason 'contain compromised release'
+latchway applications enable app_...
+latchway environments disable env_... --reason 'isolate production traffic'
+latchway environments enable env_...
+```
+
+Disabling an application preserves its child environment status values while
+denying the whole scope and atomically revoking active legacy and component
+session/refresh credentials. Disabling one environment confines the same
+effect to that environment. Enabling allows future enrollment but never
+resurrects a revoked credential. Authorized forensic reads remain available;
+execution and configuration mutations remain fail-closed while either parent
+scope is disabled.
+
 Pull the active redaction-safe document:
 
 ```bash
 latchway --output json config pull --environment env_...
+latchway config pull --environment env_... --format yaml > environment.yaml
 ```
 
-Apply one duplicate-key-safe JSON object from a regular file or stdin. A dry
-run creates and validates an immutable draft but does not activate it. A normal
-apply validates, produces the redacted structural plan when an active base
-exists, and activates with the strong ETag returned for that exact draft.
+Apply one duplicate-key-safe YAML 1.2 or JSON object from a regular file or
+stdin. YAML anchors, aliases, merge keys, custom tags, timestamps, non-finite
+numbers, multiple documents, excessive nesting, and non-string mapping keys
+are rejected before any Admin API request. A dry run creates and validates an
+immutable draft but does not activate it. A normal apply validates, produces
+the redacted structural plan when an active base exists, and activates with the
+strong ETag returned for that exact draft.
 
 ```bash
-latchway config apply --environment env_... --file environment.json --dry-run
-latchway config apply --environment env_... --file environment.json
-latchway config apply --environment env_... --base-revision rev_... --file environment.json
+latchway config apply --environment env_... --file environment.yaml --dry-run
+latchway config apply --environment env_... --file environment.yaml
+latchway config apply --environment env_... --base-revision rev_... --file environment.yaml
 ```
 
 The base-revision form first copies the current active revision and then

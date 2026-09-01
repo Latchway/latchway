@@ -57,9 +57,15 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 ## Configuration, secrets, and routes
 
 ```bash
+latchway applications disable app_... --reason 'contain compromised release'
+latchway applications enable app_...
+latchway environments disable env_... --reason 'isolate production traffic'
+latchway environments enable env_...
+
 latchway --output json config pull --environment env_...
-latchway config apply --environment env_... --file environment.json --dry-run
-latchway config apply --environment env_... --file environment.json
+latchway config pull --environment env_... --format yaml > environment.yaml
+latchway config apply --environment env_... --file environment.yaml --dry-run
+latchway config apply --environment env_... --file environment.yaml
 latchway config validate rev_...
 latchway config plan rev_...
 latchway config diff rev_...
@@ -78,11 +84,26 @@ latchway routes simulate rev_... \
   --claims-file normalized-claims.json
 ```
 
+Configuration input accepts one bounded YAML 1.2 or JSON object. Duplicate
+keys, aliases, anchors, merge keys, custom tags, timestamps, non-finite
+numbers, multiple documents, and non-string mapping keys fail before the CLI
+sends an Admin API request. Dry-run and normal apply retain the same immutable
+draft, server validation, redacted plan, and strong-ETag activation boundary.
+
+Application disable preserves each child environment's own lifecycle status
+while denying the entire application and transactionally revoking its active
+legacy and component session/refresh credentials. Environment disable performs
+the same operation only for that environment. Enabling restores eligibility
+for future enrollment; it never revives a revoked credential. Disabled scopes
+remain available to authorized forensic request, usage, audit, user,
+installation, family, and configuration reads, while execution and mutations
+fail closed.
+
 Secret values can come from stdin, a regular file, a file descriptor, or a
 named environment variable. They are not accepted as command arguments or
 returned in output.
 
-## Administrators and API tokens
+## Administrators, sessions, and API tokens
 
 ```bash
 latchway admin accounts list
@@ -96,6 +117,10 @@ latchway admin accounts disable adm_...
 latchway admin accounts enable adm_...
 latchway admin accounts reset-password adm_... --from-stdin
 
+latchway admin sessions list
+latchway admin sessions list --page-size 50 --cursor CURSOR
+latchway admin sessions revoke asn_...
+
 latchway admin api-tokens list
 latchway admin api-tokens create \
   --name mobile-ci \
@@ -104,6 +129,15 @@ latchway admin api-tokens create \
   --token-output-file ./mobile-ci.token
 latchway admin api-tokens revoke tok_...
 ```
+
+Administrator-session commands require an API token scoped with
+`manage_owners`. List output is bounded metadata only: session and
+administrator IDs, administrator email, lifecycle timestamps, status, and the
+`current` flag. It excludes credentials, token hints or hashes, CSRF and
+network metadata, and revocation reasons. API-token-authenticated CLI requests
+always receive `current: false`. Revocation is immediate and deliberately has
+no `--reason` option because the server owns the persisted reason; retrying a
+successful same-organization revocation is idempotent.
 
 Token creation writes plaintext exactly once to a new regular mode-`0600` file.
 It refuses existing paths and symlinks and compensating-revokes the token if the

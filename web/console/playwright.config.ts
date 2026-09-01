@@ -21,5 +21,10 @@ export default defineConfig({
     timeout: 30_000,
     url: "http://127.0.0.1:4174"
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }]
+  projects: [
+    { grepInvert: /@mobile/, name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { grepInvert: /@mobile/, name: "firefox", testIgnore: ["live-stack.spec.ts"], use: { ...devices["Desktop Firefox"] } },
+    { grepInvert: /@mobile/, name: "webkit", testIgnore: ["live-stack.spec.ts"], use: { ...devices["Desktop Safari"] } },
+    { grep: /@mobile/, name: "mobile-webkit", use: { ...devices["iPhone 13"] } }
+  ]
 });

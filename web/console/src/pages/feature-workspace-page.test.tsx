@@ -15,9 +15,9 @@ vi.mock("../api/session", () => ({
 }));
 
 const workspace = {
-  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "habitify" },
+  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "habitify", status: "active" as "active" | "disabled" },
   applications: [],
-  environment: { active_revision_id: "rev_0123456789abcdef", application_id: "app_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production" },
+  environment: { active_revision_id: "rev_0123456789abcdef", application_id: "app_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production", status: "active" as "active" | "disabled" },
   environments: [], invalidApplication: false, invalidEnvironment: false, isLoading: false,
   search: {}, selectApplication: vi.fn(), selectEnvironment: vi.fn(), updateSearch: vi.fn()
 };
@@ -55,6 +55,10 @@ function revision(id: string, document: JSONRecord, state: "active" | "draft", v
 
 beforeEach(() => {
   adminRequestMock.mockReset();
+  workspace.search = {};
+  workspace.updateSearch.mockReset();
+  workspace.application.status = "active";
+  workspace.environment.status = "active";
 });
 
 describe("task-oriented feature setup", () => {
@@ -99,5 +103,33 @@ describe("task-oriented feature setup", () => {
 
     await user.click(screen.getByRole("button", { name: "Publish to Production" }));
     await waitFor(() => expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/config-revisions/${draftID}/activate`, expect.anything(), { etag: '"draft-etag-2"', method: "POST" }));
+  });
+
+  it("keeps disabled scopes inspectable while preventing configuration mutation", async () => {
+    workspace.environment.status = "disabled";
+    const original = activeDocument();
+    adminRequestMock.mockResolvedValue({ data: revision(activeID, original, "active", 1), etag: '"active-etag"' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><FeatureWorkspacePage /></QueryClientProvider>);
+
+    expect(await screen.findByText("weekly_summary")).toBeInTheDocument();
+    expect(screen.getByText("Selected scope is disabled").closest("section")).toHaveAttribute("role", "status");
+    expect(screen.getByRole("button", { name: "Review feature change" })).toBeDisabled();
+    expect(screen.getByText(/Re-enable both the application and environment/)).toBeInTheDocument();
+  });
+
+  it("restores and closes a validated feature selection without sharing builder inputs", async () => {
+    workspace.search = { feature: "weekly_summary" };
+    adminRequestMock.mockResolvedValue({ data: revision(activeID, activeDocument(), "active", 1), etag: '"active-etag"' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={queryClient}><FeatureWorkspacePage /></QueryClientProvider>);
+
+    expect(await screen.findByRole("heading", { name: "weekly_summary" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close feature" }));
+    expect(workspace.updateSearch).toHaveBeenLastCalledWith({ feature: undefined });
+    await user.click(screen.getByRole("button", { name: "weekly_summary" }));
+    expect(workspace.updateSearch).toHaveBeenLastCalledWith({ feature: "weekly_summary" }, { replace: false });
+    expect(workspace.updateSearch.mock.calls.flat().join(" ")).not.toMatch(/custom_access|limit_plan|primary_model|secret|token/i);
   });
 });

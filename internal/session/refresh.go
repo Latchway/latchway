@@ -165,6 +165,9 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 		return IssuedSession{}, fmt.Errorf("begin refresh rotation: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, preflightBinding.OrganizationID, preflightBinding.ApplicationID, preflightBinding.EnvironmentID); err != nil {
+		return IssuedSession{}, err
+	}
 	// Installation is the stable root of every session mutation. Lock it before
 	// the refresh row so rotation, exchange, and installation revocation share
 	// one lock order. This prevents a rotated child credential from appearing
@@ -368,6 +371,9 @@ func (store *Store) rotateComponentSession(
 		return IssuedSession{}, fmt.Errorf("begin component refresh rotation: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, preflightBinding.OrganizationID, preflightBinding.ApplicationID, preflightBinding.EnvironmentID); err != nil {
+		return IssuedSession{}, err
+	}
 	if err := lockComponentRefreshBoundary(ctx, tx, preflightBinding); err != nil {
 		return IssuedSession{}, err
 	}

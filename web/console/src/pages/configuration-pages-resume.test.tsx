@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildNativeTemplate } from "./native-template";
@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
       display_name: "Latchway Mobile",
       id: "app_01J00000000000000000000000",
       organization_id: "org_01J00000000000000000000000",
-      slug: "latchway-mobile"
+      slug: "latchway-mobile",
+      status: "active" as const
     },
     applications: [],
     environment: {
@@ -22,7 +23,8 @@ const mocks = vi.hoisted(() => ({
       display_name: "Development",
       id: "env_01J00000000000000000000000",
       kind: "development" as const,
-      slug: "development"
+      slug: "development",
+      status: "active" as const
     },
     environments: [],
     invalidApplication: false,
@@ -125,6 +127,10 @@ describe("resumable setup wizard", () => {
     expect(await screen.findByRole("button", { name: "Credential added" })).toBeDisabled();
     expect(screen.getByText(/Revision/).closest("p")).toHaveTextContent("active");
     expect(screen.getByLabelText("Secret value")).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText("Full configuration JSON"), { target: { value: "{}" } });
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(false);
   });
 
   it("reuses an exact application and environment instead of issuing duplicate POSTs", async () => {

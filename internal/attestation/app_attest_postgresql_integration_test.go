@@ -289,6 +289,75 @@ func TestPostgreSQLAppAttestKeyStoreSeparatesAppleEnvironmentFromBindingSlug(t *
 	}
 }
 
+func TestPostgreSQLAppAttestRegistrationCannotCrossApplicationDisable(t *testing.T) {
+	fixture := newPostgreSQLAppAttestFixture(t)
+	disabler, err := fixture.pool.BeginTx(fixture.ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatalf("begin App Attest disable fixture: %v", err)
+	}
+	defer func() { _ = disabler.Rollback(fixture.ctx) }()
+	if _, err := disabler.Exec(fixture.ctx, `
+		SELECT 1 FROM applications
+		WHERE organization_id = $1 AND application_id = $2
+		FOR UPDATE
+	`, fixture.organizationID, fixture.applicationID); err != nil {
+		t.Fatalf("lock App Attest application scope: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- fixture.store.TransactAppAttestKey(fixture.ctx, fixture.keyID, func(
+			_ AppAttestStoredKey,
+			exists bool,
+		) (AppAttestStoredKey, error) {
+			if exists {
+				return AppAttestStoredKey{}, ErrAppAttestKeyStore
+			}
+			return cloneAppAttestStoredKey(fixture.state), nil
+		})
+	}()
+	waitForPostgreSQLAppAttestScopeLock(t, fixture)
+	if _, err := disabler.Exec(fixture.ctx, `
+		UPDATE applications
+		SET status = 'disabled',
+		    disabled_at = GREATEST(created_at, statement_timestamp()),
+		    updated_at = GREATEST(updated_at, created_at, statement_timestamp())
+		WHERE organization_id = $1 AND application_id = $2
+	`, fixture.organizationID, fixture.applicationID); err != nil {
+		t.Fatalf("stage App Attest application disable: %v", err)
+	}
+	if err := disabler.Commit(fixture.ctx); err != nil {
+		t.Fatalf("commit App Attest application disable: %v", err)
+	}
+	if err := <-result; !errors.Is(err, ErrAppAttestKeyStore) {
+		t.Fatalf("App Attest registration crossed application disable: %v", err)
+	}
+	assertPostgreSQLAppAttestKeyCount(t, fixture, 0)
+}
+
+func waitForPostgreSQLAppAttestScopeLock(t *testing.T, fixture postgreSQLAppAttestFixture) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%app_attest_active_application_lock%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect App Attest application lock: %v", err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("App Attest registration did not wait for the application lifecycle lock")
+}
+
 func TestPostgreSQLAppAttestKeyStoreSerializesConcurrentRegistrationAndCounters(t *testing.T) {
 	fixture := newPostgreSQLAppAttestFixture(t)
 	const registrars = 12

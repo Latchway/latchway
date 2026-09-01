@@ -505,9 +505,9 @@ Shape: object. Definition constraints: unknown properties rejected.
 
 | Property | Shape | Required | Constraints | Notes |
 | --- | --- | --- | --- | --- |
-| `storePromptBodies` | boolean | No | default: `false` | — |
-| `storeResponseBodies` | boolean | No | default: `false` | — |
-| `bodyRetention` | `Duration` | No | — | — |
+| `storePromptBodies` | boolean | No | default: `false` | Reserved for a future contract version. Latchway v1 rejects activation when this value is true. |
+| `storeResponseBodies` | boolean | No | default: `false` | Reserved for a future contract version. Latchway v1 rejects activation when this value is true. |
+| `bodyRetention` | `Duration` | No | — | Reserved duration for a future body-storage contract; it does not enable storage in v1. |
 
 ## Validation workflow
 

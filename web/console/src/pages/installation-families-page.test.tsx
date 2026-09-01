@@ -14,6 +14,7 @@ vi.mock("../api/session", () => ({
 }));
 
 import { InstallationFamiliesPage } from "./installation-families-page";
+import { WorkspaceContext, type WorkspaceContextValue } from "../app/workspace-context-value";
 
 const instant = "2026-08-29T00:00:00Z";
 const environmentID = "env_0123456789abcdef";
@@ -92,10 +93,19 @@ describe("Installation Family console", () => {
     expect(screen.getByText("keychain")).toBeInTheDocument();
     expect(screen.getByText("Refresh reuse events").parentElement).toHaveTextContent("2");
     expect(screen.getByText("Closed session families").parentElement).toHaveTextContent("3");
-    await user.click(screen.getByRole("button", { name: "Require re-attestation" }));
+    await user.click(screen.getByRole("button", { name: "Review re-attestation" }));
+    expect(screen.getByRole("heading", { name: "Require fresh trust for ios-widget?" })).toBeInTheDocument();
+    expect(screen.getByText(/No old refresh credential is restored/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Operator reason"), "console operator revocation");
+    await user.click(screen.getByLabelText(/immediately expires trust and refresh credentials/i));
+    await user.click(screen.getByRole("button", { name: "Require fresh component trust" }));
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/client-components/${childID}/require-reattestation`, expect.anything(), { body: { reason: "console operator revocation" }, method: "POST" });
     expect((await screen.findByText("Session status")).parentElement).toHaveTextContent("revoked");
-    await user.click(screen.getByRole("button", { name: "Revoke component" }));
+    await user.click(screen.getByRole("button", { name: "Review component revocation" }));
+    expect(screen.getByText(/Component revocation is terminal/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Operator reason"), "console operator revocation");
+    await user.click(screen.getByLabelText(/immediately and permanently revokes the stated component/i));
+    await user.click(screen.getByRole("button", { name: "Revoke component credential scope" }));
 
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/client-components/${childID}/revoke`, expect.anything(), { body: { reason: "console operator revocation" }, method: "POST" });
     expect(await screen.findByText("console operator revocation")).toBeInTheDocument();
@@ -121,29 +131,69 @@ describe("Installation Family console", () => {
     await user.type(screen.getByLabelText("Environment ID"), environmentID);
     await user.click(screen.getByRole("button", { name: "List families" }));
     await user.click(await screen.findByRole("button", { name: familyID }));
-    await user.clear(screen.getByLabelText("Operator reason"));
+    await user.click(screen.getByRole("button", { name: "Review containing-app renewal" }));
     await user.type(screen.getByLabelText("Operator reason"), "security response");
-    await user.click(screen.getByRole("button", { name: "Require containing-app renewal" }));
+    await user.click(screen.getByLabelText(/immediately blocks future refresh and provisioning/i));
+    await user.click(screen.getByRole("button", { name: "Require fresh family trust" }));
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/installation-families/${familyID}/require-renewal`, expect.anything(), { body: { reason: "security response" }, method: "POST" });
-    await user.click(screen.getByRole("button", { name: "Revoke family" }));
+    await user.click(screen.getByRole("button", { name: "Review family revocation" }));
+    await user.type(screen.getByLabelText("Operator reason"), "security response");
+    await user.click(screen.getByLabelText(/permanently revokes the complete Installation Family/i));
+    await user.click(screen.getByRole("button", { name: "Revoke complete family" }));
 
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/installation-families/${familyID}/revoke`, expect.anything(), { body: { reason: "security response" }, method: "POST" });
     expect(await screen.findByText("security response")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Revoke family" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review family revocation" })).toBeDisabled();
   });
 
   it("prefills the environment and pseudonymous-user filters from a user-detail link", async () => {
     const userID = "usr_0123456789abcdef";
     window.history.replaceState({}, "", `/installation-families?environment_id=${environmentID}&user_id=${userID}`);
     adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
-    const user = userEvent.setup();
     render(<InstallationFamiliesPage />);
 
     expect(screen.getByLabelText("Environment ID")).toHaveValue(environmentID);
     expect(screen.getByLabelText("User ID (optional)")).toHaveValue(userID);
-    await user.click(screen.getByRole("button", { name: "List families" }));
+    expect(await screen.findByRole("button", { name: "List families" })).toBeEnabled();
 
     expect(adminRequestMock.mock.calls[0]?.[0]).toContain(`environment_id=${environmentID}`);
     expect(adminRequestMock.mock.calls[0]?.[0]).toContain(`user_id=${userID}`);
+  });
+
+  it("restores exact family and component detail from validated workspace state and keeps operation review local", async () => {
+    const detail = { ...family, components: [root, child] };
+    adminRequestMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/installation-families?")) return { data: { items: [family], page: { has_more: false } } };
+      if (path === `/admin/v1/installation-families/${familyID}`) return { data: detail };
+      if (path === `/admin/v1/client-components/${childID}`) return { data: child };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const updateSearch = vi.fn();
+    const workspace: WorkspaceContextValue = {
+      application: { created_at: instant, display_name: "Mobile App", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "mobile-app", status: "active" },
+      applications: [],
+      environment: { application_id: "app_0123456789abcdef", created_at: instant, display_name: "Production", id: environmentID, kind: "production", slug: "production", status: "active" },
+      environments: [],
+      invalidApplication: false,
+      invalidEnvironment: false,
+      isLoading: false,
+      organization: { created_at: instant, display_name: "Example", id: "org_0123456789abcdef", slug: "example" },
+      search: { component_id: childID, environment_id: environmentID, family_id: familyID },
+      selectApplication: vi.fn(),
+      selectEnvironment: vi.fn(),
+      updateSearch
+    };
+    const user = userEvent.setup();
+    render(<WorkspaceContext.Provider value={workspace}><InstallationFamiliesPage /></WorkspaceContext.Provider>);
+
+    expect(await screen.findByRole("heading", { name: "ios-widget" })).toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/installation-families/${familyID}`, expect.anything());
+    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/client-components/${childID}`, expect.anything());
+    await user.click(screen.getByRole("button", { name: "Review component revocation" }));
+    expect(screen.getByRole("heading", { name: "Revoke ios-widget?" })).toBeInTheDocument();
+    expect(updateSearch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Close component" }));
+    expect(updateSearch).toHaveBeenLastCalledWith({ component_id: undefined, cursor: undefined, environment_id: environmentID, family_id: familyID, user_id: undefined }, { replace: true });
   });
 });

@@ -43,7 +43,10 @@ export function useConfigurationTask(area: string) {
   const response = published?.data.environment_id === environment?.id ? published : configuration.data;
   const source = response?.data;
   const activeDraft = draft?.revision.environment_id === environment?.id ? draft : undefined;
-  const canConfigure = session.data?.mode === "configured" && (session.data.session?.capabilities.includes("activate_configuration") ?? false);
+  const canConfigure = session.data?.mode === "configured"
+    && (session.data.session?.capabilities.includes("activate_configuration") ?? false)
+    && workspace?.application?.status !== "disabled"
+    && environment?.status !== "disabled";
 
   async function refreshLatest(): Promise<void> {
     if (!environment) return;
@@ -51,7 +54,7 @@ export function useConfigurationTask(area: string) {
   }
 
   async function stage(document: JSONRecord, description: string): Promise<TaskConfigurationDraft | undefined> {
-    if (!environment || !source) return undefined;
+    if (!canConfigure || !environment || !source) return undefined;
     setBusy(true);
     setProblem(undefined);
     setDraft(undefined);
@@ -76,7 +79,7 @@ export function useConfigurationTask(area: string) {
   }
 
   async function publish(): Promise<ConfigurationRevision | undefined> {
-    if (!activeDraft || !activeDraft.report.valid || !environment) return undefined;
+    if (!canConfigure || !activeDraft || !activeDraft.report.valid || !environment) return undefined;
     setBusy(true);
     setProblem(undefined);
     try {

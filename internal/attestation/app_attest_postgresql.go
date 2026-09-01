@@ -270,6 +270,34 @@ func insertPostgreSQLAppAttestKey(
 	keyID [sha256.Size]byte,
 	state AppAttestStoredKey,
 ) error {
+	// Application/environment disable takes these locks in the same order and
+	// then revokes every unlinked key it can see. Keep the scope locked through
+	// insertion so a newly registered key cannot commit after that scan and
+	// survive a later re-enable.
+	var marker int
+	if err := tx.QueryRow(ctx, `
+		/* app_attest_active_application_lock */
+		SELECT 1
+		FROM applications AS application
+		JOIN organizations AS organization
+		  ON organization.organization_id = application.organization_id
+		WHERE application.application_id = $1
+		  AND application.status = 'active' AND application.disabled_at IS NULL
+		  AND organization.status = 'active' AND organization.disabled_at IS NULL
+		FOR SHARE OF application
+	`, state.ApplicationID).Scan(&marker); err != nil {
+		return ErrAppAttestKeyStore
+	}
+	if err := tx.QueryRow(ctx, `
+		/* app_attest_active_environment_lock */
+		SELECT 1
+		FROM environments
+		WHERE application_id = $1 AND slug = $2
+		  AND status = 'active' AND disabled_at IS NULL
+		FOR SHARE
+	`, state.ApplicationID, state.EnvironmentID).Scan(&marker); err != nil {
+		return ErrAppAttestKeyStore
+	}
 	category, version := appAttestExtensionColumns(state)
 	command, err := tx.Exec(ctx, `
 		INSERT INTO attestation_keys (

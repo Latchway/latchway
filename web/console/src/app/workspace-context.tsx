@@ -15,9 +15,9 @@ import {
   useOptionalWorkspace
 } from "./workspace-context-value";
 
-function selectedBySlug<T extends { slug: string }>(items: T[], requested: string | undefined): T | undefined {
+function selectedBySlug<T extends { slug: string; status?: string }>(items: T[], requested: string | undefined): T | undefined {
   if (requested) return items.find((item) => item.slug === requested);
-  return items[0];
+  return items.find((item) => item.status !== "disabled") ?? items[0];
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -93,9 +93,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         to: location.pathname
       });
     },
-    updateSearch: (patch) => {
+    updateSearch: (patch, options) => {
       void navigate({
-        replace: true,
+        replace: options?.replace ?? true,
         search: (previous) => ({ ...previous, ...patch }),
         to: location.pathname
       });
@@ -117,5 +117,9 @@ export function EnvironmentRequired({ children }: { children: ReactNode }) {
   if (!workspace.application || !workspace.environment) {
     return <section className="empty-state"><h1>Create an application environment first.</h1><p>Task pages remain disabled until the Admin API returns an explicit environment.</p></section>;
   }
-  return children;
+  const disabled = workspace.application.status === "disabled" || workspace.environment.status === "disabled";
+  return <>
+    {disabled ? <section className="control-notice" role="status"><strong>Selected scope is disabled</strong><span>Historical requests, usage, audit records, users, installations, and configuration remain available for investigation. Traffic and configuration mutations stay blocked until both the application and environment are active; enabling the scope never restores revoked credentials.</span></section> : null}
+    {children}
+  </>;
 }

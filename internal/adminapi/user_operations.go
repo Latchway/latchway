@@ -267,7 +267,7 @@ func userOperationTarget(
 ) (string, string, error) {
 	lock := ""
 	if forUpdate {
-		lock = " FOR UPDATE OF users"
+		lock = " FOR UPDATE OF users FOR SHARE OF application, environment"
 	}
 	var applicationID, status string
 	err := queryer.QueryRow(ctx, `

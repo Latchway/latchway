@@ -57,7 +57,7 @@ problem contract in [Errors](/reference/errors).
 
 ## Operation index
 
-The normative OpenAPI document currently declares 70 operations.
+The normative OpenAPI document currently declares 77 operations.
 Each row below is generated; a source change without this page changing fails CI.
 
 ### Authentication
@@ -82,6 +82,8 @@ Each row below is generated; a source change without this page changing fails CI
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/admin/v1/applications` | `listApplications` | `AdminCookie` or `AdminToken` | `organization_id` (query); `cursor` (query); `page_size` (query) | None | `200` `application/json` `ApplicationPage` | List tenant-scoped applications. |
 | `POST` | `/admin/v1/applications` | `createApplication` | `AdminCookie` or `AdminToken` | `X-CSRF-Token` (header) | `application/json` `CreateApplicationRequest` (required) | `201` `application/json` `Application` | Create an application within an organization. |
+| `POST` | `/admin/v1/applications/{applicationId}/disable` | `disableApplication` | `AdminCookie` or `AdminToken` | `applicationId` (path, required); `X-CSRF-Token` (header) | `application/json` `DisableResourceRequest` (required) | `200` `application/json` `Application` | Disable an application and revoke every active client credential in its scope. Child environment statuses are preserved. The supplied reason is never copied into the audit ledger; only its presence is recorded. |
+| `POST` | `/admin/v1/applications/{applicationId}/enable` | `enableApplication` | `AdminCookie` or `AdminToken` | `applicationId` (path, required); `X-CSRF-Token` (header) | None | `200` `application/json` `Application` | Re-enable an application for future eligibility. Previously revoked credentials remain revoked and child environment statuses are unchanged. |
 
 ### Environments
 
@@ -89,6 +91,8 @@ Each row below is generated; a source change without this page changing fails CI
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/admin/v1/applications/{applicationId}/environments` | `listEnvironments` | `AdminCookie` or `AdminToken` | `applicationId` (path, required) | None | `200` `application/json` object | List environments for an application. |
 | `POST` | `/admin/v1/applications/{applicationId}/environments` | `createEnvironment` | `AdminCookie` or `AdminToken` | `applicationId` (path, required); `X-CSRF-Token` (header) | `application/json` `CreateEnvironmentRequest` (required) | `201` `application/json` `Environment` | Create an application environment. |
+| `POST` | `/admin/v1/environments/{environmentId}/disable` | `disableEnvironment` | `AdminCookie` or `AdminToken` | `environmentId` (path, required); `X-CSRF-Token` (header) | `application/json` `DisableResourceRequest` (required) | `200` `application/json` `Environment` | Disable an environment and revoke every active client credential in its scope. The supplied reason is never copied into the audit ledger; only its presence is recorded. |
+| `POST` | `/admin/v1/environments/{environmentId}/enable` | `enableEnvironment` | `AdminCookie` or `AdminToken` | `environmentId` (path, required); `X-CSRF-Token` (header) | None | `200` `application/json` `Environment` | Re-enable an environment for future eligibility. Previously revoked credentials remain revoked. A disabled parent application still blocks all execution and mutations. |
 
 ### Configuration
 
@@ -132,6 +136,13 @@ Each row below is generated; a source change without this page changing fails CI
 | `POST` | `/admin/v1/administrators/{adminUserId}/disable` | `disableAdministrator` | `AdminCookie` or `AdminToken` | `adminUserId` (path, required); `X-CSRF-Token` (header) | None | `200` `application/json` `Administrator` | Disable an administrator membership and revoke its scoped credentials. The final active owner cannot be disabled. Existing sessions and API tokens in the organization are revoked transactionally. |
 | `POST` | `/admin/v1/administrators/{adminUserId}/enable` | `enableAdministrator` | `AdminCookie` or `AdminToken` | `adminUserId` (path, required); `X-CSRF-Token` (header) | None | `200` `application/json` `Administrator` | Re-enable an administrator membership for future authentication. |
 | `POST` | `/admin/v1/administrators/{adminUserId}/reset-password` | `resetAdministratorPassword` | `AdminCookie` or `AdminToken` | `adminUserId` (path, required); `X-CSRF-Token` (header) | `application/json` `ResetAdministratorPasswordRequest` (required) | `200` `application/json` `Administrator` | Replace a local password and revoke every active administrator credential. Requires `manage_owners`. Because local passwords are global to an administrator identity, owner-driven reset is rejected when the target has any membership in another organization. The password is write-only; session and API-token revocation is atomic with the credential change. |
+
+### Administrator sessions
+
+| Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/admin/v1/admin-sessions` | `listAdminSessions` | `AdminCookie` or `AdminToken` | `cursor` (query); `page_size` (query) | None | `200` `application/json` `AdminSessionMetadataPage` | List redaction-safe administrator sessions in the active organization. Requires `manage_owners`. Returns administrator identity and lifecycle metadata only. Token hints, hashes, CSRF material, network metadata, and revocation reasons are never returned. `current` is true only when the request itself authenticated with that cookie session; bearer-token requests report false for every item. |
+| `POST` | `/admin/v1/admin-sessions/{adminSessionId}/revoke` | `revokeAdminSession` | `AdminCookie` or `AdminToken` | `adminSessionId` (path, required); `X-CSRF-Token` (header) | None | `204` no body | Revoke one administrator session in the active organization. Requires `manage_owners`. The persisted revocation reason is fixed by the server and cannot be supplied by the caller. Retrying a successfully revoked same-tenant session is idempotent; missing or cross-tenant IDs return `resource_not_found`. Revoking the current cookie session clears its cookies after the transaction commits. |
 
 ### Users
 
@@ -211,6 +222,7 @@ Each row below is generated; a source change without this page changing fails CI
 
 | Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/admin/v1/events` | `streamAdminEvents` | `AdminCookie` or `AdminToken` | `environment_id` (query) | None | `200` `text/event-stream` string | Stream redaction-safe refresh hints for live operational views. Emits only bounded topic names for requests, usage, configuration, audit, self-tests, and health. It never includes resource identifiers, request or response content, identity claims, credentials, proofs, provider errors, or counts. The stream is deliberately closed at least once per minute so the reconnect reauthenticates the administrator credential; every reconnect must rehydrate canonical state through the ordinary Admin API. The server also revalidates the durable cookie session or API token before every refresh poll, so revocation, expiry, administrator disablement, and membership changes close an established stream without waiting for the one-minute cap. Events deliberately omit `id` fields; `Last-Event-ID` is ignored and is not a replay contract. |
 | `GET` | `/admin/v1/system` | `getSystemStatus` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `SystemStatus` | Return redacted build, protocol, database and role status. |
 | `GET` | `/admin/v1/system/doctor` | `runSystemDoctor` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `DoctorReport` | Run the canonical bounded, redaction-safe deployment diagnostics. Returns the same structured checks and facts used by `latchway doctor` and the Console Health center. |
 | `GET` | `/admin/v1/system/support-bundle` | `downloadSystemSupportBundle` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `SupportBundle` | Download a structurally allowlisted support bundle. Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key. |

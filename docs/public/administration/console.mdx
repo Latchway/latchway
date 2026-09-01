@@ -32,7 +32,7 @@ cannot exceed its owner's current organization role or its explicit scopes.
 | `run_self_tests` | Immediate and scheduled bounded verification |
 | `inspect_users` | Users, installations, requests, usage, and audit views |
 | `revoke_installations` | Block users and revoke installations |
-| `view_prompt_bodies` | Separately gated optional body access when policy permits it |
+| `view_prompt_bodies` | Reserved capability; v1 rejects body storage and exposes no body-read endpoint |
 
 ## Console areas
 
@@ -51,6 +51,35 @@ Resource editors clone the complete active document, replace only the selected
 resource wrapper, preserve every other parsed value, and submit the full draft
 under its ETag. The server remains authoritative for validation, planning,
 simulation, activation, tenancy, and auditing.
+
+## Live operational refresh
+
+Servers that negotiate `admin_event_stream` expose a same-origin Server-Sent
+Events channel. It sends only closed topic hints for requests, usage,
+configuration, audit, self-tests, and health. The console then reloads the
+visible view through its canonical bounded endpoint. The stream never includes
+resource identifiers, user data, counts, request content, credentials, proofs,
+or provider errors.
+
+Each connection closes within one minute so reconnecting reauthenticates the
+administrator session and bounds revocation latency. Reconnect always reloads
+canonical state; event IDs are not a durable replay log. A compatible older
+server without this optional capability uses a bounded foreground refresh
+fallback instead of failing the console compatibility check.
+
+## Application and environment lifecycle
+
+Applications and environments expose explicit active/disabled state. Disable
+requires `activate_configuration`, a bounded reason, and an acknowledgement of
+the immediate credential effect. The server changes status and transactionally
+revokes active legacy and component session/refresh credentials in the exact
+scope. Disabling an application preserves each child environment's own status.
+
+Enabling restores only future eligibility. It never restores a revoked access
+grant, refresh token, rotation result, or component-session family. The console
+keeps disabled scopes selectable for authorized forensic request, usage, audit,
+user, installation-family, and configuration-history inspection, but disables
+configuration mutation. The server independently enforces the same boundary.
 
 ## Secrets
 

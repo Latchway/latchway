@@ -71,6 +71,8 @@ const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
 
+export const NoContentSchema = z.undefined();
+
 export const AdministratorSchema = z
   .object({
     created_at: Instant,
@@ -89,6 +91,27 @@ export const AdministratorSchema = z
 
 export const AdministratorPageSchema = z
   .object({ items: z.array(AdministratorSchema).max(200), page: PageInfo })
+  .strict();
+
+export const AdminSessionMetadataSchema = z
+  .object({
+    administrator: z
+      .object({
+        email: z.email().max(320),
+        id: z.string().regex(/^adm_[A-Za-z0-9_-]{16,128}$/)
+      })
+      .strict(),
+    created_at: Instant,
+    current: z.boolean(),
+    expires_at: Instant,
+    id: z.string().regex(/^asn_[A-Za-z0-9_-]{16,128}$/),
+    last_seen_at: Instant,
+    status: z.enum(["active", "expired", "revoked"])
+  })
+  .strict();
+
+export const AdminSessionMetadataPageSchema = z
+  .object({ items: z.array(AdminSessionMetadataSchema).max(200), page: PageInfo })
   .strict();
 
 export const AdministratorCapabilitySchema = z
@@ -975,6 +998,12 @@ export const SystemStatusSchema = z
     protocol_versions: z.array(z.number().int()).max(32),
     ready: z.boolean(),
     role: z.enum(["all", "api", "worker"]),
+    server_capabilities: z
+      .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/))
+      .max(32)
+      .refine((capabilities) => new Set(capabilities).size === capabilities.length, {
+        message: "Server capabilities must be unique."
+      }),
     server_version: z.string().max(128)
   })
   .strict();
@@ -1326,6 +1355,8 @@ export const ConfigurationPlanSchema = z
 export type ApplicationUser = z.infer<typeof UserSchema>;
 export type Administrator = z.infer<typeof AdministratorSchema>;
 export type AdministratorPage = z.infer<typeof AdministratorPageSchema>;
+export type AdminSessionMetadata = z.infer<typeof AdminSessionMetadataSchema>;
+export type AdminSessionMetadataPage = z.infer<typeof AdminSessionMetadataPageSchema>;
 export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;
 export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;

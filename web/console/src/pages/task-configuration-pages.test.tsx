@@ -15,9 +15,9 @@ vi.mock("../api/session", () => ({
 }));
 
 const workspace = {
-  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "habitify" },
+  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "habitify", status: "active" as const },
   applications: [],
-  environment: { active_revision_id: "rev_0123456789abcdef", application_id: "app_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", display_name: "Development", id: "env_0123456789abcdef", kind: "development" as const, slug: "development" },
+  environment: { active_revision_id: "rev_0123456789abcdef", application_id: "app_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", display_name: "Development", id: "env_0123456789abcdef", kind: "development" as const, slug: "development", status: "active" as const },
   environments: [], invalidApplication: false, invalidEnvironment: false, isLoading: false,
   search: {}, selectApplication: vi.fn(), selectEnvironment: vi.fn(), updateSearch: vi.fn()
 };

@@ -44,13 +44,12 @@ INSERT INTO applications (
     created_at,
     updated_at
 ) VALUES ($1, $2, $3, $4, 'active', $5, $5)
-RETURNING application_id, organization_id, slug, display_name, status, created_at, updated_at;
+RETURNING application_id, organization_id, slug, display_name, status, disabled_at, created_at, updated_at;
 
 -- name: ListApplications :many
-SELECT application_id, organization_id, slug, display_name, status, created_at, updated_at
+SELECT application_id, organization_id, slug, display_name, status, disabled_at, created_at, updated_at
 FROM applications
 WHERE organization_id = sqlc.arg(organization_id)
-  AND status = 'active'
   AND (
       sqlc.narg(cursor_created_at)::timestamptz IS NULL
       OR (created_at, application_id) > (
@@ -73,14 +72,13 @@ INSERT INTO environments (
     created_at,
     updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
-RETURNING environment_id, organization_id, application_id, slug, display_name, kind, status, created_at, updated_at;
+RETURNING environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at;
 
 -- name: ListEnvironments :many
-SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, created_at, updated_at
+SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at
 FROM environments
 WHERE organization_id = $1
   AND application_id = $2
-  AND status = 'active'
 ORDER BY created_at, environment_id;
 
 -- name: AdminSessionView :many

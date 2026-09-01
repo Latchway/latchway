@@ -467,7 +467,7 @@ func resolveSecretEnvironment(ctx context.Context, query managerQuery, organizat
 		  AND organization.status = 'active' AND organization.disabled_at IS NULL
 	`
 	if forUpdate {
-		statement += " FOR UPDATE OF environment"
+		statement += " FOR UPDATE OF environment FOR SHARE OF application"
 	}
 	var environment secretEnvironment
 	err := query.QueryRow(ctx, statement, organizationID, environmentID).Scan(
@@ -507,7 +507,7 @@ func lockSecretEnvironment(ctx context.Context, tx pgx.Tx, organizationID, secre
 		  AND environment.status = 'active' AND environment.disabled_at IS NULL
 		  AND application.status = 'active' AND application.disabled_at IS NULL
 		  AND organization.status = 'active' AND organization.disabled_at IS NULL
-		FOR UPDATE OF environment
+		FOR UPDATE OF environment FOR SHARE OF application
 	`, organizationID, secretID).Scan(
 		&environment.OrganizationID, &environment.ApplicationID, &environment.EnvironmentID, &name,
 	)

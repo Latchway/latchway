@@ -33,14 +33,18 @@ identity tokens, access or refresh tokens, DPoP private keys and proofs,
 attestation objects, provider credentials, provider error bodies, and raw
 internal errors.
 
-## Optional body retention
+## Body retention is unavailable in v1
 
-Prompt and response storage is disabled by default. Enabling it changes the
-deployment privacy posture and requires an explicit environment policy,
-documented purpose, separate authorization, encryption, bounded size and
-retention, audited access, and visible operator warnings. Disabling capture
-requires the documented retention deletion process; it does not erase earlier
-records by itself.
+Latchway v1 never stores prompt or response bodies. The configuration schema
+reserves `storePromptBodies`, `storeResponseBodies`, and `bodyRetention` for a
+future contract version, but activation fails with
+`body_storage_unsupported_v1` when either storage flag is `true`. Keep both
+flags `false` or omit the privacy block.
+
+Future body capture would require a separately implemented and verified policy
+for sampling, maximum bytes, redaction, encryption, bounded retention,
+authorized and audited reads, visible operator warnings, and deletion. The
+reserved fields do not claim or simulate those controls.
 
 <Warning>
   Latchway's no-body default does not change the selected upstream provider's

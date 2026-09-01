@@ -84,6 +84,9 @@ func (store *Store) Authorize(ctx context.Context, principal AccessPrincipal) (A
 		return Authorization{}, fmt.Errorf("begin session authorization: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID); err != nil {
+		return Authorization{}, err
+	}
 	if err := lockAccessInstallation(ctx, tx, principal, false); err != nil {
 		return Authorization{}, err
 	}
@@ -541,6 +544,9 @@ func (store *Store) authorizeAccess(ctx context.Context, input AccessRequestInpu
 		return authorizationState{}, fmt.Errorf("begin access authorization: %w", err)
 	}
 	defer rollbackSigning(tx)
+	if err := lockActiveCredentialScope(ctx, tx, input.Principal.OrganizationID, input.Principal.ApplicationID, input.Principal.EnvironmentID); err != nil {
+		return authorizationState{}, err
+	}
 	if err := lockAccessInstallation(ctx, tx, input.Principal, mutationLock); err != nil {
 		return authorizationState{}, err
 	}

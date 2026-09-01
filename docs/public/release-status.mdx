@@ -1,6 +1,6 @@
 ---
 title: "Release status"
-description: "What the Latchway version 1 source candidate proves—and what remains externally gated."
+description: "What the last clean Latchway version 1 checkpoint proves, what changed locally, and what remains gated."
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
@@ -10,9 +10,12 @@ lastVerified: "2026-09-01"
 owner: "release-engineering"
 ---
 
-Latchway version 1 is an implementation source candidate. The core and four
-SDK repositories build and pass their local conformance suites, but no public
-version 1 release should be inferred from source version strings.
+Latchway version 1 has a historical clean source-conformance tuple. The current
+core working tree adds Admin-session, configuration-transfer, live-refresh, and
+lifecycle-concurrency work and passes its complete local implementation gates.
+It remains uncommitted and cannot produce a new clean cross-repository report
+until its contract and repository coordinates are rebound. No public version 1
+release should be inferred from source version strings or local tests.
 
 The current core binary identifies as `1.0.0-rc.1`. The intended stable server
 and SDK versions are `1.0.0`; draft contract `1.0.0` selects wire protocol `2`
@@ -21,12 +24,14 @@ coordinates are release intent until protected promotion completes.
 
 | Area | Current claim |
 | --- | --- |
-| Core gateway and control plane | Implemented and locally validated |
+| Core gateway and control plane | Historical clean tuple validated; complete current local implementation gates pass, while clean commit/rebinding remains pending |
 | React Native, iOS, Android, and JavaScript SDK sources | Implemented and locally validated |
-| Protocol contract | Pinned and checked across repositories |
-| Public tags and immutable GitHub releases | Not yet promoted |
+| Protocol contract | Historical bundle pinned and checked across repositories; regenerate and rebind after the current Admin API delta |
+| Admin sessions and configuration transfer | Canonical API/CLI/Console session inventory/revoke, negotiated read-only safe mode, and bounded redaction-safe YAML/JSON transfer with exact numeric preservation, immutable strong-ETag staging, and explicit activation review are implemented in the current local delta; complete local gates pass |
+| Admin live refresh | Authenticated SSE refresh hints are implemented with no row data, principal revalidation, reconnect behavior, and polling/manual fallback when `admin_event_stream` is absent; complete local gates pass |
+| Public tags and immutable GitHub releases | No local version 1 tags; no remote tag or GitHub release is authenticated or verified |
 | npm, Swift/CocoaPods, and Maven publication | Not yet published |
-| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with automatic Apple Development signing, including production App Attest registration and same-key assertion. Current source `2d78f588671d35512c6d0d244c89ec61e6a48cfa` adds a Debug-only native delegated App Intent path that passes local source/build gates but still requires physical invocation. An Apple distribution-derived protected candidate and physical Android/Play evidence remain required. |
+| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with automatic Apple Development signing, including production App Attest registration and same-key assertion. Current source `2d78f588671d35512c6d0d244c89ec61e6a48cfa` adds a Debug-only native delegated App Intent path that passes local source/build gates but still requires physical invocation. No new live device proof is authorized in the current run. An Apple distribution-derived protected candidate remains required; physical Android/Play verification was intentionally skipped because no Android device is available. |
 | Firebase Web App Check | A browser-minted reCAPTCHA Enterprise token exchange and server verifier pass against the current source gateway; protected immutable-candidate rerun remains required |
 | Cloudflare Turnstile | No configured observation exists; protected exact-candidate evidence remains required |
 | Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
@@ -40,6 +45,15 @@ provider, mobile device, cloud deployment, multi-replica failure, backup and
 restore, upgrade, load, vulnerability, SBOM, signature, provenance, registry,
 and cross-repository conformance gates. Local tests cannot manufacture those
 receipts.
+
+For the current working tree, `make check` passed all Go tests and vet, 343
+script tests, 164 Console Vitest tests, the production Console build, and 34
+Playwright tests; one live-stack case remains explicitly opt-in and skipped.
+The race detector, bounded fuzz corpus, and real PostgreSQL Admin/session/App
+Attest/configuration/lifecycle lock-order suites also pass. Independent review
+closed root-challenge and App Attest post-disable insertion races,
+configuration and family/component lock-order deadlocks, exact JSON/YAML
+numeric preservation, and explicit `READ COMMITTED` lifecycle behavior.
 
 Image publication, release promotion, public-state observation, deployment
 capture, and release-record finalization enforce a source/credential split:
@@ -77,6 +91,21 @@ generic iOS and isolated Debug/Release App Intent build gates pass, but the
 intent has not yet been physically invoked. The Release App Intent target
 contains no Latchway request path and fails closed. Neither source/build result
 extends the historical physical proof or authorizes release promotion.
+
+## Current source and authorization boundary
+
+Every local implementation branch is ahead of its remote-tracking ref, and the
+active GitHub CLI credential is invalid. The exact current heads are therefore
+not claimed as pushed. No merge, tag, GitHub release, package/container
+publication, production documentation deployment, or post-publication check is
+verified.
+
+Offline/local device build, install, and launch may proceed if it does not
+contact ngrok or a live provider and does not collect Apple App Attest evidence.
+Starting or reusing ngrok, contacting a provider for device proof, collecting
+live App Attest evidence, or producing a protected device receipt requires the
+exact phrase `I authorize the scoped ngrok device proof.` That phrase has not
+been supplied for the current run.
 
 ## What must remain gated
 

@@ -1,7 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  dispatchAdminRefresh,
+  openAdminEventStream,
+  startAdminEventFallback,
+  type AdminEventStreamConnection
+} from "../api/admin-events";
+import { adminRequest, SystemStatusSchema } from "../api/admin";
 import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
@@ -42,7 +49,8 @@ type ConsoleRoute =
   | "/route-simulator"
   | "/self-tests"
   | "/audit"
-  | "/system-health";
+  | "/system-health"
+  | "/settings";
 
 interface NavigationLinkProps {
   children: ReactNode;
@@ -77,11 +85,13 @@ const commands: Array<{ description: string; label: string; to: ConsoleRoute }> 
   { description: "Continue the guided first-run workflow", label: "Setup wizard", to: "/setup" },
   { description: "Exercise the exact server policy resolver", label: "Route simulator", to: "/route-simulator" },
   { description: "Run bounded installation diagnostics", label: "Self-tests", to: "/self-tests" },
-  { description: "Inspect gateway dependencies", label: "System health", to: "/system-health" }
+  { description: "Inspect gateway dependencies", label: "System health", to: "/system-health" },
+  { description: "Review compatibility, privacy, imports, and sessions", label: "Settings", to: "/settings" }
 ];
 
 function CommandPalette({ close }: { close: () => void }) {
   const [query, setQuery] = useState("");
+  const dialog = useRef<HTMLElement>(null);
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
@@ -91,14 +101,32 @@ function CommandPalette({ close }: { close: () => void }) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) ?? []).filter((element) => !element.hasAttribute("hidden"));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [close]);
 
   return <div className="command-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) close(); }}>
-    <section aria-labelledby="command-heading" aria-modal="true" className="command-palette" role="dialog">
+    <section aria-labelledby="command-heading" aria-modal="true" className="command-palette" ref={dialog} role="dialog">
       <div className="command-palette__heading"><div><p className="eyebrow">Search or jump</p><h2 id="command-heading">Go to an operator task</h2></div><button aria-label="Close command palette" className="small-action" onClick={close} type="button">Esc</button></div>
       <label className="command-search"><span className="sr-only">Search pages and tasks</span><input autoFocus onChange={(event) => setQuery(event.target.value)} placeholder="Feature, request, setup, health…" value={query} /></label>
       <div className="command-results" role="list">{results.length ? results.map((command) => <Link className="command-result" key={command.to} onClick={close} search={(previous) => previous} to={command.to}><strong>{command.label}</strong><span>{command.description}</span></Link>) : <p>No matching task.</p>}</div>
@@ -122,6 +150,7 @@ function AppShellContent() {
   const session = useConsoleSession();
   const workspace = useWorkspace();
   const [commandOpen, setCommandOpen] = useState(false);
+  const commandReturnFocus = useRef<HTMLElement | null>(null);
   const [logoutError, setLogoutError] = useState<string>();
   const [loggingOut, setLoggingOut] = useState(false);
   const { liveness, readiness } = useSystemHealth();
@@ -143,16 +172,53 @@ function AppShellContent() {
           ? "System unavailable"
           : "Checking system";
 
+  const showCommand = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement) commandReturnFocus.current = document.activeElement;
+    setCommandOpen(true);
+  }, []);
+
+  const closeCommand = useCallback(() => {
+    setCommandOpen(false);
+  }, []);
+
   useEffect(() => {
     function openCommand(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setCommandOpen(true);
+        showCommand();
       }
     }
     window.addEventListener("keydown", openCommand);
     return () => window.removeEventListener("keydown", openCommand);
-  }, []);
+  }, [showCommand]);
+
+  useEffect(() => {
+    if (commandOpen || !commandReturnFocus.current) return;
+    const target = commandReturnFocus.current;
+    commandReturnFocus.current = null;
+    target.focus();
+  }, [commandOpen]);
+
+  useEffect(() => {
+    if (mode !== "configured") return;
+    const controller = new AbortController();
+    let connection: AdminEventStreamConnection | undefined;
+    let disposed = false;
+    void adminRequest("/admin/v1/system", SystemStatusSchema, { signal: controller.signal })
+      .then(({ data }) => {
+        if (disposed) return;
+        const onTopics = dispatchAdminRefresh;
+        connection = data.server_capabilities.includes("admin_event_stream")
+          ? openAdminEventStream({ environmentID: workspace.environment?.id, onTopics })
+          : startAdminEventFallback(onTopics);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      controller.abort();
+      connection?.close();
+    };
+  }, [mode, workspace.environment?.id]);
 
   async function logout(): Promise<void> {
     setLoggingOut(true);
@@ -254,6 +320,7 @@ function AppShellContent() {
           <NavigationLink description="Liveness and readiness" to="/system-health">
             System health
           </NavigationLink>
+          {!needsAccess ? <NavigationLink description="Compatibility, privacy, transfer, and sessions" to="/settings">Settings</NavigationLink> : null}
         </nav>
 
         <div className="sidebar-footer">
@@ -282,7 +349,7 @@ function AppShellContent() {
               {workspace.environment ? <span className={`environment-badge environment-badge--${workspace.environment.kind}`}>{workspace.environment.kind === "production" ? "Production" : workspace.environment.kind}</span> : null}
             </div> : <span>Latchway</span>}
           </div>
-          <div className="topbar__actions">{mode === "configured" ? <button aria-label="Search or jump" className="command-trigger" onClick={() => setCommandOpen(true)} type="button"><span>Search or jump…</span><kbd>{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd></button> : null}<Link
+          <div className="topbar__actions">{mode === "configured" ? <button aria-label="Search or jump" className="command-trigger" onClick={showCommand} type="button"><span>Search or jump…</span><kbd>{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd></button> : null}<Link
             className={`health-pill health-pill--${overallState}`}
             search={(previous) => previous}
             to="/system-health"
@@ -298,7 +365,7 @@ function AppShellContent() {
           <Outlet />
         </main>
       </div>
-      {commandOpen ? <CommandPalette close={() => setCommandOpen(false)} /> : null}
+      {commandOpen ? <CommandPalette close={closeCommand} /> : null}
     </div>
   );
 }

@@ -19,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/controlplane"
 	"github.com/latchway/latchway/internal/id"
 )
 
@@ -54,6 +56,270 @@ func TestOperationalDatabaseErrorClassification(t *testing.T) {
 	rollbackFailure := mapOperationalCommit("commit", pgx.ErrTxCommitRollback)
 	if errors.Is(rollbackFailure, errOperationalIndeterminate) {
 		t.Fatalf("commit rollback error=%v, want definite failure", rollbackFailure)
+	}
+}
+
+func TestOperationalLifecycleLockOrderingPostgreSQL(t *testing.T) {
+	databaseURL := testDatabaseURL(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	pool := isolatedAdminAPIPool(t, ctx, databaseURL)
+
+	authStore, err := adminauth.NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapToken := strings.Repeat("lifecycle-lock-bootstrap-", 2)
+	if err := authStore.InitializeBootstrapToken(ctx, bootstrapToken, nil); err != nil {
+		t.Fatal(err)
+	}
+	passwordHash, err := adminauth.NewDefaultPasswordHasher().Hash([]byte("correct horse battery staple"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := authStore.BootstrapOwner(ctx, bootstrapToken, adminauth.BootstrapOwnerInput{
+		OrganizationSlug: "lifecycle-locks",
+		OrganizationName: "Lifecycle Locks",
+		Email:            "lifecycle-locks@example.test",
+		DisplayName:      "Lifecycle Lock Owner",
+		PasswordHash:     passwordHash,
+		RequestID:        id.Must(id.AdminRequest),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := adminauth.Principal{
+		OrganizationID: bootstrap.OrganizationID,
+		AdminUserID:    bootstrap.AdminUserID,
+		Role:           adminauth.RoleOwner,
+		Method:         adminauth.AuthenticationSession,
+	}
+	controlStore, err := controlplane.NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := newOperationalStore(pool)
+
+	t.Run("application disable follows queued family revocation", func(t *testing.T) {
+		application, environment, fixture := seedOperationalLifecycleLockScope(
+			t, ctx, pool, controlStore, principal, "application-winner",
+		)
+		blocker, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = blocker.Rollback(context.Background()) }()
+		if _, err := blocker.Exec(ctx, `
+			SELECT 1 FROM installation_families
+			WHERE organization_id = $1 AND installation_family_id = $2
+			FOR UPDATE
+		`, principal.OrganizationID, fixture.familyID); err != nil {
+			t.Fatal(err)
+		}
+
+		mutationDone := make(chan error, 1)
+		go func() {
+			_, mutationErr := operations.revokeInstallationFamily(
+				ctx, principal, fixture.familyID, "lock-order-test", id.Must(id.AdminRequest),
+			)
+			mutationDone <- mutationErr
+		}()
+		waitForOperationalLockQuery(t, ctx, pool, "operational_lock_installation_family")
+
+		disableDone := make(chan error, 1)
+		go func() {
+			_, disableErr := controlStore.DisableApplication(ctx, principal, application.ID, "lock order test")
+			disableDone <- disableErr
+		}()
+		waitForOperationalLockQuery(t, ctx, pool, "controlplane_lock_application_lifecycle")
+		if err := blocker.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := receiveOperationalRaceResult(t, mutationDone); err != nil {
+			t.Fatalf("queued family revocation: %v", err)
+		}
+		if err := receiveOperationalRaceResult(t, disableDone); err != nil {
+			t.Fatalf("application disable after family revocation: %v", err)
+		}
+
+		var applicationStatus, familyStatus, componentStatus, refreshStatus, componentRefreshStatus string
+		var grantRevoked bool
+		if err := pool.QueryRow(ctx, `
+			SELECT application.status, family.status, component.status,
+			       grant_record.revoked_at IS NOT NULL, refresh.status, component_refresh.status
+			FROM applications AS application
+			JOIN installation_families AS family ON family.application_id = application.application_id
+			JOIN client_components AS component ON component.installation_family_id = family.installation_family_id
+			JOIN session_grants AS grant_record ON grant_record.session_grant_id = $4
+			JOIN refresh_tokens AS refresh ON refresh.refresh_token_id = $5
+			JOIN component_refresh_tokens AS component_refresh
+			  ON component_refresh.component_refresh_token_id = $6
+			WHERE application.organization_id = $1 AND application.application_id = $2
+			  AND family.environment_id = $3
+		`, principal.OrganizationID, application.ID, environment.ID, fixture.grantID,
+			fixture.refreshID, fixture.componentRefreshID).Scan(
+			&applicationStatus, &familyStatus, &componentStatus, &grantRevoked,
+			&refreshStatus, &componentRefreshStatus,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if applicationStatus != "disabled" || familyStatus != "revoked" ||
+			componentStatus != "revoked" || !grantRevoked || refreshStatus != "revoked" ||
+			componentRefreshStatus != "revoked" {
+			t.Fatalf("serialized application state=%q/%q/%q grant=%t refresh=%q component_refresh=%q",
+				applicationStatus, familyStatus, componentStatus, grantRevoked,
+				refreshStatus, componentRefreshStatus)
+		}
+	})
+
+	t.Run("environment disable precedes queued component mutation", func(t *testing.T) {
+		_, environment, fixture := seedOperationalLifecycleLockScope(
+			t, ctx, pool, controlStore, principal, "environment-winner",
+		)
+		blocker, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = blocker.Rollback(context.Background()) }()
+		if _, err := blocker.Exec(ctx, `
+			SELECT 1 FROM session_grants
+			WHERE organization_id = $1 AND session_grant_id = $2
+			FOR UPDATE
+		`, principal.OrganizationID, fixture.grantID); err != nil {
+			t.Fatal(err)
+		}
+
+		disableDone := make(chan error, 1)
+		go func() {
+			_, disableErr := controlStore.DisableEnvironment(ctx, principal, environment.ID, "lock order test")
+			disableDone <- disableErr
+		}()
+		waitForOperationalLockQuery(t, ctx, pool, "controlplane_revoke_scoped_session_grants")
+
+		requestID := id.Must(id.AdminRequest)
+		mutationDone := make(chan error, 1)
+		go func() {
+			_, mutationErr := operations.requireClientComponentReattestation(
+				ctx, principal, fixture.componentID, "lock-order-test", requestID,
+			)
+			mutationDone <- mutationErr
+		}()
+		waitForOperationalLockQuery(t, ctx, pool, "active_operational_environment_lock")
+		if err := blocker.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := receiveOperationalRaceResult(t, disableDone); err != nil {
+			t.Fatalf("environment disable: %v", err)
+		}
+		if err := receiveOperationalRaceResult(t, mutationDone); !errors.Is(err, errOperationalNotFound) {
+			t.Fatalf("component mutation after environment disable=%v, want not found", err)
+		}
+
+		var environmentStatus, familyStatus, componentStatus, refreshStatus, componentRefreshStatus, componentSessionStatus string
+		var grantRevoked bool
+		if err := pool.QueryRow(ctx, `
+			SELECT environment.status, family.status, component.status,
+			       grant_record.revoked_at IS NOT NULL, refresh.status,
+			       component_refresh.status, component_session.status
+			FROM environments AS environment
+			JOIN installation_families AS family ON family.environment_id = environment.environment_id
+			JOIN client_components AS component ON component.installation_family_id = family.installation_family_id
+			JOIN session_grants AS grant_record ON grant_record.session_grant_id = $3
+			JOIN refresh_tokens AS refresh ON refresh.refresh_token_id = $4
+			JOIN component_refresh_tokens AS component_refresh
+			  ON component_refresh.component_refresh_token_id = $5
+			JOIN component_session_families AS component_session
+			  ON component_session.component_session_family_id = $6
+			WHERE environment.organization_id = $1 AND environment.environment_id = $2
+		`, principal.OrganizationID, environment.ID, fixture.grantID, fixture.refreshID,
+			fixture.componentRefreshID, fixture.componentSessionID).Scan(
+			&environmentStatus, &familyStatus, &componentStatus, &grantRevoked,
+			&refreshStatus, &componentRefreshStatus, &componentSessionStatus,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if environmentStatus != "disabled" || familyStatus != "active" || componentStatus != "active" ||
+			!grantRevoked || refreshStatus != "revoked" || componentRefreshStatus != "revoked" ||
+			componentSessionStatus != "revoked" {
+			t.Fatalf("serialized environment state=%q/%q/%q grant=%t refresh=%q component_refresh=%q component_session=%q",
+				environmentStatus, familyStatus, componentStatus, grantRevoked, refreshStatus,
+				componentRefreshStatus, componentSessionStatus)
+		}
+		var losingAuditCount int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM audit_events WHERE request_id = $1
+		`, requestID).Scan(&losingAuditCount); err != nil {
+			t.Fatal(err)
+		}
+		if losingAuditCount != 0 {
+			t.Fatalf("rejected component mutation wrote %d audit events", losingAuditCount)
+		}
+	})
+}
+
+func seedOperationalLifecycleLockScope(
+	t *testing.T,
+	ctx context.Context,
+	pool pgxExecutor,
+	store *controlplane.Store,
+	principal adminauth.Principal,
+	label string,
+) (controlplane.Application, controlplane.Environment, operationalFixture) {
+	t.Helper()
+	application, err := store.CreateApplication(ctx, principal, controlplane.ApplicationInput{
+		OrganizationID: principal.OrganizationID,
+		NamedInput: controlplane.NamedInput{
+			Slug: label, DisplayName: label,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment, err := store.CreateEnvironment(ctx, principal, controlplane.EnvironmentInput{
+		ApplicationID: application.ID,
+		Kind:          "production",
+		NamedInput: controlplane.NamedInput{
+			Slug: "production", DisplayName: "Production",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application, environment, seedOperationalFixture(
+		t, ctx, pool, principal.OrganizationID, application.ID, environment.ID,
+	)
+}
+
+func waitForOperationalLockQuery(t *testing.T, ctx context.Context, pool pgxExecutor, fragment string) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database() AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock' AND query LIKE '%' || $1 || '%'
+			)
+		`, fragment).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("query containing %q did not reach a lock wait", fragment)
+}
+
+func receiveOperationalRaceResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent operational mutation did not complete")
+		return nil
 	}
 }
 
@@ -116,6 +382,11 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	api.eventStream = adminEventStreamSettings{
+		pollInterval: time.Millisecond, heartbeatInterval: 2 * time.Millisecond,
+		maximumLifetime: 8 * time.Millisecond, operationTimeout: 100 * time.Millisecond,
+		now: time.Now,
+	}
 	bootstrapToken := strings.Repeat("operational-bootstrap-", 2)
 	if err := api.InitializeBootstrap(ctx, bootstrapToken); err != nil {
 		t.Fatal(err)
@@ -160,6 +431,75 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	fixture := seedOperationalFixture(t, ctx, pool, session.OrganizationID, application.ID, environment.ID)
 
 	baseQuery := "?environment_id=" + url.QueryEscape(environment.ID)
+	events := performGET(handler, "/admin/v1/events"+baseQuery, cookie)
+	if events.Code != http.StatusOK || events.Header().Get("Content-Type") != "text/event-stream; charset=utf-8" ||
+		!bytes.Contains(events.Body.Bytes(), []byte("event: ready")) ||
+		!bytes.Contains(events.Body.Bytes(), []byte("event: reconnect")) ||
+		bytes.Contains(events.Body.Bytes(), []byte(fixture.requestID)) ||
+		bytes.Contains(events.Body.Bytes(), fixture.subjectHMAC) {
+		t.Fatalf("event stream status/body=%d %s", events.Code, events.Body.String())
+	}
+	if unauthenticatedEvents := performGET(handler, "/admin/v1/events"+baseQuery, nil); unauthenticatedEvents.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated event stream status=%d body=%s", unauthenticatedEvents.Code, unauthenticatedEvents.Body.String())
+	}
+	streamLogin := performJSON(t, handler, http.MethodPost, "/admin/v1/auth/login", map[string]string{
+		"email": "owner-operations@example.test", "password": "correct horse battery staple",
+		"organization_id": session.OrganizationID,
+	}, nil, "", "https://console.example.test")
+	if streamLogin.Code != http.StatusOK {
+		t.Fatalf("event-stream login status=%d body=%s", streamLogin.Code, streamLogin.Body.String())
+	}
+	streamCookie := streamLogin.Result().Cookies()[0]
+	streamHash, err := adminauth.HashToken(adminauth.AdminSessionKind, streamCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamSessionID string
+	if err := pool.QueryRow(ctx, `
+		SELECT admin_session_id FROM admin_sessions
+		WHERE organization_id = $1 AND token_hash = $2
+	`, session.OrganizationID, streamHash.Bytes()).Scan(&streamSessionID); err != nil {
+		t.Fatalf("resolve event-stream session: %v", err)
+	}
+	api.eventStream = adminEventStreamSettings{
+		pollInterval: 5 * time.Millisecond, heartbeatInterval: 50 * time.Millisecond,
+		maximumLifetime: 2 * time.Second, operationTimeout: 100 * time.Millisecond,
+		now: time.Now,
+	}
+	streamRequest := httptest.NewRequest(http.MethodGet, "/admin/v1/events"+baseQuery, nil)
+	streamRequest.AddCookie(streamCookie)
+	streamResponse := newSignalingAdminEventRecorder()
+	streamDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(streamResponse, streamRequest)
+		close(streamDone)
+	}()
+	select {
+	case <-streamResponse.flushed:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not flush its ready event")
+	}
+	revokeStream := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/admin-sessions/"+streamSessionID+"/revoke", nil,
+		cookie, csrf, "https://console.example.test")
+	if revokeStream.Code != http.StatusNoContent {
+		t.Fatalf("revoke live event-stream session status/body=%d %s", revokeStream.Code, revokeStream.Body.String())
+	}
+	select {
+	case <-streamDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("revoked event stream remained open past the next bounded poll")
+	}
+	if body := streamResponse.Body.String(); !strings.Contains(body, "event: ready") ||
+		!strings.Contains(body, "event: reconnect") || strings.Contains(body, "event: unavailable") ||
+		strings.Contains(body, "id:") {
+		t.Fatalf("revoked live event-stream body=%s", body)
+	}
+	api.eventStream = adminEventStreamSettings{
+		pollInterval: time.Millisecond, heartbeatInterval: 2 * time.Millisecond,
+		maximumLifetime: 8 * time.Millisecond, operationTimeout: 100 * time.Millisecond,
+		now: time.Now,
+	}
 	userList := performGET(handler, "/admin/v1/users"+baseQuery+"&page_size=1", cookie)
 	if userList.Code != http.StatusOK || !bytes.Contains(userList.Body.Bytes(), []byte(fixture.userID)) ||
 		bytes.Contains(userList.Body.Bytes(), fixture.subjectHMAC) {
@@ -719,6 +1059,20 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		ID string `json:"id"`
 	}
 	decodeResponse(t, secondEnvironmentResponse, &secondEnvironment)
+	crossTenantEvents := performGET(handler, "/admin/v1/events?environment_id="+
+		url.QueryEscape(secondEnvironment.ID), cookie)
+	if crossTenantEvents.Code != http.StatusNotFound ||
+		strings.Contains(crossTenantEvents.Header().Get("Content-Type"), "text/event-stream") ||
+		bytes.Contains(crossTenantEvents.Body.Bytes(), []byte(secondEnvironment.ID)) {
+		t.Fatalf("cross-tenant event stream status/body=%d %s", crossTenantEvents.Code, crossTenantEvents.Body.String())
+	}
+	secondTenantEvents := performGET(handler, "/admin/v1/events?environment_id="+
+		url.QueryEscape(secondEnvironment.ID), secondCookie)
+	if secondTenantEvents.Code != http.StatusOK ||
+		!bytes.Contains(secondTenantEvents.Body.Bytes(), []byte("event: ready")) ||
+		bytes.Contains(secondTenantEvents.Body.Bytes(), []byte("id:")) {
+		t.Fatalf("same-tenant event stream status/body=%d %s", secondTenantEvents.Code, secondTenantEvents.Body.String())
+	}
 	secondFixture := seedOperationalFixture(
 		t, ctx, pool, secondOrganizationDocument.ID, secondApplication.ID, secondEnvironment.ID,
 	)
@@ -881,6 +1235,258 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		bytes.Contains(bundle.Body.Bytes(), fixture.refreshHash) || bytes.Contains(bundle.Body.Bytes(), []byte(revokeToken)) {
 		t.Fatalf("support bundle status/body=%d %s", bundle.Code, bundle.Body.String())
 	}
+
+	// Restore representative live credentials so lifecycle disable proves the
+	// complete legacy/component revocation boundary independently of the
+	// operational mutations exercised above.
+	if _, err := pool.Exec(ctx, `
+		UPDATE session_grants
+		SET revoked_at = NULL, revoke_reason = NULL
+		WHERE session_grant_id = $1;
+		UPDATE refresh_tokens
+		SET status = 'active', used_at = NULL, revoked_at = NULL,
+		    rotated_to_refresh_token_id = NULL
+		WHERE refresh_token_id = $2;
+		UPDATE component_session_families
+		SET status = 'active', revoked_at = NULL, revocation_reason = NULL
+		WHERE component_session_family_id = $3;
+		UPDATE component_refresh_tokens
+		SET status = 'active', grant_kind = 'provisioning', session_grant_id = NULL,
+		    used_at = NULL, revoked_at = NULL,
+		    rotated_to_component_refresh_token_id = NULL
+		WHERE component_refresh_token_id = $4
+	`, pgx.QueryExecModeSimpleProtocol, fixture.grantID, fixture.refreshID,
+		fixture.componentSessionID, fixture.componentRefreshID); err != nil {
+		t.Fatalf("restore lifecycle credential fixture: %v", err)
+	}
+	rootChallengeID := id.Must(id.SessionChallenge)
+	componentChallengeID := id.Must(id.SessionChallenge)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_challenges (
+		    session_challenge_id, organization_id, application_id, environment_id,
+		    application_user_id, identity_provider_key, platform, dpop_jkt,
+		    dpop_public_jwk, nonce_hash, binding_hash, challenge_nonce,
+		    identity_verified_at, identity_expires_at, created_at, expires_at,
+		    config_revision_id, attestation_policy_id, attestation_provider,
+		    attestation_mode, attestation_minimum_trust_level,
+		    attestation_maximum_age_milliseconds,
+		    challenge_dpop_proof_jti_hash, challenge_dpop_http_method,
+		    challenge_dpop_http_uri_hash, browser_origin
+		)
+		SELECT $1, installation.organization_id, installation.application_id,
+		       installation.environment_id, installation.application_user_id,
+		       'firebase', 'ios', installation.dpop_jkt, '{}'::jsonb,
+		       $2, $3, $4, $5, $6, $5, $6, $7, 'debug', 'debug',
+		       'required', 'debug', 60000, $8, 'POST', $9, ''
+		FROM installations AS installation
+		WHERE installation.installation_id = $10;
+		INSERT INTO component_attestation_challenges (
+		    component_attestation_challenge_id, organization_id, application_id,
+		    environment_id, application_user_id, installation_family_id,
+		    client_component_id, component_key_id, config_revision_id,
+		    platform, dpop_jkt, nonce_hash, binding_hash, challenge_nonce,
+		    attestation_policy_id, attestation_provider, attestation_mode,
+		    attestation_minimum_trust_level,
+		    attestation_maximum_age_milliseconds, created_at, expires_at
+		)
+		SELECT $11, component.organization_id, component.application_id,
+		       component.environment_id, component.application_user_id,
+		       component.installation_family_id, component.client_component_id,
+		       component_key.component_key_id, $7, 'ios', component_key.dpop_jkt,
+		       $12, $13, $14, 'ios-app-attest', 'app_attest', 'required',
+		       'app_verified', 60000, $5, $6
+		FROM client_components AS component
+		JOIN component_keys AS component_key
+		  ON component_key.component_key_id = component.current_component_key_id
+		WHERE component.client_component_id = $15
+	`, pgx.QueryExecModeSimpleProtocol, rootChallengeID,
+		lifecycleFixtureBytes("lifecycle-root-nonce"), lifecycleFixtureBytes("lifecycle-root-binding"),
+		strings.Repeat("A", 43), fixture.recordedAt.Add(-time.Minute), fixture.recordedAt.Add(time.Hour),
+		fixture.revisionID, lifecycleFixtureBytes("lifecycle-root-proof"), lifecycleFixtureBytes("lifecycle-root-uri"),
+		fixture.installationID, componentChallengeID,
+		lifecycleFixtureBytes("lifecycle-component-nonce"), lifecycleFixtureBytes("lifecycle-component-binding"),
+		strings.Repeat("B", 43), fixture.componentID); err != nil {
+		t.Fatalf("seed pending lifecycle challenges: %v", err)
+	}
+	lifecycleReason := "incident review reference 42"
+	disabledEnvironment := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/environments/"+environment.ID+"/disable",
+		map[string]string{"reason": lifecycleReason}, cookie, csrf, "https://console.example.test")
+	if disabledEnvironment.Code != http.StatusOK ||
+		!bytes.Contains(disabledEnvironment.Body.Bytes(), []byte(`"status":"disabled"`)) ||
+		!bytes.Contains(disabledEnvironment.Body.Bytes(), []byte(`"disabled_at":`)) ||
+		bytes.Contains(disabledEnvironment.Body.Bytes(), []byte(lifecycleReason)) {
+		t.Fatalf("disable environment status/body=%d %s", disabledEnvironment.Code, disabledEnvironment.Body.String())
+	}
+	var disabledAt time.Time
+	var grantRevokedAt, refreshRevokedAt, componentRefreshRevokedAt *time.Time
+	var storedEnvironmentStatus, storedRefreshStatus, storedComponentRefreshStatus, storedComponentSessionStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT environment.status, environment.disabled_at,
+		       grant_record.revoked_at, refresh.status, refresh.revoked_at,
+		       component_refresh.status, component_refresh.revoked_at,
+		       component_session.status
+		FROM environments AS environment
+		JOIN session_grants AS grant_record ON grant_record.session_grant_id = $2
+		JOIN refresh_tokens AS refresh ON refresh.refresh_token_id = $3
+		JOIN component_refresh_tokens AS component_refresh
+		  ON component_refresh.component_refresh_token_id = $4
+		JOIN component_session_families AS component_session
+		  ON component_session.component_session_family_id = $5
+		WHERE environment.environment_id = $1
+	`, environment.ID, fixture.grantID, fixture.refreshID, fixture.componentRefreshID,
+		fixture.componentSessionID).Scan(
+		&storedEnvironmentStatus, &disabledAt, &grantRevokedAt,
+		&storedRefreshStatus, &refreshRevokedAt,
+		&storedComponentRefreshStatus, &componentRefreshRevokedAt,
+		&storedComponentSessionStatus,
+	); err != nil {
+		t.Fatalf("read disabled environment credentials: %v", err)
+	}
+	if storedEnvironmentStatus != "disabled" || disabledAt.IsZero() || grantRevokedAt == nil ||
+		storedRefreshStatus != "revoked" || refreshRevokedAt == nil ||
+		storedComponentRefreshStatus != "revoked" || componentRefreshRevokedAt == nil ||
+		storedComponentSessionStatus != "revoked" {
+		t.Fatalf("disabled environment credential state=%q/%v/%v/%q/%v/%q/%v/%q",
+			storedEnvironmentStatus, disabledAt, grantRevokedAt, storedRefreshStatus,
+			refreshRevokedAt, storedComponentRefreshStatus, componentRefreshRevokedAt,
+			storedComponentSessionStatus)
+	}
+	var rootChallengeConsumed, componentChallengeConsumed bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		           SELECT 1 FROM session_challenge_consumptions
+		           WHERE session_challenge_id = $1
+		       ),
+		       EXISTS (
+		           SELECT 1 FROM component_attestation_challenges
+		           WHERE component_attestation_challenge_id = $2 AND consumed_at IS NOT NULL
+		       )
+	`, rootChallengeID, componentChallengeID).Scan(&rootChallengeConsumed, &componentChallengeConsumed); err != nil {
+		t.Fatalf("read invalidated lifecycle challenges: %v", err)
+	}
+	if !rootChallengeConsumed || !componentChallengeConsumed {
+		t.Fatalf("disable left challenge exchangeable root=%t component=%t",
+			rootChallengeConsumed, componentChallengeConsumed)
+	}
+	for label, response := range map[string]*httptest.ResponseRecorder{
+		"users":         performGET(handler, "/admin/v1/users"+baseQuery, cookie),
+		"installations": performGET(handler, "/admin/v1/installations"+baseQuery, cookie),
+		"families":      performGET(handler, "/admin/v1/installation-families"+baseQuery, cookie),
+		"components":    performGET(handler, "/admin/v1/client-components"+baseQuery, cookie),
+		"requests":      performGET(handler, "/admin/v1/requests"+baseQuery, cookie),
+		"usage":         performGET(handler, "/admin/v1/usage/summary"+usageQuery, cookie),
+	} {
+		if response.Code != http.StatusOK {
+			t.Fatalf("disabled-scope forensic %s status/body=%d %s", label, response.Code, response.Body.String())
+		}
+	}
+	disabledMutation := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, blockConfirmation, revokeToken)
+	if disabledMutation.Code != http.StatusNotFound {
+		t.Fatalf("disabled environment mutation status/body=%d %s", disabledMutation.Code, disabledMutation.Body.String())
+	}
+	disabledConfig := performGET(handler, "/admin/v1/environments/"+environment.ID+"/config", cookie)
+	if disabledConfig.Code != http.StatusNotFound {
+		t.Fatalf("disabled environment config status/body=%d %s", disabledConfig.Code, disabledConfig.Body.String())
+	}
+	disabledSelfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
+		"kind": "local", "environment_id": environment.ID,
+	}, cookie, csrf, "https://console.example.test")
+	if disabledSelfTest.Code != http.StatusNotFound {
+		t.Fatalf("disabled environment self-test status/body=%d %s", disabledSelfTest.Code, disabledSelfTest.Body.String())
+	}
+	enabledEnvironment := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/environments/"+environment.ID+"/enable", nil,
+		cookie, csrf, "https://console.example.test")
+	if enabledEnvironment.Code != http.StatusOK ||
+		!bytes.Contains(enabledEnvironment.Body.Bytes(), []byte(`"status":"active"`)) ||
+		bytes.Contains(enabledEnvironment.Body.Bytes(), []byte(`"disabled_at"`)) {
+		t.Fatalf("enable environment status/body=%d %s", enabledEnvironment.Code, enabledEnvironment.Body.String())
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT revoked_at IS NOT NULL,
+		       (SELECT status FROM refresh_tokens WHERE refresh_token_id = $2),
+		       (SELECT status FROM component_refresh_tokens WHERE component_refresh_token_id = $3)
+		FROM session_grants WHERE session_grant_id = $1
+	`, fixture.grantID, fixture.refreshID, fixture.componentRefreshID).Scan(
+		&grantRevoked, &storedRefreshStatus, &storedComponentRefreshStatus,
+	); err != nil {
+		t.Fatalf("read re-enabled credential state: %v", err)
+	}
+	if !grantRevoked || storedRefreshStatus != "revoked" || storedComponentRefreshStatus != "revoked" {
+		t.Fatalf("enable revived credentials grant=%t legacy=%q component=%q",
+			grantRevoked, storedRefreshStatus, storedComponentRefreshStatus)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		           SELECT 1 FROM session_challenge_consumptions
+		           WHERE session_challenge_id = $1
+		       ),
+		       EXISTS (
+		           SELECT 1 FROM component_attestation_challenges
+		           WHERE component_attestation_challenge_id = $2 AND consumed_at IS NOT NULL
+		       )
+	`, rootChallengeID, componentChallengeID).Scan(&rootChallengeConsumed, &componentChallengeConsumed); err != nil {
+		t.Fatalf("read re-enabled lifecycle challenges: %v", err)
+	}
+	if !rootChallengeConsumed || !componentChallengeConsumed {
+		t.Fatal("enable revived a pre-disable challenge")
+	}
+	disabledApplication := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/applications/"+application.ID+"/disable",
+		map[string]string{"reason": "application containment"}, cookie, csrf, "https://console.example.test")
+	if disabledApplication.Code != http.StatusOK ||
+		!bytes.Contains(disabledApplication.Body.Bytes(), []byte(`"status":"disabled"`)) {
+		t.Fatalf("disable application status/body=%d %s", disabledApplication.Code, disabledApplication.Body.String())
+	}
+	var childStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM environments WHERE environment_id = $1`, environment.ID).Scan(&childStatus); err != nil {
+		t.Fatal(err)
+	}
+	if childStatus != "active" {
+		t.Fatalf("application disable changed child environment status to %q", childStatus)
+	}
+	createUnderDisabled := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/applications/"+application.ID+"/environments",
+		map[string]string{"slug": "blocked-child", "display_name": "Blocked Child", "kind": "staging"},
+		cookie, csrf, "https://console.example.test")
+	if createUnderDisabled.Code != http.StatusNotFound {
+		t.Fatalf("disabled application child creation status/body=%d %s", createUnderDisabled.Code, createUnderDisabled.Body.String())
+	}
+	crossTenantDisable := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/applications/"+secondApplication.ID+"/disable",
+		map[string]string{"reason": "cross tenant probe"}, cookie, csrf, "https://console.example.test")
+	if crossTenantDisable.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant application disable status/body=%d %s", crossTenantDisable.Code, crossTenantDisable.Body.String())
+	}
+	enabledApplication := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/applications/"+application.ID+"/enable", nil,
+		cookie, csrf, "https://console.example.test")
+	if enabledApplication.Code != http.StatusOK ||
+		!bytes.Contains(enabledApplication.Body.Bytes(), []byte(`"status":"active"`)) {
+		t.Fatalf("enable application status/body=%d %s", enabledApplication.Code, enabledApplication.Body.String())
+	}
+	var lifecycleAuditText string
+	if err := pool.QueryRow(ctx, `
+		SELECT coalesce(string_agg(row_to_json(event)::text || row_to_json(change)::text, ''), '')
+		FROM audit_events AS event
+		LEFT JOIN audit_event_changes AS change USING (audit_event_id)
+		WHERE event.action IN ('admin.environment_disable', 'admin.environment_enable',
+		                       'admin.application_disable', 'admin.application_enable')
+	`).Scan(&lifecycleAuditText); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(lifecycleAuditText, lifecycleReason) ||
+		!strings.Contains(lifecycleAuditText, `reason_provided`) ||
+		!strings.Contains(lifecycleAuditText, `session_credentials`) {
+		t.Fatalf("lifecycle audit is unsafe or incomplete: %s", lifecycleAuditText)
+	}
+}
+
+func lifecycleFixtureBytes(label string) []byte {
+	digest := sha256.Sum256([]byte("lifecycle-fixture:" + label))
+	return append([]byte(nil), digest[:]...)
 }
 
 func previewUserOperationForTest(
