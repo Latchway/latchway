@@ -83,7 +83,7 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
           govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
       - name: Scan source, dependencies, secrets, and infrastructure
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: fs
@@ -95,7 +95,7 @@ jobs:
           ignore-unfixed: false
           exit-code: "1"
       - name: Enforce dependency license policy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: fs
@@ -128,7 +128,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Scan production container
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           image-ref: latchway:security-scan
@@ -139,7 +139,7 @@ jobs:
           ignore-unfixed: false
           exit-code: "1"
       - name: Enforce production-container license policy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           image-ref: latchway:security-scan
@@ -332,7 +332,7 @@ jobs:
           --window "$RUNNER_TEMP/security-raw/scan-window.json"
           --commit "$CANDIDATE_COMMIT"
       - name: Capture current source vulnerability, secret, and static-policy output
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: fs
@@ -345,7 +345,7 @@ jobs:
           ignore-unfixed: false
           exit-code: "0"
       - name: Capture current source dependency-license output
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: fs
