@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -129,5 +130,29 @@ func TestPrepareDecisionStagesAllowsOnlyOneFinalTerminalStage(t *testing.T) {
 	}
 	if _, err := prepareDecisionStages(overflow, true); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("prepareDecisionStages accepted %d stages: %v", len(overflow), err)
+	}
+}
+
+func TestAppendDecisionStagesAtRejectsInvalidStageNumberRangeBeforeWriting(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		next  int32
+		count int
+	}{
+		"non-positive next stage": {next: 0, count: 1},
+		"batch exceeds maximum":   {next: maximumDecisionStages, count: 2},
+	} {
+		name, test := name, test
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			err := appendDecisionStagesAt(
+				context.Background(), nil, AuthenticatedRequest{}, test.next,
+				make([]DecisionStage, test.count),
+			)
+			if !errors.Is(err, ErrInvalidState) {
+				t.Fatalf("appendDecisionStagesAt(%d, %d) = %v, want ErrInvalidState",
+					test.next, test.count, err)
+			}
+		})
 	}
 }

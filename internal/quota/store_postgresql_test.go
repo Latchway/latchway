@@ -41,6 +41,270 @@ type quotaPostgreSQLFixture struct {
 func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 	fixture := newQuotaPostgreSQLFixture(t)
 
+	t.Run("authenticated begin uses database time and preserves it on replay", func(t *testing.T) {
+		input := fixture.input(t, "authenticated-clock", 5)
+		authenticatedInput := authenticatedInputFromReserve(input)
+		var before time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `SELECT clock_timestamp()`).Scan(&before); err != nil {
+			t.Fatalf("capture authenticated begin lower bound: %v", err)
+		}
+		authenticated, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInput)
+		if err != nil {
+			t.Fatalf("begin authenticated request: %v", err)
+		}
+		if authenticated.LogicalRequestID() != input.LogicalRequestID.String() {
+			t.Fatalf("authenticated request ID = %q, want %q",
+				authenticated.LogicalRequestID(), input.LogicalRequestID.String())
+		}
+		var requestedAt, after time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT requested_at, clock_timestamp()
+			FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&requestedAt, &after); err != nil {
+			t.Fatalf("read authenticated request time: %v", err)
+		}
+		if requestedAt.IsZero() || requestedAt.Before(before) || requestedAt.After(after) {
+			t.Fatalf("requested_at %s is outside database bounds [%s, %s]",
+				requestedAt, before, after)
+		}
+
+		replayed, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInput)
+		if err != nil || replayed.LogicalRequestID() != authenticated.LogicalRequestID() {
+			t.Fatalf("replay authenticated request = %#v, %v", replayed, err)
+		}
+		var replayedAt time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT requested_at FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&replayedAt); err != nil {
+			t.Fatalf("read replayed authenticated request time: %v", err)
+		}
+		if !replayedAt.Equal(requestedAt) {
+			t.Fatalf("replay changed requested_at from %s to %s", requestedAt, replayedAt)
+		}
+
+		collision := authenticatedInput
+		collision.FeatureKey = "authenticated-clock-collision"
+		if _, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, collision); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("authenticated identity collision = %v, want ErrInvalidInput", err)
+		}
+		var afterCollision time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT requested_at FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&afterCollision); err != nil {
+			t.Fatalf("read collided authenticated request time: %v", err)
+		}
+		if !afterCollision.Equal(requestedAt) {
+			t.Fatalf("identity collision changed requested_at from %s to %s", requestedAt, afterCollision)
+		}
+	})
+
+	t.Run("concurrent decision batches retain contiguous serialized ordering", func(t *testing.T) {
+		input := fixture.input(t, "decision-stage-contention", 5)
+		authenticated, err := fixture.store.BeginAuthenticatedRequest(
+			fixture.ctx, authenticatedInputFromReserve(input),
+		)
+		if err != nil {
+			t.Fatalf("begin contended authenticated request: %v", err)
+		}
+		blocker, err := fixture.pool.Begin(fixture.ctx)
+		if err != nil {
+			t.Fatalf("begin decision-stage blocker: %v", err)
+		}
+		defer func() { _ = blocker.Rollback(fixture.ctx) }()
+		if _, err := blocker.Exec(fixture.ctx, `
+			SELECT logical_request_id
+			FROM logical_requests
+			WHERE logical_request_id = $1
+			FOR UPDATE
+		`, input.LogicalRequestID.String()); err != nil {
+			t.Fatalf("lock authenticated request: %v", err)
+		}
+
+		startedAt := time.Now().UTC()
+		writers := []struct {
+			name   string
+			stages []DecisionStage
+		}{
+			{
+				name: "identity and trust",
+				stages: []DecisionStage{
+					{Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
+						StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond)},
+					{Stage: DecisionClientTrustVerified, Outcome: DecisionSucceeded,
+						StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond)},
+				},
+			},
+			{
+				name: "configuration and inspection",
+				stages: []DecisionStage{
+					{Stage: DecisionConfigurationLoaded, Outcome: DecisionSucceeded,
+						StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond)},
+					{Stage: DecisionRequestInspected, Outcome: DecisionSucceeded,
+						StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond)},
+				},
+			},
+		}
+		type decisionResult struct {
+			name string
+			err  error
+		}
+		results := make(chan decisionResult, len(writers))
+		for _, writer := range writers {
+			go func() {
+				results <- decisionResult{
+					name: writer.name,
+					err:  fixture.store.RecordDecisionStages(fixture.ctx, authenticated, writer.stages),
+				}
+			}()
+		}
+		waitForLogicalRequestLockWaiters(t, fixture, len(writers))
+		select {
+		case result := <-results:
+			t.Fatalf("decision writer %q escaped parent lock early: %v", result.name, result.err)
+		default:
+		}
+		if err := blocker.Commit(fixture.ctx); err != nil {
+			t.Fatalf("release decision-stage blocker: %v", err)
+		}
+		for range writers {
+			select {
+			case result := <-results:
+				if result.err != nil {
+					t.Errorf("record %s batch: %v", result.name, result.err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("decision writer did not resume after parent unlock")
+			}
+		}
+
+		rows, err := fixture.pool.Query(fixture.ctx, `
+			SELECT stage_number, stage
+			FROM logical_request_decision_stages
+			WHERE logical_request_id = $1
+			ORDER BY stage_number
+		`, input.LogicalRequestID.String())
+		if err != nil {
+			t.Fatalf("read contended decision stages: %v", err)
+		}
+		defer rows.Close()
+		var numbers []int
+		var stages []string
+		for rows.Next() {
+			var number int
+			var stage string
+			if err := rows.Scan(&number, &stage); err != nil {
+				t.Fatalf("scan contended decision stage: %v", err)
+			}
+			numbers = append(numbers, number)
+			stages = append(stages, stage)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate contended decision stages: %v", err)
+		}
+		if !slices.Equal(numbers, []int{1, 2, 3, 4}) {
+			t.Fatalf("contended decision stage numbers = %v, want [1 2 3 4]", numbers)
+		}
+		identityFirst := []string{
+			DecisionIdentityVerified, DecisionClientTrustVerified,
+			DecisionConfigurationLoaded, DecisionRequestInspected,
+		}
+		configurationFirst := []string{
+			DecisionConfigurationLoaded, DecisionRequestInspected,
+			DecisionIdentityVerified, DecisionClientTrustVerified,
+		}
+		if !slices.Equal(stages, identityFirst) && !slices.Equal(stages, configurationFirst) {
+			t.Fatalf("contended decision stage order = %v", stages)
+		}
+	})
+
+	t.Run("failed decision batch rolls back stages but leaves lifecycle recoverable", func(t *testing.T) {
+		input := fixture.input(t, "decision-stage-rollback", 5)
+		authenticated, err := fixture.store.BeginAuthenticatedRequest(
+			fixture.ctx, authenticatedInputFromReserve(input),
+		)
+		if err != nil {
+			t.Fatalf("begin rollback authenticated request: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			CREATE FUNCTION reject_quota_lifecycle_test_stage_insert()
+			RETURNS trigger
+			LANGUAGE plpgsql
+			AS $$
+			BEGIN
+				IF NEW.stage = 'client_context_validated' THEN
+					RAISE EXCEPTION 'injected decision-stage persistence failure'
+						USING ERRCODE = 'XX000';
+				END IF;
+				RETURN NEW;
+			END;
+			$$
+		`); err != nil {
+			t.Fatalf("create decision-stage failure function: %v", err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = fixture.pool.Exec(cleanupCtx, `
+				DROP TRIGGER IF EXISTS quota_lifecycle_test_stage_insert_failure
+				ON logical_request_decision_stages
+			`)
+			_, _ = fixture.pool.Exec(cleanupCtx, `
+				DROP FUNCTION IF EXISTS reject_quota_lifecycle_test_stage_insert()
+			`)
+		})
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			CREATE TRIGGER quota_lifecycle_test_stage_insert_failure
+			BEFORE INSERT ON logical_request_decision_stages
+			FOR EACH ROW EXECUTE FUNCTION reject_quota_lifecycle_test_stage_insert()
+		`); err != nil {
+			t.Fatalf("create decision-stage failure trigger: %v", err)
+		}
+
+		startedAt := time.Now().UTC()
+		err = fixture.store.RecordDecisionStages(fixture.ctx, authenticated, []DecisionStage{
+			{Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
+				StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond)},
+			{Stage: DecisionClientContextValidated, Outcome: DecisionSucceeded,
+				StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond)},
+		})
+		if !errors.Is(err, ErrDependency) {
+			t.Fatalf("injected decision-stage failure = %v, want ErrDependency", err)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM logical_request_decision_stages
+			WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("failed decision batch persisted %d stages", got)
+		}
+		var status string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT status FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&status); err != nil {
+			t.Fatalf("read authenticated row after decision failure: %v", err)
+		}
+		if status != "authenticated" {
+			t.Fatalf("authenticated row status after decision failure = %q", status)
+		}
+
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE logical_requests
+			SET requested_at = statement_timestamp() - interval '25 hours'
+			WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); err != nil {
+			t.Fatalf("age failed decision lifecycle: %v", err)
+		}
+		processed, err := fixture.store.RecoverStaleAuthenticatedRequestsBatch(fixture.ctx, 10)
+		if err != nil || processed != 1 {
+			t.Fatalf("recover failed decision lifecycle = %d, %v", processed, err)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM logical_request_decision_stages
+			WHERE logical_request_id = $1 AND stage = 'lifecycle_recovered'
+		`, input.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("recovered decision lifecycle stages = %d, want 1", got)
+		}
+	})
+
 	t.Run("authenticated lifecycle persists pre-reservation denial and immutable stages", func(t *testing.T) {
 		input := fixture.input(t, "prequota-denial", 5)
 		authenticated, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input))
@@ -4688,6 +4952,34 @@ func waitForQuotaReservationLock(t *testing.T, fixture quotaPostgreSQLFixture) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("quota reservation waiter did not reach the row lock")
+}
+
+func waitForLogicalRequestLockWaiters(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	want int,
+) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT count(*)
+			FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND query LIKE '%SELECT status, config_revision_id%'
+			  AND query LIKE '%FROM logical_requests%'
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect logical request lock waits: %v", err)
+		}
+		if waiting >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("logical request lock waiters did not reach %d", want)
 }
 
 func waitForQuotaBucketLock(t *testing.T, fixture quotaPostgreSQLFixture) {

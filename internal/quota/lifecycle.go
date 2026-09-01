@@ -171,10 +171,6 @@ func (store *Store) BeginAuthenticatedRequest(
 		return AuthenticatedRequest{}, persistenceFailure("begin authenticated request", err)
 	}
 	defer rollback(tx)
-	requestedAt, err := transactionTime(ctx, tx)
-	if err != nil {
-		return AuthenticatedRequest{}, err
-	}
 	command, err := tx.Exec(ctx, `
 		INSERT INTO logical_requests (
 			logical_request_id, organization_id, application_id, environment_id,
@@ -187,7 +183,7 @@ func (store *Store) BeginAuthenticatedRequest(
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 			$12, $13, $14, 'legacy_unknown', $15, $16, $17, $18,
-			'authenticated', $19
+			'authenticated', transaction_timestamp()
 		)
 		ON CONFLICT DO NOTHING
 	`, prepared.LogicalRequestID.String(), prepared.OrganizationID, prepared.ApplicationID,
@@ -196,7 +192,7 @@ func (store *Store) BeginAuthenticatedRequest(
 		nullableString(prepared.ComponentDefinitionID), nullableString(prepared.ComponentKind),
 		nullableString(prepared.TrustSource), prepared.SessionGrantID, prepared.ConfigRevisionID,
 		prepared.FeatureKey, prepared.Protocol, nullableString(prepared.ClientRequestID),
-		nullableString(prepared.Framework), nullableString(prepared.FrameworkVersion), requestedAt)
+		nullableString(prepared.Framework), nullableString(prepared.FrameworkVersion))
 	if err != nil {
 		return AuthenticatedRequest{}, mapWriteError("insert authenticated logical request", err)
 	}
@@ -462,18 +458,37 @@ func (store *Store) RecordDecisionStages(
 		return persistenceFailure("begin request decision stage", err)
 	}
 	defer rollback(tx)
-	var status, revisionID string
-	if err := tx.QueryRow(ctx, `
+	// Keep the lock and stage-number read as distinct queued commands. Under
+	// READ COMMITTED, the second command gets a fresh snapshot after any wait
+	// for a prior writer, while the batch still costs one client round trip.
+	batch := &pgx.Batch{}
+	batch.Queue(`
 		SELECT status, config_revision_id
 		FROM logical_requests
 		WHERE organization_id = $1 AND application_id = $2
 		  AND environment_id = $3 AND logical_request_id = $4
 		FOR UPDATE
 	`, request.organizationID, request.applicationID, request.environmentID,
-		request.logicalRequestID).Scan(&status, &revisionID); errors.Is(err, pgx.ErrNoRows) {
+		request.logicalRequestID)
+	batch.Queue(`
+		SELECT COALESCE(max(stage_number), 0) + 1
+		FROM logical_request_decision_stages
+		WHERE logical_request_id = $1
+	`, request.logicalRequestID)
+	results := tx.SendBatch(ctx, batch)
+	var status, revisionID string
+	lockErr := results.QueryRow().Scan(&status, &revisionID)
+	var next int32
+	nextErr := results.QueryRow().Scan(&next)
+	closeErr := results.Close()
+	if errors.Is(lockErr, pgx.ErrNoRows) {
 		return ErrNotFound
-	} else if err != nil {
-		return persistenceFailure("lock request decision lifecycle", err)
+	} else if lockErr != nil {
+		return persistenceFailure("lock request decision lifecycle", lockErr)
+	} else if nextErr != nil {
+		return persistenceFailure("select next request decision stage", nextErr)
+	} else if closeErr != nil {
+		return persistenceFailure("read request decision lifecycle batch", closeErr)
 	}
 	if revisionID != request.configRevisionID || status != "authenticated" {
 		return ErrInvalidState
@@ -483,7 +498,7 @@ func (store *Store) RecordDecisionStages(
 			return err
 		}
 	}
-	if err := appendDecisionStages(ctx, tx, request, prepared); err != nil {
+	if err := appendDecisionStagesAt(ctx, tx, request, next, prepared); err != nil {
 		return err
 	}
 	terminal := prepared[len(prepared)-1]
@@ -584,6 +599,19 @@ func appendDecisionStages(
 		WHERE logical_request_id = $1
 	`, request.logicalRequestID).Scan(&next); err != nil {
 		return persistenceFailure("select next request decision stage", err)
+	}
+	return appendDecisionStagesAt(ctx, tx, request, next, stages)
+}
+
+func appendDecisionStagesAt(
+	ctx context.Context,
+	tx pgx.Tx,
+	request AuthenticatedRequest,
+	next int32,
+	stages []DecisionStage,
+) error {
+	if len(stages) == 0 {
+		return nil
 	}
 	if next < 1 || int64(next)+int64(len(stages))-1 > maximumDecisionStages {
 		return ErrInvalidState
