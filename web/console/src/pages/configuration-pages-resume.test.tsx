@@ -159,6 +159,38 @@ describe("resumable setup wizard", () => {
     expect(mocks.adminRequest.mock.calls.some((call) => call[2]?.method === "POST")).toBe(false);
   });
 
+  it("accepts the canonical lifecycle fields returned for newly created resources", async () => {
+    mocks.adminRequest.mockImplementation(async (path: string, schema: unknown, options?: { method?: string }) => {
+      const parser = schema as { parse(input: unknown): unknown };
+      if (path.startsWith("/admin/v1/applications?") && !options?.method) {
+        return { data: { items: [], page: { has_more: false } } };
+      }
+      if (path === "/admin/v1/applications" && options?.method === "POST") {
+        return { data: parser.parse({ ...mocks.workspace.application, disabled_at: null }) };
+      }
+      if (path.endsWith("/environments") && !options?.method) return { data: { items: [] } };
+      if (path.endsWith("/environments") && options?.method === "POST") {
+        return { data: parser.parse({ ...mocks.workspace.environment, disabled_at: null }) };
+      }
+      throw new Error(`unexpected request ${options?.method ?? "GET"} ${path}`);
+    });
+
+    const application = await findOrCreateApplication({
+      displayName: "Latchway Mobile",
+      organizationID: "org_01J00000000000000000000000",
+      slug: "latchway-mobile"
+    });
+    const environment = await findOrCreateEnvironment({
+      applicationID: application.id,
+      displayName: "Development",
+      kind: "development",
+      slug: "development"
+    });
+
+    expect(application.status).toBe("active");
+    expect(environment.status).toBe("active");
+  });
+
   it("resumes an identical valid revision through validation and activation without creating a duplicate", async () => {
     const valid = {
       created_at: "2026-09-01T00:01:00Z",

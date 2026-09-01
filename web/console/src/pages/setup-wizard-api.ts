@@ -1,8 +1,6 @@
 import {
   adminRequest,
-  ApplicationSchema,
   ConfigurationPlanSchema,
-  EnvironmentSchema,
   queryPath,
   RevisionSchema,
   ValidationSchema,
@@ -12,8 +10,10 @@ import {
 } from "../api/admin";
 import { problemFromError } from "../api/auth";
 import {
+  ApplicationResourceSchema,
   ApplicationResourcePageSchema,
   ConfigurationRevisionResourcePageSchema,
+  EnvironmentResourceSchema,
   EnvironmentResourceListSchema
 } from "../api/resources";
 import { canonicalConfigurationJSON } from "./setup-wizard-state";
@@ -77,7 +77,7 @@ export async function findOrCreateApplication(input: { displayName: string; orga
     return existing;
   }
   try {
-    return (await adminRequest("/admin/v1/applications", ApplicationSchema, { method: "POST", body: {
+    return (await adminRequest("/admin/v1/applications", ApplicationResourceSchema, { method: "POST", body: {
       organization_id: input.organizationID, slug: input.slug, display_name: input.displayName
     } })).data;
   } catch (error) {
@@ -98,7 +98,7 @@ export async function findOrCreateEnvironment(input: { applicationID: string; di
     return existing;
   }
   try {
-    return (await adminRequest(`/admin/v1/applications/${input.applicationID}/environments`, EnvironmentSchema, {
+    return (await adminRequest(`/admin/v1/applications/${input.applicationID}/environments`, EnvironmentResourceSchema, {
       method: "POST", body: { slug: input.slug, display_name: input.displayName, kind: input.kind }
     })).data;
   } catch (error) {
