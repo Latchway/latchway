@@ -4585,6 +4585,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Bounded operator explanation used only to establish that a reason was supplied; its value is never persisted in audit data. */
+                    reason: string;
                     revision_id: components["schemas"]["RevisionID"];
                 };
             };

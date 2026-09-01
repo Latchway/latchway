@@ -746,7 +746,11 @@ describe("rich usage and route-simulator views", () => {
 	expect(screen.getAllByText("321")).toHaveLength(2);
 	expect(screen.getByText("fallback")).toBeInTheDocument();
 	expect(screen.getByText("504")).toBeInTheDocument();
-	expect(screen.getByText("timeout")).toBeInTheDocument();
+	const timeoutLinks = screen.getAllByRole("link", { name: "timeout" });
+	expect(timeoutLinks.length).toBeGreaterThan(0);
+	for (const link of timeoutLinks) {
+	  expect(link).toHaveAttribute("href", "https://docs.latchway.dev/errors/timeout");
+	}
 	expect(screen.getByText("upstream_reported")).toBeInTheDocument();
 	expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
 	expect(screen.getAllByText("swift-openai 4.6.0")).toHaveLength(1);

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -744,6 +745,7 @@ func (api *API) activateConfigurationRevision(w http.ResponseWriter, r *http.Req
 
 type rollbackConfigurationRequest struct {
 	RevisionID string `json:"revision_id"`
+	Reason     string `json:"reason"`
 }
 
 func (api *API) rollbackEnvironmentConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -752,7 +754,8 @@ func (api *API) rollbackEnvironmentConfiguration(w http.ResponseWriter, r *http.
 		return
 	}
 	request, err := decodeJSON[rollbackConfigurationRequest](r)
-	if err != nil {
+	request.Reason = strings.TrimSpace(request.Reason)
+	if err != nil || request.Reason == "" || !utf8.ValidString(request.Reason) || utf8.RuneCountInString(request.Reason) > 500 || strings.ContainsAny(request.Reason, "\r\n\x00") {
 		api.writeProblem(w, r, invalidRequest("The rollback request is invalid."))
 		return
 	}

@@ -199,7 +199,7 @@ async function installAdminFixture(
     }
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: activeConfigurationRevisionID, state: "active", version: activeConfigurationVersion }, { ETag: '"active-revision-etag"' });
     if (url.pathname === `/admin/v1/environments/${ids.environment}/rollback` && request.method() === "POST") {
-      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; rollbackBodies.push({ etag: request.headers()["if-match"], ...body });
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; rollbackBodies.push({ audit_reason: request.headers()["x-latchway-audit-reason"], etag: request.headers()["if-match"], ...body });
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 3 }, { ETag: '"restored-revision-etag"' });
     }
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
@@ -659,9 +659,11 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
 
   await page.getByRole("link", { name: /^Configuration revisions/ }).click();
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
-  await page.getByRole("button", { name: "Rollback to this revision" }).click();
+  await page.getByRole("button", { name: "Review rollback" }).click();
+  await page.getByLabel("Operator reason").fill("restore known-good revision");
+  await page.getByRole("button", { name: "Confirm rollback to revision 1" }).click();
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
-  expect(fixture.rollbackBodies).toEqual([{ etag: '"active-revision-etag"', revision_id: ids.revision }]);
+  expect(fixture.rollbackBodies).toEqual([{ audit_reason: "operator_reason_provided", etag: '"active-revision-etag"', reason: "restore known-good revision", revision_id: ids.revision }]);
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);

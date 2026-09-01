@@ -317,7 +317,7 @@ describe("resource-management pages", () => {
       state: "superseded",
       version: 1
     };
-    const active = { ...previous, id: ids.activeRevision, state: "active", version: 2 };
+    const active = { ...previous, document: { ...previous.document, spec: { features: [{ id: "assistant" }] } }, id: ids.activeRevision, state: "active", version: 2 };
     let activeReads = 0;
     adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { etag?: string; method?: string }) => {
       if (path.includes("/config-revisions?")) return Promise.resolve({ data: { items: [previous], page: { has_more: false } } });
@@ -332,12 +332,16 @@ describe("resource-management pages", () => {
     await user.type(screen.getByLabelText("Environment ID"), ids.environment);
     await user.click(screen.getByRole("button", { name: "Load newest revision" }));
     await screen.findByText(/Active revision:/);
-    await user.click(screen.getByRole("button", { name: "Rollback to this revision" }));
+    await user.click(screen.getByRole("button", { name: "Review rollback" }));
+    expect(screen.getByRole("heading", { name: "Replace active revision 2 with revision 1?" })).toBeInTheDocument();
+    expect(screen.getByText("$.spec.features")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Operator reason"), "restore known-good revision");
+    await user.click(screen.getByRole("button", { name: "Confirm rollback to revision 1" }));
 
     await waitFor(() => expect(adminRequestMock).toHaveBeenCalledWith(
       `/admin/v1/environments/${ids.environment}/rollback`,
       expect.anything(),
-      { body: { revision_id: ids.previousRevision }, etag: '"etag-at-click"', method: "POST" }
+      { body: { reason: "restore known-good revision", revision_id: ids.previousRevision }, etag: '"etag-at-click"', method: "POST" }
     ));
     expect(activeReads).toBe(2);
   });

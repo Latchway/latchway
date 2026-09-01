@@ -127,6 +127,10 @@ describe("resumable setup wizard", () => {
     expect(await screen.findByRole("button", { name: "Credential added" })).toBeDisabled();
     expect(screen.getByText(/Revision/).closest("p")).toHaveTextContent("active");
     expect(screen.getByLabelText("Secret value")).toHaveValue("");
+    expect(screen.getByRole("link", { name: "Open AI connections" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/upstreams(?:\?|$)/)
+    );
 
     fireEvent.change(screen.getByLabelText("Full configuration JSON"), { target: { value: "{}" } });
     const beforeUnload = new Event("beforeunload", { cancelable: true });

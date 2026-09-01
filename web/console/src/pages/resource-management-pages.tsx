@@ -340,6 +340,30 @@ function validStrongETag(value: string | undefined): value is string {
   return Boolean(value && value.startsWith('"') && value.endsWith('"') && !value.startsWith("W/") && !value.includes("\n") && !value.includes("\r"));
 }
 
+function structuralDiffPaths(before: unknown, after: unknown, path = "$"): string[] {
+  if (Object.is(before, after)) return [];
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const paths: string[] = [];
+    for (let index = 0; index < Math.max(before.length, after.length); index += 1) {
+      if (index >= before.length || index >= after.length) paths.push(`${path}[${index}]`);
+      else paths.push(...structuralDiffPaths(before[index], after[index], `${path}[${index}]`));
+    }
+    return paths;
+  }
+  if (before && after && typeof before === "object" && typeof after === "object") {
+    const left = before as Record<string, unknown>;
+    const right = after as Record<string, unknown>;
+    const paths: string[] = [];
+    for (const key of [...new Set([...Object.keys(left), ...Object.keys(right)])].sort()) {
+      const childPath = `${path}.${key}`;
+      if (!(key in left) || !(key in right)) paths.push(childPath);
+      else paths.push(...structuralDiffPaths(left[key], right[key], childPath));
+    }
+    return paths;
+  }
+  return [path];
+}
+
 export function ConfigurationRevisionsPage() {
   const session = useConsoleSession();
   const workspace = useOptionalWorkspace();
@@ -347,6 +371,8 @@ export function ConfigurationRevisionsPage() {
   const [page, setPage] = useState<ConfigurationRevisionResourcePage>();
   const [active, setActive] = useState<ConfigurationRevisionResource>();
   const [activeETag, setActiveETag] = useState<string>();
+  const [rollbackTarget, setRollbackTarget] = useState<ConfigurationRevisionResource>();
+  const [rollbackReason, setRollbackReason] = useState("");
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   const canConfigure = session.data?.mode === "configured"
@@ -367,7 +393,7 @@ export function ConfigurationRevisionsPage() {
     setBusy(true); setProblem(undefined);
     try {
       const history = await adminRequest(queryPath(`/admin/v1/environments/${selectedEnvironment}/config-revisions`, { page_size: "1", cursor }), ConfigurationRevisionResourcePageSchema);
-      setPage(history.data);
+      setPage(history.data); setRollbackTarget(undefined); setRollbackReason("");
       try {
         const current = await adminRequest(`/admin/v1/environments/${selectedEnvironment}/config`, ConfigurationRevisionResourceSchema);
         setActive(current.data); setActiveETag(current.etag);
@@ -379,7 +405,12 @@ export function ConfigurationRevisionsPage() {
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
-  async function rollback(target: ConfigurationRevisionResource): Promise<void> {
+  async function rollback(target: ConfigurationRevisionResource, reason: string): Promise<void> {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason || trimmedReason.length > 500 || /[\r\n\0]/.test(trimmedReason)) {
+      setProblem(invalidResourceProblem("Provide a 1-500 character rollback reason without line breaks."));
+      return;
+    }
     setBusy(true); setProblem(undefined);
     try {
       const current = await adminRequest(`/admin/v1/environments/${effectiveEnvironmentID}/config`, ConfigurationRevisionResourceSchema);
@@ -387,8 +418,9 @@ export function ConfigurationRevisionsPage() {
         setProblem({ code: "etag_required", detail: "The server omitted the strong ETag required for safe rollback.", retryable: true, status: 0, title: "Rollback precondition unavailable" });
         return;
       }
-      const rolledBack = (await adminRequest(`/admin/v1/environments/${effectiveEnvironmentID}/rollback`, ConfigurationRevisionResourceSchema, { method: "POST", etag: current.etag, body: { revision_id: target.id } })).data;
+      const rolledBack = (await adminRequest(`/admin/v1/environments/${effectiveEnvironmentID}/rollback`, ConfigurationRevisionResourceSchema, { method: "POST", etag: current.etag, body: { revision_id: target.id, reason: trimmedReason } })).data;
       setActive(rolledBack); setActiveETag(undefined);
+      setRollbackTarget(undefined); setRollbackReason("");
       setPage((currentPage) => currentPage ? { ...currentPage, items: currentPage.items.map((item) => item.id === rolledBack.id ? rolledBack : item) } : currentPage);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
@@ -396,6 +428,7 @@ export function ConfigurationRevisionsPage() {
   const item = page?.items[0];
   const unpublished = Boolean(item && ["draft", "valid", "invalid"].includes(item.state));
   const rollbackAllowed = Boolean(canConfigure && active && item?.activated_at && item.id !== active.id && validStrongETag(activeETag));
+  const rollbackPaths = active && rollbackTarget ? structuralDiffPaths(active.document, rollbackTarget.document) : [];
   useEffect(() => {
     if (!selectedEnvironmentID) return;
     let cancelled = false;
@@ -412,7 +445,8 @@ export function ConfigurationRevisionsPage() {
     {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Newest server revision · one full document per page</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Refresh revisions</button></section> : <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => { setEnvironmentID(event.target.value); setPage(undefined); setActive(undefined); setActiveETag(undefined); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load newest revision</button></div>}
     <ProblemNotice problem={problem} />
     {active ? <p className="resource-result">Active revision: <code>{active.id}</code> (version {active.version})</p> : page ? <div className="control-notice"><strong>No active revision</strong><span>History can be inspected, but rollback requires an active ETag precondition.</span></div> : null}
-    {item ? <section className="detail-card"><div className="detail-card__heading"><div><h2>Revision {item.version}</h2><p><code>{item.id}</code></p></div><span className="state-badge">{item.id === active?.id ? "active" : item.state}</span></div><dl><div><dt>Created</dt><dd>{displayInstant(item.created_at)}</dd></div><div><dt>Created by</dt><dd>{item.created_by}</dd></div><div><dt>First activated</dt><dd>{displayInstant(item.activated_at)}</dd></div><div><dt>Validation</dt><dd>{item.validation ? item.validation.valid ? "valid" : "invalid" : "not recorded"}</dd></div></dl>{unpublished ? <div className="control-notice"><strong>Unpublished server revision</strong><span>It does not affect traffic. The Admin API has no abandon/delete operation, so this audited revision cannot be removed from the console.</span><button className="small-action" disabled type="button">Abandon unavailable</button></div> : null}<details><summary>Inspect redaction-safe configuration document</summary><pre>{JSON.stringify(item.document, null, 2)}</pre></details><div className="button-row"><button className="primary-action" disabled={busy || !rollbackAllowed} onClick={() => void rollback(item)} type="button">Rollback to this revision</button>{!canConfigure ? <small>The activate_configuration capability is required.</small> : !item.activated_at ? <small>Only a previously activated valid revision can be restored.</small> : item.id === active?.id ? <small>This revision is already active.</small> : !validStrongETag(activeETag) ? <small>A strong active-revision ETag is required.</small> : null}</div></section> : page ? <div className="control-notice"><strong>No revisions</strong><span>This environment has no configuration history.</span></div> : null}
+    {item ? <section className="detail-card"><div className="detail-card__heading"><div><h2>Revision {item.version}</h2><p><code>{item.id}</code></p></div><span className="state-badge">{item.id === active?.id ? "active" : item.state}</span></div><dl><div><dt>Created</dt><dd>{displayInstant(item.created_at)}</dd></div><div><dt>Created by</dt><dd>{item.created_by}</dd></div><div><dt>First activated</dt><dd>{displayInstant(item.activated_at)}</dd></div><div><dt>Validation</dt><dd>{item.validation ? item.validation.valid ? "valid" : "invalid" : "not recorded"}</dd></div></dl>{unpublished ? <div className="control-notice"><strong>Unpublished server revision</strong><span>It does not affect traffic. The Admin API has no abandon/delete operation, so this audited revision cannot be removed from the console.</span><button className="small-action" disabled type="button">Abandon unavailable</button></div> : null}<details><summary>Inspect redaction-safe configuration document</summary><pre>{JSON.stringify(item.document, null, 2)}</pre></details><div className="button-row"><button className="primary-action" disabled={busy || !rollbackAllowed} onClick={() => { setRollbackTarget(item); setRollbackReason(""); }} type="button">Review rollback</button>{!canConfigure ? <small>The activate_configuration capability is required.</small> : !item.activated_at ? <small>Only a previously activated valid revision can be restored.</small> : item.id === active?.id ? <small>This revision is already active.</small> : !validStrongETag(activeETag) ? <small>A strong active-revision ETag is required.</small> : null}</div></section> : page ? <div className="control-notice"><strong>No revisions</strong><span>This environment has no configuration history.</span></div> : null}
+    {rollbackTarget && active ? <section aria-labelledby="rollback-review-heading" className="publish-review publish-review--valid"><p className="eyebrow">Rollback review</p><h2 id="rollback-review-heading">Replace active revision {active.version} with revision {rollbackTarget.version}?</h2><div className="impact-grid"><div><strong>Traffic changes atomically</strong><span>The target document becomes active after a fresh strong-ETag check.</span></div><div><strong>{rollbackPaths.length} structural path change(s)</strong><span>Values remain hidden from this review; inspect both redaction-safe documents above if needed.</span></div><div><strong>Rollback creates new activation evidence</strong><span>Revoked credentials and external side effects are not restored.</span></div></div>{rollbackPaths.length ? <ul>{rollbackPaths.slice(0, 100).map((path) => <li key={path}><code>{path}</code></li>)}</ul> : <p>No document field changes were detected; only revision identity would change.</p>}{rollbackPaths.length > 100 ? <p>Showing the first 100 changed paths.</p> : null}<label>Operator reason<textarea maxLength={500} onChange={(event) => setRollbackReason(event.target.value)} required rows={3} value={rollbackReason} /></label><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => { setRollbackTarget(undefined); setRollbackReason(""); }} type="button">Cancel rollback</button><button className="primary-action primary-action--danger" disabled={busy || !rollbackReason.trim()} onClick={() => void rollback(rollbackTarget, rollbackReason)} type="button">Confirm rollback to revision {rollbackTarget.version}</button></div></section> : null}
     {page ? <div className="button-row">{paginationButton("Newest", busy, () => void load())}{page.page.has_more && page.page.next_cursor ? paginationButton("Next older revision", busy, () => void load(page.page.next_cursor)) : null}</div> : null}
   </div>;
 }

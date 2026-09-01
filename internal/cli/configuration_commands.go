@@ -273,12 +273,16 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 }
 
 func newConfigRollbackCommand(opts *options, root *controlCommandOptions) *cobra.Command {
-	var environmentID string
+	var environmentID, reason string
 	command := &cobra.Command{
 		Use: "rollback REVISION_ID", Short: "Atomically reactivate a prior valid revision", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if id.Validate(environmentID, id.Environment) != nil || id.Validate(args[0], id.ConfigRevision) != nil {
 				return errors.New("environment or revision ID is invalid")
+			}
+			validatedReason, err := validLifecycleReasonCLI(reason)
+			if err != nil {
+				return err
 			}
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
@@ -295,14 +299,16 @@ func newConfigRollbackCommand(opts *options, root *controlCommandOptions) *cobra
 			}
 			var rolledBack configurationRevisionCLI
 			headers := http.Header{"If-Match": []string{etag}}
-			if _, err := client.doWithHeaders(cmd.Context(), http.MethodPost, "/admin/v1/environments/"+environmentID+"/rollback", nil, map[string]string{"revision_id": args[0]}, headers, http.StatusOK, &rolledBack); err != nil {
+			if _, err := client.doWithHeaders(cmd.Context(), http.MethodPost, "/admin/v1/environments/"+environmentID+"/rollback", nil, map[string]string{"revision_id": args[0], "reason": validatedReason}, headers, http.StatusOK, &rolledBack); err != nil {
 				return err
 			}
 			return printConfigurationRevision(opts, rolledBack)
 		},
 	}
 	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&reason, "reason", "", "operator reason (1-500 characters; value is not persisted in audit data)")
 	_ = command.MarkFlagRequired("environment")
+	_ = command.MarkFlagRequired("reason")
 	return command
 }
 

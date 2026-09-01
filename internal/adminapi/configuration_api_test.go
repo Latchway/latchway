@@ -185,8 +185,20 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	if active.Code != http.StatusOK || active.Header().Get("ETag") != secondETag {
 		t.Fatalf("active status=%d ETag=%q body=%s", active.Code, active.Header().Get("ETag"), active.Body.String())
 	}
-	rollback := performConfigurationJSON(t, handler, http.MethodPost,
+	missingRollbackReason := performConfigurationJSON(t, handler, http.MethodPost,
 		"/admin/v1/environments/"+environment.ID+"/rollback", map[string]string{"revision_id": initial.ID},
+		cookie, csrf, active.Header().Get("ETag"))
+	if missingRollbackReason.Code != http.StatusBadRequest {
+		t.Fatalf("missing rollback reason status=%d body=%s", missingRollbackReason.Code, missingRollbackReason.Body.String())
+	}
+	unsafeRollbackReason := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/environments/"+environment.ID+"/rollback", map[string]string{"revision_id": initial.ID, "reason": "unsafe\nreason"},
+		cookie, csrf, active.Header().Get("ETag"))
+	if unsafeRollbackReason.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe rollback reason status=%d body=%s", unsafeRollbackReason.Code, unsafeRollbackReason.Body.String())
+	}
+	rollback := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/environments/"+environment.ID+"/rollback", map[string]string{"revision_id": initial.ID, "reason": "restore known-good revision"},
 		cookie, csrf, active.Header().Get("ETag"))
 	if rollback.Code != http.StatusOK {
 		t.Fatalf("rollback status=%d body=%s", rollback.Code, rollback.Body.String())
