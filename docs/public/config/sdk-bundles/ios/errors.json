@@ -3,7 +3,7 @@
     {
       "name": "attestationUnavailable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 184,
@@ -18,7 +18,7 @@
     {
       "name": "attestation_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 88,
@@ -33,7 +33,7 @@
     {
       "name": "attestation_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 86,
@@ -48,7 +48,7 @@
     {
       "name": "attestation_stale",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 89,
@@ -63,7 +63,7 @@
     {
       "name": "attestation_step_up_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 90,
@@ -78,7 +78,7 @@
     {
       "name": "attestation_unsupported",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 87,
@@ -93,7 +93,7 @@
     {
       "name": "cancelled",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 190,
@@ -108,7 +108,7 @@
     {
       "name": "component_definition_not_found",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 101,
@@ -123,7 +123,7 @@
     {
       "name": "component_delegation_expired",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 107,
@@ -138,7 +138,7 @@
     {
       "name": "component_direct_attestation_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 110,
@@ -153,7 +153,7 @@
     {
       "name": "component_feature_not_granted",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 108,
@@ -168,7 +168,7 @@
     {
       "name": "component_key_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 105,
@@ -183,7 +183,7 @@
     {
       "name": "component_key_replaced",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 106,
@@ -198,7 +198,7 @@
     {
       "name": "component_not_configured",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 102,
@@ -213,7 +213,7 @@
     {
       "name": "component_not_provisioned",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 103,
@@ -228,7 +228,7 @@
     {
       "name": "component_parent_trust_expired",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 109,
@@ -243,7 +243,7 @@
     {
       "name": "component_revoked",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 104,
@@ -258,7 +258,7 @@
     {
       "name": "concurrency_exceeded",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 120,
@@ -273,7 +273,7 @@
     {
       "name": "configuration_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 127,
@@ -288,7 +288,7 @@
     {
       "name": "containing_app_setup_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 111,
@@ -303,7 +303,7 @@
     {
       "name": "dpop_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 92,
@@ -318,7 +318,7 @@
     {
       "name": "dpop_missing",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 91,
@@ -333,7 +333,7 @@
     {
       "name": "dpop_nonce_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 94,
@@ -348,7 +348,7 @@
     {
       "name": "dpop_replayed",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 93,
@@ -363,7 +363,7 @@
     {
       "name": "feature_not_allowed",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 117,
@@ -378,7 +378,7 @@
     {
       "name": "feature_not_found",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 116,
@@ -393,7 +393,7 @@
     {
       "name": "framework_integration_unsupported",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 112,
@@ -408,7 +408,7 @@
     {
       "name": "framework_version_unsupported",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 113,
@@ -423,7 +423,7 @@
     {
       "name": "gateway",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 11,
@@ -438,7 +438,7 @@
     {
       "name": "identity_reauthentication_required",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 85,
@@ -453,7 +453,7 @@
     {
       "name": "identity_token_expired",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 84,
@@ -468,7 +468,7 @@
     {
       "name": "identity_token_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 83,
@@ -483,7 +483,7 @@
     {
       "name": "identity_token_missing",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 82,
@@ -498,7 +498,7 @@
     {
       "name": "installation_family_not_found",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 100,
@@ -513,7 +513,7 @@
     {
       "name": "installation_family_revoked",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 99,
@@ -528,7 +528,7 @@
     {
       "name": "installation_revoked",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 98,
@@ -543,7 +543,7 @@
     {
       "name": "internal_error",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 132,
@@ -558,7 +558,7 @@
     {
       "name": "invalidAttestationBinding",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 185,
@@ -573,7 +573,7 @@
     {
       "name": "invalidConfiguration",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 179,
@@ -588,7 +588,7 @@
     {
       "name": "invalidGatewayStream",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 12,
@@ -603,7 +603,7 @@
     {
       "name": "invalidRequest",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 180,
@@ -618,7 +618,7 @@
     {
       "name": "invalidServerResponse",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 188,
@@ -633,7 +633,7 @@
     {
       "name": "invalidTranscript",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 9,
@@ -648,7 +648,7 @@
     {
       "name": "keyStorageFailure",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 183,
@@ -663,7 +663,7 @@
     {
       "name": "model_not_allowed",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 118,
@@ -678,7 +678,7 @@
     {
       "name": "operation_indeterminate",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 131,
@@ -693,7 +693,7 @@
     {
       "name": "output_limit_exceeded",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 121,
@@ -708,7 +708,7 @@
     {
       "name": "pricing_unavailable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 122,
@@ -723,7 +723,7 @@
     {
       "name": "protocol_version_unsupported",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 129,
@@ -738,7 +738,7 @@
     {
       "name": "quota_exceeded",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 119,
@@ -753,7 +753,7 @@
     {
       "name": "rate_limited",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 130,
@@ -768,7 +768,7 @@
     {
       "name": "refresh_token_reused",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 97,
@@ -783,7 +783,7 @@
     {
       "name": "request_invalid",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 81,
@@ -798,7 +798,7 @@
     {
       "name": "rootKeychainMigrationRequired",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 181,
@@ -813,7 +813,7 @@
     {
       "name": "route_not_found",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 123,
@@ -828,7 +828,7 @@
     {
       "name": "secureEnclaveUnavailable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 182,
@@ -843,7 +843,7 @@
     {
       "name": "server",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 189,
@@ -858,7 +858,7 @@
     {
       "name": "server_not_ready",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 128,
@@ -873,7 +873,7 @@
     {
       "name": "sessionUnavailable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 186,
@@ -888,7 +888,7 @@
     {
       "name": "session_expired",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 95,
@@ -903,7 +903,7 @@
     {
       "name": "session_revoked",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 96,
@@ -918,7 +918,7 @@
     {
       "name": "transportFailure",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 187,
@@ -933,7 +933,7 @@
     {
       "name": "transport_destination_not_allowed",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 114,
@@ -948,7 +948,7 @@
     {
       "name": "transport_request_not_replayable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 115,
@@ -963,7 +963,7 @@
     {
       "name": "unsupportedSamplingMode",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 10,
@@ -978,7 +978,7 @@
     {
       "name": "upstream_protocol_error",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 126,
@@ -993,7 +993,7 @@
     {
       "name": "upstream_timeout",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 125,
@@ -1008,7 +1008,7 @@
     {
       "name": "upstream_unavailable",
       "source": {
-        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 124,

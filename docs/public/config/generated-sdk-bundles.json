@@ -2,18 +2,18 @@
   "bundles": [
     {
       "archive": "docs/sdk-bundles/android/docs-bundle-1.0.0.tar.gz",
-      "archive_sha256": "4e1dbdb0c1a98e771ac2291dc0386bb095a2a6fedd36be166e0c984a851706ba",
-      "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+      "archive_sha256": "e1706cb2b0f7718c8dccf33d8228d20b66da0581720627907779a5e2e67279b0",
+      "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
       "files": [
         {
           "generated_path": "snippets/generated/android/frameworks/koog.kt",
-          "generated_sha256": "a637bb4558876c4bcd0ca8e75e4948cf8c74b6b1d7d7b236e0612ffd6d5e888b",
+          "generated_sha256": "7de56edf215772800594037d8a3e39cea3410209f52b58975af0f091373168fa",
           "kind": "framework",
           "payload_path": "frameworks/koog.kt",
           "payload_sha256": "1af1b9ba40e451431dc6e47adc8f4a685179a55f07ea2ddf12708d94f907bd07",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt",
               "region": {
                 "end_line": 88,
@@ -26,17 +26,17 @@
             }
           ],
           "snippet_path": "snippets/generated/android/frameworks/koog.kt.mdx",
-          "snippet_sha256": "8204e884c664cfd6ec8eb7bfedfeac934d1a2513ebb88ad45032afceaf67fd71"
+          "snippet_sha256": "532f386c871d59ca50918617c7f683001518e5c4c62b4fcdc20fa3f9f7ae466e"
         },
         {
           "generated_path": "snippets/generated/android/frameworks/langchain4j.kt",
-          "generated_sha256": "e60e80a26ba81b95fe0f0dd6828978c3a3ea30894d562e133b0c8fa04bdceda3",
+          "generated_sha256": "c44033874cf6fe6c84c287302e4ad85d4109946f53a5152f5891114f24c37aec",
           "kind": "framework",
           "payload_path": "frameworks/langchain4j.kt",
           "payload_sha256": "913b2ee129e97214cdfd98f197f72fd9a089817fe550f39e0776e9f4cbb8f0a8",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt",
               "region": {
                 "end_line": 56,
@@ -49,17 +49,17 @@
             }
           ],
           "snippet_path": "snippets/generated/android/frameworks/langchain4j.kt.mdx",
-          "snippet_sha256": "e105e13bb23413441a1458c7214a07179c8493d9e608ca13cd0524c53bff531a"
+          "snippet_sha256": "9dcd043e6fd722a9a879de3a4664d0efc18727cf68af148117a15d4052fe3c8c"
         },
         {
           "generated_path": "snippets/generated/android/frameworks/openai-kotlin.kt",
-          "generated_sha256": "f8dc330b582f4af1a14dfb7f8778a1d7634c690fbc81bdac1278591669caa78e",
+          "generated_sha256": "9e1b103579a5b29574f1800d378758237d64a0c568b24ac1177cd5b905d209d6",
           "kind": "framework",
           "payload_path": "frameworks/openai-kotlin.kt",
           "payload_sha256": "0bd46bff9e2720a5b5affbd4cea31c3bbec6adad9f8481295802fa704b681b42",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt",
               "region": {
                 "end_line": 56,
@@ -72,17 +72,17 @@
             }
           ],
           "snippet_path": "snippets/generated/android/frameworks/openai-kotlin.kt.mdx",
-          "snippet_sha256": "1fd7890203eda11bc63c3e65477b776ee480c5d721637ab75a05ca72581c4e45"
+          "snippet_sha256": "059c6a2b7e9b0758c1430dc72e44dbc6d316a2e4c529a32cc229735116323510"
         },
         {
           "generated_path": "snippets/generated/android/frameworks/retrofit.kt",
-          "generated_sha256": "629392ea2dc4f581bceb64d732979f5bd75c6e18aef24805e57cec342228810f",
+          "generated_sha256": "a938b080b031a9ebccc7fa745373d9930ed1121b06aca012b6193f0b228f7eb6",
           "kind": "framework",
           "payload_path": "frameworks/retrofit.kt",
           "payload_sha256": "0c77a34b5089c1c6c68cdf17b5de205a266b98e2690395f571d838b6afeff3a2",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt",
               "region": {
                 "end_line": 74,
@@ -95,17 +95,17 @@
             }
           ],
           "snippet_path": "snippets/generated/android/frameworks/retrofit.kt.mdx",
-          "snippet_sha256": "913ad9a5631d533d8679325687e1531b6548f54325898363378cb978618ec8e3"
+          "snippet_sha256": "b57ff16c66a84945e40d05f01e12898d236947e25c4e4f43b42551c85f57cdea"
         },
         {
           "generated_path": "snippets/generated/android/quickstart/basic-client.kt",
-          "generated_sha256": "dfd1ae735e28565b0e00a98b937e3eb44957a893b73fd89dc05cd35aa1ba0170",
+          "generated_sha256": "52d19dc3e44c994ea0036eb0427729c4c248af50a238f8c557ee1abdc32d00ca",
           "kind": "quickstart",
           "payload_path": "quickstart/basic-client.kt",
           "payload_sha256": "116814d15c041603095b215663858829858263bdb29407922271d6f9867f6088",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt",
               "region": {
                 "end_line": 39,
@@ -118,17 +118,17 @@
             }
           ],
           "snippet_path": "snippets/generated/android/quickstart/basic-client.kt.mdx",
-          "snippet_sha256": "287d2a2750396725440c06f26224a91d94fed841ce0a5eca2cb1dbb04c2423d7"
+          "snippet_sha256": "e147dd0f6f6c207d660d3a89665c4b4e4efcfe68d7b05a4de76253b71a0cfd49"
         },
         {
           "generated_path": "snippets/generated/android/quickstart/firebase-auth.kt",
-          "generated_sha256": "b1b759f69fa4da3d36fbffd7be3ffc49edc257119a1e53406aab76cc86c5777c",
+          "generated_sha256": "1337f02bf9b772e84a57b5acc2da4b5790a988b6dce2e394cf7988b152a33852",
           "kind": "quickstart",
           "payload_path": "quickstart/firebase-auth.kt",
           "payload_sha256": "97bd4f050a6340bc666f1db8c21b67799b84c2090dc372191552efcdb8029c54",
           "provenance": [
             {
-              "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+              "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
               "file": "sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt",
               "region": {
                 "end_line": 301,
@@ -141,31 +141,31 @@
             }
           ],
           "snippet_path": "snippets/generated/android/quickstart/firebase-auth.kt.mdx",
-          "snippet_sha256": "61b665e33b03bf28278c2f5be8e5240328c2aead51c6f404a16041ef50c467f0"
+          "snippet_sha256": "78c09bb17d33e790c5d66f0cda133ac043d33d153d7e45a8e7a4a7140d594eee"
         }
       ],
       "id": "android",
       "package": "dev.latchway",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-android",
-      "source_date_epoch": 1788175799,
+      "source_date_epoch": 1788220082,
       "source_tree_clean": true,
       "version": "1.0.0"
     },
     {
       "archive": "docs/sdk-bundles/ios/docs-bundle-1.0.0.tar.gz",
-      "archive_sha256": "4342f060efa90b4e08db7bcd46194856b292fef65b42b5b70fa96c03e6d542e1",
-      "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+      "archive_sha256": "eac8039114ca2dcad933b1e55ac9ba0c886dacda6d6560e169e48ab45e6c0f64",
+      "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
       "files": [
         {
           "generated_path": "snippets/generated/ios/frameworks/foundation-models.swift",
-          "generated_sha256": "880ae35643e1d84a1d180a679b06502366176a6a05696a0cf043cb557d9010ae",
+          "generated_sha256": "6b203351752eaba5501a32666a689d9fc450afd2c9e95808b3a5fa9931f18d96",
           "kind": "framework",
           "payload_path": "frameworks/foundation-models.swift",
           "payload_sha256": "5daf271fa707b7c5c210c638c57ceacd8a1b9612da0e2947a1ff326c0e4f215c",
           "provenance": [
             {
-              "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+              "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
               "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
               "region": {
                 "end_line": 189,
@@ -178,17 +178,17 @@
             }
           ],
           "snippet_path": "snippets/generated/ios/frameworks/foundation-models.swift.mdx",
-          "snippet_sha256": "7e64503fe9d5e35d81d87af61336f3cb8b2e3d14872689b05f7c52a3faf7c820"
+          "snippet_sha256": "b55ec2b96e1bdeec37638e2cfd3aa415d9498e63c30b8bb0955b56c04a49c83d"
         },
         {
           "generated_path": "snippets/generated/ios/frameworks/swift-openai.swift",
-          "generated_sha256": "65d39569a4781e6690ee9f71b5b070e13495c7e2abe0179b34496a1a0699ba46",
+          "generated_sha256": "191e93d789fac1843e059376eb19cb1d7c4dd26e1f5ac5914bc56a2a3cc585d5",
           "kind": "framework",
           "payload_path": "frameworks/swift-openai.swift",
           "payload_sha256": "2b9a012c059bf12475bcbc0db90022a9ef1786140c64525971e6aa474cfbdd77",
           "provenance": [
             {
-              "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+              "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
               "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
               "region": {
                 "end_line": 99,
@@ -201,17 +201,17 @@
             }
           ],
           "snippet_path": "snippets/generated/ios/frameworks/swift-openai.swift.mdx",
-          "snippet_sha256": "da55e2fe2f06fcece81e3ae99b6f99917054a7fb7a0c9f0fa5d24e99886aac8d"
+          "snippet_sha256": "6c55e573fca08051658a8fda497dc8302e1b55e8683eaacbc9b4cce014b0e049"
         },
         {
           "generated_path": "snippets/generated/ios/quickstart/app-extension-component.swift",
-          "generated_sha256": "11b868e5f16a9ef1b19455e1a09b9d023dfaa1256fe867ad7aa2d1e64654ce92",
+          "generated_sha256": "6201e03d572ad7e34e9944101ba2dc4d8f95ca6394e42b0ec2bc2faef3424a45",
           "kind": "quickstart",
           "payload_path": "quickstart/app-extension-component.swift",
           "payload_sha256": "514ab5f7cd3f373b3fe9849fe702033c7c9d8b15b069d84a6da32e730e9b08c2",
           "provenance": [
             {
-              "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+              "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
               "file": "Examples/AppExtensionComponents/Host/ComponentHostApp.swift",
               "region": {
                 "end_line": 89,
@@ -224,17 +224,17 @@
             }
           ],
           "snippet_path": "snippets/generated/ios/quickstart/app-extension-component.swift.mdx",
-          "snippet_sha256": "7fbe605c6c6ecfa0d737a9289aac1dbce4a8e66f07f4b4b1710dec73b721cbd0"
+          "snippet_sha256": "ae451a6976e66366128cf54608abd98950e6e1be4bea22dc0db914a03d6deb01"
         },
         {
           "generated_path": "snippets/generated/ios/quickstart/url-session.swift",
-          "generated_sha256": "9aa4642c17ff1c83b43a6433ac9671261161c3c721e2e0e55b455cb9dd24af5c",
+          "generated_sha256": "779d9dc70852c00630b3543c35b06483d9e5c2299ca7778f548a03782adc50ef",
           "kind": "quickstart",
           "payload_path": "quickstart/url-session.swift",
           "payload_sha256": "4e8a947666a977dcd2159d9428ff3f40a08c143d279a6f1520212a8c28bb5f31",
           "provenance": [
             {
-              "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+              "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
               "file": "Examples/BasicURLSession/BasicURLSession.swift",
               "region": {
                 "end_line": 247,
@@ -247,31 +247,31 @@
             }
           ],
           "snippet_path": "snippets/generated/ios/quickstart/url-session.swift.mdx",
-          "snippet_sha256": "564ec45030d7b6dd8b6ec0dfe05b60c87d32fed7f8e81d438fc3d090793d1464"
+          "snippet_sha256": "39748c798dcac2559142ad2a62333558490e87b652b367c7a74dceca7b64465d"
         }
       ],
       "id": "ios",
       "package": "Latchway",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-ios-sdk",
-      "source_date_epoch": 1788175799,
+      "source_date_epoch": 1788220626,
       "source_tree_clean": true,
       "version": "1.0.0"
     },
     {
       "archive": "docs/sdk-bundles/js/docs-bundle-1.0.0.tar.gz",
-      "archive_sha256": "4c10a5116d0398afe059610d8dd5182e770bda32c4402f17e7fc36e4d14abe6f",
-      "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+      "archive_sha256": "fd227ca489ed0d8702eb9a7cfff0827ef5e889034796f7a0da82c85a6644ce18",
+      "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
       "files": [
         {
           "generated_path": "snippets/generated/js/frameworks/langchain.ts",
-          "generated_sha256": "0375e43c8d25c30b5bc76d6d14ea0179f6952e109455bd1648a61cfa56c73ddb",
+          "generated_sha256": "4cff2e74e22a918e1ebb2d071963b561d4209dee51d4de5dd62078a1c4f53165",
           "kind": "framework",
           "payload_path": "frameworks/langchain.ts",
           "payload_sha256": "6f1596c2f371971615a845869f9fa6e61e8cb5b130825c9c1c64388ed62f5742",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "packages/langchain/src/index.ts",
               "region": {
                 "end_line": 103,
@@ -284,17 +284,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/frameworks/langchain.ts.mdx",
-          "snippet_sha256": "d2451674ff07f25ca5afc9e4f0407c347cae43bd8997893f8b5ea525ad9ba2a7"
+          "snippet_sha256": "2a980380a7f6942c075bbe4ca1d7467265d64bec52431b4c922b88b0d5488251"
         },
         {
           "generated_path": "snippets/generated/js/frameworks/openai.ts",
-          "generated_sha256": "836aacfdcb2c6f54ac202e32f513ad844771343314f2a8279cbbdae7dcb12b4e",
+          "generated_sha256": "bb16d1acaa47fd93cc94d3290592625c8ce68f1c3c8c22838e00ba58750d475f",
           "kind": "framework",
           "payload_path": "frameworks/openai.ts",
           "payload_sha256": "1b5a119e20ab8af68343c0db78ff557c59b5a5df5d80decee9da47238fa4f24c",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "packages/openai/src/index.ts",
               "region": {
                 "end_line": 71,
@@ -307,17 +307,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/frameworks/openai.ts.mdx",
-          "snippet_sha256": "cc3ef3611a9aa5c8815dd2f3ec087d2e77b6532649d889c1cf86f5cc8a93cac1"
+          "snippet_sha256": "88ce0e74cbdc1793518b425cfa151d1d880b94227757c32d875473d57b6aaf00"
         },
         {
           "generated_path": "snippets/generated/js/frameworks/vercel-ai.ts",
-          "generated_sha256": "f0ffd535a7628193fd0ad225c068e9f5f359b18b5420310b792934c95e988eb5",
+          "generated_sha256": "6eda4b0705bde718a77dc448f3311f6b51f5c64e8ec651b995a32bbb5fbd4811",
           "kind": "framework",
           "payload_path": "frameworks/vercel-ai.ts",
           "payload_sha256": "53737067ecfc3b77d51fc5ce719a4e449773f174471f760dafe1ff1d07fc2ff7",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "packages/vercel-ai/src/index.ts",
               "region": {
                 "end_line": 78,
@@ -330,17 +330,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/frameworks/vercel-ai.ts.mdx",
-          "snippet_sha256": "a93a22164d3e6c686af033465c103155e9b4e79658563fe48817ecf641a6db15"
+          "snippet_sha256": "f1d9ddc5fe7570acaf5037ba0d1d494a773f2e3c2730f4811cdf3509bbe5679a"
         },
         {
           "generated_path": "snippets/generated/js/quickstart/firebase-app-check.ts",
-          "generated_sha256": "7349c338e1fd8d6daad4329cedca5b77bee9ae31dda67e356bfd35dfd725abca",
+          "generated_sha256": "bfee7bd890bdc6264416db9cce33a2f4dca6c3e476c99f9e5b95b13a89ad1eaa",
           "kind": "quickstart",
           "payload_path": "quickstart/firebase-app-check.ts",
           "payload_sha256": "a83eee7e14ccc32f946b46eee6f158f4a581d0fc3ac7658843bd1c8a284fdd59",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "examples/firebase/client.ts",
               "region": {
                 "end_line": 23,
@@ -353,17 +353,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/quickstart/firebase-app-check.ts.mdx",
-          "snippet_sha256": "e214b4ba317fd25f86cbae8cb3e8d6218628d0d5a0435432d50b25ba87fd9839"
+          "snippet_sha256": "17740239c625d3d0134c1ad65ebb2371144da80e23c89d291213674355b120b4"
         },
         {
           "generated_path": "snippets/generated/js/quickstart/vanilla-development-client.ts",
-          "generated_sha256": "f7921df1f0fd43788db65fbe587018f433f1d2cc02a2d94ee65cb264c9244ade",
+          "generated_sha256": "b82b34b3bc6477f11bf554c4fdcb391ef1d46a8fb6f8eddb82ac7d60f28c8e8b",
           "kind": "quickstart",
           "payload_path": "quickstart/vanilla-development-client.ts",
           "payload_sha256": "0d929594fd3a01f14f3c28cf1957200efc0d5589f761953c2096082e5ae72ae0",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "examples/vanilla/development-client.ts",
               "region": {
                 "end_line": 82,
@@ -376,17 +376,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/quickstart/vanilla-development-client.ts.mdx",
-          "snippet_sha256": "b58fe33290895ed0c976ebda3782e1b86ed58a8a74f8b56bc60fd7d075e9cc95"
+          "snippet_sha256": "309ea8d6fb1b789ab8207eaf20b64f4ce67a39b80e7fc5a81609528dc88d094a"
         },
         {
           "generated_path": "snippets/generated/js/quickstart/vanilla-development-helper.ts",
-          "generated_sha256": "1ce5f2374195ed02fcba8383cc4dd96aa5ccd08346175a4a0ce8de1881d62152",
+          "generated_sha256": "b4a57b144289411ba43610c67642660f75c45e8a83a5c6e4efafa1a7be7db6ad",
           "kind": "quickstart",
           "payload_path": "quickstart/vanilla-development-helper.ts",
           "payload_sha256": "c1452da5ee2aa7cbd901af60a3b960790b621d5c1074ef0701d10d1cd911cf43",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "examples/vanilla/development-helper.ts",
               "region": {
                 "end_line": 142,
@@ -399,17 +399,17 @@
             }
           ],
           "snippet_path": "snippets/generated/js/quickstart/vanilla-development-helper.ts.mdx",
-          "snippet_sha256": "2005b78a4548e7e01326a067fc1c8cbc768c7f9c12d0fc10219e0eaa57f330fe"
+          "snippet_sha256": "45a78d7be325142edcdcd532e75ce4d85bae4e7bdcb68f2eb359690f0e89a094"
         },
         {
           "generated_path": "snippets/generated/js/quickstart/vanilla-streaming-fetch.ts",
-          "generated_sha256": "c0ceb43e0550f11d98be8698a856a11c9087c394df728d4f773f3b6eb521f96d",
+          "generated_sha256": "e7ec9de6a4b830c2168049ffc5d2b9520078355348ce8c7f2e8466734fc1b2be",
           "kind": "quickstart",
           "payload_path": "quickstart/vanilla-streaming-fetch.ts",
           "payload_sha256": "f7ebf07cf092a5bb14cf66cbb6cdf0b41a7a61ed392618c497463785486c34e5",
           "provenance": [
             {
-              "commit": "3d1d372a550c38e74c073207e334805e03a09208",
+              "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
               "file": "examples/vanilla/streaming-fetch.ts",
               "region": {
                 "end_line": 93,
@@ -422,31 +422,31 @@
             }
           ],
           "snippet_path": "snippets/generated/js/quickstart/vanilla-streaming-fetch.ts.mdx",
-          "snippet_sha256": "a3f9b3b18e98c5926d43d0036bc1ca012f5ab4addd8d4ea2080e91d031f835b0"
+          "snippet_sha256": "f617b2b8928e452832ad994c0c7c73c6f68973cc3aca3654fa900e1fb93df140"
         }
       ],
       "id": "js",
       "package": "@latchway/client",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-js",
-      "source_date_epoch": 1788175799,
+      "source_date_epoch": 1788220063,
       "source_tree_clean": true,
       "version": "1.0.0"
     },
     {
       "archive": "docs/sdk-bundles/react-native/docs-bundle-1.0.0.tar.gz",
-      "archive_sha256": "30d0fcefccba0ec86e88e9dc8464790fc834108ffa15fde65f72de4b6ba2a61a",
-      "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+      "archive_sha256": "b5db9a3e9dd65e1de00b1d978cd3078a2ba2208f2700310eee2bc91ca632500b",
+      "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
       "files": [
         {
           "generated_path": "snippets/generated/react-native/frameworks/react-native-consumers.ts",
-          "generated_sha256": "6e92d1cc5f56b6356983a6c834398400810c1ba4e6e84f599760aba6411c962c",
+          "generated_sha256": "811a33bcef79ba4465fadf53714bd5aee80b44ee3cc7032dc877afc046390255",
           "kind": "framework",
           "payload_path": "frameworks/react-native-consumers.ts",
           "payload_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270",
           "provenance": [
             {
-              "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
               "file": "example/src/framework-consumers.ts",
               "region": {
                 "end_line": 153,
@@ -459,371 +459,371 @@
             }
           ],
           "snippet_path": "snippets/generated/react-native/frameworks/react-native-consumers.ts.mdx",
-          "snippet_sha256": "03c8ba043bdba114dbb670db77fe29e213473b35bbaec880fa488fd2d4dfce1b"
+          "snippet_sha256": "5b85b762decea75f424cd98b5975e9609d53dc9feaa4dda0920d0b09a9b563cd"
         },
         {
           "generated_path": "snippets/generated/react-native/quickstart/create-client.tsx",
-          "generated_sha256": "5be5022b75c5bcd56535166a3197e6fb17c224c5463bbad7ba0a5bbe1eafc809",
+          "generated_sha256": "85b60fe9e35cf26059fb99b7bf495fc59d1d7469ad6e72a63df7b9bceddf1e85",
           "kind": "quickstart",
           "payload_path": "quickstart/create-client.tsx",
           "payload_sha256": "d20e36f01bb766c8f12965865794f2d2910ae17ceaa4816514acdd5ef834b3c7",
           "provenance": [
             {
-              "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
               "file": "example/src/App.tsx",
               "region": {
-                "end_line": 73,
-                "start_line": 52
+                "end_line": 78,
+                "start_line": 57
               },
               "region_sha256": "d20e36f01bb766c8f12965865794f2d2910ae17ceaa4816514acdd5ef834b3c7",
               "release": "v1.0.0",
               "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-              "source_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3"
+              "source_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e"
             }
           ],
           "snippet_path": "snippets/generated/react-native/quickstart/create-client.tsx.mdx",
-          "snippet_sha256": "13db049e6480e71885d23c05e2be422da0b137bee0abcca32806b60911917c78"
+          "snippet_sha256": "734ef35101eb2cfc13a11d05415dffa55c5382c5de0cc109035d141fc31fafa0"
         },
         {
           "generated_path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx",
-          "generated_sha256": "6449332743a4778d2b201cff311361cd08cf46e7499a711f3e548f4f1bff967d",
+          "generated_sha256": "91df708ed782b38a4ef529bce2312d3984bcd853c621afc7948afda035d4c7cf",
           "kind": "quickstart",
           "payload_path": "quickstart/streaming-fetch.tsx",
           "payload_sha256": "a1c3d6dec94814057492793c06fc7fbbf1bed2dd2b325e53aa03e264feeeeb19",
           "provenance": [
             {
-              "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
               "file": "example/src/App.tsx",
               "region": {
-                "end_line": 113,
-                "start_line": 87
+                "end_line": 118,
+                "start_line": 92
               },
               "region_sha256": "a1c3d6dec94814057492793c06fc7fbbf1bed2dd2b325e53aa03e264feeeeb19",
               "release": "v1.0.0",
               "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-              "source_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3"
+              "source_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e"
             }
           ],
           "snippet_path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx",
-          "snippet_sha256": "9b64ef6e919fc5e148c7458a24b4a7bc025726ea0f4dd05fc0e79da40e787991"
+          "snippet_sha256": "92933cdf43939b814596aadd92c68aa4d9d530976b84ee31b605e0479db45303"
         }
       ],
       "id": "react-native",
       "package": "@latchway/react-native",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-      "source_date_epoch": 1788179282,
+      "source_date_epoch": 1788220712,
       "source_tree_clean": true,
       "version": "1.0.0"
     }
   ],
   "generator": "scripts/docs_sdk_bundle.py",
-  "lock_sha256": "e353fbb77cedc6a09e7dbc393cf6ffd0c33a3393a1550c48ad5727b2653a67e4",
+  "lock_sha256": "77e3031ae51743c1cfbf1a267549827b6e01970d353f88d900a1b02feaea68bd",
   "outputs": [
     {
       "bytes": 37301,
       "path": "config/sdk-bundles/android/errors.json",
-      "sha256": "01c5773689598d965874976c463d239753669eb433be83dc34383669f4b0be60"
+      "sha256": "549b64f945535dc417c81f6d49098bfdc5ceb6ee9c127cf5dafb3a45d840fe5c"
     },
     {
       "bytes": 3935,
       "path": "config/sdk-bundles/android/examples.json",
-      "sha256": "be82a57381c6f6b5bca7215cf45ecd7ced0363de8447640e928541237038be0a"
+      "sha256": "fd6983268c54accd5dedbbe3ef976a1ecd0247eed35b190211fe2d065a97a26c"
     },
     {
       "bytes": 98069,
       "path": "config/sdk-bundles/android/public-symbols.json",
-      "sha256": "699ed5da5e87f51ae2cb8b57ff79db68d3f9ba6de0ce13e13a9c0f382ed35d2f"
+      "sha256": "e39f54fb40f36b00f9d23be662515253969c0893dbe4546de8412017321e444b"
     },
     {
       "bytes": 5729,
       "path": "config/sdk-bundles/android/supported-versions.json",
-      "sha256": "4130da05eed3770fc6a230f21cad789ea2cd770de2e42db340592bf545ee349e"
+      "sha256": "39dd0e616cdd506b9f65c014bd1f2fa13e771bd42d50da8bf17d8eda68602cf4"
     },
     {
       "bytes": 38590,
       "path": "config/sdk-bundles/ios/errors.json",
-      "sha256": "eb24453325ac00c42befe8dd5cf9547645f45fe125b263893a01c97d92ca8f62"
+      "sha256": "9ec1bc79a4a2618f5281944e93a0e53f81b8b0c209686237c39c8dd19404f51c"
     },
     {
       "bytes": 3169,
       "path": "config/sdk-bundles/ios/examples.json",
-      "sha256": "bf278a46aef09286cd9405bfd1573d9a543c78ab39793670be71a505ec94de7e"
+      "sha256": "c02f9d22932ac82445aa9763ccb510e3bd7f47e2d468b2d0471edd190c497563"
     },
     {
       "bytes": 194331,
       "path": "config/sdk-bundles/ios/public-symbols.json",
-      "sha256": "825880696ba9fbbda4b8983772ff334062fd490e894213851183d667b467fef5"
+      "sha256": "773247eba50f49dc9d6dd180eb9429dd6e7dec121cd4c5e5d4f4368f17148e92"
     },
     {
       "bytes": 3466,
       "path": "config/sdk-bundles/ios/supported-versions.json",
-      "sha256": "b790728bf2d20f0968d2529e000664002c86673f1963236ad0ebba692d893e10"
+      "sha256": "6b00ae667bacf23a3f910633ef793d66a7afe6d94d2c0606ace66fa277417273"
     },
     {
       "bytes": 35423,
       "path": "config/sdk-bundles/js/errors.json",
-      "sha256": "6bf61149a817b9cd1dc96e2bbc3121062682e6d3f6947ebfcfd4c5cfbdc03de2"
+      "sha256": "c22b03091e649211d4a233ec4d2c8547c49914f7cc79ca52822ee5bb610d3cd0"
     },
     {
       "bytes": 4774,
       "path": "config/sdk-bundles/js/examples.json",
-      "sha256": "2da25a2c44104f8f92a37a0376f059a32dabe691ec3511b6a09bd1b6a0c8f216"
+      "sha256": "df07cc4b4eaf9f645c1bf3ab1ec7d240b3cf3d8da004d4eddfa7fdfc18283478"
     },
     {
       "bytes": 50741,
       "path": "config/sdk-bundles/js/public-symbols.json",
-      "sha256": "ad0857e38556ee78265724ac429c412447ea05f750c9d933c6d25118559c1497"
+      "sha256": "c660eb04bafbb9e75c36f8f480ceb7690b0ab3ad9776bb4e75030bf8fb8afaa7"
     },
     {
       "bytes": 6353,
       "path": "config/sdk-bundles/js/supported-versions.json",
-      "sha256": "2217f640ac634be77245a3f2d59c30a1b24e68970ef8bf7661fe73af5dbd1295"
+      "sha256": "23f9c137cc8ec97f9f945ce61d4f2f82a41bed55cda3ec7e6c9c875475217f75"
     },
     {
       "bytes": 36353,
       "path": "config/sdk-bundles/react-native/errors.json",
-      "sha256": "257d79dc709be649ae7f33ac98cf6844a6de582073812d73aa9b4541e68ed1f6"
+      "sha256": "afc33962747e2710c42963cc873c1c200345737748a7e8b99c1db11734041bf9"
     },
     {
-      "bytes": 2534,
+      "bytes": 2535,
       "path": "config/sdk-bundles/react-native/examples.json",
-      "sha256": "5bc91d6637b8680a96e79d9e541c4470286c7fbf884ead7e0e26c5dc3c504672"
+      "sha256": "810823961dbf3297de389ae35050fd599d6479964264e570c31fafc9c4f0ac13"
     },
     {
-      "bytes": 42883,
+      "bytes": 46784,
       "path": "config/sdk-bundles/react-native/public-symbols.json",
-      "sha256": "3b25832b7950ed66ecd4bcd03c1aee6171e81feedd4837c6c9291c026e1fcde2"
+      "sha256": "7c70e2c97bd0225a1cca2c921bc2bc16caa4a951dbe05f360eccf8ce42804985"
     },
     {
       "bytes": 5398,
       "path": "config/sdk-bundles/react-native/supported-versions.json",
-      "sha256": "04e2729b8f28928541ff1a20b364f83c83f5e9a0a502d99c163610125b0d6be4"
+      "sha256": "7f1c1c99010e19939f9f091ce707aafe0aec92bdbc570ba3028a77561b1e250f"
     },
     {
       "bytes": 2054,
       "path": "reference/sdk-bundles.mdx",
-      "sha256": "8792737b2556abce35b85c576eeac44cd1b02c55c2b81e5aa6f97b3cb32d5725"
+      "sha256": "6e7a2045cfb900b6ef3f9287577050d7193d434dc92731d479296b8cafadee16"
     },
     {
       "bytes": 23070,
       "path": "reference/sdk-bundles/android.mdx",
-      "sha256": "af476fe1ba43bab9b4ba67b6fd350e6a6b3cc68fb28449112049be26ceffd2de"
+      "sha256": "1a57be671b4856cc96ce88e05072cc38787a81f233cabeee6386ff99ce869b8a"
     },
     {
       "bytes": 23041,
       "path": "reference/sdk-bundles/ios.mdx",
-      "sha256": "09f7b804cd972f7eaeb6a5baae4ce39c44876c652ee5c81a439dec1c3cdefbfa"
+      "sha256": "d6e6f96d24daaf43d3f8ff88f5fb0997e969c5e25a0c207e00908e3b20778218"
     },
     {
       "bytes": 23577,
       "path": "reference/sdk-bundles/js.mdx",
-      "sha256": "021832683d985ac982262efd129860b1e42979532983562eb1fd2b9b724d8a64"
+      "sha256": "f4ebd2d2716d1a1e8b071a705f1f83c59c176c6fc3d8da2f2d6794a2e0878470"
     },
     {
       "bytes": 8886,
       "path": "reference/sdk-bundles/react-native.mdx",
-      "sha256": "48bbd0d831596e35bb7c4977f62338386888d1b944891b1756c4d32171ac8f4b"
+      "sha256": "78c6a270026044ff41b9bf74e950043815dbd397303f0000041e183488ad0e79"
     },
     {
       "bytes": 2307,
       "path": "snippets/generated/android/frameworks/koog.kt",
-      "sha256": "a637bb4558876c4bcd0ca8e75e4948cf8c74b6b1d7d7b236e0612ffd6d5e888b"
+      "sha256": "7de56edf215772800594037d8a3e39cea3410209f52b58975af0f091373168fa"
     },
     {
       "bytes": 2314,
       "path": "snippets/generated/android/frameworks/koog.kt.mdx",
-      "sha256": "8204e884c664cfd6ec8eb7bfedfeac934d1a2513ebb88ad45032afceaf67fd71"
+      "sha256": "532f386c871d59ca50918617c7f683001518e5c4c62b4fcdc20fa3f9f7ae466e"
     },
     {
       "bytes": 1776,
       "path": "snippets/generated/android/frameworks/langchain4j.kt",
-      "sha256": "e60e80a26ba81b95fe0f0dd6828978c3a3ea30894d562e133b0c8fa04bdceda3"
+      "sha256": "c44033874cf6fe6c84c287302e4ad85d4109946f53a5152f5891114f24c37aec"
     },
     {
       "bytes": 1790,
       "path": "snippets/generated/android/frameworks/langchain4j.kt.mdx",
-      "sha256": "e105e13bb23413441a1458c7214a07179c8493d9e608ca13cd0524c53bff531a"
+      "sha256": "9dcd043e6fd722a9a879de3a4664d0efc18727cf68af148117a15d4052fe3c8c"
     },
     {
       "bytes": 1591,
       "path": "snippets/generated/android/frameworks/openai-kotlin.kt",
-      "sha256": "f8dc330b582f4af1a14dfb7f8778a1d7634c690fbc81bdac1278591669caa78e"
+      "sha256": "9e1b103579a5b29574f1800d378758237d64a0c568b24ac1177cd5b905d209d6"
     },
     {
       "bytes": 1606,
       "path": "snippets/generated/android/frameworks/openai-kotlin.kt.mdx",
-      "sha256": "1fd7890203eda11bc63c3e65477b776ee480c5d721637ab75a05ca72581c4e45"
+      "sha256": "059c6a2b7e9b0758c1430dc72e44dbc6d316a2e4c529a32cc229735116323510"
     },
     {
       "bytes": 2253,
       "path": "snippets/generated/android/frameworks/retrofit.kt",
-      "sha256": "629392ea2dc4f581bceb64d732979f5bd75c6e18aef24805e57cec342228810f"
+      "sha256": "a938b080b031a9ebccc7fa745373d9930ed1121b06aca012b6193f0b228f7eb6"
     },
     {
       "bytes": 2264,
       "path": "snippets/generated/android/frameworks/retrofit.kt.mdx",
-      "sha256": "913ad9a5631d533d8679325687e1531b6548f54325898363378cb978618ec8e3"
+      "sha256": "b57ff16c66a84945e40d05f01e12898d236947e25c4e4f43b42551c85f57cdea"
     },
     {
       "bytes": 1834,
       "path": "snippets/generated/android/quickstart/basic-client.kt",
-      "sha256": "dfd1ae735e28565b0e00a98b937e3eb44957a893b73fd89dc05cd35aa1ba0170"
+      "sha256": "52d19dc3e44c994ea0036eb0427729c4c248af50a238f8c557ee1abdc32d00ca"
     },
     {
       "bytes": 1828,
       "path": "snippets/generated/android/quickstart/basic-client.kt.mdx",
-      "sha256": "287d2a2750396725440c06f26224a91d94fed841ce0a5eca2cb1dbb04c2423d7"
+      "sha256": "e147dd0f6f6c207d660d3a89665c4b4e4efcfe68d7b05a4de76253b71a0cfd49"
     },
     {
       "bytes": 12479,
       "path": "snippets/generated/android/quickstart/firebase-auth.kt",
-      "sha256": "b1b759f69fa4da3d36fbffd7be3ffc49edc257119a1e53406aab76cc86c5777c"
+      "sha256": "1337f02bf9b772e84a57b5acc2da4b5790a988b6dce2e394cf7988b152a33852"
     },
     {
       "bytes": 12479,
       "path": "snippets/generated/android/quickstart/firebase-auth.kt.mdx",
-      "sha256": "61b665e33b03bf28278c2f5be8e5240328c2aead51c6f404a16041ef50c467f0"
+      "sha256": "78c09bb17d33e790c5d66f0cda133ac043d33d153d7e45a8e7a4a7140d594eee"
     },
     {
       "bytes": 6745,
       "path": "snippets/generated/ios/frameworks/foundation-models.swift",
-      "sha256": "880ae35643e1d84a1d180a679b06502366176a6a05696a0cf043cb557d9010ae"
+      "sha256": "6b203351752eaba5501a32666a689d9fc450afd2c9e95808b3a5fa9931f18d96"
     },
     {
       "bytes": 6731,
       "path": "snippets/generated/ios/frameworks/foundation-models.swift.mdx",
-      "sha256": "7e64503fe9d5e35d81d87af61336f3cb8b2e3d14872689b05f7c52a3faf7c820"
+      "sha256": "b55ec2b96e1bdeec37638e2cfd3aa415d9498e63c30b8bb0955b56c04a49c83d"
     },
     {
       "bytes": 3931,
       "path": "snippets/generated/ios/frameworks/swift-openai.swift",
-      "sha256": "65d39569a4781e6690ee9f71b5b070e13495c7e2abe0179b34496a1a0699ba46"
+      "sha256": "191e93d789fac1843e059376eb19cb1d7c4dd26e1f5ac5914bc56a2a3cc585d5"
     },
     {
       "bytes": 3917,
       "path": "snippets/generated/ios/frameworks/swift-openai.swift.mdx",
-      "sha256": "da55e2fe2f06fcece81e3ae99b6f99917054a7fb7a0c9f0fa5d24e99886aac8d"
+      "sha256": "6c55e573fca08051658a8fda497dc8302e1b55e8683eaacbc9b4cce014b0e049"
     },
     {
       "bytes": 2596,
       "path": "snippets/generated/ios/quickstart/app-extension-component.swift",
-      "sha256": "11b868e5f16a9ef1b19455e1a09b9d023dfaa1256fe867ad7aa2d1e64654ce92"
+      "sha256": "6201e03d572ad7e34e9944101ba2dc4d8f95ca6394e42b0ec2bc2faef3424a45"
     },
     {
       "bytes": 2578,
       "path": "snippets/generated/ios/quickstart/app-extension-component.swift.mdx",
-      "sha256": "7fbe605c6c6ecfa0d737a9289aac1dbce4a8e66f07f4b4b1710dec73b721cbd0"
+      "sha256": "ae451a6976e66366128cf54608abd98950e6e1be4bea22dc0db914a03d6deb01"
     },
     {
       "bytes": 9086,
       "path": "snippets/generated/ios/quickstart/url-session.swift",
-      "sha256": "9aa4642c17ff1c83b43a6433ac9671261161c3c721e2e0e55b455cb9dd24af5c"
+      "sha256": "779d9dc70852c00630b3543c35b06483d9e5c2299ca7778f548a03782adc50ef"
     },
     {
       "bytes": 9055,
       "path": "snippets/generated/ios/quickstart/url-session.swift.mdx",
-      "sha256": "564ec45030d7b6dd8b6ec0dfe05b60c87d32fed7f8e81d438fc3d090793d1464"
+      "sha256": "39748c798dcac2559142ad2a62333558490e87b652b367c7a74dceca7b64465d"
     },
     {
       "bytes": 3561,
       "path": "snippets/generated/js/frameworks/langchain.ts",
-      "sha256": "0375e43c8d25c30b5bc76d6d14ea0179f6952e109455bd1648a61cfa56c73ddb"
+      "sha256": "4cff2e74e22a918e1ebb2d071963b561d4209dee51d4de5dd62078a1c4f53165"
     },
     {
       "bytes": 3520,
       "path": "snippets/generated/js/frameworks/langchain.ts.mdx",
-      "sha256": "d2451674ff07f25ca5afc9e4f0407c347cae43bd8997893f8b5ea525ad9ba2a7"
+      "sha256": "2a980380a7f6942c075bbe4ca1d7467265d64bec52431b4c922b88b0d5488251"
     },
     {
       "bytes": 2739,
       "path": "snippets/generated/js/frameworks/openai.ts",
-      "sha256": "836aacfdcb2c6f54ac202e32f513ad844771343314f2a8279cbbdae7dcb12b4e"
+      "sha256": "bb16d1acaa47fd93cc94d3290592625c8ce68f1c3c8c22838e00ba58750d475f"
     },
     {
       "bytes": 2695,
       "path": "snippets/generated/js/frameworks/openai.ts.mdx",
-      "sha256": "cc3ef3611a9aa5c8815dd2f3ec087d2e77b6532649d889c1cf86f5cc8a93cac1"
+      "sha256": "88ce0e74cbdc1793518b425cfa151d1d880b94227757c32d875473d57b6aaf00"
     },
     {
       "bytes": 3371,
       "path": "snippets/generated/js/frameworks/vercel-ai.ts",
-      "sha256": "f0ffd535a7628193fd0ad225c068e9f5f359b18b5420310b792934c95e988eb5"
+      "sha256": "6eda4b0705bde718a77dc448f3311f6b51f5c64e8ec651b995a32bbb5fbd4811"
     },
     {
       "bytes": 3330,
       "path": "snippets/generated/js/frameworks/vercel-ai.ts.mdx",
-      "sha256": "a93a22164d3e6c686af033465c103155e9b4e79658563fe48817ecf641a6db15"
+      "sha256": "f1d9ddc5fe7570acaf5037ba0d1d494a773f2e3c2730f4811cdf3509bbe5679a"
     },
     {
       "bytes": 1205,
       "path": "snippets/generated/js/quickstart/firebase-app-check.ts",
-      "sha256": "7349c338e1fd8d6daad4329cedca5b77bee9ae31dda67e356bfd35dfd725abca"
+      "sha256": "bfee7bd890bdc6264416db9cce33a2f4dca6c3e476c99f9e5b95b13a89ad1eaa"
     },
     {
       "bytes": 1160,
       "path": "snippets/generated/js/quickstart/firebase-app-check.ts.mdx",
-      "sha256": "e214b4ba317fd25f86cbae8cb3e8d6218628d0d5a0435432d50b25ba87fd9839"
+      "sha256": "17740239c625d3d0134c1ad65ebb2371144da80e23c89d291213674355b120b4"
     },
     {
       "bytes": 3278,
       "path": "snippets/generated/js/quickstart/vanilla-development-client.ts",
-      "sha256": "f7921df1f0fd43788db65fbe587018f433f1d2cc02a2d94ee65cb264c9244ade"
+      "sha256": "b82b34b3bc6477f11bf554c4fdcb391ef1d46a8fb6f8eddb82ac7d60f28c8e8b"
     },
     {
       "bytes": 3244,
       "path": "snippets/generated/js/quickstart/vanilla-development-client.ts.mdx",
-      "sha256": "b58fe33290895ed0c976ebda3782e1b86ed58a8a74f8b56bc60fd7d075e9cc95"
+      "sha256": "309ea8d6fb1b789ab8207eaf20b64f4ce67a39b80e7fc5a81609528dc88d094a"
     },
     {
       "bytes": 5814,
       "path": "snippets/generated/js/quickstart/vanilla-development-helper.ts",
-      "sha256": "1ce5f2374195ed02fcba8383cc4dd96aa5ccd08346175a4a0ce8de1881d62152"
+      "sha256": "b4a57b144289411ba43610c67642660f75c45e8a83a5c6e4efafa1a7be7db6ad"
     },
     {
       "bytes": 5780,
       "path": "snippets/generated/js/quickstart/vanilla-development-helper.ts.mdx",
-      "sha256": "2005b78a4548e7e01326a067fc1c8cbc768c7f9c12d0fc10219e0eaa57f330fe"
+      "sha256": "45a78d7be325142edcdcd532e75ce4d85bae4e7bdcb68f2eb359690f0e89a094"
     },
     {
       "bytes": 2962,
       "path": "snippets/generated/js/quickstart/vanilla-streaming-fetch.ts",
-      "sha256": "c0ceb43e0550f11d98be8698a856a11c9087c394df728d4f773f3b6eb521f96d"
+      "sha256": "e7ec9de6a4b830c2168049ffc5d2b9520078355348ce8c7f2e8466734fc1b2be"
     },
     {
       "bytes": 2925,
       "path": "snippets/generated/js/quickstart/vanilla-streaming-fetch.ts.mdx",
-      "sha256": "a3f9b3b18e98c5926d43d0036bc1ca012f5ab4addd8d4ea2080e91d031f835b0"
+      "sha256": "f617b2b8928e452832ad994c0c7c73c6f68973cc3aca3654fa900e1fb93df140"
     },
     {
       "bytes": 5415,
       "path": "snippets/generated/react-native/frameworks/react-native-consumers.ts",
-      "sha256": "6e92d1cc5f56b6356983a6c834398400810c1ba4e6e84f599760aba6411c962c"
+      "sha256": "811a33bcef79ba4465fadf53714bd5aee80b44ee3cc7032dc877afc046390255"
     },
     {
       "bytes": 5377,
       "path": "snippets/generated/react-native/frameworks/react-native-consumers.ts.mdx",
-      "sha256": "03c8ba043bdba114dbb670db77fe29e213473b35bbaec880fa488fd2d4dfce1b"
+      "sha256": "5b85b762decea75f424cd98b5975e9609d53dc9feaa4dda0920d0b09a9b563cd"
     },
     {
       "bytes": 1204,
       "path": "snippets/generated/react-native/quickstart/create-client.tsx",
-      "sha256": "5be5022b75c5bcd56535166a3197e6fb17c224c5463bbad7ba0a5bbe1eafc809"
+      "sha256": "85b60fe9e35cf26059fb99b7bf495fc59d1d7469ad6e72a63df7b9bceddf1e85"
     },
     {
       "bytes": 1144,
       "path": "snippets/generated/react-native/quickstart/create-client.tsx.mdx",
-      "sha256": "13db049e6480e71885d23c05e2be422da0b137bee0abcca32806b60911917c78"
+      "sha256": "734ef35101eb2cfc13a11d05415dffa55c5382c5de0cc109035d141fc31fafa0"
     },
     {
       "bytes": 1214,
       "path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx",
-      "sha256": "6449332743a4778d2b201cff311361cd08cf46e7499a711f3e548f4f1bff967d"
+      "sha256": "91df708ed782b38a4ef529bce2312d3984bcd853c621afc7948afda035d4c7cf"
     },
     {
       "bytes": 1154,
       "path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx",
-      "sha256": "9b64ef6e919fc5e148c7458a24b4a7bc025726ea0f4dd05fc0e79da40e787991"
+      "sha256": "92933cdf43939b814596aadd92c68aa4d9d530976b84ee31b605e0479db45303"
     }
   ],
   "schema_version": "latchway.generated-sdk-documentation.v1"

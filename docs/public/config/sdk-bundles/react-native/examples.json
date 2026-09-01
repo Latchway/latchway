@@ -4,23 +4,23 @@
       "kind": "physical_device",
       "name": "React Native physical-device application",
       "source": {
-        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
         "file": "example/src/App.tsx",
         "region": {
-          "end_line": 1110,
+          "end_line": 1271,
           "start_line": 1
         },
-        "region_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3",
+        "region_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3"
+        "source_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e"
       }
     },
     {
       "kind": "framework",
       "name": "OpenAI, Vercel AI, LangChain, and Anthropic consumers",
       "source": {
-        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
         "file": "example/src/framework-consumers.ts",
         "region": {
           "end_line": 153,
@@ -36,23 +36,23 @@
       "kind": "component",
       "name": "iOS App Intent extension",
       "source": {
-        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
         "file": "example/ios/AppIntents/AppIntents.swift",
         "region": {
-          "end_line": 29,
+          "end_line": 264,
           "start_line": 1
         },
-        "region_sha256": "8ac572531c777c609a5d331dbecffb138b22de70fc0e65a9ff5a441524d1a856",
+        "region_sha256": "170130f1424b91bb52246dba503b48d06dbafced41e39e70142bc2045855991d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "8ac572531c777c609a5d331dbecffb138b22de70fc0e65a9ff5a441524d1a856"
+        "source_sha256": "170130f1424b91bb52246dba503b48d06dbafced41e39e70142bc2045855991d"
       }
     },
     {
       "kind": "physical_device",
       "name": "Android host application",
       "source": {
-        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
         "file": "example/android/app/src/main/java/com/latchwayexample/MainApplication.kt",
         "region": {
           "end_line": 22,

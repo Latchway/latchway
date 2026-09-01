@@ -4,7 +4,7 @@
     {
       "name": "dev.latchway",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 10,
@@ -20,7 +20,7 @@
     {
       "name": "Android API",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "README.md",
         "region": {
           "end_line": 29,
@@ -36,7 +36,7 @@
     {
       "name": "OkHttp minimum",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "README.md",
         "region": {
           "end_line": 31,
@@ -52,7 +52,7 @@
     {
       "name": "OkHttp latest",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -68,7 +68,7 @@
     {
       "name": "Retrofit minimum",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "README.md",
         "region": {
           "end_line": 35,
@@ -84,7 +84,7 @@
     {
       "name": "Retrofit latest",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -100,7 +100,7 @@
     {
       "name": "OpenAI Kotlin minimum",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "README.md",
         "region": {
           "end_line": 35,
@@ -116,7 +116,7 @@
     {
       "name": "OpenAI Kotlin latest",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -132,7 +132,7 @@
     {
       "name": "LangChain4j",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -148,7 +148,7 @@
     {
       "name": "Koog",
       "source": {
-        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
+        "commit": "17c108706998f2c30fe511fd92ed049c024c8e85",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
