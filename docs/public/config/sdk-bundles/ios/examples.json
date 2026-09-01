@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Native App Attest golden journey",
       "source": {
-        "commit": "aa182f766dc72d57f3915bd1c16678fe4f866ffe",
+        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
         "file": "Examples/BasicURLSession/BasicURLSession.swift",
         "region": {
           "end_line": 247,
@@ -20,7 +20,7 @@
       "kind": "physical_device",
       "name": "App Attest physical-device application",
       "source": {
-        "commit": "aa182f766dc72d57f3915bd1c16678fe4f866ffe",
+        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
         "file": "Examples/AppAttestConformance/Sources/AppAttestConformanceApp.swift",
         "region": {
           "end_line": 1115,
@@ -36,7 +36,7 @@
       "kind": "component",
       "name": "App-extension component host",
       "source": {
-        "commit": "aa182f766dc72d57f3915bd1c16678fe4f866ffe",
+        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
         "file": "Examples/AppExtensionComponents/Host/ComponentHostApp.swift",
         "region": {
           "end_line": 121,
@@ -52,7 +52,7 @@
       "kind": "framework",
       "name": "SwiftOpenAI adapter",
       "source": {
-        "commit": "aa182f766dc72d57f3915bd1c16678fe4f866ffe",
+        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 153,
@@ -68,7 +68,7 @@
       "kind": "framework",
       "name": "Apple Foundation Models adapter",
       "source": {
-        "commit": "aa182f766dc72d57f3915bd1c16678fe4f866ffe",
+        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 330,

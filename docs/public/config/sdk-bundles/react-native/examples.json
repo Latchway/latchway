@@ -4,7 +4,7 @@
       "kind": "physical_device",
       "name": "React Native physical-device application",
       "source": {
-        "commit": "cc011841acc1be78022ef65a039d4aabf8a37b57",
+        "commit": "55ea598cc33b9e1a952b135a9debec867a61058d",
         "file": "example/src/App.tsx",
         "region": {
           "end_line": 1274,
@@ -20,7 +20,7 @@
       "kind": "framework",
       "name": "OpenAI, Vercel AI, LangChain, and Anthropic consumers",
       "source": {
-        "commit": "cc011841acc1be78022ef65a039d4aabf8a37b57",
+        "commit": "55ea598cc33b9e1a952b135a9debec867a61058d",
         "file": "example/src/framework-consumers.ts",
         "region": {
           "end_line": 153,
@@ -36,7 +36,7 @@
       "kind": "component",
       "name": "iOS App Intent extension",
       "source": {
-        "commit": "cc011841acc1be78022ef65a039d4aabf8a37b57",
+        "commit": "55ea598cc33b9e1a952b135a9debec867a61058d",
         "file": "example/ios/AppIntents/AppIntents.swift",
         "region": {
           "end_line": 264,
@@ -52,7 +52,7 @@
       "kind": "physical_device",
       "name": "Android host application",
       "source": {
-        "commit": "cc011841acc1be78022ef65a039d4aabf8a37b57",
+        "commit": "55ea598cc33b9e1a952b135a9debec867a61058d",
         "file": "example/android/app/src/main/java/com/latchwayexample/MainApplication.kt",
         "region": {
           "end_line": 22,
