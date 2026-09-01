@@ -55,7 +55,7 @@ var scenarioAssertions = map[string][]string{
 		"load_balancer_routed_multiple_api_replicas",
 		"configuration_revision_atomic_across_replicas",
 		"signing_rotation_preserved_active_sessions",
-		"jwks_rotation_converged",
+		"gateway_signing_jwks_converged",
 	},
 }
 

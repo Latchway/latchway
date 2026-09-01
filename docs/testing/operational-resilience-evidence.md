@@ -11,8 +11,9 @@ all of the following machine reports:
    and at least two API replicas, two workers, and a real load-balancer path;
 3. a PostgreSQL custom-format backup restored into a distinct fresh database,
    with the authenticated prior candidate's `migrate status` and `doctor`
-   passing and a
-   bounded state fingerprint preserved; and
+   passing and a bounded representative-state fingerprint preserved across
+   tenant hierarchy, administrator/session, configuration revision, encrypted
+   secret, quota, usage, job, and audit rows; and
 4. a distinct-ancestor prior candidate, the exact current candidate, and the
    prior candidate again on the same isolated database, with readiness, health,
    schema compatibility, and the bounded state fingerprint preserved through
@@ -168,7 +169,7 @@ passing assertions named:
 - `load_balancer_routed_multiple_api_replicas`;
 - `configuration_revision_atomic_across_replicas`;
 - `signing_rotation_preserved_active_sessions`; and
-- `jwks_rotation_converged`.
+- `gateway_signing_jwks_converged` (issuer-JWKS rotation and shared replica cache behavior are proved by the separate `jwks-rotation-and-shared-cache` PostgreSQL scenario).
 
 ## Repo-owned disposable fault controller
 
@@ -306,8 +307,10 @@ scripts/run-operational-resilience-drills.sh \
 The launcher revalidates every artifact named by the prior manifest, derives
 its immutable OCI index and exact `linux/amd64` child, verifies Git ancestry,
 then checks the executed child images' platform, `RepoDigests`, revision labels,
-and runtime version output. It creates a small disabled tenant fixture,
-captures a canonical state fingerprint, performs `pg_dump`/`pg_restore`,
+and runtime version output. It creates a disabled tenant plus non-empty
+administrator/session, configuration revision, encrypted-secret, quota, usage,
+completed-job, and audit fixtures, captures a canonical fingerprint over their
+counts and bounded semantic markers, performs `pg_dump`/`pg_restore`,
 migrates and starts the current candidate, then starts the prior candidate
 against the candidate schema. The prior candidate must report its exact
 manifest version and revision and a strictly lower semantic version. Neither

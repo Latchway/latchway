@@ -182,7 +182,7 @@
     },
     {
       "id": "live-config-and-key-rotation-across-api-replicas",
-      "requirement": "Change configuration, signing keys, and issuer JWKS while requests span at least two API replicas and two workers, without mixed decisions or invalidating active sessions.",
+      "requirement": "Change configuration and gateway signing keys while requests span at least two API replicas and two workers, without mixed decisions or invalidating active sessions; issuer-JWKS rotation is proved separately by the shared-cache PostgreSQL scenario.",
       "kind": "external",
       "controller_action": "replicated_rotation_sequence",
       "evidence_notes": "Requires a real load balancer, shared PostgreSQL, two API replicas, two workers, and exact release image digests."

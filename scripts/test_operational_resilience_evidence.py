@@ -731,6 +731,10 @@ class OperationalEvidenceFixture:
         }
 
     @staticmethod
+    def representative_row_counts() -> dict[str, int]:
+        return {name: 1 for name in MODULE.OPERATIONAL_STATE_TABLES}
+
+    @staticmethod
     def readiness() -> dict[str, object]:
         return {
             "status": "ready",
@@ -754,7 +758,7 @@ class OperationalEvidenceFixture:
             "health": {"status": "ok", "build": build},
             "readiness": self.readiness(),
             "state_fingerprint_sha256": "6" * 64,
-            "row_counts": {"organizations": 1, "applications": 1, "environments": 1},
+            "row_counts": self.representative_row_counts(),
         }
 
     def _write_drills(self) -> None:
@@ -777,7 +781,7 @@ class OperationalEvidenceFixture:
             "health": {"status": "ok", "build": previous_version},
             "readiness": self.readiness(),
             "state_fingerprint_sha256": "6" * 64,
-            "row_counts": {"organizations": 1, "applications": 1, "environments": 1},
+            "row_counts": self.representative_row_counts(),
         }
         restore = copy.deepcopy(source)
         restore["database_identity_sha256"] = "8" * 64
@@ -929,7 +933,7 @@ class OperationalEvidenceFixture:
             {
                 "database_identity_sha256": "8" * 64,
                 "state_fingerprint_sha256": "6" * 64,
-                "row_counts": {"organizations": 1, "applications": 1, "environments": 1},
+                "row_counts": self.representative_row_counts(),
             },
         )
         self._write_image_inspection()
@@ -1702,6 +1706,18 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.EvidenceError, "backup_claims_invalid"):
             self.finalize("claims-output")
 
+    def test_rejects_shallow_operational_state(self) -> None:
+        def remove_representative_domains(value: dict[str, object]) -> None:
+            value["source"]["row_counts"] = {
+                "organizations": 1,
+                "applications": 1,
+                "environments": 1,
+            }
+
+        self.mutate(self.fixture.backup_path, remove_representative_domains)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "backup_source_invalid"):
+            self.finalize("shallow-state-output")
+
     def test_rejects_unproved_multi_replica_claim(self) -> None:
         path = self.fixture.failure_dir / "live-config-and-key-rotation-across-api-replicas.json"
         self.mutate(path, lambda value: value["environment"].__setitem__("api_replicas", "1"))
@@ -1796,6 +1812,13 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             finished_at="2026-08-29T11:10:00Z",
         )
         self.assertEqual(backup["status"], "passed")
+        self.assertTrue(
+            backup["assertions"]["representative_operational_state_preserved"]
+        )
+        self.assertTrue(
+            upgrade["assertions"]["candidate_migration_status_validated"]
+        )
+        self.assertNotIn("candidate_migrations_applied", upgrade["assertions"])
         self.assertEqual(
             backup["previous_candidate_intended_tag"], "v1.0.0-rc.1"
         )

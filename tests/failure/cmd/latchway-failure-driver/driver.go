@@ -1204,7 +1204,7 @@ func (value *driver) replicaRotation(ctx context.Context, run *scenarioRun, phas
 		if err := run.pass("signing_rotation_preserved_active_sessions", "After the worker rotated the active signing key, the pre-rotation access token still served protected traffic on both API replicas."); err != nil {
 			return nil, err
 		}
-		if err := run.pass("jwks_rotation_converged", "Both API replicas returned the same JWKS containing the old retiring key and the new active key."); err != nil {
+		if err := run.pass("gateway_signing_jwks_converged", "Both API replicas returned the same gateway-signing JWKS containing the old retiring key and the new active key; issuer-JWKS rotation is a separate shared-cache scenario."); err != nil {
 			return nil, err
 		}
 		newRevisionID, err := cloneAndActivateConfiguration(ctx, value.pool, value.provision)

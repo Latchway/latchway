@@ -161,7 +161,7 @@ MULTI_REPLICA_ASSERTIONS = frozenset(
         "load_balancer_routed_multiple_api_replicas",
         "configuration_revision_atomic_across_replicas",
         "signing_rotation_preserved_active_sessions",
-        "jwks_rotation_converged",
+        "gateway_signing_jwks_converged",
     )
 )
 EXTERNAL_FAILURE_ASSERTIONS = {
@@ -222,6 +222,7 @@ BACKUP_ASSERTIONS = frozenset(
         "archive_digest_verified",
         "source_and_restore_databases_distinct",
         "state_fingerprint_preserved",
+        "representative_operational_state_preserved",
         "schema_version_preserved",
         "previous_candidate_doctor_passed",
         "restored_runtime_ready_with_escrowed_master_key",
@@ -230,15 +231,32 @@ BACKUP_ASSERTIONS = frozenset(
 UPGRADE_ASSERTIONS = frozenset(
     (
         "previous_candidate_started",
-        "candidate_migrations_applied",
+        "candidate_migration_status_validated",
         "candidate_doctor_passed",
         "candidate_runtime_ready",
         "state_preserved_through_upgrade",
+        "representative_operational_state_preserved",
         "previous_candidate_application_rollback_started",
         "previous_candidate_doctor_passed_after_candidate",
         "previous_candidate_runtime_ready_after_candidate",
         "state_preserved_through_rollback",
         "schema_compatible_with_previous_candidate",
+    )
+)
+OPERATIONAL_STATE_TABLES = frozenset(
+    (
+        "organizations",
+        "applications",
+        "environments",
+        "admin_users",
+        "admin_memberships",
+        "admin_sessions",
+        "config_revisions",
+        "secret_records",
+        "quota_buckets",
+        "usage_rollups_daily",
+        "jobs",
+        "audit_events",
     )
 )
 DOMAIN_CLAIMS = {
@@ -2182,7 +2200,7 @@ def validate_state(value: Any, image: str, code: str) -> dict[str, Any]:
         or not isinstance(value["state_fingerprint_sha256"], str)
         or SHA256.fullmatch(value["state_fingerprint_sha256"]) is None
         or not isinstance(value["row_counts"], dict)
-        or not value["row_counts"]
+        or set(value["row_counts"]) != OPERATIONAL_STATE_TABLES
         or any(
             not isinstance(key, str)
             or not key
@@ -2373,7 +2391,7 @@ def validate_runtime_stage(value: Any, image: str, code: str) -> dict[str, Any]:
         or not isinstance(value["state_fingerprint_sha256"], str)
         or SHA256.fullmatch(value["state_fingerprint_sha256"]) is None
         or not isinstance(value["row_counts"], dict)
-        or not value["row_counts"]
+        or set(value["row_counts"]) != OPERATIONAL_STATE_TABLES
         or any(
             not isinstance(count, int) or isinstance(count, bool) or count < 1
             for count in value["row_counts"].values()

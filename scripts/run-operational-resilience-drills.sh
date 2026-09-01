@@ -256,12 +256,31 @@ capture_state() {
     --tuples-only \
     --no-align \
     --command "SELECT json_build_object(
-      'organizations', (SELECT count(*) FROM organizations WHERE slug = 'operational-drill'),
-      'applications', (SELECT count(*) FROM applications WHERE slug = 'operational-drill'),
-      'environments', (SELECT count(*) FROM environments WHERE slug = 'operational-drill'),
-      'organization_id', (SELECT organization_id FROM organizations WHERE slug = 'operational-drill'),
-      'application_id', (SELECT application_id FROM applications WHERE slug = 'operational-drill'),
-      'environment_id', (SELECT environment_id FROM environments WHERE slug = 'operational-drill')
+      'row_counts', json_build_object(
+        'organizations', (SELECT count(*) FROM organizations WHERE slug = 'operational-drill'),
+        'applications', (SELECT count(*) FROM applications WHERE slug = 'operational-drill'),
+        'environments', (SELECT count(*) FROM environments WHERE slug = 'operational-drill'),
+        'admin_users', (SELECT count(*) FROM admin_users WHERE email_normalized = 'operator@operational-drill.invalid'),
+        'admin_memberships', (SELECT count(*) FROM admin_memberships WHERE admin_membership_id = 'amb_01ARZ3NDEKTSV4RRFFQ69G5FAZ'),
+        'admin_sessions', (SELECT count(*) FROM admin_sessions WHERE admin_session_id = 'asn_01ARZ3NDEKTSV4RRFFQ69G5FB0'),
+        'config_revisions', (SELECT count(*) FROM config_revisions WHERE config_revision_id = 'rev_01ARZ3NDEKTSV4RRFFQ69G5FB1'),
+        'secret_records', (SELECT count(*) FROM secret_records WHERE secret_record_id = 'sec_01ARZ3NDEKTSV4RRFFQ69G5FB2'),
+        'quota_buckets', (SELECT count(*) FROM quota_buckets WHERE quota_bucket_id = 'qbk_01ARZ3NDEKTSV4RRFFQ69G5FB3'),
+        'usage_rollups_daily', (SELECT count(*) FROM usage_rollups_daily WHERE environment_id = 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX' AND dimension_key = 'environment:operational-drill'),
+        'jobs', (SELECT count(*) FROM jobs WHERE job_id = 'job_01ARZ3NDEKTSV4RRFFQ69G5FB4'),
+        'audit_events', (SELECT count(*) FROM audit_events WHERE audit_event_id = 'aud_01ARZ3NDEKTSV4RRFFQ69G5FB5')
+      ),
+      'markers', json_build_object(
+        'organization', (SELECT json_build_object('id', organization_id, 'status', status) FROM organizations WHERE slug = 'operational-drill'),
+        'environment', (SELECT json_build_object('id', environment_id, 'kind', kind, 'status', status) FROM environments WHERE slug = 'operational-drill'),
+        'administrator', (SELECT json_build_object('id', admin_user_id, 'status', status) FROM admin_users WHERE email_normalized = 'operator@operational-drill.invalid'),
+        'configuration', (SELECT json_build_object('id', config_revision_id, 'status', status, 'document', document) FROM config_revisions WHERE config_revision_id = 'rev_01ARZ3NDEKTSV4RRFFQ69G5FB1'),
+        'secret', (SELECT json_build_object('id', secret_record_id, 'name', name, 'version', version, 'ciphertext_bytes', octet_length(ciphertext)) FROM secret_records WHERE secret_record_id = 'sec_01ARZ3NDEKTSV4RRFFQ69G5FB2'),
+        'quota', (SELECT json_build_object('id', quota_bucket_id, 'metric', metric, 'used_units', used_units) FROM quota_buckets WHERE quota_bucket_id = 'qbk_01ARZ3NDEKTSV4RRFFQ69G5FB3'),
+        'usage', (SELECT json_build_object('metric', metric, 'units', units, 'request_count', request_count) FROM usage_rollups_daily WHERE environment_id = 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX' AND dimension_key = 'environment:operational-drill'),
+        'job', (SELECT json_build_object('id', job_id, 'type', job_type, 'status', status) FROM jobs WHERE job_id = 'job_01ARZ3NDEKTSV4RRFFQ69G5FB4'),
+        'audit', (SELECT json_build_object('id', audit_event_id, 'action', action, 'outcome', outcome) FROM audit_events WHERE audit_event_id = 'aud_01ARZ3NDEKTSV4RRFFQ69G5FB5')
+      )
     )" >"$raw"
   jq --compact-output --sort-keys . "$raw" >"$evidence_dir/.${prefix}-state.canonical.json"
   local fingerprint
@@ -273,11 +292,7 @@ capture_state() {
     '{
       database_identity_sha256: $database_identity_sha256,
       state_fingerprint_sha256: $state_fingerprint_sha256,
-      row_counts: {
-        organizations: $state[0].organizations,
-        applications: $state[0].applications,
-        environments: $state[0].environments
-      }
+      row_counts: $state[0].row_counts
     }' >"$evidence_dir/${prefix}-state.json"
   rm -f -- "$raw" "$evidence_dir/.${prefix}-state.canonical.json"
 }
@@ -336,12 +351,30 @@ previous_version_commit=$(jq --raw-output .commit "$evidence_dir/previous-versio
 [[ "$previous_version_commit" == "$previous_candidate_commit" ]] || { echo "previous candidate runtime version and OCI revision disagree" >&2; exit 1; }
 
 docker exec "$source_postgres" psql --username latchway --dbname latchway --set ON_ERROR_STOP=1 --command "
+  INSERT INTO admin_users (admin_user_id, email, email_normalized, display_name)
+  VALUES ('adm_01ARZ3NDEKTSV4RRFFQ69G5FAY', 'operator@operational-drill.invalid', 'operator@operational-drill.invalid', 'Operational Drill Operator');
   INSERT INTO organizations (organization_id, slug, display_name)
   VALUES ('org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'operational-drill', 'Operational Drill');
+  INSERT INTO admin_memberships (admin_membership_id, organization_id, admin_user_id, role, created_by_admin_user_id)
+  VALUES ('amb_01ARZ3NDEKTSV4RRFFQ69G5FAZ', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'adm_01ARZ3NDEKTSV4RRFFQ69G5FAY', 'owner', 'adm_01ARZ3NDEKTSV4RRFFQ69G5FAY');
   INSERT INTO applications (application_id, organization_id, slug, display_name)
   VALUES ('app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'operational-drill', 'Operational Drill');
   INSERT INTO environments (environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at)
   VALUES ('env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'operational-drill', 'Operational Drill', 'staging', 'disabled', now());
+  INSERT INTO admin_sessions (admin_session_id, organization_id, admin_user_id, token_hash, token_hint, csrf_token_hash, expires_at)
+  VALUES ('asn_01ARZ3NDEKTSV4RRFFQ69G5FB0', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'adm_01ARZ3NDEKTSV4RRFFQ69G5FAY', decode(repeat('11', 32), 'hex'), 'Drill1', decode(repeat('12', 32), 'hex'), now() + interval '1 day');
+  INSERT INTO config_revisions (config_revision_id, organization_id, application_id, environment_id, revision_number, etag, status, document, created_by_admin_user_id)
+  VALUES ('rev_01ARZ3NDEKTSV4RRFFQ69G5FB1', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 1, 'operational-drill', 'draft', '{\"drill\":\"backup-upgrade\"}'::jsonb, 'adm_01ARZ3NDEKTSV4RRFFQ69G5FAY');
+  INSERT INTO secret_records (secret_record_id, organization_id, application_id, environment_id, name, version, encryption_format_version, algorithm, master_key_identifier, ciphertext, nonce, created_by_admin_user_id)
+  VALUES ('sec_01ARZ3NDEKTSV4RRFFQ69G5FB2', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'drill-secret', 1, 1, 'aes-256-gcm', 'operational-drill', decode(repeat('21', 17), 'hex'), decode(repeat('22', 12), 'hex'), 'adm_01ARZ3NDEKTSV4RRFFQ69G5FAY');
+  INSERT INTO quota_buckets (quota_bucket_id, organization_id, application_id, environment_id, metric, scope_type, scope_key, algorithm, window_key, hard_maximum, used_units)
+  VALUES ('qbk_01ARZ3NDEKTSV4RRFFQ69G5FB3', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'logical_requests', 'environment', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'calendar', '2026-09-01', 10, 1);
+  INSERT INTO usage_rollups_daily (organization_id, application_id, environment_id, bucket_date, dimension_key, dimensions, metric, units, request_count)
+  VALUES ('org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', DATE '2026-09-01', 'environment:operational-drill', '{\"environment\":\"operational-drill\"}'::jsonb, 'logical_requests', 1, 1);
+  INSERT INTO jobs (job_id, organization_id, environment_id, job_type, idempotency_key, payload, status, max_attempts, created_at, updated_at, completed_at)
+  VALUES ('job_01ARZ3NDEKTSV4RRFFQ69G5FB4', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'enforce_retention', 'operational-drill-completed', '{\"drill\":true}'::jsonb, 'succeeded', 1, statement_timestamp(), statement_timestamp(), statement_timestamp());
+  INSERT INTO audit_events (audit_event_id, organization_id, environment_id, actor_kind, action, resource_type, resource_id, outcome, occurred_at)
+  VALUES ('aud_01ARZ3NDEKTSV4RRFFQ69G5FB5', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'system', 'system.operational_drill', 'environment', 'env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'succeeded', statement_timestamp());
 " >/dev/null
 capture_state "$source_postgres" previous "$source_identity"
 start_gateway_and_capture "$previous_candidate_runtime_image" "$source_postgres" previous

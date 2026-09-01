@@ -42,8 +42,7 @@ def validate_state(path: Path) -> dict[str, Any]:
         EVIDENCE.SHA256.fullmatch(str(value["database_identity_sha256"])) is None
         or EVIDENCE.SHA256.fullmatch(str(value["state_fingerprint_sha256"])) is None
         or not isinstance(value["row_counts"], dict)
-        or set(value["row_counts"])
-        != {"organizations", "applications", "environments"}
+        or set(value["row_counts"]) != EVIDENCE.OPERATIONAL_STATE_TABLES
         or any(
             not isinstance(count, int) or isinstance(count, bool) or count != 1
             for count in value["row_counts"].values()
