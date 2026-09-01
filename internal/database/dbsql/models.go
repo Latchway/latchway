@@ -192,6 +192,10 @@ type AuditEvent struct {
 	RequestID      *string            `db:"request_id" json:"request_id"`
 	OccurredAt     pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
 	RecordedAt     pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
+	// Bounded descriptive source: Console is derived from authenticated sessions; CLI versus API is an API-token client claim and is never authorization evidence; system is server-owned.
+	Source string `db:"source" json:"source"`
+	// Optional stable operational reason code. Free-form text and secret-bearing material are prohibited.
+	Reason *string `db:"reason" json:"reason"`
 }
 
 type AuditEventChange struct {
@@ -549,6 +553,36 @@ type LogicalRequest struct {
 	TrustSource                *string `db:"trust_source" json:"trust_source"`
 	Framework                  *string `db:"framework" json:"framework"`
 	FrameworkVersion           *string `db:"framework_version" json:"framework_version"`
+	// Redaction-safe projection of the first server-selected route. The immutable decision history remains in logical_request_decision_stages.
+	SelectedRouteKey      *string `db:"selected_route_key" json:"selected_route_key"`
+	SelectedUpstreamKey   *string `db:"selected_upstream_key" json:"selected_upstream_key"`
+	SelectedModelKey      *string `db:"selected_model_key" json:"selected_model_key"`
+	SelectedPhysicalModel *string `db:"selected_physical_model" json:"selected_physical_model"`
+}
+
+// Append-only, redaction-safe identity/trust/policy/quota/routing decisions for one authenticated logical request.
+type LogicalRequestDecisionStage struct {
+	OrganizationID   string             `db:"organization_id" json:"organization_id"`
+	ApplicationID    string             `db:"application_id" json:"application_id"`
+	EnvironmentID    string             `db:"environment_id" json:"environment_id"`
+	LogicalRequestID string             `db:"logical_request_id" json:"logical_request_id"`
+	StageNumber      int16              `db:"stage_number" json:"stage_number"`
+	Stage            string             `db:"stage" json:"stage"`
+	Outcome          string             `db:"outcome" json:"outcome"`
+	FailureCode      *string            `db:"failure_code" json:"failure_code"`
+	ConfigRevisionID string             `db:"config_revision_id" json:"config_revision_id"`
+	PolicyRuleKey    *string            `db:"policy_rule_key" json:"policy_rule_key"`
+	LimitPlanKey     *string            `db:"limit_plan_key" json:"limit_plan_key"`
+	LimitRuleKey     *string            `db:"limit_rule_key" json:"limit_rule_key"`
+	LimitMetric      *string            `db:"limit_metric" json:"limit_metric"`
+	LimitAlgorithm   *string            `db:"limit_algorithm" json:"limit_algorithm"`
+	LimitMaximum     *int64             `db:"limit_maximum" json:"limit_maximum"`
+	RouteKey         *string            `db:"route_key" json:"route_key"`
+	UpstreamKey      *string            `db:"upstream_key" json:"upstream_key"`
+	ModelKey         *string            `db:"model_key" json:"model_key"`
+	PhysicalModel    *string            `db:"physical_model" json:"physical_model"`
+	StartedAt        pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	CompletedAt      pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
 }
 
 type Organization struct {
