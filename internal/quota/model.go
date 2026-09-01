@@ -211,6 +211,12 @@ type ReserveInput struct {
 	InputPreflight      *InputPreflightBinding
 	RequestMeasurements *RequestMeasurementBinding
 	Streaming           bool
+	// DecisionStages are the already-evaluated, successful pre-reservation
+	// decisions that must be appended atomically when an authenticated logical
+	// request is claimed. They are excluded from the request fingerprint: the
+	// durable server-selected values remain the fingerprint authority, while
+	// stage timing is observational provenance.
+	DecisionStages []DecisionStage
 
 	Rules []Rule
 }
@@ -502,11 +508,16 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		preflight.RewrittenBodySHA256 != measurements.RewrittenBodySHA256 {
 		return preparedRequest{}, ErrInvalidInput
 	}
+	decisionStages, err := prepareDecisionStages(input.DecisionStages, false)
+	if err != nil {
+		return preparedRequest{}, err
+	}
 	// Do not retain the caller's pointer. Fingerprinting and persistence must
 	// observe the single validated value even if the caller reuses its input.
 	input.InputPreflight = preflight
 	input.RequestMeasurements = measurements
 	input.NormalizedClaimDigests = cloneStringMap(input.NormalizedClaimDigests)
+	input.DecisionStages = decisionStages
 	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
 	prepared.Rules = clonePreparedRules(preparedRules)
 	return prepared, nil

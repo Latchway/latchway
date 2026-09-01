@@ -333,7 +333,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	for _, stage := range []quota.DecisionStage{
+	if err := handler.recordDecisionStages(request.Context(), lifecycle, []quota.DecisionStage{
 		{
 			Stage: quota.DecisionIdentityVerified, Outcome: quota.DecisionSucceeded,
 			StartedAt: identityStartedAt, CompletedAt: identityCompletedAt,
@@ -342,16 +342,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			Stage: quota.DecisionClientTrustVerified, Outcome: quota.DecisionSucceeded,
 			StartedAt: trustStartedAt, CompletedAt: trustCompletedAt,
 		},
-	} {
-		if err := handler.recordDecisionStage(request.Context(), lifecycle, stage); err != nil {
-			handler.writeMappedError(writer, requestID, declaration.feature, err)
-			return
-		}
+	}); err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
 	}
+	pendingDecisionStages := make([]quota.DecisionStage, 0, 5)
 	clientContextStartedAt := handler.now().UTC()
 	if !sdkMatchesPlatform(declaration.sdk, authorization.InstallationPlatform) {
 		if err := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionClientContextValidated,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionClientContextValidated,
 			clientContextStartedAt, errors.New("request_invalid"), "request_invalid",
 		); err != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -364,7 +363,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	if authorization.ComponentID != "" && !slices.Contains(authorization.GrantedFeatures, declaration.feature) {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionClientContextValidated,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionClientContextValidated,
 			clientContextStartedAt, session.ErrComponentFeatureNotGranted, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -373,13 +372,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, session.ErrComponentFeatureNotGranted)
 		return
 	}
-	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+	pendingDecisionStages = append(pendingDecisionStages, quota.DecisionStage{
 		Stage: quota.DecisionClientContextValidated, Outcome: quota.DecisionSucceeded,
 		StartedAt: clientContextStartedAt, CompletedAt: handler.decisionCompletedAt(clientContextStartedAt),
-	}); err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
+	})
 
 	configurationStartedAt := handler.now().UTC()
 	snapshot, err := handler.configuration.ActiveSnapshot(request.Context(), configuration.TenantScope{
@@ -389,7 +385,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	})
 	if err != nil {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionConfigurationLoaded,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionConfigurationLoaded,
 			configurationStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -401,7 +397,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
 		snapshot.PolicyEnvironment() != authorization.EnvironmentID {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionConfigurationLoaded,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionConfigurationLoaded,
 			configurationStartedAt, policy.ErrConfiguration, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -410,19 +406,16 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
 		return
 	}
-	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+	pendingDecisionStages = append(pendingDecisionStages, quota.DecisionStage{
 		Stage: quota.DecisionConfigurationLoaded, Outcome: quota.DecisionSucceeded,
 		StartedAt: configurationStartedAt, CompletedAt: handler.decisionCompletedAt(configurationStartedAt),
-	}); err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
+	})
 
 	inspectionStartedAt := handler.now().UTC()
 	metadata, err := endpoint.adapter.InspectRequest(request.Context(), request)
 	if err != nil {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionRequestInspected,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionRequestInspected,
 			inspectionStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -434,7 +427,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	replay, err := captureReplayableRequest(request)
 	if err != nil {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionRequestInspected,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionRequestInspected,
 			inspectionStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -443,13 +436,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+	pendingDecisionStages = append(pendingDecisionStages, quota.DecisionStage{
 		Stage: quota.DecisionRequestInspected, Outcome: quota.DecisionSucceeded,
 		StartedAt: inspectionStartedAt, CompletedAt: handler.decisionCompletedAt(inspectionStartedAt),
-	}); err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
+	})
 	policyStartedAt := handler.now().UTC()
 	policyCtx, finishPolicy := handler.startStage(request.Context(), "policy evaluation", telemetry.Labels{
 		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
@@ -462,7 +452,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	finishPolicy(handler.telemetryOutcome(err))
 	if err != nil {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionPolicyEvaluated,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionPolicyEvaluated,
 			policyStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -471,14 +461,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+	pendingDecisionStages = append(pendingDecisionStages, quota.DecisionStage{
 		Stage: quota.DecisionPolicyEvaluated, Outcome: quota.DecisionSucceeded,
 		StartedAt: policyStartedAt, CompletedAt: handler.decisionCompletedAt(policyStartedAt),
 		LimitPlanKey: plan.LimitPlan.ID,
-	}); err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
+	})
 	routeStartedAt := handler.now().UTC()
 	routeCtx, finishRoute := handler.startStage(request.Context(), "route selection", telemetry.Labels{
 		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
@@ -489,7 +476,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if err != nil {
 		finishRoute(handler.telemetryOutcome(err))
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionRouteSelected,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionRouteSelected,
 			routeStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -506,7 +493,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	finishRoute(handler.telemetryOutcome(err))
 	if err != nil {
 		if lifecycleErr := handler.recordDecisionFailure(
-			request.Context(), lifecycle, quota.DecisionRouteSelected,
+			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionRouteSelected,
 			routeStartedAt, err, "",
 		); lifecycleErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -515,16 +502,13 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+	pendingDecisionStages = append(pendingDecisionStages, quota.DecisionStage{
 		Stage: quota.DecisionRouteSelected, Outcome: quota.DecisionSucceeded,
 		StartedAt: routeStartedAt, CompletedAt: handler.decisionCompletedAt(routeStartedAt),
 		LimitPlanKey: plan.LimitPlan.ID,
 		RouteKey:     primary.decision.Route.ID, UpstreamKey: primary.decision.Upstream.ID,
 		ModelKey: primary.decision.Model.ID, PhysicalModel: primary.decision.Model.UpstreamModel,
-	}); err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
+	})
 
 	requestLabels := telemetry.Labels{
 		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
@@ -555,13 +539,14 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
 		InputPreflight:      quotaInputPreflightBinding(prepared.inputPreflight),
 		RequestMeasurements: quotaRequestMeasurementBinding(prepared.requestMeasurements),
+		DecisionStages:      pendingDecisionStages,
 		Streaming:           metadata.Streaming, Rules: prepared.rules,
 	})
 	finishQuota(handler.telemetryOutcome(err))
 	if err != nil {
 		if !errors.Is(err, quota.ErrExceeded) && !errors.Is(err, quota.ErrConcurrencyExceeded) {
 			if lifecycleErr := handler.recordDecisionFailure(
-				request.Context(), lifecycle, quota.DecisionQuotaReserved,
+				request.Context(), lifecycle, pendingDecisionStages, quota.DecisionQuotaReserved,
 				quotaStartedAt, err, "",
 			); lifecycleErr != nil && !errors.Is(lifecycleErr, quota.ErrInvalidState) {
 				handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
@@ -2428,19 +2413,20 @@ func (handler *Handler) beginAuthenticatedRequest(
 	return handler.quotas.BeginAuthenticatedRequest(ctx, input)
 }
 
-func (handler *Handler) recordDecisionStage(
+func (handler *Handler) recordDecisionStages(
 	parent context.Context,
 	request quota.AuthenticatedRequest,
-	stage quota.DecisionStage,
+	stages []quota.DecisionStage,
 ) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
 	defer cancel()
-	return handler.quotas.RecordDecisionStage(ctx, request, stage)
+	return handler.quotas.RecordDecisionStages(ctx, request, stages)
 }
 
 func (handler *Handler) recordDecisionFailure(
 	parent context.Context,
 	request quota.AuthenticatedRequest,
+	prior []quota.DecisionStage,
 	stage string,
 	startedAt time.Time,
 	failure error,
@@ -2460,10 +2446,13 @@ func (handler *Handler) recordDecisionFailure(
 		outcome = quota.DecisionCancelled
 		code = "request_cancelled"
 	}
-	return handler.recordDecisionStage(parent, request, quota.DecisionStage{
+	stages := make([]quota.DecisionStage, 0, len(prior)+1)
+	stages = append(stages, prior...)
+	stages = append(stages, quota.DecisionStage{
 		Stage: stage, Outcome: outcome, FailureCode: code,
 		StartedAt: startedAt, CompletedAt: handler.decisionCompletedAt(startedAt),
 	})
+	return handler.recordDecisionStages(parent, request, stages)
 }
 
 func (handler *Handler) decisionCompletedAt(startedAt time.Time) time.Time {

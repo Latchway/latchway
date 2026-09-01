@@ -4198,12 +4198,12 @@ func (fake *fakeQuotaStore) BeginAuthenticatedRequest(
 	return fake.authenticated, fake.authenticatedErr
 }
 
-func (fake *fakeQuotaStore) RecordDecisionStage(
+func (fake *fakeQuotaStore) RecordDecisionStages(
 	_ context.Context,
 	_ quota.AuthenticatedRequest,
-	stage quota.DecisionStage,
+	stages []quota.DecisionStage,
 ) error {
-	fake.decisionStages = append(fake.decisionStages, stage)
+	fake.decisionStages = append(fake.decisionStages, stages...)
 	return fake.decisionStageErr
 }
 

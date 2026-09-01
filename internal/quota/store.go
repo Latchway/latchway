@@ -426,7 +426,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		if !claimed {
 			return loadExistingReserve(ctx, tx, prepared, fingerprint)
 		}
-	} else if command.RowsAffected() != 1 {
+	} else if command.RowsAffected() != 1 || len(prepared.DecisionStages) != 0 {
 		return Reservation{}, ErrInvalidState
 	}
 	if len(requestBoundsExceeded) != 0 {

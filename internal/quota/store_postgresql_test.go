@@ -48,18 +48,18 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 			t.Fatalf("begin authenticated request: %v", err)
 		}
 		startedAt := time.Now().UTC().Add(-time.Millisecond)
-		if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, DecisionStage{
-			Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
-			StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond),
+		if err := fixture.store.RecordDecisionStages(fixture.ctx, authenticated, []DecisionStage{
+			{
+				Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
+				StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond),
+			},
+			{
+				Stage: DecisionPolicyEvaluated, Outcome: DecisionDenied,
+				FailureCode: "feature_not_allowed", PolicyRuleKey: "feature_access",
+				StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond),
+			},
 		}); err != nil {
-			t.Fatalf("record identity decision: %v", err)
-		}
-		if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, DecisionStage{
-			Stage: DecisionPolicyEvaluated, Outcome: DecisionDenied,
-			FailureCode: "feature_not_allowed", PolicyRuleKey: "feature_access",
-			StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond),
-		}); err != nil {
-			t.Fatalf("record policy denial: %v", err)
+			t.Fatalf("record atomic decision batch: %v", err)
 		}
 		var status, failureCode string
 		var completedAt time.Time
@@ -103,12 +103,12 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 
 	t.Run("reservation claims authenticated row and appends exact quota provenance", func(t *testing.T) {
 		input := fixture.input(t, "authenticated-reserve", 5)
-		authenticated, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input))
+		_, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input))
 		if err != nil {
 			t.Fatalf("begin authenticated request: %v", err)
 		}
 		at := time.Now().UTC()
-		for _, stage := range []DecisionStage{
+		input.DecisionStages = []DecisionStage{
 			{
 				Stage: DecisionPolicyEvaluated, Outcome: DecisionSucceeded,
 				PolicyRuleKey: "feature_access", LimitPlanKey: input.LimitPlanKey,
@@ -121,10 +121,6 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 				ModelKey: input.ModelKey, PhysicalModel: input.PhysicalModel,
 				StartedAt: at, CompletedAt: at,
 			},
-		} {
-			if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, stage); err != nil {
-				t.Fatalf("record pre-reservation stage %q: %v", stage.Stage, err)
-			}
 		}
 		reservation, err := fixture.store.Reserve(fixture.ctx, input)
 		if err != nil {

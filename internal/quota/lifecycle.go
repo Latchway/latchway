@@ -15,6 +15,7 @@ import (
 
 const (
 	staleAuthenticatedRequestAge = 24 * time.Hour
+	maximumDecisionStages        = 256
 
 	DecisionIdentityVerified       = "identity_verified"
 	DecisionClientTrustVerified    = "client_trust_verified"
@@ -331,6 +332,16 @@ func claimAuthenticatedRequest(
 		!nullableSelectionMatches(physicalModel, input.PhysicalModel) {
 		return false, ErrInvalidInput
 	}
+	for _, stage := range input.DecisionStages {
+		if err := projectDecisionStage(ctx, tx, requestHandleForPrepared(input), stage); err != nil {
+			return false, err
+		}
+	}
+	if err := appendDecisionStages(
+		ctx, tx, requestHandleForPrepared(input), input.DecisionStages,
+	); err != nil {
+		return false, err
+	}
 	command, err := tx.Exec(ctx, `
 		UPDATE logical_requests
 		SET selected_limit_plan_key = $2,
@@ -399,6 +410,24 @@ func prepareDecisionStage(stage DecisionStage) (DecisionStage, error) {
 	return stage, nil
 }
 
+func prepareDecisionStages(stages []DecisionStage, allowTerminal bool) ([]DecisionStage, error) {
+	if len(stages) > maximumDecisionStages {
+		return nil, ErrInvalidInput
+	}
+	prepared := make([]DecisionStage, len(stages))
+	for index, stage := range stages {
+		value, err := prepareDecisionStage(stage)
+		if err != nil {
+			return nil, err
+		}
+		if value.Outcome != DecisionSucceeded && (!allowTerminal || index != len(stages)-1) {
+			return nil, ErrInvalidInput
+		}
+		prepared[index] = value
+	}
+	return prepared, nil
+}
+
 // RecordDecisionStage appends one bounded stage. A denied, failed, or
 // cancelled pre-reservation stage atomically closes the logical request.
 func (store *Store) RecordDecisionStage(
@@ -406,10 +435,25 @@ func (store *Store) RecordDecisionStage(
 	request AuthenticatedRequest,
 	stage DecisionStage,
 ) error {
+	return store.RecordDecisionStages(ctx, request, []DecisionStage{stage})
+}
+
+// RecordDecisionStages appends one bounded ordered batch. Successful stages
+// and an optional final terminal stage commit together, so normal request
+// processing does not require one PostgreSQL transaction per decision while
+// failures remain durable before quota reservation.
+func (store *Store) RecordDecisionStages(
+	ctx context.Context,
+	request AuthenticatedRequest,
+	stages []DecisionStage,
+) error {
 	if store == nil || store.pool == nil || ctx == nil || !validAuthenticatedRequestHandle(request) {
 		return ErrInvalidInput
 	}
-	prepared, err := prepareDecisionStage(stage)
+	if len(stages) == 0 {
+		return ErrInvalidInput
+	}
+	prepared, err := prepareDecisionStages(stages, true)
 	if err != nil {
 		return err
 	}
@@ -434,14 +478,17 @@ func (store *Store) RecordDecisionStage(
 	if revisionID != request.configRevisionID || status != "authenticated" {
 		return ErrInvalidState
 	}
-	if err := projectDecisionStage(ctx, tx, request, prepared); err != nil {
+	for _, stage := range prepared {
+		if err := projectDecisionStage(ctx, tx, request, stage); err != nil {
+			return err
+		}
+	}
+	if err := appendDecisionStages(ctx, tx, request, prepared); err != nil {
 		return err
 	}
-	if err := appendDecisionStage(ctx, tx, request, prepared); err != nil {
-		return err
-	}
-	if prepared.Outcome != DecisionSucceeded {
-		terminalStatus := prepared.Outcome
+	terminal := prepared[len(prepared)-1]
+	if terminal.Outcome != DecisionSucceeded {
+		terminalStatus := terminal.Outcome
 		if terminalStatus == DecisionCancelled {
 			terminalStatus = "cancelled"
 		}
@@ -450,7 +497,7 @@ func (store *Store) RecordDecisionStage(
 			SET status = $2, failure_code = $3,
 			    completed_at = GREATEST(requested_at, $4)
 			WHERE logical_request_id = $1 AND status = 'authenticated'
-		`, request.logicalRequestID, terminalStatus, prepared.FailureCode, prepared.CompletedAt)
+		`, request.logicalRequestID, terminalStatus, terminal.FailureCode, terminal.CompletedAt)
 		if err != nil {
 			return persistenceFailure("close pre-reservation logical request", err)
 		}
@@ -521,12 +568,15 @@ func projectDecisionStage(
 	return nil
 }
 
-func appendDecisionStage(
+func appendDecisionStages(
 	ctx context.Context,
 	tx pgx.Tx,
 	request AuthenticatedRequest,
-	stage DecisionStage,
+	stages []DecisionStage,
 ) error {
+	if len(stages) == 0 {
+		return nil
+	}
 	var next int32
 	if err := tx.QueryRow(ctx, `
 		SELECT COALESCE(max(stage_number), 0) + 1
@@ -535,31 +585,41 @@ func appendDecisionStage(
 	`, request.logicalRequestID).Scan(&next); err != nil {
 		return persistenceFailure("select next request decision stage", err)
 	}
-	if next < 1 || next > 256 {
+	if next < 1 || int64(next)+int64(len(stages))-1 > maximumDecisionStages {
 		return ErrInvalidState
 	}
-	_, err := tx.Exec(ctx, `
-		INSERT INTO logical_request_decision_stages (
-			organization_id, application_id, environment_id, logical_request_id,
-			stage_number, stage, outcome, failure_code, config_revision_id,
-			policy_rule_key, limit_plan_key, limit_rule_key, limit_metric,
-			limit_algorithm, limit_maximum, route_key, upstream_key, model_key,
-			physical_model, started_at, completed_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			$12, $13, $14, $15, $16, $17, $18, $19, $20, $21
-		)
-	`, request.organizationID, request.applicationID, request.environmentID,
-		request.logicalRequestID, next, stage.Stage, stage.Outcome,
-		nullableString(stage.FailureCode), request.configRevisionID,
-		nullableString(stage.PolicyRuleKey), nullableString(stage.LimitPlanKey),
-		nullableString(stage.LimitRuleKey), nullableString(stage.LimitMetric),
-		nullableString(stage.LimitAlgorithm), nullableInt64(stage.LimitMaximum, stage.HasLimitMaximum),
-		nullableString(stage.RouteKey), nullableString(stage.UpstreamKey),
-		nullableString(stage.ModelKey), nullableString(stage.PhysicalModel),
-		stage.StartedAt, stage.CompletedAt)
-	if err != nil {
-		return mapWriteError("append request decision stage", err)
+	batch := &pgx.Batch{}
+	for index, stage := range stages {
+		batch.Queue(`
+			INSERT INTO logical_request_decision_stages (
+				organization_id, application_id, environment_id, logical_request_id,
+				stage_number, stage, outcome, failure_code, config_revision_id,
+				policy_rule_key, limit_plan_key, limit_rule_key, limit_metric,
+				limit_algorithm, limit_maximum, route_key, upstream_key, model_key,
+				physical_model, started_at, completed_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+				$12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+			)
+		`, request.organizationID, request.applicationID, request.environmentID,
+			request.logicalRequestID, next+int32(index), stage.Stage, stage.Outcome,
+			nullableString(stage.FailureCode), request.configRevisionID,
+			nullableString(stage.PolicyRuleKey), nullableString(stage.LimitPlanKey),
+			nullableString(stage.LimitRuleKey), nullableString(stage.LimitMetric),
+			nullableString(stage.LimitAlgorithm), nullableInt64(stage.LimitMaximum, stage.HasLimitMaximum),
+			nullableString(stage.RouteKey), nullableString(stage.UpstreamKey),
+			nullableString(stage.ModelKey), nullableString(stage.PhysicalModel),
+			stage.StartedAt, stage.CompletedAt)
+	}
+	results := tx.SendBatch(ctx, batch)
+	for range stages {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return mapWriteError("append request decision stage", err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return mapWriteError("append request decision stages", err)
 	}
 	return nil
 }
@@ -602,6 +662,7 @@ func appendQuotaDecisionStages(
 	failureCode string,
 ) error {
 	request := requestHandleForPrepared(input)
+	stages := make([]DecisionStage, 0, len(input.rules)+1)
 	for _, rule := range input.rules {
 		if _, evaluated := evaluatedRuleKeys[rule.ruleKey]; !evaluated {
 			continue
@@ -612,26 +673,25 @@ func appendQuotaDecisionStages(
 			outcome = DecisionDenied
 			code = failureCode
 		}
-		if err := appendDecisionStage(ctx, tx, request, DecisionStage{
+		stages = append(stages, DecisionStage{
 			Stage: DecisionQuotaRuleEvaluated, Outcome: outcome, FailureCode: code,
 			StartedAt: startedAt, CompletedAt: completedAt, LimitPlanKey: input.LimitPlanKey,
 			LimitRuleKey: rule.ruleKey, LimitMetric: rule.Metric,
 			LimitAlgorithm: rule.Algorithm, LimitMaximum: decisionLimitMaximum(rule),
 			HasLimitMaximum: true,
-		}); err != nil {
-			return err
-		}
+		})
 	}
 	outcome := DecisionSucceeded
 	if failureCode != "" {
 		outcome = DecisionDenied
 	}
-	return appendDecisionStage(ctx, tx, request, DecisionStage{
+	stages = append(stages, DecisionStage{
 		Stage: DecisionQuotaReserved, Outcome: outcome, FailureCode: failureCode,
 		StartedAt: startedAt, CompletedAt: completedAt, LimitPlanKey: input.LimitPlanKey,
 		RouteKey: input.RouteKey, UpstreamKey: input.UpstreamKey,
 		ModelKey: input.ModelKey, PhysicalModel: input.PhysicalModel,
 	})
+	return appendDecisionStages(ctx, tx, request, stages)
 }
 
 func requestBoundEvaluatedRuleKeySet(rules []preparedRule) map[string]struct{} {

@@ -152,7 +152,7 @@ func policyEngineInput(
 // opaque handles prevent the data plane from inventing persisted state.
 type QuotaStore interface {
 	BeginAuthenticatedRequest(context.Context, quota.AuthenticatedRequestInput) (quota.AuthenticatedRequest, error)
-	RecordDecisionStage(context.Context, quota.AuthenticatedRequest, quota.DecisionStage) error
+	RecordDecisionStages(context.Context, quota.AuthenticatedRequest, []quota.DecisionStage) error
 	Reserve(context.Context, quota.ReserveInput) (quota.Reservation, error)
 	BeginAttempt(context.Context, quota.Reservation) (quota.Attempt, bool, error)
 	BeginRetryAttempt(context.Context, quota.Attempt, quota.RetryAttemptInput) (quota.Attempt, bool, error)

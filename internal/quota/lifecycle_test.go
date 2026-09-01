@@ -91,3 +91,43 @@ func TestPrepareDecisionStageEnforcesClosedProvenanceTuples(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareDecisionStagesAllowsOnlyOneFinalTerminalStage(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	succeeded := DecisionStage{
+		Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
+		StartedAt: now, CompletedAt: now.Add(time.Millisecond),
+	}
+	terminal := DecisionStage{
+		Stage: DecisionClientContextValidated, Outcome: DecisionDenied,
+		FailureCode: "request_invalid",
+		StartedAt:   now.Add(time.Millisecond), CompletedAt: now.Add(2 * time.Millisecond),
+	}
+
+	prepared, err := prepareDecisionStages([]DecisionStage{succeeded, terminal}, true)
+	if err != nil || len(prepared) != 2 || prepared[1].Outcome != DecisionDenied {
+		t.Fatalf("prepare valid terminal batch = %#v, %v", prepared, err)
+	}
+	for name, stages := range map[string][]DecisionStage{
+		"terminal before final stage":   {terminal, succeeded},
+		"terminal in reservation batch": {succeeded, terminal},
+	} {
+		name, stages := name, stages
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			allowTerminal := name != "terminal in reservation batch"
+			if _, err := prepareDecisionStages(stages, allowTerminal); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("prepareDecisionStages accepted invalid terminal placement: %v", err)
+			}
+		})
+	}
+
+	overflow := make([]DecisionStage, maximumDecisionStages+1)
+	for index := range overflow {
+		overflow[index] = succeeded
+	}
+	if _, err := prepareDecisionStages(overflow, true); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("prepareDecisionStages accepted %d stages: %v", len(overflow), err)
+	}
+}
