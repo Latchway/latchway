@@ -23,7 +23,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 COPY --from=console-build /src/web/console/dist ./web/console/dist
-ARG VERSION=1.0.0-rc.1
+ARG VERSION=1.0.0
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG TARGETOS
@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/latchway ./cmd/latchway
 
 FROM scratch
-ARG VERSION=1.0.0-rc.1
+ARG VERSION=1.0.0
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE=https://github.com/Latchway/latchway

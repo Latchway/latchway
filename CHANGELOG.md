@@ -4,6 +4,8 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-01
+
 ### Added
 
 - Add a fail-closed, separately controlled independent security-review gate
