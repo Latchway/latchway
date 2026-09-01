@@ -42,6 +42,13 @@ func TestComponentDefinitionsCompileIntoImmutableRuntimeSnapshot(t *testing.T) {
 	if again.AllowedFeatures[0] != "assistant" {
 		t.Fatal("component definition escaped snapshot immutability")
 	}
+	root, ok := snapshot.RootComponentDefinition("ios", "app_attest", "")
+	if !ok || root.ID != "ios-main" {
+		t.Fatalf("authoritative App Attest root = %+v ok=%t", root, ok)
+	}
+	if _, ok := snapshot.RootComponentDefinition("ios", "debug", ""); ok {
+		t.Fatal("mismatched attestation provider selected an iOS root")
+	}
 }
 
 func TestComponentDefinitionSemanticFailures(t *testing.T) {
@@ -83,6 +90,28 @@ func TestComponentDefinitionSemanticFailures(t *testing.T) {
 				widget["attestation"] = map[string]any{"strategy": "direct", "provider": "app_attest"}
 			},
 		},
+		{
+			name: "root provider does not match required selection", code: "component_root_attestation_provider_mismatch",
+			edit: func(definitions []any) {
+				definitions[0].(map[string]any)["attestation"] = map[string]any{
+					"strategy": "direct", "provider": "debug",
+				}
+			},
+		},
+		{
+			name: "root bundle does not match required App Attest selection", code: "component_root_identifier_mismatch",
+			edit: func(definitions []any) {
+				objectValue(definitions[0].(map[string]any), "identifiers")["bundleIdentifiers"] = []any{
+					"com.example.other",
+				}
+			},
+		},
+		{
+			name: "identity-only root is reserved but unsupported", code: "component_root_identity_only_unsupported",
+			edit: func(definitions []any) {
+				definitions[0].(map[string]any)["attestation"] = map[string]any{"strategy": "identity_only"}
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -106,6 +135,187 @@ func TestComponentDefinitionSemanticFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComponentDefinitionsRejectAmbiguousNativeRoots(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	definitions := validComponentDefinitions()
+	definitions = append(definitions, map[string]any{
+		"id": "ios-secondary", "platform": "ios", "kind": "main_app",
+		"identifiers":     map[string]any{"bundleIdentifiers": []any{"com.example.secondary"}},
+		"familyRole":      "root",
+		"attestation":     map[string]any{"strategy": "direct", "provider": "app_attest"},
+		"allowedFeatures": []any{"assistant"},
+	})
+	objectValue(document, "spec")["componentDefinitions"] = definitions
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "component_root_ambiguous") {
+		t.Fatalf("ambiguous native roots compiled: %+v", report.Issues)
+	}
+}
+
+func TestMultipleWebRootDefinitionsResolveOnlyByExactConfiguredOrigin(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := validWebRootPartitionConfiguration(t)
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid {
+		t.Fatalf("exact web root partition rejected: %+v", report.Issues)
+	}
+	snapshot, err := newActiveSnapshot(
+		"rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for origin, expectedID := range map[string]string{
+		"https://app.example.test":        "web-app",
+		"https://admin.example.test:8443": "web-admin",
+	} {
+		definition, ok := snapshot.RootComponentDefinition("web", "turnstile", origin)
+		if !ok || definition.ID != expectedID {
+			t.Fatalf("origin %q resolved definition=%+v ok=%t, want %s", origin, definition, ok, expectedID)
+		}
+	}
+	for _, input := range []struct{ provider, origin string }{
+		{provider: "debug", origin: "https://app.example.test"},
+		{provider: "turnstile", origin: "https://unknown.example.test"},
+	} {
+		if definition, ok := snapshot.RootComponentDefinition("web", input.provider, input.origin); ok {
+			t.Fatalf("untrusted selector %+v resolved root %+v", input, definition)
+		}
+	}
+}
+
+func TestWebRootDefinitionsRejectOverlappingAndUnmappedAllowedOrigins(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		code string
+		edit func(map[string]any)
+	}{
+		{
+			name: "overlapping root origin", code: "component_root_origin_ambiguous",
+			edit: func(document map[string]any) {
+				definitions := objectArray(objectValue(document, "spec"), "componentDefinitions")
+				objectValue(definitions[0], "identifiers")["origins"] = []any{
+					"https://app.example.test", "https://admin.example.test:8443",
+				}
+			},
+		},
+		{
+			name: "allowed origin without root", code: "component_root_origin_unmapped",
+			edit: func(document map[string]any) {
+				spec := objectValue(document, "spec")
+				policy := objectArray(spec, "attestationPolicies")[0]
+				selection := objectValue(objectValue(policy, "platforms"), "web")
+				selection["allowedOrigins"] = []any{
+					"https://app.example.test", "https://admin.example.test:8443",
+					"https://support.example.test",
+				}
+				objectValue(selection, "turnstile")["allowedHostnames"] = []any{
+					"app.example.test", "admin.example.test", "support.example.test",
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			validator, err := NewValidator()
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := validWebRootPartitionConfiguration(t)
+			test.edit(document)
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("web root partition issues=%+v want=%s", report.Issues, test.code)
+			}
+		})
+	}
+}
+
+func TestRuntimeSnapshotRejectsOverlappingWebRootOrigins(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := validWebRootPartitionConfiguration(t)
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid {
+		t.Fatalf("valid web root partition rejected: %+v", report.Issues)
+	}
+	var forged map[string]any
+	if err := json.Unmarshal(compiled, &forged); err != nil {
+		t.Fatal(err)
+	}
+	definitions := objectArray(objectValue(forged, "spec"), "componentDefinitions")
+	objectValue(definitions[0], "identifiers")["origins"] = []any{
+		"https://app.example.test", "https://admin.example.test:8443",
+	}
+	forgedCompiled, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newActiveSnapshot(
+		"rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, forgedCompiled,
+	); err == nil {
+		t.Fatal("compiled snapshot accepted overlapping web root origins")
+	}
+}
+
+func validWebRootPartitionConfiguration(t *testing.T) map[string]any {
+	t.Helper()
+	selection := validTurnstileSelection()
+	selection["allowedOrigins"] = []any{
+		"https://app.example.test", "https://admin.example.test:8443",
+	}
+	objectValue(selection, "turnstile")["allowedHostnames"] = []any{
+		"app.example.test", "admin.example.test",
+	}
+	document := configurationWithAttestationSelection(t, "web", selection)
+	objectValue(document, "spec")["componentDefinitions"] = []any{
+		map[string]any{
+			"id": "web-app", "platform": "web", "kind": "browser",
+			"identifiers":     map[string]any{"origins": []any{"https://app.example.test"}},
+			"familyRole":      "root",
+			"attestation":     map[string]any{"strategy": "direct", "provider": "turnstile"},
+			"allowedFeatures": []any{"assistant"},
+		},
+		map[string]any{
+			"id": "web-admin", "platform": "web", "kind": "browser",
+			"identifiers":     map[string]any{"origins": []any{"https://admin.example.test:8443"}},
+			"familyRole":      "root",
+			"attestation":     map[string]any{"strategy": "direct", "provider": "turnstile"},
+			"allowedFeatures": []any{"assistant"},
+		},
+	}
+	return document
 }
 
 func TestComponentDefinitionDelegationCycleFails(t *testing.T) {

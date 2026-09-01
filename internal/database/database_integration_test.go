@@ -22,7 +22,7 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
-const latestTestSchemaVersion int64 = 24
+const latestTestSchemaVersion int64 = 25
 
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()
@@ -65,6 +65,12 @@ func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 				"LogicalRequestID": "logical_request_id", "UpstreamAttemptID": "upstream_attempt_id",
 				"QuotaReservationID": "quota_reservation_id", "AllocatedUnits": "allocated_units",
 				"ChargedUnits": "charged_units", "ReleasedUnits": "released_units",
+			},
+		},
+		{
+			name: "session challenge", typeOf: reflect.TypeOf(dbsql.SessionChallenge{}),
+			fields: map[string]string{
+				"BrowserOrigin": "browser_origin",
 			},
 		},
 	} {

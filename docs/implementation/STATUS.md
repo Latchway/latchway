@@ -18,7 +18,7 @@ domains remain open.
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
 | Validated implementation coordinates | Exact source and documentation-mirror coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
-| Database schema version | `24` at the recorded passing source coordinate |
+| Database schema version | `25` in the current working source; the recorded clean source coordinate was schema `24` |
 | Last full test time | `2026-09-01` — the final contract/SDK tuple passes clean cross-repository source conformance, the React Native full check and GitHub policy check pass, four byte-reproducible clean SDK documentation bundles are imported at the exact recorded commits, and both the canonical and synchronized Mintlify suites pass |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical invocation of the current Debug App Intent path, the protected delegated-extension runtime matrix, physical Android/Play proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
@@ -93,7 +93,7 @@ python3 scripts/cross-repo-conformance.py --scope source \
 | Contract freeze | Core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
 | Bundle SHA-256 | `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
-| Database | Recorded source candidate schema `24` |
+| Database | Current working source schema `25`; recorded clean checkpoint schema `24` |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | Release state | `unreleased`; no tag or package publication authorized |
 
@@ -105,7 +105,7 @@ checkpoint and reproducible draft bundle above.
 
 | Workstream | Local source status | Remaining boundary |
 | --- | --- | --- |
-| Family/component contract and migrations | Implemented through schema 24; bundle and locks converged | Protected exact-candidate evidence |
+| Family/component contract and migrations | Implemented through schema 25; exact challenge Origin and authoritative root-definition selection are hardened without changing the frozen API/configuration contract | Refresh the clean core checkpoint and protected exact-candidate evidence |
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including a generic component App Attest step-up protocol | Exact-candidate rerun and protected observations |
 | Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; opaque HTTP now has pairwise-disjoint exact-depth path templates while retaining the prior segment-bound `pathPrefixes` mode for existing v1 revisions; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
 | Weighted/sticky routing, fallback, retry, accounting | Complete | Exact-image load/failure evidence |
@@ -114,7 +114,7 @@ checkpoint and reproducible draft bundle above.
 | Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
 | React Native SDK | Commit `af3860cbf39ab6a8d1d76da392cb699b9e019e42` is implemented, fully checked, and pinned to the exact three native/source commits. It adds root-owned component descriptor lifecycle plus a Debug-only native App Intent delegated request with exact-run challenge/receipt binding; the Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the physical root-app proof. | Physical invocation of the current Debug App Intent path, protected Apple distribution and extension-matrix proof, physical Android proof, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
-| Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware and leaves lifecycle-only, opaque, and historical attempts without an inferred token timestamp | Protected exact-image drills |
+| Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, while schema 25 invalidates unverifiable ephemeral challenges and persists exact browser Origin for new ones | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Mintlify public docs | The canonical source, exact SDK bundles, and synchronized mirror commit `a0c3559b11353a8196bde800d4b7484726e9f76a` pass the complete local suite | Merge and production deploy/post-deploy validation |
 
@@ -177,13 +177,22 @@ passed. These results do not substitute for any protected external domain.
 
 ## Direct component attestation boundary
 
-Schema 24 retains the generic component-owned App Attest challenge/exchange
+Schema 25 retains the generic component-owned App Attest challenge/exchange
 routes and binding version 2 introduced in schema 23. If an eligible platform
 can produce component-owned evidence, a delegated component can rotate only its
 own DPoP-bound session while retaining delegation ancestry under
 `delegated_direct_attested`. The configured component policy remains
 `preferred` so it cannot qualify an initial delegated session; the explicit
 step-up exchange itself requires valid App Attest evidence.
+
+Schema 25 also makes initial root-family attribution fail closed. A browser
+challenge persists its exact canonical Origin and the exchange must present the
+same value; native challenges persist an empty Origin. Root Component
+Definitions are selected from the authoritative required attestation policy's
+exact bundle, package, or web Origin rather than platform alone. Multiple web
+roots are permitted only when disjoint exact origin sets partition every
+allowed Origin across directly attested roots. Explicit root `identity_only` remains in the frozen schema only
+for compatibility and cannot activate in version 1.
 
 That wire capability is not an iOS Action/SSO support claim. Apple documents
 that App Attest key generation fails in iOS app extensions; only eligible

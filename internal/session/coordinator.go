@@ -171,6 +171,7 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 		ApplicationUserID: user.ID, IdentityProvider: principal.ProviderID,
 		IdentityVerifiedAt: principal.AuthenticatedAt,
 		IdentityExpiresAt:  principal.ExpiresAt, Platform: input.Platform,
+		Origin:  input.Metadata.Origin,
 		DPoPJKT: proof.JKT, DPoPPublicJWK: proof.JWK, DPoPProofJTI: proof.JTI,
 		DPoPHTTPMethod: input.Metadata.HTTPMethod, DPoPRequestURI: &input.Metadata.TargetURL,
 	})
@@ -230,6 +231,10 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
+	if input.Metadata.Origin != challenge.Origin {
+		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
 	payload, err := input.Attestation.Payload.Object()
 	if err != nil {
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
@@ -249,6 +254,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	issued, err := coordinator.sessions.Exchange(ctx, ExchangeInput{
 		ChallengeID: input.ChallengeID, Attestation: verified, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin:     input.Metadata.Origin,
 		KeyStorage: "unknown", AppVersion: input.Installation.AppVersion,
 	})
 	if err != nil {

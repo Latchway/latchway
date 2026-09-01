@@ -829,6 +829,81 @@ func (snapshot ActiveSnapshot) ComponentDefinitions() []ComponentDefinition {
 	return definitions
 }
 
+// RootComponentDefinition resolves the one root surface selected by trusted
+// attestation configuration and the exact browser Origin captured with the
+// challenge. Callers never provide a component-definition identifier.
+func (snapshot ActiveSnapshot) RootComponentDefinition(
+	platform string,
+	attestationProvider string,
+	browserOrigin string,
+) (ComponentDefinition, bool) {
+	_, selection, ok := snapshot.RequiredAttestationForPlatform(platform)
+	if !ok || selection.Provider != attestationProvider {
+		return ComponentDefinition{}, false
+	}
+	identifierKind := ""
+	identifierValue := ""
+	switch {
+	case platform == "web":
+		if browserOrigin == "" || !configuredStringContains(selection.AllowedOrigins, browserOrigin) {
+			return ComponentDefinition{}, false
+		}
+		identifierKind, identifierValue = "origin", browserOrigin
+	case (platform == "ios" || platform == "react_native_ios" || platform == "watchos") &&
+		selection.Provider == "app_attest" && selection.AppAttest != nil:
+		identifierKind, identifierValue = "bundle", selection.AppAttest.BundleID
+	case (platform == "android" || platform == "react_native_android" || platform == "wearos") &&
+		selection.Provider == "play_integrity" && selection.PlayIntegrity != nil:
+		identifierKind, identifierValue = "package", selection.PlayIntegrity.PackageName
+	default:
+		if browserOrigin != "" {
+			return ComponentDefinition{}, false
+		}
+	}
+
+	var matched ComponentDefinition
+	found := false
+	for _, definition := range snapshot.components {
+		if definition.Platform != platform || definition.FamilyRole != "root" {
+			continue
+		}
+		if definition.Attestation.Strategy == "direct" &&
+			definition.Attestation.Provider != attestationProvider {
+			continue
+		}
+		if definition.Attestation.Strategy != "direct" {
+			continue
+		}
+		matchesIdentifier := true
+		switch identifierKind {
+		case "bundle":
+			matchesIdentifier = configuredStringContains(definition.Identifiers.BundleIdentifiers, identifierValue)
+		case "package":
+			matchesIdentifier = configuredStringContains(definition.Identifiers.PackageNames, identifierValue)
+		case "origin":
+			matchesIdentifier = configuredStringContains(definition.Identifiers.Origins, identifierValue)
+		}
+		if !matchesIdentifier || found {
+			if matchesIdentifier && found {
+				return ComponentDefinition{}, false
+			}
+			continue
+		}
+		matched = definition
+		found = true
+	}
+	return matched.clone(), found
+}
+
+func configuredStringContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 // Upstream returns a deep copy of one configured server-owned target.
 func (snapshot ActiveSnapshot) Upstream(upstreamID string) (Upstream, bool) {
 	upstream, ok := snapshot.upstreams[upstreamID]

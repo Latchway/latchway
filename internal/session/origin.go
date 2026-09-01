@@ -44,3 +44,10 @@ func snapshotOriginAllowed(snapshot configuration.ActiveSnapshot, platform, orig
 	_, selection, ok := snapshot.RequiredAttestationForPlatform(platform)
 	return ok && platformOriginAllowed(selection, platform, origin)
 }
+
+func validChallengeOrigin(platform, origin string) bool {
+	if platform == "web" {
+		return weborigin.Canonical(origin)
+	}
+	return origin == ""
+}

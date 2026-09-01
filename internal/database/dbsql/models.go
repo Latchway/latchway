@@ -758,6 +758,8 @@ type SessionChallenge struct {
 	ChallengeDpopHttpMethod   string `db:"challenge_dpop_http_method" json:"challenge_dpop_http_method"`
 	// SHA-256 digest of the normalized challenge-request URI; raw request URIs are never persisted.
 	ChallengeDpopHttpUriHash []byte `db:"challenge_dpop_http_uri_hash" json:"challenge_dpop_http_uri_hash"`
+	// Exact canonical browser Origin accepted when the challenge was created; empty for native and server runtimes.
+	BrowserOrigin string `db:"browser_origin" json:"browser_origin"`
 }
 
 type SessionChallengeConsumption struct {

@@ -15,7 +15,7 @@ deployments, or protected evidence that does not exist.
 | --- | --- |
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
-| Database | Schema `24` |
+| Database | Schema `25` in the current working source; the recorded clean checkpoint was schema `24` |
 | Contract bundle | SHA-256 `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` at core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
 | SDK source tuple | JavaScript `379a6d20bed9cbda9af6210f5511250fbbe9b571`; Swift `ab38ae00838a81be071f53740c624dc4f0558dcb`; Android `17c108706998f2c30fe511fd92ed049c024c8e85`; React Native `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
@@ -29,7 +29,7 @@ authorize version 1.
 
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
-| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 24, frozen bundle and synchronized locks | Protected exact-candidate evidence |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 25, exact challenge-Origin binding, authoritative root-definition selection, and an unchanged frozen contract bundle | Refresh the clean core checkpoint and protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
 | Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
@@ -48,6 +48,16 @@ DPoP-bound session. Successful verification produces composite
 delegation, component definition, family, provider, bundle, component key, and
 JWK-thumbprint bindings. Component/family/install revocation and component
 replacement revoke linked App Attest state.
+
+Schema 25 invalidates only preexisting ephemeral session challenges, which
+cannot be assigned a trustworthy historical browser Origin. New challenges
+persist the exact canonical web Origin (or empty native Origin), and exchange
+requires equality before attestation or token issuance. Root-family creation
+uses the required attestation selection's exact App Attest bundle, Play package,
+or persisted web Origin; platform-only selection is forbidden. Multiple root
+definitions are valid only when disjoint, directly attested web-origin sets
+partition every allowed Origin exactly once. The frozen schema still reserves root `identity_only`, but semantic
+and compiled-snapshot validation reject activating it in version 1.
 
 The referenced component-only App Attest policy must be configured in
 `preferred` mode, require at least `app_verified`, and pin the exact component
@@ -100,7 +110,7 @@ receipts. The final convergence run has:
 
 - regenerated the contract bundle twice with identical bytes and recorded its
   final checksum;
-- synchronized the schema-24 contract, component-attestation schema/vector,
+- synchronized the frozen API/configuration contract, component-attestation schema/vector,
   protocol coordinate, and bundle lock across all SDK repositories;
 - run the clean-tree core, SDK, dashboard, documentation, workflow, and
   cross-repository conformance gate on the exact commits; and

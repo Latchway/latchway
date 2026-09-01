@@ -173,6 +173,7 @@ type ExchangeInput struct {
 	DPoPProof   DPoPProof
 	HTTPMethod  string
 	RequestURI  *url.URL
+	Origin      string
 	KeyStorage  string
 	AppVersion  string
 
@@ -200,6 +201,9 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 	challenge, err := challengeStore.Get(ctx, input.ChallengeID)
 	if err != nil {
 		return IssuedSession{}, err
+	}
+	if input.Origin != challenge.Origin {
+		return IssuedSession{}, ErrSessionInvalid
 	}
 	if !challenge.IdentityExpiresAt.After(now) {
 		return IssuedSession{}, ErrIdentityRefreshRequired
@@ -240,12 +244,14 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 	input.attestation = verifiedAttestation
 	input.policyRevisionID = snapshot.RevisionID
 	input.sessionPolicy = snapshot.SessionPolicy()
-	componentDefinition, err := rootComponentDefinition(snapshot, challenge.Binding.Platform)
+	componentDefinition, err := rootComponentDefinition(
+		snapshot, challenge.Binding.Platform, verifiedAttestation.Provider, challenge.Origin,
+	)
 	if err != nil {
 		return IssuedSession{}, err
 	}
-	if componentDefinition != nil && (componentDefinition.Attestation.Strategy != "direct" ||
-		componentDefinition.Attestation.Provider != verifiedAttestation.Provider) {
+	if componentDefinition != nil && componentDefinition.Attestation.Strategy == "direct" &&
+		componentDefinition.Attestation.Provider != verifiedAttestation.Provider {
 		return IssuedSession{}, ErrComponentNotConfigured
 	}
 	input.componentDefinition = componentDefinition
@@ -509,27 +515,20 @@ func trustRank(level string) (int, bool) {
 	}
 }
 
-func rootComponentDefinition(snapshot configuration.ActiveSnapshot, platform string) (*configuration.ComponentDefinition, error) {
-	definitions := snapshot.ComponentDefinitions()
-	if len(definitions) == 0 {
+func rootComponentDefinition(
+	snapshot configuration.ActiveSnapshot,
+	platform string,
+	attestationProvider string,
+	browserOrigin string,
+) (*configuration.ComponentDefinition, error) {
+	if len(snapshot.ComponentDefinitions()) == 0 {
 		return nil, nil
 	}
-	var matched *configuration.ComponentDefinition
-	for index := range definitions {
-		definition := definitions[index]
-		if definition.Platform != platform || definition.FamilyRole != "root" {
-			continue
-		}
-		if matched != nil {
-			return nil, ErrComponentNotConfigured
-		}
-		copy := definition
-		matched = &copy
-	}
-	if matched == nil {
+	matched, ok := snapshot.RootComponentDefinition(platform, attestationProvider, browserOrigin)
+	if !ok {
 		return nil, ErrComponentNotConfigured
 	}
-	return matched, nil
+	return &matched, nil
 }
 
 func legacyRootComponentDefinitionID(platform string) string {

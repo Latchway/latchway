@@ -137,7 +137,12 @@ func componentDefinitionSemanticIssues(
 		provider := stringValue(attestation, "provider")
 		directStepUp, _ := attestation["directStepUp"].(bool)
 		directPolicyID := stringValue(attestation, "directAttestationPolicy")
-		if !runtimeComponentAttestation(platform, kind, role, ComponentAttestationPolicy{
+		if role == "root" && strategy == "identity_only" {
+			issues = append(issues, errorIssue(
+				"component_root_identity_only_unsupported", base+"/attestation/strategy",
+				"Explicit identity-only root Component Definitions are not supported in version 1; configure direct attestation.",
+			))
+		} else if !runtimeComponentAttestation(platform, kind, role, ComponentAttestationPolicy{
 			Strategy: strategy, Provider: provider, DirectStepUp: directStepUp,
 			DirectAttestationPolicy: directPolicyID,
 		}) {
@@ -213,6 +218,7 @@ func componentDefinitionSemanticIssues(
 			}
 		}
 	}
+	issues = append(issues, componentRootBindingIssues(definitions, attestations)...)
 
 	state := make(map[string]uint8, len(definitions))
 	var visit func(string) bool
@@ -239,6 +245,154 @@ func componentDefinitionSemanticIssues(
 				"Component Definition delegation must be acyclic.",
 			))
 			break
+		}
+	}
+	return issues
+}
+
+func componentRootBindingIssues(
+	definitions map[string]map[string]any,
+	attestations map[string]map[string]any,
+) []Issue {
+	required := make(map[string][]PlatformAttestation)
+	for _, policyID := range sortedMapKeys(attestations) {
+		platforms := objectValue(attestations[policyID], "platforms")
+		for _, platform := range sortedObjectKeys(platforms) {
+			selection, ok := platforms[platform].(map[string]any)
+			if !ok || stringValue(selection, "mode") != "required" {
+				continue
+			}
+			if typed, decoded := decodePlatformAttestation(selection); decoded {
+				required[platform] = append(required[platform], typed)
+			}
+		}
+	}
+
+	issues := make([]Issue, 0)
+	rootsByPlatform := make(map[string][]string)
+	boundRoot := make(map[string]bool)
+	for _, definitionID := range sortedMapKeys(definitions) {
+		definition := definitions[definitionID]
+		if stringValue(definition, "familyRole") != "root" {
+			continue
+		}
+		platform := stringValue(definition, "platform")
+		rootsByPlatform[platform] = append(rootsByPlatform[platform], definitionID)
+		base := "/spec/componentDefinitions/" + pointerToken(definitionID)
+		selections := required[platform]
+		if len(selections) != 1 {
+			issues = append(issues, errorIssue(
+				"component_root_attestation_policy_ambiguous", base+"/attestation",
+				"A root Component Definition requires exactly one required attestation selection for its platform.",
+			))
+			continue
+		}
+		selection := selections[0]
+		attestation := objectValue(definition, "attestation")
+		strategy := stringValue(attestation, "strategy")
+		provider := stringValue(attestation, "provider")
+		if strategy == "direct" && provider != selection.Provider {
+			issues = append(issues, errorIssue(
+				"component_root_attestation_provider_mismatch", base+"/attestation/provider",
+				"A directly attested root must use the platform's required attestation provider.",
+			))
+			continue
+		}
+
+		identifiers := objectValue(definition, "identifiers")
+		switch {
+		case (platform == "ios" || platform == "react_native_ios" || platform == "watchos") &&
+			selection.Provider == "app_attest" && selection.AppAttest != nil:
+			bundles := stringArray(identifiers, "bundleIdentifiers")
+			if len(bundles) != 1 || bundles[0] != selection.AppAttest.BundleID {
+				issues = append(issues, errorIssue(
+					"component_root_identifier_mismatch", base+"/identifiers/bundleIdentifiers",
+					"The root bundle identifier must exactly equal the bundle identifier verified by the required App Attest policy.",
+				))
+				continue
+			}
+			boundRoot[definitionID] = strategy == "direct"
+		case (platform == "android" || platform == "react_native_android" || platform == "wearos") &&
+			selection.Provider == "play_integrity" && selection.PlayIntegrity != nil:
+			packages := stringArray(identifiers, "packageNames")
+			if len(packages) != 1 || packages[0] != selection.PlayIntegrity.PackageName {
+				issues = append(issues, errorIssue(
+					"component_root_identifier_mismatch", base+"/identifiers/packageNames",
+					"The root package name must exactly equal the package name verified by the required Play Integrity policy.",
+				))
+				continue
+			}
+			boundRoot[definitionID] = strategy == "direct"
+		case platform == "web":
+			allowed := make(map[string]struct{}, len(selection.AllowedOrigins))
+			for _, origin := range selection.AllowedOrigins {
+				allowed[origin] = struct{}{}
+			}
+			origins := stringArray(identifiers, "origins")
+			valid := len(origins) > 0
+			for _, origin := range origins {
+				if _, ok := allowed[origin]; !ok {
+					valid = false
+				}
+			}
+			if !valid {
+				issues = append(issues, errorIssue(
+					"component_root_identifier_mismatch", base+"/identifiers/origins",
+					"Every root origin must be an exact origin allowed by the required web attestation policy.",
+				))
+				continue
+			}
+			boundRoot[definitionID] = strategy == "direct" && selection.Provider != "debug"
+		default:
+			// Debug and server runtimes do
+			// not produce a durable platform identifier suitable for choosing
+			// among sibling root definitions.
+			boundRoot[definitionID] = false
+		}
+	}
+
+	for _, platform := range sortedMapKeys(rootsByPlatform) {
+		definitionIDs := rootsByPlatform[platform]
+		if platform == "web" && len(required[platform]) == 1 {
+			selection := required[platform][0]
+			originOwners := make(map[string]int, len(selection.AllowedOrigins))
+			for _, definitionID := range definitionIDs {
+				identifiers := objectValue(definitions[definitionID], "identifiers")
+				for _, origin := range stringArray(identifiers, "origins") {
+					originOwners[origin]++
+				}
+			}
+			for _, origin := range selection.AllowedOrigins {
+				switch originOwners[origin] {
+				case 0:
+					issues = append(issues, errorIssue(
+						"component_root_origin_unmapped",
+						"/spec/componentDefinitions/"+pointerToken(definitionIDs[0])+"/identifiers/origins",
+						"Every origin allowed by a required web attestation policy must select exactly one root Component Definition.",
+					))
+				case 1:
+				default:
+					issues = append(issues, errorIssue(
+						"component_root_origin_ambiguous",
+						"/spec/componentDefinitions/"+pointerToken(definitionIDs[0])+"/identifiers/origins",
+						"An origin allowed by a required web attestation policy may select only one root Component Definition.",
+					))
+				}
+			}
+		}
+		if len(definitionIDs) < 2 {
+			continue
+		}
+		unambiguous := platform == "web"
+		for _, definitionID := range definitionIDs {
+			unambiguous = unambiguous && boundRoot[definitionID]
+		}
+		if !unambiguous {
+			issues = append(issues, errorIssue(
+				"component_root_ambiguous",
+				"/spec/componentDefinitions/"+pointerToken(definitionIDs[0]),
+				"A platform may have multiple root Component Definitions only when exact verified web origins select one directly attested root.",
+			))
 		}
 	}
 	return issues

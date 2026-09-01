@@ -49,3 +49,16 @@ The root component establishes the family's primary trust. A delegated
 component presents a short-lived, single-use authorization issued by the root
 for that component's public key and definition. Read [Trust
 provenance](/concepts/trust-provenance) before designing an extension flow.
+
+Root definitions must match the unique required attestation selection for their
+platform. App Attest roots pin its exact bundle identifier, Play Integrity
+roots pin its exact package name, and browser roots partition every allowed web
+Origin exactly once. Browser challenges persist that exact Origin, so an
+exchange from a different allowed Origin cannot select another root. Native or
+debug policies without a durable verified identifier permit only one root.
+
+The `identity_only` root strategy remains reserved in the draft configuration
+schema for compatibility, but version 1 rejects it during semantic validation
+and compiled-snapshot loading. Configure direct root attestation instead; the
+internal identity-only legacy bridge is not an activatable configuration
+surface.

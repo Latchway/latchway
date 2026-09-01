@@ -75,6 +75,7 @@ type ChallengeInput struct {
 	IdentityVerifiedAt      time.Time
 	IdentityExpiresAt       time.Time
 	Platform                string
+	Origin                  string
 	DPoPJKT                 string
 	DPoPPublicJWK           dpop.PublicJWK
 	DPoPProofJTI            string
@@ -83,7 +84,9 @@ type ChallengeInput struct {
 }
 
 func (input ChallengeInput) validate() error {
-	if validateChallengeIdentity(input) != nil || id.Validate(input.ConfigurationRevisionID, id.ConfigRevision) != nil || !validReplayJTI(input.DPoPProofJTI) || !replayMethodPattern.MatchString(input.DPoPHTTPMethod) || input.DPoPRequestURI == nil {
+	if validateChallengeIdentity(input) != nil || !validChallengeOrigin(input.Platform, input.Origin) ||
+		id.Validate(input.ConfigurationRevisionID, id.ConfigRevision) != nil || !validReplayJTI(input.DPoPProofJTI) ||
+		!replayMethodPattern.MatchString(input.DPoPHTTPMethod) || input.DPoPRequestURI == nil {
 		return ErrChallengeInvalid
 	}
 	return nil
@@ -127,6 +130,7 @@ type Challenge struct {
 	IdentityExpiresAt       time.Time
 	EnvironmentID           string
 	ConfigurationRevisionID string
+	Origin                  string
 	Attestation             ChallengeAttestationPolicy
 	ExpiresAt               time.Time
 
@@ -172,6 +176,9 @@ func challengeMatchesSnapshot(challenge Challenge, snapshot configuration.Active
 	if challenge.ConfigurationRevisionID != snapshot.RevisionID || challenge.EnvironmentID != snapshot.EnvironmentID {
 		return false
 	}
+	if !snapshotOriginAllowed(snapshot, challenge.Binding.Platform, challenge.Origin) {
+		return false
+	}
 	expected, err := challengePolicyFromSnapshot(
 		snapshot,
 		challenge.IdentityProvider,
@@ -198,6 +205,9 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 	policy, err := challengePolicyFromSnapshot(snapshot, input.IdentityProvider, input.Platform)
 	if err != nil {
 		return Challenge{}, err
+	}
+	if !snapshotOriginAllowed(snapshot, input.Platform, input.Origin) {
+		return Challenge{}, ErrSessionScope
 	}
 	normalizedDPoPURI, err := dpop.NormalizeHTU(input.DPoPRequestURI)
 	if err != nil || !validNormalizedReplayURI(normalizedDPoPURI) {
@@ -244,10 +254,10 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 			attestation_mode, attestation_minimum_trust_level,
 			attestation_maximum_age_milliseconds,
 			challenge_dpop_proof_jti_hash, challenge_dpop_http_method,
-			challenge_dpop_http_uri_hash
+			challenge_dpop_http_uri_hash, browser_origin
 		)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-		       $18, $19, $20, $21, $22, $23, $24, $25, $26
+		       $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
 		FROM environments e
 		JOIN applications a
 		  ON a.organization_id = e.organization_id AND a.application_id = e.application_id
@@ -276,7 +286,7 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 		bindingHash[:], nonce, input.IdentityVerifiedAt.UTC(), input.IdentityExpiresAt.UTC(), now, expiresAt,
 		input.EnvironmentSlug, snapshot.RevisionID, policy.ID, policy.Provider, policy.Mode,
 		policy.MinimumTrustLevel, policy.MaximumAge.Milliseconds(), proofJTIHash[:],
-		input.DPoPHTTPMethod, dpopURIHash[:])
+		input.DPoPHTTPMethod, dpopURIHash[:], input.Origin)
 	if err != nil {
 		if isChallengeProofReplay(err) {
 			return Challenge{}, ErrDPoPReplayed
@@ -292,7 +302,7 @@ func (store *ChallengeStore) Create(ctx context.Context, input ChallengeInput) (
 		IdentityProvider: input.IdentityProvider, IdentityVerifiedAt: input.IdentityVerifiedAt.UTC(),
 		IdentityExpiresAt: input.IdentityExpiresAt.UTC(),
 		EnvironmentID:     input.EnvironmentID, ConfigurationRevisionID: snapshot.RevisionID,
-		Attestation: policy, ExpiresAt: expiresAt,
+		Origin: input.Origin, Attestation: policy, ExpiresAt: expiresAt,
 		dpopProofJTIHash: proofJTIHash, dpopHTTPMethod: input.DPoPHTTPMethod,
 		dpopHTTPURIHash: dpopURIHash,
 	}, nil
@@ -319,7 +329,7 @@ func (store *ChallengeStore) Get(ctx context.Context, challengeID string) (Chall
 		       c.attestation_mode, c.attestation_minimum_trust_level,
 		       c.attestation_maximum_age_milliseconds,
 		       c.challenge_dpop_proof_jti_hash, c.challenge_dpop_http_method,
-		       c.challenge_dpop_http_uri_hash,
+		       c.challenge_dpop_http_uri_hash, c.browser_origin,
 		       EXISTS (
 		           SELECT 1 FROM session_challenge_consumptions x
 		           WHERE x.session_challenge_id = c.session_challenge_id
@@ -346,7 +356,7 @@ func (store *ChallengeStore) Get(ctx context.Context, challengeID string) (Chall
 		&result.ConfigurationRevisionID, &result.Attestation.ID, &result.Attestation.Provider,
 		&result.Attestation.Mode, &result.Attestation.MinimumTrustLevel,
 		&attestationMaximumAgeMilliseconds, &storedProofJTIHash, &result.dpopHTTPMethod,
-		&storedDPoPURIHash, &consumed,
+		&storedDPoPURIHash, &result.Origin, &consumed,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Challenge{}, ErrChallengeInvalid
@@ -369,7 +379,7 @@ func (store *ChallengeStore) Get(ctx context.Context, challengeID string) (Chall
 		attestationMaximumAgeMilliseconds > int64((30*24*time.Hour)/time.Millisecond) ||
 		len(storedProofJTIHash) != sha256.Size ||
 		!replayMethodPattern.MatchString(result.dpopHTTPMethod) ||
-		len(storedDPoPURIHash) != sha256.Size {
+		len(storedDPoPURIHash) != sha256.Size || !validChallengeOrigin(platform, result.Origin) {
 		return Challenge{}, ErrChallengeInvalid
 	}
 	result.Attestation.MaximumAge = time.Duration(attestationMaximumAgeMilliseconds) * time.Millisecond
@@ -478,6 +488,7 @@ func consumeChallenge(ctx context.Context, tx pgx.Tx, challenge Challenge, now t
 		  AND c.challenge_dpop_proof_jti_hash = $10
 		  AND c.challenge_dpop_http_method = $11
 		  AND c.challenge_dpop_http_uri_hash = $12
+		  AND c.browser_origin = $13
 		  AND c.expires_at > $2
 		  AND EXISTS (
 		      SELECT 1
@@ -494,7 +505,8 @@ func consumeChallenge(ctx context.Context, tx pgx.Tx, challenge Challenge, now t
 	`, challenge.ID, now, challenge.BindingHash[:], challenge.ConfigurationRevisionID,
 		challenge.Attestation.ID, challenge.Attestation.Provider, challenge.Attestation.Mode,
 		challenge.Attestation.MinimumTrustLevel, challenge.Attestation.MaximumAge.Milliseconds(),
-		challenge.dpopProofJTIHash[:], challenge.dpopHTTPMethod, challenge.dpopHTTPURIHash[:])
+		challenge.dpopProofJTIHash[:], challenge.dpopHTTPMethod, challenge.dpopHTTPURIHash[:],
+		challenge.Origin)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrChallengeConsumed

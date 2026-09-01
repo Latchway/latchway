@@ -33,7 +33,7 @@ mirror.
 | Contract freeze | Core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
 | Bundle SHA-256 | `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Database | Schema `24` |
+| Database | Schema `25` in the current working source; the recorded clean checkpoint predates this hardening |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | JavaScript source | `379a6d20bed9cbda9af6210f5511250fbbe9b571` |
 | Swift source | `ab38ae00838a81be071f53740c624dc4f0558dcb` |
@@ -113,7 +113,19 @@ generation from iOS app extensions.
   challenges, binding-version-2 verification, retry-safe assertion handling,
   component-only session rotation, provider binding, key cleanup on
   replacement/revocation, and preserved delegation ancestry; retain it through
-  schema 24.
+  schema 25.
+- [x] Persist the exact canonical browser Origin on every schema-25 session
+  challenge and require the exchange to present that same Origin. The migration
+  invalidates only preexisting ephemeral challenge rows because they have no
+  trustworthy origin value to backfill.
+- [x] Select root Component Definitions from the unique required attestation
+  selection: exact App Attest bundle, exact Play package, or exact persisted web
+  Origin. Multiple roots are accepted only when disjoint, directly attested web
+  origin sets partition every allowed Origin exactly once; debug or otherwise
+  identifier-free roots remain singular.
+- [x] Keep the frozen configuration contract unchanged: explicit root
+  `identity_only` remains schema-reserved for compatibility but fails semantic
+  and compiled-snapshot validation in version 1.
 - [x] Make policy, production input/total quotas, requests, usage, telemetry,
   retention, and audit component-aware.
 - [x] Pass complete unit, PostgreSQL integration, migration, race, replay,

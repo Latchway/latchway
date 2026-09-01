@@ -3,6 +3,7 @@ package configuration
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 	"unicode/utf8"
 
@@ -108,7 +109,8 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 			return ActiveSnapshot{}, errorsCorruptSnapshot("component definition")
 		}
 	}
-	if !runtimeComponentDefinitionGraph(snapshot.components) {
+	if !runtimeComponentDefinitionGraph(snapshot.components) ||
+		!runtimeRootComponentBindings(snapshot.components, snapshot.attestations) {
 		return ActiveSnapshot{}, errorsCorruptSnapshot("component definition graph")
 	}
 	if err := snapshot.loadRuntimeConfiguration(
@@ -216,6 +218,107 @@ func runtimeComponentDefinitionGraph(definitions map[string]ComponentDefinition)
 	return true
 }
 
+func runtimeRootComponentBindings(
+	definitions map[string]ComponentDefinition,
+	attestations map[string]AttestationPolicy,
+) bool {
+	required := make(map[string][]PlatformAttestation)
+	for _, policy := range attestations {
+		for platform, selection := range policy.Platforms {
+			if selection.Mode == "required" {
+				required[platform] = append(required[platform], selection)
+			}
+		}
+	}
+	rootsByPlatform := make(map[string][]ComponentDefinition)
+	boundRoot := make(map[string]bool)
+	for _, definition := range definitions {
+		if definition.FamilyRole != "root" {
+			continue
+		}
+		rootsByPlatform[definition.Platform] = append(rootsByPlatform[definition.Platform], definition)
+		selections := required[definition.Platform]
+		if len(selections) != 1 {
+			return false
+		}
+		selection := selections[0]
+		if definition.Attestation.Strategy == "direct" &&
+			definition.Attestation.Provider != selection.Provider {
+			return false
+		}
+		switch {
+		case (definition.Platform == "ios" || definition.Platform == "react_native_ios" || definition.Platform == "watchos") &&
+			selection.Provider == "app_attest" && selection.AppAttest != nil:
+			if len(definition.Identifiers.BundleIdentifiers) != 1 ||
+				definition.Identifiers.BundleIdentifiers[0] != selection.AppAttest.BundleID {
+				return false
+			}
+			boundRoot[definition.ID] = definition.Attestation.Strategy == "direct"
+		case (definition.Platform == "android" || definition.Platform == "react_native_android" || definition.Platform == "wearos") &&
+			selection.Provider == "play_integrity" && selection.PlayIntegrity != nil:
+			if len(definition.Identifiers.PackageNames) != 1 ||
+				definition.Identifiers.PackageNames[0] != selection.PlayIntegrity.PackageName {
+				return false
+			}
+			boundRoot[definition.ID] = definition.Attestation.Strategy == "direct"
+		case definition.Platform == "web":
+			allowed := make(map[string]struct{}, len(selection.AllowedOrigins))
+			for _, origin := range selection.AllowedOrigins {
+				allowed[origin] = struct{}{}
+			}
+			if len(definition.Identifiers.Origins) == 0 {
+				return false
+			}
+			for _, origin := range definition.Identifiers.Origins {
+				if _, ok := allowed[origin]; !ok {
+					return false
+				}
+			}
+			boundRoot[definition.ID] = definition.Attestation.Strategy == "direct" &&
+				selection.Provider != "debug"
+		default:
+			boundRoot[definition.ID] = false
+		}
+	}
+	platforms := make([]string, 0, len(rootsByPlatform))
+	for platform := range rootsByPlatform {
+		platforms = append(platforms, platform)
+	}
+	sort.Strings(platforms)
+	for _, platform := range platforms {
+		roots := rootsByPlatform[platform]
+		if platform == "web" {
+			selections := required[platform]
+			if len(selections) != 1 {
+				return false
+			}
+			originOwners := make(map[string]int, len(selections[0].AllowedOrigins))
+			for _, root := range roots {
+				for _, origin := range root.Identifiers.Origins {
+					originOwners[origin]++
+				}
+			}
+			for _, origin := range selections[0].AllowedOrigins {
+				if originOwners[origin] != 1 {
+					return false
+				}
+			}
+		}
+		if len(roots) < 2 {
+			continue
+		}
+		if platform != "web" {
+			return false
+		}
+		for _, root := range roots {
+			if !boundRoot[root.ID] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func runtimeIdentifierStrings(values []string) bool {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -280,9 +383,6 @@ func runtimeComponentAttestation(platform, kind, role string, policy ComponentAt
 		}
 		return runtimeIdentifierPattern.MatchString(policy.DirectAttestationPolicy) &&
 			componentDirectAppAttestSupported(platform, kind)
-	}
-	if policy.Strategy == "identity_only" {
-		return policy.Provider == "" && !policy.DirectStepUp && policy.DirectAttestationPolicy == ""
 	}
 	if policy.Strategy != "direct" || policy.Provider == "" || policy.DirectStepUp ||
 		policy.DirectAttestationPolicy != "" {

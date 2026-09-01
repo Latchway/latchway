@@ -70,15 +70,18 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 		t.Fatalf("loaded immutable challenge policy differs: got=%#v want=%#v", loaded.Attestation, challenge.Attestation)
 	}
 
-	var storedNonce string
+	var storedNonce, storedOrigin string
 	var nonceHash, proofJTIHash, proofURIHash []byte
 	if err := pool.QueryRow(ctx, `
 		SELECT challenge_nonce, nonce_hash, challenge_dpop_proof_jti_hash,
-		       challenge_dpop_http_uri_hash
+		       challenge_dpop_http_uri_hash, browser_origin
 		FROM session_challenges
 		WHERE session_challenge_id = $1
-	`, challenge.ID).Scan(&storedNonce, &nonceHash, &proofJTIHash, &proofURIHash); err != nil {
+	`, challenge.ID).Scan(&storedNonce, &nonceHash, &proofJTIHash, &proofURIHash, &storedOrigin); err != nil {
 		t.Fatalf("read persisted nonce binding: %v", err)
+	}
+	if storedOrigin != "" || challenge.Origin != "" || loaded.Origin != challenge.Origin {
+		t.Fatalf("native challenge origin binding changed: stored=%q challenge=%q loaded=%q", storedOrigin, challenge.Origin, loaded.Origin)
 	}
 	expectedNonceHash := sha256.Sum256(mustDecodeChallengeNonce(t, challenge.Nonce))
 	if storedNonce != challenge.Nonce || len(nonceHash) != sha256.Size || string(nonceHash) != string(expectedNonceHash[:]) || string(nonceHash) == challenge.Nonce {
@@ -779,6 +782,71 @@ func (unusedAccessIssuer) Prepare(context.Context) (PreparedAccessIssuer, error)
 	return nil, errors.New("access issuer must not be reached for rejected attestation policy")
 }
 
+func TestSessionExchangeRejectsChallengeOriginSwapPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSessionPool(t)
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	fixture := createChallengeFixture(t, ctx, pool)
+	const challengeOrigin = "https://app.example.test"
+	const swappedOrigin = "https://admin.example.test:8443"
+	policyRevisionID := activateChallengeTestRevisionForPlatform(
+		t, ctx, pool, fixture, now, "web", []any{challengeOrigin, swappedOrigin},
+		"debug", "required", "debug", "10m",
+	)
+	configurationStore, err := configuration.NewStore(pool)
+	if err != nil {
+		t.Fatalf("construct origin-swap configuration store: %v", err)
+	}
+	challengeStore, err := newChallengeStore(ChallengeStoreConfig{
+		Pool: pool, Configuration: configurationStore, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct origin-swap challenge store: %v", err)
+	}
+	dpopKey, jwk, jkt := newChallengeKey(t)
+	challengeURI := mustSessionURL(t, "https://gateway.example.test/client/v1/session-challenges")
+	challenge, err := challengeStore.Create(ctx, withChallengeProof(ChallengeInput{
+		OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
+		EnvironmentID: fixture.environmentID, ConfigurationRevisionID: policyRevisionID,
+		EnvironmentSlug: "development", ApplicationUserID: fixture.applicationUserID,
+		IdentityProvider: "firebase", IdentityVerifiedAt: now, IdentityExpiresAt: now.Add(time.Hour),
+		Platform: "web", Origin: challengeOrigin, DPoPJKT: jkt, DPoPPublicJWK: jwk,
+	}, challengeURI, now, "origin-swap-challenge"))
+	if err != nil {
+		t.Fatalf("create origin-bound challenge: %v", err)
+	}
+	loaded, err := challengeStore.Get(ctx, challenge.ID)
+	if err != nil || loaded.Origin != challengeOrigin {
+		t.Fatalf("load persisted challenge origin=%q err=%v", loaded.Origin, err)
+	}
+	var storedOrigin string
+	if err := pool.QueryRow(ctx, `
+		SELECT browser_origin FROM session_challenges WHERE session_challenge_id = $1
+	`, challenge.ID).Scan(&storedOrigin); err != nil || storedOrigin != challengeOrigin {
+		t.Fatalf("persisted challenge origin=%q err=%v", storedOrigin, err)
+	}
+	sessionStore, err := NewStore(StoreConfig{
+		Pool: pool, AccessTokens: unusedAccessIssuer{}, Configuration: configurationStore,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct origin-swap session store: %v", err)
+	}
+	exchangeURI := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions")
+	_, err = sessionStore.Exchange(ctx, ExchangeInput{
+		ChallengeID: challenge.ID,
+		Attestation: verifiedDebugAttestation(t, challenge.Binding, now, "origin-swap-exchange"),
+		DPoPProof:   signedSessionDPoP(t, dpopKey, "POST", exchangeURI, now, "origin-swap-exchange"),
+		HTTPMethod:  "POST", RequestURI: exchangeURI, Origin: swappedOrigin,
+		KeyStorage: "webcrypto", AppVersion: "1.0.0",
+	})
+	if !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("origin-swapped exchange error=%v want=%v", err, ErrSessionInvalid)
+	}
+	if _, err := challengeStore.Get(ctx, challenge.ID); err != nil {
+		t.Fatalf("origin-swapped exchange consumed challenge: %v", err)
+	}
+}
+
 func TestSessionExchangeAndRotateWithSingleDatabaseConnection(t *testing.T) {
 	pool, ctx := isolatedSessionPoolWithMaxConnections(t, 1)
 	now := time.Date(2026, 8, 27, 12, 0, 0, 987654321, time.UTC)
@@ -874,6 +942,24 @@ func activateChallengeTestRevision(t *testing.T, ctx context.Context, pool *pgxp
 }
 
 func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, now time.Time, provider, mode, minimumTrust, maximumAge string) string {
+	return activateChallengeTestRevisionForPlatform(
+		t, ctx, pool, fixture, now, "ios", nil, provider, mode, minimumTrust, maximumAge,
+	)
+}
+
+func activateChallengeTestRevisionForPlatform(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	fixture challengeFixture,
+	now time.Time,
+	platform string,
+	allowedOrigins []any,
+	provider string,
+	mode string,
+	minimumTrust string,
+	maximumAge string,
+) string {
 	t.Helper()
 	adminUserID := mustSessionID(t, id.AdminUser)
 	adminMembershipID := mustSessionID(t, id.AdminMembership)
@@ -891,11 +977,14 @@ func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, 
 			"allowedBundleVersions": []any{"1.0"},
 		}
 	}
+	if platform == "web" {
+		selection["allowedOrigins"] = append([]any(nil), allowedOrigins...)
+	}
 	compiledDocument, err := json.Marshal(map[string]any{"spec": sessionTestCompiledSpec(
 		[]any{map[string]any{"id": "firebase", "type": "firebase"}},
 		[]any{map[string]any{
 			"id": "native", "maxAge": maximumAge,
-			"platforms": map[string]any{"ios": selection},
+			"platforms": map[string]any{platform: selection},
 		}},
 	)})
 	if err != nil {
