@@ -3,7 +3,7 @@
     {
       "name": "attestation_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 11,
@@ -12,13 +12,13 @@
         "region_sha256": "6560752229df00a42c129a1736b6093aa5048da499bfbf8bcdeb0d491fa04e48",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "attestation_provider_missing",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 68,
@@ -27,13 +27,13 @@
         "region_sha256": "eb6dfd9f2d3c2f0f97479760fedd5b314de201021e4ba0e44537a758657966d5",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "attestation_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 9,
@@ -42,13 +42,13 @@
         "region_sha256": "54be7ff0970b4e86d7ec3e5a869861e6ff91ddfb37a19467c404e145d41d29af",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "attestation_stale",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 12,
@@ -57,13 +57,13 @@
         "region_sha256": "5479b7bf9cc968af0affc5ffc50582ed7e5ffe40a56d1b0a91542cd5fa6e97fa",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "attestation_step_up_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 13,
@@ -72,13 +72,13 @@
         "region_sha256": "df06c51c08fb03ef5b4708787a98318ee73578f8958e99863c1ca90741dfe28f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "attestation_unsupported",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 10,
@@ -87,13 +87,13 @@
         "region_sha256": "e1bbd7d0cb7a7faaadafc38e82b25e7da6106ac1f3cd2f2f0a24fcfc68e9b2d4",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "authentication_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 53,
@@ -102,13 +102,13 @@
         "region_sha256": "1bfa392349d15d91e0dd74ca79aa87f774454991344e61b6faf06995d0d010b4",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "bootstrap_disabled",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 59,
@@ -117,13 +117,13 @@
         "region_sha256": "676bd10fc9f47cfbb7a18bab4da2cc87fc3b7618f56d3287ec3ef323ecc081ce",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "client_configuration_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 65,
@@ -132,13 +132,13 @@
         "region_sha256": "9bd4adcc8e2e582b198c480c23b44153500aca79aefeec1bb537b64f5c058893",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_definition_not_found",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 24,
@@ -147,13 +147,13 @@
         "region_sha256": "173fce63f46693d0b2f540586f11b3b4abf4cdac95f04a22ae5fa724101ec834",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_delegation_expired",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 30,
@@ -162,13 +162,13 @@
         "region_sha256": "34ac135732c4b0ff6e390a069d9db646d2d8b6cbbf256a14493ac55a88d2c4a0",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_direct_attestation_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 33,
@@ -177,13 +177,13 @@
         "region_sha256": "64e7ec0b8e0d476ecf92877ad237523a5c4a747fde516a89a38af14aeb2acdea",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_feature_not_granted",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 31,
@@ -192,13 +192,13 @@
         "region_sha256": "2100ea020b575f361b78dad99b84f09c1f59f99a80d8ce58034142493caabbbd",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_key_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 28,
@@ -207,13 +207,13 @@
         "region_sha256": "6d414c35f0f23abd0964b39fef1c8c4c3b600e82d5e0c5abe93b04ff04ebbfe7",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_key_replaced",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 29,
@@ -222,13 +222,13 @@
         "region_sha256": "982add8376b86cdfdab9b6e13b06a900e17f4b103a0dcb47d0d3f8397dadb257",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_not_configured",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 25,
@@ -237,13 +237,13 @@
         "region_sha256": "537ef85b5b5934939e812694d7c118b91fc04b185afef2fcbd3273b22f0634ca",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_not_provisioned",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 26,
@@ -252,13 +252,13 @@
         "region_sha256": "42870416223776b127db40487928ac53619b61be000012c058932bcd1ba0ab9d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_parent_trust_expired",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 32,
@@ -267,13 +267,13 @@
         "region_sha256": "403dbd77f981a95b70f096c0bc441a28e2ebceb59096f38345ef1663febe6c7b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "component_revoked",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 27,
@@ -282,13 +282,13 @@
         "region_sha256": "59b6decd0b560e7adef956434b8108e2e4bb93aad4e3d2611a8f5760fe693059",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "concurrency_exceeded",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 43,
@@ -297,13 +297,13 @@
         "region_sha256": "5ba6472e2b7cbff505cb145c0cb9c2ef87a43b7757f1085334fcaf00430d7b7f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "configuration_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 50,
@@ -312,13 +312,13 @@
         "region_sha256": "9b1d02452ee15f239d288c5bc168022127b9024305daff3c8283133ebbd316ae",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "conflict",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 56,
@@ -327,13 +327,13 @@
         "region_sha256": "358278c2993dcb36f6f6f9b6f8194efd1bf3b14047fe0c6ebd78aad0a491f377",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "containing_app_setup_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 34,
@@ -342,13 +342,13 @@
         "region_sha256": "6feaa7ded6d83f9fd464116f65b2eca450e270d80be2f1c9e115650a3157818d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "crypto_unavailable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 67,
@@ -357,13 +357,13 @@
         "region_sha256": "2d353c6ee6f4c767b377e3913b690023d4b21fde3316c0f1e47b10f488744d45",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "dpop_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 15,
@@ -372,13 +372,13 @@
         "region_sha256": "b5c83f89c86fb8c962dca7a489058a3060610cc2656aa7ec41db147b8227ba41",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "dpop_missing",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 14,
@@ -387,13 +387,13 @@
         "region_sha256": "cb56ca693c69b8f83eecd9b6b24e5f346c20ada45a749cb4444b054e607dc013",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "dpop_nonce_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 17,
@@ -402,13 +402,13 @@
         "region_sha256": "426bd17d636efff29f9c1f049b50b390d2a74aa2e9470c3f80f1580a19bd2dde",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "dpop_replayed",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 16,
@@ -417,13 +417,13 @@
         "region_sha256": "edc3a42fa3be69986aa31ae603d9ea8e2c439fa2a41deee09f631ccb76bcab06",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "etag_mismatch",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 58,
@@ -432,13 +432,13 @@
         "region_sha256": "e701faafffd01e162e205eb1d882d1b39c4293cacf708a639a3433f9afeab55b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "etag_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 57,
@@ -447,13 +447,13 @@
         "region_sha256": "d0ab7dcb14c90ab1ef7229cbca4e5b3ba7c6271c1c214ee63c6e1095d3490eeb",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "feature_not_allowed",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 40,
@@ -462,13 +462,13 @@
         "region_sha256": "3aacd45028ad321ac7f21ffcfabbc1ae6fdeb565fd8914547594c74c15f76afb",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "feature_not_found",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 39,
@@ -477,13 +477,13 @@
         "region_sha256": "c3d91f0a4132343c1a7aa52773415678d20dda987add400916897ece0cb527dc",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "framework_integration_unsupported",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 35,
@@ -492,13 +492,13 @@
         "region_sha256": "332f67d2405bf61bd0d70674d23e1dedd4cbc548b8e1438a26a1304531cf147b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "framework_version_unsupported",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 36,
@@ -507,13 +507,13 @@
         "region_sha256": "eea420557fcc0866c07ee27cfcd83432bfcedd418ee0aa42e91c2bffb9a8fc99",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "identity_reauthentication_required",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 8,
@@ -522,13 +522,13 @@
         "region_sha256": "16d2aa94d2c94d4b7d7279bb622894a7fe4c1dda4e297c846cb38b229b63dd55",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "identity_token_expired",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 7,
@@ -537,13 +537,13 @@
         "region_sha256": "52dc750129e20e8f304dfad77b8c3a0eccbc597086e8acaf89a699b7570fdd58",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "identity_token_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 6,
@@ -552,13 +552,13 @@
         "region_sha256": "12abdb3bed059232c8e2b1f3fbecdce8f44c6edb5ea5f5bdad77e60a41139d6b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "identity_token_missing",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 5,
@@ -567,13 +567,13 @@
         "region_sha256": "992f1669d0888f8523db2bbb738e557e62178954deea7d38f8f54cc1cb789bfc",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "installation_family_not_found",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 23,
@@ -582,13 +582,13 @@
         "region_sha256": "8037d729cf800f2a734429c062be016ac5cc2dca098d3cb2642c06c838e12dcd",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "installation_family_revoked",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 22,
@@ -597,13 +597,13 @@
         "region_sha256": "7d2d2ac3f5de20ecef661a4295bf93c72647736f324cae84c54bccd96a655f45",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "installation_revoked",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 21,
@@ -612,13 +612,13 @@
         "region_sha256": "cafef80bda9b8dcef32d252223eaea53db114871af42f895a21c31ee1d410591",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "internal_error",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 62,
@@ -627,13 +627,13 @@
         "region_sha256": "892b05dbe84d35ff42d5f51c60da2cf2cbaf7f901610635014467cd22f89e16a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "model_not_allowed",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 41,
@@ -642,13 +642,13 @@
         "region_sha256": "ff484b6e2db9fedf2c422d78e5d329c29f55424944c20f0dbff5ade76b8ee96c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "network_error",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 71,
@@ -657,13 +657,13 @@
         "region_sha256": "5eb12a8530308983abe9652b89aecad9bdef96a38b96d03f60e88dfafbf6ffe8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "operation_indeterminate",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 61,
@@ -672,13 +672,13 @@
         "region_sha256": "d60e8dd063ff2f8f5af412a00be8b466a9b6d984a39463bd4d35800ca9fbb775",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "output_limit_exceeded",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 44,
@@ -687,13 +687,13 @@
         "region_sha256": "2eb694aaaf2a9eb685801c6b67fb67339087d26fdb0a9a4f9021e2edb1836c69",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "permission_denied",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 54,
@@ -702,13 +702,13 @@
         "region_sha256": "92568a2b3726f32b6f2406b1ce5d7e110d2969a8d4d6090cff4aaface3426d3f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "pricing_unavailable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 45,
@@ -717,13 +717,13 @@
         "region_sha256": "c54a59fd5de2b01932341a62ae15703ce49a927a23f2c568ea8dc22682493a87",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "protocol_response_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 69,
@@ -732,13 +732,13 @@
         "region_sha256": "0c553a549c35d582c456ebb4dac99850d110c986e0fdc4e34739e661abb94b0a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "protocol_version_unsupported",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 52,
@@ -747,13 +747,13 @@
         "region_sha256": "28c575f249afa1ab7dc6927dfe5b40c0143d40a914af37d6c5905bc16cfe5062",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "quota_exceeded",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 42,
@@ -762,13 +762,13 @@
         "region_sha256": "4fc07fdfbb743dab01dc8afb5987bcdcc9dd381b11f827e5f2ac122aace539fa",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "rate_limited",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 60,
@@ -777,13 +777,13 @@
         "region_sha256": "7634e5831c9dddd834fa3403d7d07cb4360929c28581f8014f38b02f3331678b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "refresh_token_reused",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 20,
@@ -792,13 +792,13 @@
         "region_sha256": "ec5ab9a40cf952d9201c56192c43cf1648d506948fa98624085e9858c82cd43b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "request_invalid",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 4,
@@ -807,13 +807,13 @@
         "region_sha256": "8ce1a003bae723dd465a17bb72fce7d47966001b18bb94f4a9f0fd4b4185811b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "request_not_replayable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 70,
@@ -822,13 +822,13 @@
         "region_sha256": "582360cb3fa3dda9fcf288cbac1755c07a8f33003d16b528ec2c1a79adfa4abd",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "resource_not_found",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 55,
@@ -837,13 +837,13 @@
         "region_sha256": "5bbd6b343b3c7c569c36fe337a6996ac850813c877c17951961c69c9797c029e",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "route_not_found",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 46,
@@ -852,13 +852,13 @@
         "region_sha256": "621de12303f98ddb659c4d14fa33becc2670461c21f1dc17734004d67e4cec5c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "server_not_ready",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 51,
@@ -867,13 +867,13 @@
         "region_sha256": "20a7a6934cb5d22c81329a6f2d9042ddeaf6f1b3400320b85f2edb0c897df53f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "session_expired",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 18,
@@ -882,13 +882,13 @@
         "region_sha256": "7b33da894ede547463a9f6708d32d8396814e30bf4d9dda30af70d140e66aed7",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "session_revoked",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 19,
@@ -897,13 +897,13 @@
         "region_sha256": "977731fb9c70d9e98cc2001c86df11f529393532e20825871f2679ecd595bba3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "storage_unavailable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 66,
@@ -912,13 +912,13 @@
         "region_sha256": "0afa45d6ea0923ecb80754fcf9d742ae024b666507158d481de3befe5d4664aa",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "transport_destination_not_allowed",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 37,
@@ -927,13 +927,13 @@
         "region_sha256": "79b6296d7e5136cb6011c98b81eac5d0ed81caca37613271c2381326da98787a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "transport_request_not_replayable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 38,
@@ -942,13 +942,13 @@
         "region_sha256": "a60e8bd3c22f940b03a3c42f7bd224ddfb38eb686562e74672e985cecdfb058a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "upstream_protocol_error",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 49,
@@ -957,13 +957,13 @@
         "region_sha256": "0455052a1dc38efc56535b6197d86809771a05f2d07d60cdeb6331ff6f93be97",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "upstream_timeout",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 48,
@@ -972,13 +972,13 @@
         "region_sha256": "51e6af79a05bccbff4cf64e543ff4aa8410394e7b9858025459692cf6d587d5b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "upstream_unavailable",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 47,
@@ -987,7 +987,7 @@
         "region_sha256": "d0e8c89dbfa602c34c7b24a4eb5e42e580a19ee0999c35c03e2c02a1b38c179c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     }
   ],

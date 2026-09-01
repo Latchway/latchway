@@ -41,6 +41,7 @@ class SyntheticWorkspace:
             "documentation": root / "latchway-docs",
         }
         self.commits: dict[str, str] = {}
+        self.contract_source_commit = ""
         self.bundle_sha256 = ""
         self.fixture_sha256: dict[str, str] = {}
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -50,11 +51,12 @@ class SyntheticWorkspace:
 
     def create(self) -> None:
         self._create_core()
-        self._create_documentation()
         self._create_javascript()
         self._create_ios()
         self._create_android()
         self._create_react_native()
+        self._create_sdk_documentation_lock()
+        self._create_documentation()
         for repository_id, repository in self.repositories.items():
             self.git(repository, "tag", "-a", self.core_release, "-m", "Release 1.0.0")
             self.commits[repository_id] = self.git(repository, "rev-parse", "HEAD")
@@ -199,6 +201,7 @@ class SyntheticWorkspace:
         }
         self.init_and_commit(root)
         self.commits["core"] = self.git(root, "rev-parse", "HEAD")
+        self.contract_source_commit = self.commits["core"]
 
     def _create_documentation(self) -> None:
         root = self.repositories["documentation"]
@@ -383,6 +386,35 @@ class SyntheticWorkspace:
         self.write(root / "CHANGELOG.md", "# Changelog\n\n## [1.0.0]\n\n- Release.\n")
         self.init_and_commit(root)
         self.commits["react_native"] = self.git(root, "rev-parse", "HEAD")
+
+    def _create_sdk_documentation_lock(self) -> None:
+        root = self.repositories["core"]
+        identifiers = {
+            "android": "android",
+            "ios": "ios",
+            "js": "javascript",
+            "react-native": "react_native",
+        }
+        self.write_json(
+            root / "docs/sdk-bundles.lock",
+            {
+                "bundle_schema_version": "latchway.sdk-documentation-bundle.v1",
+                "bundles": [
+                    {
+                        "id": identifier,
+                        "commit": self.commits[repository_id],
+                        "release": f"v{self.version}",
+                        "source_tree_clean": True,
+                        "version": self.version,
+                    }
+                    for identifier, repository_id in identifiers.items()
+                ],
+                "schema_version": "latchway.sdk-documentation-lock.v1",
+            },
+        )
+        self.git(root, "add", "docs/sdk-bundles.lock")
+        self.git(root, "commit", "-m", "docs: lock exact SDK source bundles")
+        self.commits["core"] = self.git(root, "rev-parse", "HEAD")
 
     def create_external_evidence(self, root: Path) -> None:
         coordinates = {
@@ -920,8 +952,32 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertIn("sdk_contract_locks_disagree", reasons)
         self.assertIn("sdk_fixture_mismatch", reasons)
 
+    def test_sdk_documentation_bundles_must_pin_exact_clean_sdk_heads(self) -> None:
+        core = self.workspace.repositories["core"]
+        lock_path = core / "docs/sdk-bundles.lock"
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        javascript = next(entry for entry in lock["bundles"] if entry["id"] == "js")
+        javascript["commit"] = "0" * 40
+        javascript["source_tree_clean"] = False
+        SyntheticWorkspace.write_json(lock_path, lock)
+        SyntheticWorkspace.git(core, "add", "docs/sdk-bundles.lock")
+        SyntheticWorkspace.git(core, "commit", "-m", "test: stale SDK docs bundle")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("sdk-documentation-drift")
+        self.assertEqual(result.returncode, 1)
+        check = next(
+            item
+            for item in report["checks"]
+            if item["id"] == "source.sdk_documentation_bundles"
+        )
+        self.assertEqual(check["reason"], "sdk_documentation_commit_mismatch")
+        self.assertEqual(check["details"], {"repository": "javascript"})
+
     def test_locks_may_pin_an_unchanged_ancestor_contract_checkpoint(self) -> None:
-        contract_source_commit = self.workspace.commits["core"]
+        contract_source_commit = self.workspace.contract_source_commit
         core = self.workspace.repositories["core"]
         SyntheticWorkspace.write(
             core / "docs/implementation/COMPLETION_REPORT.md",

@@ -4,7 +4,7 @@
     {
       "name": "AttestationContext",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 18,
@@ -19,7 +19,7 @@
     {
       "name": "AttestationContext",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 39,
@@ -34,7 +34,7 @@
     {
       "name": "AttestationProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 19,
@@ -49,7 +49,7 @@
     {
       "name": "AttestationProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 47,
@@ -64,7 +64,7 @@
     {
       "name": "AttestationProviderID",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 20,
@@ -79,7 +79,7 @@
     {
       "name": "AttestationProviderID",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 32,
@@ -94,7 +94,7 @@
     {
       "name": "AuthenticatedTransport",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 21,
@@ -109,7 +109,7 @@
     {
       "name": "AuthenticatedTransport",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 231,
@@ -124,7 +124,7 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 12,
@@ -139,7 +139,7 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/version.ts",
         "region": {
           "end_line": 2,
@@ -154,7 +154,7 @@
     {
       "name": "ClientComponentKind",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 22,
@@ -169,7 +169,7 @@
     {
       "name": "ClientComponentKind",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 123,
@@ -184,7 +184,7 @@
     {
       "name": "ClientComponentSummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 23,
@@ -199,7 +199,7 @@
     {
       "name": "ClientComponentSummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 137,
@@ -214,7 +214,7 @@
     {
       "name": "Diagnostics",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 24,
@@ -229,7 +229,7 @@
     {
       "name": "Diagnostics",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 217,
@@ -244,7 +244,7 @@
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 25,
@@ -259,7 +259,7 @@
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 52,
@@ -274,7 +274,7 @@
     {
       "name": "FirebaseAppCheckToken",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/firebase.ts",
         "region": {
           "end_line": 13,
@@ -289,7 +289,7 @@
     {
       "name": "FrameworkID",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 26,
@@ -304,7 +304,7 @@
     {
       "name": "FrameworkID",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 54,
@@ -319,7 +319,7 @@
     {
       "name": "FrameworkMetadata",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 27,
@@ -334,7 +334,7 @@
     {
       "name": "FrameworkMetadata",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 64,
@@ -349,7 +349,7 @@
     {
       "name": "IdentityTokenProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 28,
@@ -364,7 +364,7 @@
     {
       "name": "IdentityTokenProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 14,
@@ -379,7 +379,7 @@
     {
       "name": "InstallationFamilySummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 29,
@@ -394,7 +394,7 @@
     {
       "name": "InstallationFamilySummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 118,
@@ -409,7 +409,7 @@
     {
       "name": "InstallationMetadata",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 30,
@@ -424,7 +424,7 @@
     {
       "name": "InstallationMetadata",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 71,
@@ -439,7 +439,7 @@
     {
       "name": "InstallationSummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 111,
@@ -454,7 +454,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 31,
@@ -469,7 +469,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 238,
@@ -484,7 +484,7 @@
     {
       "name": "LatchwayClientErrorCode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 64,
@@ -493,28 +493,28 @@
         "region_sha256": "1386d0df4690356251318cde580f1aa2c2e1504fdd1149601f3007e2d4bc4730",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayError",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
-          "end_line": 96,
-          "start_line": 96
+          "end_line": 101,
+          "start_line": 101
         },
         "region_sha256": "8451a034b5dcbe509b24c223ead638f7961167df44d1ecb53566fc4fa710b010",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayError",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 6,
@@ -529,7 +529,7 @@
     {
       "name": "LatchwayErrorCode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 73,
@@ -538,13 +538,13 @@
         "region_sha256": "2468d701b107d1bcdef0f7cc79978183da93a0e5c0d14cdb5e95f9a9a09759d7",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayErrorCode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 44,
@@ -559,22 +559,22 @@
     {
       "name": "LatchwayErrorDocumentationURL",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
-          "end_line": 75,
-          "start_line": 75
+          "end_line": 80,
+          "start_line": 80
         },
         "region_sha256": "c05c3be8de60b7481ff95a28143ec3f5dcd64d5d7a4a795931dc0f3e487910f8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayErrorDocumentationURL",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 45,
@@ -589,22 +589,22 @@
     {
       "name": "LatchwayErrorOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
-          "end_line": 85,
-          "start_line": 85
+          "end_line": 90,
+          "start_line": 90
         },
         "region_sha256": "d03dd9ace538e24196cd08e61d3235fd1709b8bc0bce1dbd4ae966b277517848",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 32,
@@ -619,7 +619,7 @@
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 90,
@@ -634,7 +634,7 @@
     {
       "name": "LatchwayOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 33,
@@ -649,7 +649,7 @@
     {
       "name": "LatchwayOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 77,
@@ -664,7 +664,7 @@
     {
       "name": "LatchwayServerErrorCode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
           "end_line": 3,
@@ -673,13 +673,13 @@
         "region_sha256": "0a093f9ea10ee6b7dd42b8ca32435bf4dc73105b8c8ea4a861696f5de8e760c2",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "LatchwayServerErrorCode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 46,
@@ -694,7 +694,7 @@
     {
       "name": "LatchwayServiceWorkerHandler",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/service-worker.ts",
         "region": {
           "end_line": 14,
@@ -709,7 +709,7 @@
     {
       "name": "LatchwayServiceWorkerOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/service-worker.ts",
         "region": {
           "end_line": 3,
@@ -724,7 +724,7 @@
     {
       "name": "NodeLatchwayOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/node.ts",
         "region": {
           "end_line": 6,
@@ -739,7 +739,7 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 13,
@@ -754,7 +754,7 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/version.ts",
         "region": {
           "end_line": 3,
@@ -769,7 +769,7 @@
     {
       "name": "PersistenceMode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 34,
@@ -784,7 +784,7 @@
     {
       "name": "PersistenceMode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 3,
@@ -799,7 +799,7 @@
     {
       "name": "PersistenceOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 35,
@@ -814,7 +814,7 @@
     {
       "name": "PersistenceOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 5,
@@ -829,7 +829,7 @@
     {
       "name": "Platform",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 1,
@@ -844,7 +844,7 @@
     {
       "name": "ProvisionComponentOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 36,
@@ -859,7 +859,7 @@
     {
       "name": "ProvisionComponentOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 155,
@@ -874,7 +874,7 @@
     {
       "name": "ProvisionedComponent",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 37,
@@ -889,7 +889,7 @@
     {
       "name": "ProvisionedComponent",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 167,
@@ -904,7 +904,7 @@
     {
       "name": "PublicP256JWK",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 38,
@@ -919,7 +919,7 @@
     {
       "name": "PublicP256JWK",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 148,
@@ -934,7 +934,7 @@
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 39,
@@ -949,7 +949,7 @@
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 95,
@@ -964,7 +964,7 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 40,
@@ -979,7 +979,7 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 105,
@@ -994,7 +994,7 @@
     {
       "name": "SDK_KIND",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/version.ts",
         "region": {
           "end_line": 5,
@@ -1009,7 +1009,7 @@
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 14,
@@ -1024,7 +1024,7 @@
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/version.ts",
         "region": {
           "end_line": 1,
@@ -1039,7 +1039,7 @@
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 15,
@@ -1054,7 +1054,7 @@
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/version.ts",
         "region": {
           "end_line": 4,
@@ -1069,7 +1069,7 @@
     {
       "name": "ServerDiagnostics",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 41,
@@ -1084,7 +1084,7 @@
     {
       "name": "ServerDiagnostics",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 204,
@@ -1099,7 +1099,7 @@
     {
       "name": "ServiceWorkerFetchEventLike",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/service-worker.ts",
         "region": {
           "end_line": 9,
@@ -1114,7 +1114,7 @@
     {
       "name": "SessionChallenge",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 18,
@@ -1129,7 +1129,7 @@
     {
       "name": "TrustSummary",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/types.ts",
         "region": {
           "end_line": 179,
@@ -1144,7 +1144,7 @@
     {
       "name": "TurnstileProviderOptions",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/turnstile.ts",
         "region": {
           "end_line": 7,
@@ -1159,7 +1159,7 @@
     {
       "name": "assertAllowedDataPlaneTarget",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/contract.ts",
         "region": {
           "end_line": 33,
@@ -1174,7 +1174,7 @@
     {
       "name": "base64urlDecode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/encoding.ts",
         "region": {
           "end_line": 18,
@@ -1189,7 +1189,7 @@
     {
       "name": "base64urlEncode",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/encoding.ts",
         "region": {
           "end_line": 3,
@@ -1204,7 +1204,7 @@
     {
       "name": "clientPaths",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/contract.ts",
         "region": {
           "end_line": 3,
@@ -1219,7 +1219,7 @@
     {
       "name": "createBrowserLatchwayClient",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/browser.ts",
         "region": {
           "end_line": 4,
@@ -1234,7 +1234,7 @@
     {
       "name": "createCustomAttestationProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 10,
@@ -1249,7 +1249,7 @@
     {
       "name": "createFirebaseAppCheckProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/firebase.ts",
         "region": {
           "end_line": 17,
@@ -1264,7 +1264,7 @@
     {
       "name": "createFirebaseIdentityTokenProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/firebase.ts",
         "region": {
           "end_line": 4,
@@ -1279,7 +1279,7 @@
     {
       "name": "createLatchwayClient",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 3,
@@ -1294,7 +1294,7 @@
     {
       "name": "createLatchwayServiceWorkerHandler",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/service-worker.ts",
         "region": {
           "end_line": 21,
@@ -1309,7 +1309,7 @@
     {
       "name": "createNodeLatchwayClient",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/node.ts",
         "region": {
           "end_line": 11,
@@ -1324,7 +1324,7 @@
     {
       "name": "createTurnstileProvider",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/turnstile.ts",
         "region": {
           "end_line": 13,
@@ -1339,7 +1339,7 @@
     {
       "name": "decodeUTF8",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/encoding.ts",
         "region": {
           "end_line": 40,
@@ -1354,7 +1354,7 @@
     {
       "name": "errorFromResponse",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 7,
@@ -1369,22 +1369,22 @@
     {
       "name": "latchwayErrorDocumentationURL",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/errors.ts",
         "region": {
-          "end_line": 79,
-          "start_line": 79
+          "end_line": 84,
+          "start_line": 84
         },
         "region_sha256": "e12bdbba6892b9cb1bb4f9d0a8478f0e5a57e3db7e671acd7128b569b42e1081",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "dd88c1633b31b18c6053ab3a5905221f882524ad4c08822aebea9e8fdaefb657"
+        "source_sha256": "6328593028891a4ad5acbb296d65bcc102f98a83ae869a298a841468dba0d7bc"
       }
     },
     {
       "name": "latchwayErrorDocumentationURL",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/index.ts",
         "region": {
           "end_line": 8,
@@ -1399,7 +1399,7 @@
     {
       "name": "randomID",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/encoding.ts",
         "region": {
           "end_line": 44,
@@ -1414,7 +1414,7 @@
     {
       "name": "utf8",
       "source": {
-        "commit": "379a6d20bed9cbda9af6210f5511250fbbe9b571",
+        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
         "file": "src/encoding.ts",
         "region": {
           "end_line": 36,

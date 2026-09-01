@@ -4,7 +4,7 @@
     {
       "name": "Latchway",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -20,7 +20,7 @@
     {
       "name": "iOS",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -36,7 +36,7 @@
     {
       "name": "Swift",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -52,7 +52,7 @@
     {
       "name": "SwiftOpenAI minimum",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Package.swift",
         "region": {
           "end_line": 24,
@@ -68,7 +68,7 @@
     {
       "name": "SwiftOpenAI latest",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Package.swift",
         "region": {
           "end_line": 24,
@@ -84,7 +84,7 @@
     {
       "name": "Apple Foundation Models OS availability",
       "source": {
-        "commit": "ab38ae00838a81be071f53740c624dc4f0558dcb",
+        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -93,7 +93,7 @@
         "region_sha256": "501219b7ad96ec0e4e741c276c8907364306b717b56a6f2590664d684d7955f4",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+        "source_sha256": "c4fb5df75aab9648290e625644a7df257098b9a8e6ecb08f59fa103e0697f502"
       },
       "version": "27.0"
     }

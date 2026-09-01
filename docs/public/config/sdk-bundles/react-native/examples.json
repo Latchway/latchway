@@ -4,23 +4,23 @@
       "kind": "physical_device",
       "name": "React Native physical-device application",
       "source": {
-        "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
+        "commit": "111e7841f81e87ab471c18d381fed18ec8335760",
         "file": "example/src/App.tsx",
         "region": {
-          "end_line": 1271,
+          "end_line": 1274,
           "start_line": 1
         },
-        "region_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e",
+        "region_sha256": "c3e5d37efae903a668cdc85039f88c612b6c244a5f4be4df1e9d5b6907cb95e6",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "4dbbb222da006ad6b7dda2f40d0853a82c539f8d2956096a804ad4d11b77086e"
+        "source_sha256": "c3e5d37efae903a668cdc85039f88c612b6c244a5f4be4df1e9d5b6907cb95e6"
       }
     },
     {
       "kind": "framework",
       "name": "OpenAI, Vercel AI, LangChain, and Anthropic consumers",
       "source": {
-        "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
+        "commit": "111e7841f81e87ab471c18d381fed18ec8335760",
         "file": "example/src/framework-consumers.ts",
         "region": {
           "end_line": 153,
@@ -36,7 +36,7 @@
       "kind": "component",
       "name": "iOS App Intent extension",
       "source": {
-        "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
+        "commit": "111e7841f81e87ab471c18d381fed18ec8335760",
         "file": "example/ios/AppIntents/AppIntents.swift",
         "region": {
           "end_line": 264,
@@ -52,7 +52,7 @@
       "kind": "physical_device",
       "name": "Android host application",
       "source": {
-        "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
+        "commit": "111e7841f81e87ab471c18d381fed18ec8335760",
         "file": "example/android/app/src/main/java/com/latchwayexample/MainApplication.kt",
         "region": {
           "end_line": 22,

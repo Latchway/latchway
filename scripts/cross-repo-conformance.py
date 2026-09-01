@@ -170,6 +170,7 @@ CHECK_SUMMARIES = {
     "source.contract_locks": "Every SDK lock names one immutable ancestor contract checkpoint, contract, wire version, server range, and bundle hash.",
     "source.generated_fixtures": "Every SDK fixture is byte-identical to the generated core bundle member.",
     "source.package_versions": "Public package names and source version declarations agree.",
+    "source.sdk_documentation_bundles": "Every generated SDK documentation bundle is clean and bound to the exact release-candidate SDK source.",
     "source.react_native_pins": "React Native dependencies pin the exact local JavaScript, iOS, and Android sources.",
     "promotion.local_preconditions": "The released contract and every intended source coordinate are valid before publication.",
     "promotion.evidence_window": "All required evidence is fresh and belongs to one bounded candidate window.",
@@ -236,6 +237,12 @@ class Evaluator:
         self._run("source.contract_locks", "local_source", True, self._contract_locks)
         self._run("source.generated_fixtures", "local_source", True, self._generated_fixtures)
         self._run("source.package_versions", "local_source", True, self._package_versions)
+        self._run(
+            "source.sdk_documentation_bundles",
+            "local_source",
+            True,
+            self._sdk_documentation_bundles,
+        )
         self._run("source.react_native_pins", "local_source", True, self._react_native_pins)
 
         promotion_requested = self.configuration.scope in ("promotion", "release")
@@ -1005,6 +1012,72 @@ class Evaluator:
             for repository_id, version in versions.items()
         }
         return {"versions": versions}
+
+    def _sdk_documentation_bundles(self) -> Mapping[str, Any]:
+        repositories = self._required_state("repositories")
+        commits = self._required_state("commits")
+        versions = self._required_state("versions")
+        lock = read_json(repositories["core"] / "docs/sdk-bundles.lock")
+        if (
+            not isinstance(lock, dict)
+            or set(lock)
+            != {"bundle_schema_version", "bundles", "schema_version"}
+            or lock.get("bundle_schema_version")
+            != "latchway.sdk-documentation-bundle.v1"
+            or lock.get("schema_version")
+            != "latchway.sdk-documentation-lock.v1"
+            or not isinstance(lock.get("bundles"), list)
+        ):
+            raise VerificationError("sdk_documentation_lock_invalid")
+
+        expected = {
+            "android": ("android", commits["android"], versions["android"]),
+            "ios": ("ios", commits["ios"], versions["ios"]),
+            "js": ("javascript", commits["javascript"], versions["javascript"]),
+            "react-native": (
+                "react_native",
+                commits["react_native"],
+                versions["react_native"],
+            ),
+        }
+        entries: dict[str, Mapping[str, Any]] = {}
+        for entry in lock["bundles"]:
+            if not isinstance(entry, dict):
+                raise VerificationError("sdk_documentation_lock_invalid")
+            identifier = entry.get("id")
+            if not isinstance(identifier, str) or identifier in entries:
+                raise VerificationError("sdk_documentation_lock_invalid")
+            entries[identifier] = entry
+        if set(entries) != set(expected):
+            raise VerificationError("sdk_documentation_lock_invalid")
+
+        pinned: dict[str, str] = {}
+        for identifier, (repository_id, commit, version) in expected.items():
+            entry = entries[identifier]
+            if entry.get("commit") != commit:
+                raise VerificationError(
+                    "sdk_documentation_commit_mismatch",
+                    {"repository": repository_id},
+                )
+            if (
+                entry.get("version") != version
+                or entry.get("release") != f"v{version}"
+            ):
+                raise VerificationError(
+                    "sdk_documentation_version_mismatch",
+                    {"repository": repository_id},
+                )
+            if entry.get("source_tree_clean") is not True:
+                raise VerificationError(
+                    "sdk_documentation_source_not_clean",
+                    {"repository": repository_id},
+                )
+            pinned[repository_id] = commit
+
+        return {
+            "bundle_count": len(entries),
+            "pinned_source_commits": pinned,
+        }
 
     def _react_native_pins(self) -> Mapping[str, Any]:
         repositories = self._required_state("repositories")

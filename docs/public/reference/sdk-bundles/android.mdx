@@ -14,9 +14,9 @@ description: "Generated, version-bound examples and compatibility metadata for A
 | --- | --- |
 | Package | `dev.latchway` |
 | Release | `v1.0.0` |
-| Commit | `17c108706998f2c30fe511fd92ed049c024c8e85` |
+| Commit | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `e1706cb2b0f7718c8dccf33d8228d20b66da0581720627907779a5e2e67279b0` |
+| Bundle SHA-256 | `b4fa68217afc453182d95c345f8d9920a965ce00aab0b1160f2c063c83f93eb0` |
 
 ## Supported versions
 
@@ -37,7 +37,7 @@ description: "Generated, version-bound examples and compatibility metadata for A
 
 ### `frameworks/koog.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L42-L88)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L42-L91)
 
 ```kotlin
     @Test
@@ -50,7 +50,10 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConfor
                 .setBody(CHAT_COMPLETION),
         )
         server.start()
-        val harness = FrameworkConformanceHarness(server)
+        val harness = FrameworkConformanceHarness(
+            server,
+            frameworkIntegration = LatchwayFrameworkIntegration.KOOG,
+        )
         val fixture = koog(server, harness)
         val schema = buildJsonObject {
             put("type", "object")
@@ -78,7 +81,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConfor
 
             assertEquals("fixture accepted", answer.textContent())
             assertEquals("POST /v1/chat/completions HTTP/1.1", recorded.requestLine)
-            assertFrameworkAuthorization(recorded)
+            assertFrameworkAuthorization(recorded, LatchwayFrameworkIntegration.KOOG)
             assertEquals("fixture_lookup", body.getJSONArray("tools").getJSONObject(0)
                 .getJSONObject("function").getString("name"))
             assertTrue(body.getJSONObject("response_format").toString().contains("structured-output"))
@@ -91,7 +94,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConfor
 
 ### `frameworks/langchain4j.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
 
 ```kotlin
 class LangChain4jFrameworkConformanceTest {
@@ -134,7 +137,7 @@ class LangChain4jFrameworkConformanceTest {
 
 ### `frameworks/openai-kotlin.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
 
 ```kotlin
 class OpenAiKotlinFrameworkConformanceTest {
@@ -170,10 +173,9 @@ class OpenAiKotlinFrameworkConformanceTest {
 
 ### `frameworks/retrofit.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L28-L74)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L30-L104)
 
 ```kotlin
-class RetrofitFrameworkConformanceTest {
     @Test
     fun retrofitUsesTheProductionHooksAndReplacesItsPlaceholderAuthorization() {
         val server = LoopbackHttpServer()
@@ -220,11 +222,40 @@ class RetrofitFrameworkConformanceTest {
         )
         server.start()
         val canceled = CountDownLatch(1)
+        val listener = object : EventListener() {
+            override fun canceled(call: okhttp3.Call) {
+                canceled.countDown()
+            }
+        }
+        val harness = FrameworkConformanceHarness(server)
+        val http = harness.okHttpBuilder(listener).build()
+
+        try {
+            val call = retrofit(server, http).stream(
+                authorization = "Bearer $PROVIDER_PLACEHOLDER",
+                body = "{}".toRequestBody(JSON),
+            )
+            val started = System.nanoTime()
+            val response = call.execute()
+            val first = checkNotNull(response.body()).source().readUtf8LineStrict()
+            val elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+
+            assertEquals("data: first", first)
+            assertTrue("first frame must arrive before the delayed second frame", elapsedMillis < 1_500)
+            call.cancel()
+            assertTrue(call.isCanceled)
+            assertTrue("Retrofit cancellation must cancel the underlying OkHttp call", canceled.await(2, TimeUnit.SECONDS))
+            assertEquals(2, server.controlRequestCount)
+            assertFrameworkAuthorization(server.takeDataRequest())
+        } finally {
+            close(http, harness, server)
+        }
+    }
 ```
 
 ### `quickstart/basic-client.kt`
 
-Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
+Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
 
 ```kotlin
 package dev.latchway.sample.basic
@@ -270,7 +301,7 @@ public object BasicLatchwayFactory {
 
 ### `quickstart/firebase-auth.kt`
 
-Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/17c108706998f2c30fe511fd92ed049c024c8e85/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L301)
+Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L301)
 
 ```kotlin
 package dev.latchway.sample.firebase
