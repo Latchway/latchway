@@ -22,6 +22,8 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
   byte-identical to the bundle;
 - core, JavaScript, Swift/CocoaPods, Android/Maven, and React Native package
   version declarations to agree with their public source constants; and
+- each canonical SDK documentation bundle lock entry to name the exact clean
+  JavaScript, Swift, Android, or React Native candidate commit and version;
 - React Native's compatibility manifest and native/JavaScript coordinates to
   pin the exact local dependency commits and versions; and
 - the `latchway-docs` mirror manifest to bind every generated file byte to an

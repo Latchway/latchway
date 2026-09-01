@@ -59,6 +59,7 @@ SOURCE_CHECK_IDS = frozenset(
         "source.contract_locks",
         "source.generated_fixtures",
         "source.package_versions",
+        "source.sdk_documentation_bundles",
         "source.react_native_pins",
         "source.documentation_mirror",
     )

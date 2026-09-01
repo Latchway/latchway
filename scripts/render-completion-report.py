@@ -69,6 +69,7 @@ REQUIRED_CONFORMANCE_CHECKS = {
     "source.contract_locks": "local_source",
     "source.generated_fixtures": "local_source",
     "source.package_versions": "local_source",
+    "source.sdk_documentation_bundles": "local_source",
     "source.react_native_pins": "local_source",
     "promotion.local_preconditions": "local_promotion",
     "release.local_preconditions": "local_release",

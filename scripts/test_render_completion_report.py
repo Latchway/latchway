@@ -811,6 +811,20 @@ class RenderCompletionReportTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.ReportError, "findings_unresolved"):
             self.render()
 
+    def test_requires_exact_sdk_documentation_bundle_conformance(self) -> None:
+        identifier = "source.sdk_documentation_bundles"
+        self.assertEqual(
+            MODULE.REQUIRED_CONFORMANCE_CHECKS.get(identifier),
+            "local_source",
+        )
+        document = copy.deepcopy(self.conformance)
+        document["checks"] = [
+            check for check in document["checks"] if check["id"] != identifier
+        ]
+        self.rewrite("conformance", document)
+        with self.assertRaisesRegex(MODULE.ReportError, "checks_incomplete"):
+            self.render()
+
     def test_rejects_incomplete_accepted_risk_documentation(self) -> None:
         security = copy.deepcopy(self.security)
         security["independent_reviews"][0]["accepted_risks"] = security[

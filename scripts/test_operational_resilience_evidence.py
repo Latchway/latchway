@@ -1029,6 +1029,21 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                 artifact["sha256"],
             )
 
+    def test_source_requires_exact_sdk_documentation_bundle_conformance(self) -> None:
+        identifier = "source.sdk_documentation_bundles"
+        self.assertIn(identifier, MODULE.SOURCE_CHECK_IDS)
+
+        def remove_check(document: dict[str, object]) -> None:
+            document["checks"] = [
+                check
+                for check in document["checks"]
+                if check["id"] != identifier
+            ]
+
+        self.mutate(self.fixture.source_path, remove_check)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "source_checks_invalid"):
+            self.finalize("missing-sdk-documentation-check")
+
     def test_rejects_tampered_or_substituted_prior_candidate_evidence(self) -> None:
         artifact = (
             self.fixture.previous_candidate_dir
