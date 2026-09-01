@@ -42,6 +42,26 @@ it. Both registry-bearing jobs always log out; neither executes candidate
 source or repository scripts. Configure required reviewers on both
 environments and do not place reusable secrets in either one.
 
+## First GHCR package bootstrap
+
+The first GitHub Container Registry publish creates
+`ghcr.io/latchway/latchway` as a private package even when it is produced by a
+public repository. Land the preview workflow on `main`, dispatch it with that
+exact current `main` SHA, and expect the first credential-free public-verifier
+job to fail after the source-free publisher creates the package. A package
+administrator must then open the `Latchway/latchway` container package
+settings, verify that it is linked to the `Latchway/latchway` repository, and
+change its visibility to **Public**. That visibility change is irreversible.
+Rerun only the failed workflow jobs; the anonymous digest, child-layer, and
+signature checks plus the authenticated provenance/SBOM checks must all pass.
+Do not call the package published or usable before that rerun is green.
+
+After visibility bootstrap, remove inherited human package-write access where
+the organization permits it and retain the protected workflows as the only
+writers. Public GHCR packages can be pulled anonymously; the release verifier
+depends on that behavior and deliberately starts with an empty Docker
+credential store.
+
 Promotion separates candidate execution from every public mutation. A
 zero-repository-permission candidate job (`permissions: {}` with no explicit
 secret or token environment) recomputes the candidate, security, and promotion
@@ -113,6 +133,19 @@ verify-or-create and never overwritten. The `X.Y`, `X`, and `latest` aliases
 may advance only through an authenticated, semver-monotonic transition; a rerun
 of an older release cannot move an alias backward. Promotion and final evidence
 both bind every intended alias to the expected index digest.
+
+GHCR does not provide a server-side compare-and-swap or immutable-tag control
+for these transitions. Organization and package policy must therefore make the
+protected release workflows the exclusive writers of stable image tags and
+moving aliases. Remove inherited human package-write access where feasible,
+do not issue long-lived package-write tokens, and keep preview/public-verifier
+credentials unable to write stable coordinates. The workflows re-read and
+verify every digest before and after each transition and fail closed on
+interference, but an independent writer could still race the registry's
+inspect-then-create or inspect-then-retag window. That residual non-atomic
+window is an external release risk, not an immutability guarantee. Unique
+preview tags avoid ordinary collisions but share the same exclusive-writer and
+non-atomic registry limitation; they do not remove the stable-alias requirement.
 
 Promotion and finalization share one repository-wide stable-release chronology
 group. Before a promotion changes any moving alias, it preflights all three

@@ -14,7 +14,7 @@ import (
 const (
 	tokenEntropyBytes      = 32
 	minBootstrapTokenBytes = 32
-	maxBootstrapTokenBytes = 4096
+	maxBootstrapTokenBytes = 2048
 	tokenHashBytes         = sha256.Size
 )
 
@@ -22,7 +22,7 @@ var (
 	// ErrInvalidToken indicates a malformed or wrong-kind opaque token.
 	ErrInvalidToken = errors.New("invalid token")
 	// ErrBootstrapTokenLength prevents weak or unbounded bootstrap secrets.
-	ErrBootstrapTokenLength = errors.New("bootstrap token must be between 32 and 4096 bytes")
+	ErrBootstrapTokenLength = errors.New("bootstrap token must be between 32 and 2048 bytes")
 )
 
 // TokenKind separates token namespaces and hash domains.

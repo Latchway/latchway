@@ -1,0 +1,583 @@
+name: Publish commit preview image
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_commit:
+        description: Exact current main commit to publish as a non-release preview
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-image-${{ inputs.preview_commit }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact preview source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.preview_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the exact current main draft coordinate
+        id: metadata
+        shell: bash
+        env:
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$PREVIEW_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$PREVIEW_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$PREVIEW_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(jq --raw-output .contract_status api/protocol-version.json)" = draft
+          test "$(jq --raw-output '.released_at == null' api/protocol-version.json)" = true
+          source_version=$(jq --exit-status --raw-output .version web/console/package.json)
+          [[ "$source_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9A-Za-z.-]+$ ]]
+          short_commit=$(printf %.12s "$PREVIEW_COMMIT")
+          echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
+          echo "source_version=$source_version" >> "$GITHUB_OUTPUT"
+          echo "runtime_version=0.0.0-preview.$short_commit" >> "$GITHUB_OUTPUT"
+          echo "registry_tag=preview-$PREVIEW_COMMIT-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate draft contracts
+        run: python3 scripts/validate-contracts.py
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - name: Build the exact amd64 preview without registry credentials
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: latchway:preview-amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.preview_commit }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.runtime_version }}
+            org.opencontainers.image.created=${{ steps.metadata.outputs.date }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.runtime_version }}
+            COMMIT=${{ inputs.preview_commit }}
+            BUILD_DATE=${{ steps.metadata.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+      - name: Build the exact arm64 preview without registry credentials
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: latchway:preview-arm64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.preview_commit }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.runtime_version }}
+            org.opencontainers.image.created=${{ steps.metadata.outputs.date }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.runtime_version }}
+            COMMIT=${{ inputs.preview_commit }}
+            BUILD_DATE=${{ steps.metadata.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+      - name: Smoke both exact preview children
+        run: |
+          scripts/container-smoke.sh latchway:preview-amd64
+          scripts/container-smoke.sh latchway:preview-arm64
+      - name: Scan amd64 vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: latchway:preview-amd64
+          format: json
+          output: latchway-preview-linux-amd64-vulnerability.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+      - name: Scan arm64 vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: latchway:preview-arm64
+          format: json
+          output: latchway-preview-linux-arm64-vulnerability.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+      - name: Generate exact amd64 SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: latchway:preview-amd64
+          format: spdx-json
+          output-file: latchway-preview-linux-amd64.spdx.json
+          upload-artifact: false
+      - name: Generate exact arm64 SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: latchway:preview-arm64
+          format: spdx-json
+          output-file: latchway-preview-linux-arm64.spdx.json
+          upload-artifact: false
+      - name: Build the closed credential-free preview handoff
+        shell: bash
+        env:
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          SOURCE_VERSION: ${{ steps.metadata.outputs.source_version }}
+          RUNTIME_VERSION: ${{ steps.metadata.outputs.runtime_version }}
+          REGISTRY_TAG: ${{ steps.metadata.outputs.registry_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          docker save --output latchway-preview-linux-amd64.image.tar latchway:preview-amd64
+          docker save --output latchway-preview-linux-arm64.image.tar latchway:preview-arm64
+          python3 scripts/verify-runtime-image.py latchway-preview-linux-amd64.image.tar linux/amd64
+          python3 scripts/verify-runtime-image.py latchway-preview-linux-arm64.image.tar linux/arm64
+          artifacts='[]'
+          for path in \
+            latchway-preview-linux-amd64.image.tar \
+            latchway-preview-linux-arm64.image.tar \
+            latchway-preview-linux-amd64-vulnerability.json \
+            latchway-preview-linux-arm64-vulnerability.json \
+            latchway-preview-linux-amd64.spdx.json \
+            latchway-preview-linux-arm64.spdx.json
+          do
+            test -f "$path" && test ! -L "$path" && test -s "$path"
+            size=$(stat --format=%s "$path")
+            (( size >= 2 && size <= 2147483648 ))
+            sha=$(sha256sum "$path" | awk '{print $1}')
+            artifacts=$(jq --arg path "$path" --arg sha "$sha" --argjson size "$size" \
+              '. + [{path:$path,sha256:$sha,size_bytes:$size}]' <<< "$artifacts")
+          done
+          jq -n --sort-keys \
+            --arg commit "$PREVIEW_COMMIT" \
+            --arg image "$IMAGE" \
+            --arg source_version "$SOURCE_VERSION" \
+            --arg runtime_version "$RUNTIME_VERSION" \
+            --arg registry_tag "$REGISTRY_TAG" \
+            --arg contract_version "$(jq --raw-output .contract_version api/protocol-version.json)" \
+            --arg amd64_id "$(docker image inspect --format '{{.Id}}' latchway:preview-amd64)" \
+            --arg arm64_id "$(docker image inspect --format '{{.Id}}' latchway:preview-arm64)" \
+            --argjson artifacts "$artifacts" '
+              {
+                schema_version: 1,
+                kind: "latchway_commit_preview_handoff",
+                status: "preview",
+                release_qualified: false,
+                stable_promotion_eligible: false,
+                source: {commit:$commit,version:$source_version},
+                runtime_version: $runtime_version,
+                contract: {version:$contract_version,status:"draft",released_at:null},
+                image_repository: $image,
+                registry_tag: $registry_tag,
+                local_images: {
+                  "linux/amd64": {reference:"latchway:preview-amd64",image_id:$amd64_id},
+                  "linux/arm64": {reference:"latchway:preview-arm64",image_id:$arm64_id}
+                },
+                artifacts: $artifacts
+              }
+            ' > latchway-preview-handoff.json
+      - name: Retain the exact preview handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-preview-handoff-${{ inputs.preview_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            latchway-preview-handoff.json
+            latchway-preview-linux-amd64.image.tar
+            latchway-preview-linux-arm64.image.tar
+            latchway-preview-linux-amd64-vulnerability.json
+            latchway-preview-linux-arm64-vulnerability.json
+            latchway-preview-linux-amd64.spdx.json
+            latchway-preview-linux-arm64.spdx.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish_and_sign:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      registry_tag: ${{ steps.publish.outputs.registry_tag }}
+      index_digest: ${{ steps.publish.outputs.index_digest }}
+      amd64_digest: ${{ steps.publish.outputs.amd64_digest }}
+      arm64_digest: ${{ steps.publish.outputs.arm64_digest }}
+    steps:
+      - name: Download the credential-free preview handoff without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-preview-handoff-${{ inputs.preview_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handoff
+      - name: Validate the closed preview handoff before registry authentication
+        id: handoff
+        shell: bash
+        env:
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_SHA" = "$PREVIEW_COMMIT"
+          root="$RUNNER_TEMP/handoff"
+          receipt="$root/latchway-preview-handoff.json"
+          test -z "$(find "$root" -type l -print -quit)"
+          jq --sort-keys . "$receipt" > "$RUNNER_TEMP/canonical.json"
+          cmp --silent "$receipt" "$RUNNER_TEMP/canonical.json"
+          jq --exit-status --arg commit "$PREVIEW_COMMIT" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" '
+            (keys | sort) == ["artifacts","contract","image_repository","kind","local_images","registry_tag","release_qualified","runtime_version","schema_version","source","stable_promotion_eligible","status"] and
+            .schema_version == 1 and .kind == "latchway_commit_preview_handoff" and .status == "preview" and
+            .release_qualified == false and .stable_promotion_eligible == false and
+            (.source | keys | sort) == ["commit","version"] and .source.commit == $commit and
+            (.source.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+-[0-9A-Za-z.-]+$")) and
+            .runtime_version == ("0.0.0-preview." + ($commit[0:12])) and
+            (.contract | keys | sort) == ["released_at","status","version"] and
+            (.contract.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+            .contract.status == "draft" and .contract.released_at == null and
+            .image_repository == "ghcr.io/latchway/latchway" and
+            .registry_tag == ("preview-" + $commit + "-" + $run + "-" + $attempt) and
+            (.local_images | keys | sort) == ["linux/amd64","linux/arm64"] and
+            (.local_images["linux/amd64"] | keys | sort) == ["image_id","reference"] and
+            (.local_images["linux/arm64"] | keys | sort) == ["image_id","reference"] and
+            .local_images["linux/amd64"].reference == "latchway:preview-amd64" and
+            .local_images["linux/arm64"].reference == "latchway:preview-arm64" and
+            all(.local_images[]; (.image_id | test("^sha256:[0-9a-f]{64}$"))) and
+            .local_images["linux/amd64"].image_id != .local_images["linux/arm64"].image_id and
+            (.artifacts | length) == 6 and ([.artifacts[].path] | unique | length) == 6 and
+            all(.artifacts[];
+              (keys | sort) == ["path","sha256","size_bytes"] and
+              (.path | test("^latchway-preview-linux-(amd64|arm64)\\.(image\\.tar|spdx\\.json|vulnerability\\.json)$")) and
+              (.sha256 | test("^[0-9a-f]{64}$")) and
+              (.size_bytes >= 2 and .size_bytes <= 2147483648))
+          ' "$receipt" >/dev/null
+          expected="$RUNNER_TEMP/expected"
+          actual="$RUNNER_TEMP/actual"
+          { printf '%s\n' latchway-preview-handoff.json; jq --raw-output '.artifacts[].path' "$receipt"; } | LC_ALL=C sort > "$expected"
+          find "$root" -maxdepth 1 -type f -print | while IFS= read -r path; do basename "$path"; done | LC_ALL=C sort > "$actual"
+          cmp --silent "$expected" "$actual"
+          jq --raw-output '.artifacts[] | [.path,.sha256,(.size_bytes|tostring)] | @tsv' "$receipt" |
+            while IFS=$'\t' read -r relative sha size; do
+              path="$root/$relative"
+              test "$(sha256sum "$path" | awk '{print $1}')" = "$sha"
+              test "$(stat --format=%s "$path")" = "$size"
+            done
+          for architecture in amd64 arm64; do
+            jq --exit-status '
+              type == "object" and (.SchemaVersion | type == "integer" and . >= 2) and
+              all((.Results // [])[]; all((.Vulnerabilities // [])[]; .Severity != "HIGH" and .Severity != "CRITICAL"))
+            ' "$root/latchway-preview-linux-$architecture-vulnerability.json" >/dev/null
+            jq --exit-status 'type == "object" and .spdxVersion == "SPDX-2.3" and (.packages | type == "array" and length > 0)' \
+              "$root/latchway-preview-linux-$architecture.spdx.json" >/dev/null
+            docker load --input "$root/latchway-preview-linux-$architecture.image.tar" >/dev/null
+            reference=$(jq --raw-output --arg platform "linux/$architecture" '.local_images[$platform].reference' "$receipt")
+            image_id=$(jq --raw-output --arg platform "linux/$architecture" '.local_images[$platform].image_id' "$receipt")
+            test "$(docker image inspect --format '{{.Id}}' "$reference")" = "$image_id"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$reference")" = "linux/$architecture"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$reference")" = "$PREVIEW_COMMIT"
+          done
+          echo "image=$(jq --raw-output .image_repository "$receipt")" >> "$GITHUB_OUTPUT"
+          echo "registry_tag=$(jq --raw-output .registry_tag "$receipt")" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - name: Authenticate only the source-free preview publisher
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish exact children and unique preview index
+        id: publish
+        shell: bash
+        env:
+          IMAGE: ${{ steps.handoff.outputs.image }}
+          REGISTRY_TAG: ${{ steps.handoff.outputs.registry_tag }}
+        run: |
+          set -Eeuo pipefail
+          for architecture in amd64 arm64; do
+            remote="$IMAGE:$REGISTRY_TAG-$architecture"
+            docker tag "latchway:preview-$architecture" "$remote"
+            docker push "$remote" > "$RUNNER_TEMP/push-$architecture.txt" 2>&1
+            digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-$architecture.txt")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          done
+          amd64_digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-amd64.txt")
+          arm64_digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-arm64.txt")
+          docker buildx imagetools create --tag "$IMAGE:$REGISTRY_TAG" "$IMAGE@$amd64_digest" "$IMAGE@$arm64_digest"
+          docker buildx imagetools inspect --raw "$IMAGE:$REGISTRY_TAG" > "$RUNNER_TEMP/index.json"
+          jq --exit-status --arg amd64 "$amd64_digest" --arg arm64 "$arm64_digest" '
+            .schemaVersion == 2 and (.manifests | length) == 2 and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] == [$amd64]) and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] == [$arm64])
+          ' "$RUNNER_TEMP/index.json" >/dev/null
+          index_digest="sha256:$(sha256sum "$RUNNER_TEMP/index.json" | awk '{print $1}')"
+          docker buildx imagetools inspect --raw "$IMAGE@$index_digest" > "$RUNNER_TEMP/index-by-digest.json"
+          cmp --silent "$RUNNER_TEMP/index.json" "$RUNNER_TEMP/index-by-digest.json"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "registry_tag=$REGISTRY_TAG" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          echo "amd64_digest=$amd64_digest" >> "$GITHUB_OUTPUT"
+          echo "arm64_digest=$arm64_digest" >> "$GITHUB_OUTPUT"
+      - name: Construct explicit non-release preview manifest
+        shell: bash
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          REGISTRY_TAG: ${{ steps.publish.outputs.registry_tag }}
+          INDEX_DIGEST: ${{ steps.publish.outputs.index_digest }}
+          AMD64_DIGEST: ${{ steps.publish.outputs.amd64_digest }}
+          ARM64_DIGEST: ${{ steps.publish.outputs.arm64_digest }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/handoff"
+          output="$RUNNER_TEMP/preview"
+          mkdir -p "$output"
+          for architecture in amd64 arm64; do
+            install -m 0444 "$root/latchway-preview-linux-$architecture.spdx.json" "$output/"
+            install -m 0444 "$root/latchway-preview-linux-$architecture-vulnerability.json" "$output/"
+          done
+          jq -n --sort-keys \
+            --arg image "$IMAGE" --arg tag "$REGISTRY_TAG" --arg index "$INDEX_DIGEST" \
+            --arg amd64 "$AMD64_DIGEST" --arg arm64 "$ARM64_DIGEST" \
+            --slurpfile receipt "$root/latchway-preview-handoff.json" '
+              {
+                schema_version: 1,
+                kind: "latchway_commit_preview",
+                status: "preview",
+                release_qualified: false,
+                stable_promotion_eligible: false,
+                source: $receipt[0].source,
+                runtime_version: $receipt[0].runtime_version,
+                contract: $receipt[0].contract,
+                image: {repository:$image,tag:$tag,index_digest:$index,platforms:{"linux/amd64":$amd64,"linux/arm64":$arm64}},
+                artifacts: [$receipt[0].artifacts[] | select(.path | endswith(".image.tar") | not)]
+              }
+            ' > "$output/latchway-preview.json"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the preview index with GitHub OIDC
+        shell: bash
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.index_digest }}
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -Eeuo pipefail
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-sha "$PREVIEW_COMMIT" \
+            "$IMAGE@$DIGEST"
+      - name: Publish preview index provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.publish.outputs.image }}
+          subject-digest: ${{ steps.publish.outputs.index_digest }}
+          push-to-registry: true
+      - name: Publish exact amd64 preview SBOM attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.publish.outputs.image }}
+          subject-digest: ${{ steps.publish.outputs.amd64_digest }}
+          sbom-path: ${{ runner.temp }}/preview/latchway-preview-linux-amd64.spdx.json
+          push-to-registry: true
+      - name: Publish exact arm64 preview SBOM attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.publish.outputs.image }}
+          subject-digest: ${{ steps.publish.outputs.arm64_digest }}
+          sbom-path: ${{ runner.temp }}/preview/latchway-preview-linux-arm64.spdx.json
+          push-to-registry: true
+      - name: Attest the explicit non-release preview manifest
+        id: manifest-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/preview/latchway-preview.json
+      - name: Retain the preview manifest attestation
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.manifest-attestation.outputs.bundle-path }}
+        run: install -m 0600 "$BUNDLE_PATH" "$RUNNER_TEMP/preview/latchway-preview.attestation.sigstore.json"
+      - name: Retain immutable signed preview evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-preview-${{ inputs.preview_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preview/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Remove the source-free publisher registry credential
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+
+  verify-public:
+    if: github.ref == 'refs/heads/main'
+    needs: publish_and_sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Prove anonymous digest pull and signature verification
+        shell: bash
+        env:
+          IMAGE: ${{ needs.publish_and_sign.outputs.image }}
+          TAG: ${{ needs.publish_and_sign.outputs.registry_tag }}
+          DIGEST: ${{ needs.publish_and_sign.outputs.index_digest }}
+          AMD64_DIGEST: ${{ needs.publish_and_sign.outputs.amd64_digest }}
+          ARM64_DIGEST: ${{ needs.publish_and_sign.outputs.arm64_digest }}
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -Eeuo pipefail
+          empty_config="$RUNNER_TEMP/anonymous-docker"
+          mkdir -p "$empty_config"
+          chmod 0700 "$empty_config"
+          export DOCKER_CONFIG="$empty_config"
+          test -z "$(find "$DOCKER_CONFIG" -mindepth 1 -print -quit)"
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" > "$RUNNER_TEMP/digest.json"
+          docker buildx imagetools inspect --raw "$IMAGE:$TAG" > "$RUNNER_TEMP/tag.json"
+          cmp --silent "$RUNNER_TEMP/digest.json" "$RUNNER_TEMP/tag.json"
+          test "$(sha256sum "$RUNNER_TEMP/digest.json" | awk '{print $1}')" = "${DIGEST#sha256:}"
+          jq --exit-status --arg amd64 "$AMD64_DIGEST" --arg arm64 "$ARM64_DIGEST" '
+            .schemaVersion == 2 and (.manifests | type == "array" and length == 2) and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] == [$amd64]) and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] == [$arm64]) and
+            all(.manifests[];
+              (.digest | test("^sha256:[0-9a-f]{64}$")) and
+              (.mediaType | type == "string" and length > 0) and
+              (.size | type == "number" and . > 0))
+          ' "$RUNNER_TEMP/digest.json" >/dev/null
+          runtime_version="0.0.0-preview.${PREVIEW_COMMIT:0:12}"
+          for architecture in amd64 arm64; do
+            if [[ "$architecture" = amd64 ]]; then child_digest="$AMD64_DIGEST"; else child_digest="$ARM64_DIGEST"; fi
+            reference="$IMAGE@$child_digest"
+            docker pull --platform "linux/$architecture" "$reference"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$reference")" = "linux/$architecture"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$reference")" = "https://github.com/$GITHUB_REPOSITORY"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$reference")" = "$PREVIEW_COMMIT"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$reference")" = "$runtime_version"
+            docker image inspect --format '{{json .RepoDigests}}' "$reference" |
+              jq --exit-status --arg reference "$reference" 'index($reference) != null' >/dev/null
+          done
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-sha "$PREVIEW_COMMIT" \
+            "$IMAGE@$DIGEST"
+          echo "Public preview: $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  verify-attestations:
+    if: github.ref == 'refs/heads/main'
+    needs:
+      - publish_and_sign
+      - verify-public
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Authenticate only the fresh attestation verifier
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify exact index provenance and platform SBOM attestations
+        shell: bash
+        env:
+          IMAGE: ${{ needs.publish_and_sign.outputs.image }}
+          DIGEST: ${{ needs.publish_and_sign.outputs.index_digest }}
+          AMD64_DIGEST: ${{ needs.publish_and_sign.outputs.amd64_digest }}
+          ARM64_DIGEST: ${{ needs.publish_and_sign.outputs.arm64_digest }}
+          PREVIEW_COMMIT: ${{ inputs.preview_commit }}
+        run: |
+          set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          signer_workflow="$GITHUB_REPOSITORY/.github/workflows/preview-image.yml"
+          gh attestation verify "oci://$IMAGE@$DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$signer_workflow" \
+            --signer-digest "$PREVIEW_COMMIT" \
+            --source-digest "$PREVIEW_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --bundle-from-oci \
+            --format json > "$RUNNER_TEMP/index-provenance.json"
+          jq --exit-status --arg digest "${DIGEST#sha256:}" '
+            type == "array" and length >= 1 and
+            all(.[].verificationResult.statement;
+              .predicateType == "https://slsa.dev/provenance/v1" and
+              any(.subject[]; .digest.sha256 == $digest))
+          ' "$RUNNER_TEMP/index-provenance.json" >/dev/null
+          for architecture in amd64 arm64; do
+            if [[ "$architecture" = amd64 ]]; then child_digest="$AMD64_DIGEST"; else child_digest="$ARM64_DIGEST"; fi
+            gh attestation verify "oci://$IMAGE@$child_digest" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$signer_workflow" \
+              --signer-digest "$PREVIEW_COMMIT" \
+              --source-digest "$PREVIEW_COMMIT" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              --bundle-from-oci \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --format json > "$RUNNER_TEMP/$architecture-sbom-attestation.json"
+            jq --exit-status --arg digest "${child_digest#sha256:}" '
+              type == "array" and length >= 1 and
+              all(.[].verificationResult.statement;
+                .predicateType == "https://spdx.dev/Document/v2.3" and
+                any(.subject[]; .digest.sha256 == $digest))
+            ' "$RUNNER_TEMP/$architecture-sbom-attestation.json" >/dev/null
+          done
+      - name: Remove the attestation verifier registry credential
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true

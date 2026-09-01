@@ -1,0 +1,292 @@
+---
+title: "Deploy to Google Cloud Run"
+description: "Run the signed GHCR image on Cloud Run with private Cloud SQL, Secret Manager, and explicit migrations."
+icon: "cloud"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The checked-in Terraform stack deploys the canonical Latchway image from GitHub
+Container Registry, a private PostgreSQL 18 Cloud SQL instance, Secret Manager
+values, a Serverless VPC Access connector, one HTTPS Cloud Run service, and a
+one-shot migration job.
+
+<Warning>
+  The stable `1.0.0` image has not been published yet. Keep
+  `ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST` as a
+  placeholder until the release page supplies a signed, attested digest. Do not
+  deploy an unverified local image under the stable version.
+</Warning>
+
+Cloud Run accepts public GHCR images directly and imports an immutable copy at
+deployment. Google recommends an Artifact Registry remote repository in front
+of GHCR when higher registry availability is required. In either case, deploy
+by digest, not by tag. The image must contain a `linux/amd64` manifest.
+
+## Prerequisites
+
+- a Google Cloud project with billing enabled;
+- `gcloud`, Terraform, and access to create Cloud Run, Cloud SQL, VPC, IAM, and
+  Secret Manager resources;
+- a tightly scoped, versioned GCS bucket for the encrypted remote Terraform
+  backend declared by the stack;
+- a DNS name for the final HTTPS origin; and
+- the verified `ghcr.io/latchway/latchway@sha256:...` release digest.
+
+Authenticate and select the project before running Terraform:
+
+```bash
+gcloud auth application-default login
+gcloud config set project PROJECT_ID
+gcloud services enable \
+  artifactregistry.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  compute.googleapis.com \
+  iam.googleapis.com \
+  run.googleapis.com \
+  secretmanager.googleapis.com \
+  sqladmin.googleapis.com \
+  storage.googleapis.com \
+  vpcaccess.googleapis.com
+```
+
+Create the state bucket once if your platform team has not already supplied
+one. Bucket names are globally unique:
+
+```bash
+export LATCHWAY_TF_STATE_BUCKET='PROJECT_ID-latchway-tfstate-UNIQUE_SUFFIX'
+gcloud storage buckets create "gs://$LATCHWAY_TF_STATE_BUCKET" \
+  --location=REGION \
+  --uniform-bucket-level-access
+gcloud storage buckets update "gs://$LATCHWAY_TF_STATE_BUCKET" --versioning
+```
+
+Enforce public-access prevention and grant state-object access only to the
+deployment principals that require it. Prefer an organization-managed bucket
+with retention, audit logging, and recovery policy over an operator-created
+bucket.
+
+## Choose the image source
+
+For a public stable release, the simplest source is the canonical GHCR digest:
+
+```bash
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+```
+
+For higher registry availability, create an Artifact Registry remote Docker
+repository backed by `https://ghcr.io`, request the same image through that
+repository, and still pin the resulting reference by digest. Do not copy or
+rebuild the image merely to change registries. See Google's
+[Cloud Run image guidance](https://docs.cloud.google.com/run/docs/deploying)
+and [remote repository guide](https://docs.cloud.google.com/artifact-registry/docs/repositories/remote-repo).
+
+## Configure Terraform
+
+Start from the checked-in example:
+
+```bash
+cd deploy/cloud-run/terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Set these values in the untracked `terraform.tfvars` file:
+
+```hcl
+project_id    = "PROJECT_ID"
+region        = "asia-southeast1"
+service_name  = "latchway"
+service_image                    = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
+migration_image                  = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
+migration_approved_service_image = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
+service_revision_name            = "latchway-release-id"
+previous_service_revision_name   = null
+service_traffic_percent          = 100
+public_origin = "https://ai.example.com"
+```
+
+Use a new, explicit `service_revision_name` for every image digest. The
+migration approval is an exact digest acknowledgement: Terraform refuses to
+create or route to a service image that does not equal it.
+
+Use `REGIONAL` database availability for production. The default maximum
+database pool is `max_instances × db_connections_per_instance`, or 200
+connections. Reserve additional capacity for migrations, administration,
+backups, and failover before raising either value.
+
+<Warning>
+  Terraform state contains generated database, master-key, and first-owner
+  bootstrap material. Store it in the configured encrypted remote backend with
+  tightly scoped access. Never upload a state file to the repository or attach
+  it to a support request.
+</Warning>
+
+## Plan and apply
+
+```bash
+export LATCHWAY_TF_STATE_BUCKET='EXISTING_VERSIONED_STATE_BUCKET'
+terraform init \
+  -backend-config="bucket=$LATCHWAY_TF_STATE_BUCKET" \
+  -backend-config='prefix=latchway/cloud-run'
+terraform fmt -check
+terraform validate
+umask 077
+latchway_plan=$(mktemp "${TMPDIR:-/tmp}/latchway.tfplan.XXXXXX")
+trap 'rm -f "$latchway_plan"' EXIT
+terraform plan -out="$latchway_plan"
+terraform apply "$latchway_plan"
+rm -f "$latchway_plan"
+unset latchway_plan
+trap - EXIT
+```
+
+The partial GCS backend fails initialization unless a bucket is supplied. The
+temporary plan is mode-restricted because it can contain generated secret
+material; delete it immediately after apply. The scoped `.gitignore` rejects
+Terraform state, variables, plans, crash logs, overrides, and provider caches,
+but ignore rules are not a substitute for encrypted storage.
+
+The first revision uses `LATCHWAY_MIGRATE_ON_START=true` as a guarded bootstrap
+fallback. Migrations use a PostgreSQL advisory lock, but production upgrades
+should use the dedicated job.
+
+Record the service URL and configured image without printing secret values:
+
+```bash
+terraform output -raw service_url
+terraform output -raw configured_image
+terraform output -raw configured_migration_image
+terraform output -raw configured_service_revision
+terraform output -raw maximum_application_database_connections
+```
+
+## Create the first owner
+
+Terraform creates a random one-use administrator bootstrap token and grants the
+runtime identity temporary access to it. Read it directly into a password
+manager, open the Console at the service URL, and create the first owner.
+
+After owner creation, create a new post-bootstrap revision at 0% traffic. Keep
+the same approved image digest, name the current revision as previous, and set:
+
+```hcl
+inject_admin_bootstrap_token   = false
+migrate_on_start               = false
+service_revision_name          = "latchway-post-bootstrap-id"
+previous_service_revision_name = "latchway-release-id"
+service_traffic_percent        = 0
+```
+
+Apply with the protected plan procedure, probe the tagged candidate as shown
+below, then set `service_traffic_percent=100` and apply again. The promoted
+revision no longer references the bootstrap secret, its secret-level access
+grant is removed, and future upgrades use the explicit migration job. Retire
+the unused secret according to the organization's recorded secret-retention
+policy.
+
+## Run a controlled upgrade
+
+Never update the migration job and service traffic in one plan. Use the same
+mode-restricted plan/apply procedure above for each phase.
+
+### Phase A: migrate while service traffic is unchanged
+
+Set only `migration_image` to the next verified digest. Keep
+`service_image`, `migration_approved_service_image`, the current service
+revision, and 100% traffic unchanged, then apply. Execute the updated job:
+
+```bash
+terraform output -raw migration_command
+gcloud run jobs execute latchway-migrate \
+  --project PROJECT_ID \
+  --region REGION \
+  --wait
+```
+
+Then execute the same job with `--output,json migrate status` as its argument
+override. Accept the migration only when `current` equals `available`. Do not
+delete migration-ledger rows or run a down migration; schema recovery uses a
+tested backup.
+
+### Phase B: create and probe a 0%-traffic revision
+
+Only after migration status passes, set the new `service_image`, copy that
+exact digest to `migration_approved_service_image`, give it a new
+`service_revision_name`, set the currently serving revision as
+`previous_service_revision_name`, and set `service_traffic_percent=0`. Apply,
+then resolve the tagged candidate URL and probe it without shifting user
+traffic:
+
+```bash
+latchway_candidate_url=$(gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(status.traffic[?tag=candidate].url)')
+test -n "$latchway_candidate_url"
+curl --fail --show-error "$latchway_candidate_url/healthz"
+curl --fail --show-error "$latchway_candidate_url/readyz"
+```
+
+Also exercise one authenticated non-streaming request and one SSE request on
+that URL.
+
+### Phase C: shift traffic explicitly
+
+Set `service_traffic_percent=100`, review the plan, and apply. Terraform removes
+the previous-revision traffic allocation only in this phase. Do not combine
+Phase A, B, or C or mix unrelated infrastructure changes into their plans.
+
+## Verify the deployment
+
+Check the externally visible probes:
+
+```bash
+curl --fail --show-error https://ai.example.com/healthz
+curl --fail --show-error https://ai.example.com/readyz
+```
+
+Readiness includes PostgreSQL, schema, active configuration, key material, and
+the worker heartbeat. A `200` from `/healthz` with a non-`200` `/readyz` is an
+unready deployment, not a successful rollout.
+
+Also verify the provider-resolved image and revision:
+
+```bash
+gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format=json
+```
+
+Confirm the revision resolves to the intended digest, then exercise one
+authenticated non-streaming request and one SSE request. Cloud Run's template
+uses a 60-minute request timeout; clients must reconnect before that boundary.
+Do not enable response buffering at a load balancer or CDN.
+
+## Operate and recover
+
+- Keep Cloud SQL on private IP with encrypted connections and point-in-time
+  recovery enabled.
+- Escrow `LATCHWAY_MASTER_KEY` independently from the database. Restoring one
+  without the matching other is not a valid recovery.
+- Prove an isolated restore before accepting production traffic.
+- Keep the previous application digest available through the observation
+  window. Migrations are forward-only; schema rollback requires a database
+  restore.
+- Restrict `/metrics` to the intended scraper or private network.
+
+Complete [production readiness](/operations/production-readiness),
+[backup and restore](/operations/backup-restore), and
+[upgrades and rollback](/operations/upgrades) before promotion.
+
+## Release evidence boundary
+
+A successful Terraform apply is deployment evidence, not release evidence. A
+production claim must bind the exact signed OCI index and `linux/amd64` child,
+the Cloud Run revision, migration status, secret references without values,
+health/readiness, streaming behavior, and graceful replacement in the protected
+release workflow.

@@ -342,7 +342,7 @@ jobs:
               ;;
             supply_chain)
               expected_claims='["license_scan_verified","multi_arch_image_verified","provenance_verified","sbom_verified","signature_verified","vulnerability_scan_verified"]'
-              expected_observations='["supply.cosign-signature","supply.github-provenance","supply.license.amd64","supply.license.arm64","supply.oci-index","supply.platform.amd64","supply.platform.arm64","supply.sbom.amd64","supply.sbom.arm64","supply.vulnerability.amd64","supply.vulnerability.arm64"]'
+              expected_observations='["supply.cosign-signature","supply.github-provenance","supply.github-spdx.amd64","supply.github-spdx.arm64","supply.license.amd64","supply.license.arm64","supply.oci-index","supply.platform.amd64","supply.platform.arm64","supply.sbom.amd64","supply.sbom.arm64","supply.vulnerability.amd64","supply.vulnerability.arm64"]'
               ;;
             public_tags)
               expected_claims='["github_releases_verified","remote_annotated_tags_verified"]'
@@ -476,6 +476,7 @@ jobs:
               supply.oci-index|supply.platform.*) expected_tool=docker-buildx ;;
               supply.vulnerability.*|supply.license.*) expected_tool=candidate-trivy-report-validator ;;
               supply.sbom.*) expected_tool=candidate-spdx-report-validator ;;
+              supply.github-spdx.*) expected_tool=github-attestation ;;
               supply.cosign-signature) expected_tool=cosign ;;
               supply.github-provenance) expected_tool=github-attestation ;;
               publication.*) expected_tool=github-api ;;

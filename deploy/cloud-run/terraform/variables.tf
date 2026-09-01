@@ -15,13 +15,68 @@ variable "service_name" {
   default     = "latchway"
 }
 
-variable "image" {
-  description = "Verified OCI image by digest, for example ghcr.io/latchway/latchway@sha256:..."
+variable "service_image" {
+  description = "Verified OCI image digest served to application traffic. Keep the old digest here until the new migration image has run successfully."
   type        = string
 
   validation {
-    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.image))
-    error_message = "image must be immutable and end in an OCI sha256 digest."
+    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.service_image))
+    error_message = "service_image must be immutable and end in an OCI sha256 digest."
+  }
+}
+
+variable "migration_image" {
+  description = "Verified OCI image digest used by the one-shot migration job. Advance this before service_image during an upgrade."
+  type        = string
+
+  validation {
+    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.migration_image))
+    error_message = "migration_image must be immutable and end in an OCI sha256 digest."
+  }
+}
+
+variable "migration_approved_service_image" {
+  description = "Exact service digest whose migrations the operator has verified. It must equal service_image before Terraform can create or route to that revision."
+  type        = string
+
+  validation {
+    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.migration_approved_service_image))
+    error_message = "migration_approved_service_image must be immutable and end in an OCI sha256 digest."
+  }
+}
+
+variable "service_revision_name" {
+  description = "Explicit Cloud Run revision name for service_image; use a new immutable name for each digest."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.service_revision_name))
+    error_message = "service_revision_name must be a 2-63 character lowercase Cloud Run revision name."
+  }
+}
+
+variable "previous_service_revision_name" {
+  description = "Revision retaining traffic while a new candidate is created at 0 percent. Set null for the first deployment or after full promotion."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.previous_service_revision_name == null ||
+      can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.previous_service_revision_name))
+    )
+    error_message = "previous_service_revision_name must be null or a valid lowercase Cloud Run revision name."
+  }
+}
+
+variable "service_traffic_percent" {
+  description = "Traffic assigned to service_revision_name. Use 0 for the probe phase and 100 only after readiness succeeds."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.service_traffic_percent >= 0 && var.service_traffic_percent <= 100 && floor(var.service_traffic_percent) == var.service_traffic_percent
+    error_message = "service_traffic_percent must be an integer from 0 through 100."
   }
 }
 

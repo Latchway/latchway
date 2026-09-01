@@ -30,7 +30,7 @@ immutable PostgreSQL-backed environment revisions, not process variables.
 | `LATCHWAY_READ_TIMEOUT` | `15s` | Positive Go duration for the HTTP server read/header boundary. |
 | `LATCHWAY_IDLE_TIMEOUT` | `90s` | Positive Go duration for idle HTTP connections. Route-specific upstream/stream timeouts remain revisioned configuration. |
 | `LATCHWAY_DB_MAX_CONNECTIONS` | `20` | Integer from 2 through 500 per process. Budget the maximum across every API and worker replica. |
-| `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Empty unless bootstrapping | When present, 32–4096 bytes. High-entropy, one-time first-owner input. Remove it after bootstrap; retaining it cannot reopen a consumed flow. |
+| `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Empty unless bootstrapping | When present, 32–2048 bytes. High-entropy, one-time first-owner input. Remove it after bootstrap; retaining it cannot reopen a consumed flow. |
 | `LATCHWAY_ADMIN_SESSION_LIFETIME` | `12h` | Go duration from 5 minutes through 30 days. A shorter value reduces browser-session lifetime. |
 
 Whitespace-only values are treated as absent for variables with defaults. An

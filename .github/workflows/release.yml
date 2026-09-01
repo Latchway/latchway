@@ -80,6 +80,7 @@ jobs:
           python3 -m unittest \
             scripts/test_release_candidate.py \
             scripts/test_release_preflight.py \
+            scripts/test_validate_contracts.py \
             scripts/test_ci_workflow.py \
             scripts/test_cross_repo_conformance.py \
             scripts/test_cloudflare_deployment_capture.py \
@@ -157,7 +158,14 @@ jobs:
             --commit "$CANDIDATE_COMMIT" \
             "$INTENDED_TAG"
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - name: Resolve reproducible build metadata
         id: metadata
         shell: bash
@@ -517,6 +525,10 @@ jobs:
           done
           echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - name: Authenticate only the fresh no-checkout publisher
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
@@ -732,6 +744,10 @@ jobs:
           echo "amd64_digest=$(jq --raw-output '.image.platforms["linux/amd64"]' "$manifest")" >> "$GITHUB_OUTPUT"
           echo "arm64_digest=$(jq --raw-output '.image.platforms["linux/arm64"]' "$manifest")" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io

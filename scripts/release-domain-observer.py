@@ -62,9 +62,10 @@ GITHUB_AUTHORITY_DOMAINS = frozenset(
     {"supply_chain", "public_tags", "public_registries"}
 )
 # Exact public-registry closure at GitHub's 64-asset release bound:
-# JavaScript 230 + React Native 245 + iOS 21 + Android 31 + documentation 7.
-# This counts manifest rows; the authority manifest itself is the 535th file.
-MAXIMUM_AUTHORITY_FILES = 534
+# JavaScript 230 + React Native 245 + iOS 21 + Android 31 + documentation 7
+# + anonymous public OCI 7. This counts manifest rows; the authority manifest
+# itself is the 542nd file.
+MAXIMUM_AUTHORITY_FILES = 541
 MAXIMUM_AUTHORITY_BYTES = 128 * 1024 * 1024
 MAXIMUM_AUTHORITY_WINDOW = EVIDENCE.timedelta(hours=2)
 FORBIDDEN_CANDIDATE_CREDENTIAL_ENV = frozenset(
@@ -2186,6 +2187,54 @@ class Observer:
                 validate=self._validate_spdx,
             )
 
+        for architecture in ("amd64", "arm64"):
+            digest = self.candidate["image"]["platforms"][f"linux/{architecture}"]
+            sbom = load_output(
+                EVIDENCE.read_bytes(
+                    candidate_root / f"latchway-linux-{architecture}.spdx.json"
+                ),
+                "spdx_invalid",
+            )
+            attestation, started, finished = self._github_authority_file(
+                f"supply-chain/github-spdx-{architecture}.json"
+            )
+            self._validate_github_attestation(
+                attestation,
+                predicate_type="https://spdx.dev/Document/v2.3",
+                digest=digest,
+                code="github_spdx_attestation_invalid",
+                expected_predicate=sbom,
+            )
+            self.emit(
+                f"supply.github-spdx.{architecture}",
+                attestation,
+                started=started,
+                finished=finished,
+                version="github-cli-v2",
+                invocation=(
+                    "gh",
+                    "attestation",
+                    "verify",
+                    f"oci://{self.candidate['image']['repository']}@{digest}",
+                    "--repo",
+                    EVIDENCE.REPOSITORY,
+                    "--signer-workflow",
+                    f"{EVIDENCE.REPOSITORY}/{EVIDENCE.CANDIDATE_WORKFLOW}",
+                    "--source-digest",
+                    self.identity["core_commit"],
+                    "--signer-digest",
+                    self.identity["core_commit"],
+                    "--source-ref",
+                    "refs/heads/main",
+                    "--deny-self-hosted-runners",
+                    "--bundle-from-oci",
+                    "--predicate-type",
+                    "https://spdx.dev/Document/v2.3",
+                    "--format",
+                    "json",
+                ),
+            )
+
         certificate = "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main"
         self.run_command(
             "supply.cosign-signature",
@@ -2202,7 +2251,12 @@ class Observer:
             "supply-chain/github-provenance.json",
             maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
         )
-        self._require_nonempty_list(provenance, "provenance_result_invalid")
+        self._validate_github_attestation(
+            provenance,
+            predicate_type="https://slsa.dev/provenance/v1",
+            digest=index_digest,
+            code="provenance_result_invalid",
+        )
         self.emit(
             "supply.github-provenance",
             provenance,
@@ -2225,6 +2279,9 @@ class Observer:
                 "--source-ref",
                 "refs/heads/main",
                 "--deny-self-hosted-runners",
+                "--bundle-from-oci",
+                "--predicate-type",
+                "https://slsa.dev/provenance/v1",
                 "--format",
                 "json",
             ),
@@ -2247,32 +2304,21 @@ class Observer:
         if not isinstance(manifests, list):
             raise ObservationError("oci_index_invalid")
         observed: dict[str, str] = {}
-        attested: set[str] = set()
         for entry in manifests:
             platform = entry.get("platform") if isinstance(entry, dict) else None
             if not isinstance(platform, dict):
                 raise ObservationError("oci_platforms_mismatch")
             os_name = platform.get("os")
             architecture = platform.get("architecture")
-            if os_name == "unknown" and architecture == "unknown":
-                subject = nested(
-                    entry, "annotations", "vnd.docker.reference.digest"
-                )
-                if (
-                    nested(entry, "annotations", "vnd.docker.reference.type")
-                    != "attestation-manifest"
-                    or subject not in platforms.values()
-                    or subject in attested
-                ):
-                    raise ObservationError("oci_attestation_manifest_invalid")
-                attested.add(subject)
-                continue
             name = f"{os_name}/{architecture}"
             digest = entry.get("digest") if isinstance(entry, dict) else None
             if name in observed or not isinstance(digest, str):
                 raise ObservationError("oci_platforms_mismatch")
             observed[name] = digest
-        if observed != dict(platforms) or attested != set(platforms.values()):
+        # Registry attestations are OCI referrers to these subjects. They do not
+        # rewrite the immutable two-platform subject index with synthetic
+        # `unknown/unknown` descriptors.
+        if len(manifests) != len(platforms) or observed != dict(platforms):
             raise ObservationError("oci_platforms_mismatch")
 
     @staticmethod
@@ -2310,6 +2356,39 @@ class Observer:
     def _require_nonempty_list(payload: bytes, code: str) -> None:
         value = load_output(payload, code)
         if not isinstance(value, list) or not value:
+            raise ObservationError(code)
+
+    @staticmethod
+    def _validate_github_attestation(
+        payload: bytes,
+        *,
+        predicate_type: str,
+        digest: str,
+        code: str,
+        expected_predicate: Any | None = None,
+    ) -> None:
+        value = load_output(payload, code)
+        expected_digest = digest.removeprefix("sha256:")
+        if not isinstance(value, list) or not value:
+            raise ObservationError(code)
+        exact_predicate_found = expected_predicate is None
+        for item in value:
+            statement = nested(item, "verificationResult", "statement")
+            subjects = statement.get("subject") if isinstance(statement, dict) else None
+            if (
+                not isinstance(statement, dict)
+                or statement.get("predicateType") != predicate_type
+                or not isinstance(subjects, list)
+                or not any(
+                    isinstance(subject, dict)
+                    and nested(subject, "digest", "sha256") == expected_digest
+                    for subject in subjects
+                )
+            ):
+                raise ObservationError(code)
+            if statement.get("predicate") == expected_predicate:
+                exact_predicate_found = True
+        if not exact_predicate_found:
             raise ObservationError(code)
 
     @staticmethod
@@ -2650,34 +2729,48 @@ class Observer:
     def observe_public_registries(self) -> None:
         self._observe_documentation_production()
         image = self.identity["oci_image_digest"]
-        cosign_command = (
-            "cosign", "verify", "--output", "json",
-            "--certificate-identity", "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main",
-            "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
-            "--certificate-github-workflow-sha", self.identity["core_commit"],
-            image,
-        )
-        cosign_payload, oci_started, oci_finished = self._execute_command(
-            cosign_command
+        cosign_payload, oci_started, oci_finished = self._github_authority_file(
+            "public-registries/oci/cosign.json",
+            maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
         )
         self._validate_cosign(cosign_payload, image, "registry_oci_invalid")
         core = self.identity["repositories"]["core"]
         references: dict[str, dict[str, str]] = {}
         for tag in self._oci_release_tags(core["version"]):
             reference = f"ghcr.io/latchway/latchway:{tag}"
-            raw, _, finished = self._execute_command(
-                ("docker", "buildx", "imagetools", "inspect", "--raw", reference)
+            raw, started, finished = self._github_authority_file(
+                f"public-registries/oci/index-{tag}.json",
+                maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
             )
-            hashes = {
-                hashlib.sha256(raw).hexdigest(),
-                hashlib.sha256(raw.removesuffix(b"\n")).hexdigest(),
-            }
-            if self.candidate["image"]["index_digest"].removeprefix("sha256:") not in hashes:
-                raise ObservationError("registry_oci_alias_digest_mismatch")
+            self._validate_index(
+                raw,
+                self.candidate["image"]["index_digest"],
+                self.candidate["image"]["platforms"],
+            )
             references[tag] = {
                 "reference": reference,
                 "digest": self.candidate["image"]["index_digest"],
             }
+            if started < oci_started:
+                oci_started = started
+            if finished > oci_finished:
+                oci_finished = finished
+        children: dict[str, dict[str, Any]] = {}
+        for architecture in ("amd64", "arm64"):
+            digest = self.candidate["image"]["platforms"][f"linux/{architecture}"]
+            payload, started, finished = self._github_authority_file(
+                f"public-registries/oci/child-{architecture}.json",
+                maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
+            )
+            children[f"linux/{architecture}"] = self._validate_public_child_inspection(
+                payload,
+                architecture=architecture,
+                reference=f"ghcr.io/latchway/latchway@{digest}",
+                commit=self.identity["core_commit"],
+                version=core["version"],
+            )
+            if started < oci_started:
+                oci_started = started
             if finished > oci_finished:
                 oci_finished = finished
         oci_proof = {
@@ -2690,6 +2783,7 @@ class Observer:
             "immutable_version_reference": f"ghcr.io/latchway/latchway:{core['version']}",
             "moving_aliases": list(self._oci_release_tags(core["version"])[1:]),
             "references": references,
+            "anonymous_platform_pulls": children,
             "signature_verification": load_output(
                 cosign_payload, "registry_oci_invalid"
             ),
@@ -2699,8 +2793,8 @@ class Observer:
             canonical_json(oci_proof),
             started=oci_started,
             finished=oci_finished,
-            version="system",
-            invocation=cosign_command,
+            version="github-authority-v1",
+            invocation=("github-authority", "verify-public-oci"),
         )
         javascript = self.identity["repositories"]["javascript"]
         self._observe_javascript_npm_set(javascript)
@@ -2922,6 +3016,49 @@ class Observer:
             invocation=maven_command,
             cwd=self.repositories["android"],
         )
+
+    @staticmethod
+    def _validate_public_child_inspection(
+        payload: bytes,
+        *,
+        architecture: str,
+        reference: str,
+        commit: str,
+        version: str,
+    ) -> dict[str, Any]:
+        value = load_output(payload, "registry_oci_child_invalid")
+        item = value[0] if isinstance(value, list) and len(value) == 1 else None
+        labels = nested(item, "Config", "Labels") if isinstance(item, dict) else None
+        repo_digests = item.get("RepoDigests") if isinstance(item, dict) else None
+        layers = nested(item, "RootFS", "Layers") if isinstance(item, dict) else None
+        image_id = item.get("Id") if isinstance(item, dict) else None
+        if (
+            not isinstance(item, dict)
+            or item.get("Os") != "linux"
+            or item.get("Architecture") != architecture
+            or not isinstance(labels, dict)
+            or labels.get("org.opencontainers.image.source")
+            != "https://github.com/Latchway/latchway"
+            or labels.get("org.opencontainers.image.revision") != commit
+            or labels.get("org.opencontainers.image.version") != version
+            or not isinstance(repo_digests, list)
+            or reference not in repo_digests
+            or not isinstance(layers, list)
+            or not layers
+            or any(
+                not isinstance(layer, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", layer) is None
+                for layer in layers
+            )
+            or not isinstance(image_id, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None
+        ):
+            raise ObservationError("registry_oci_child_invalid")
+        return {
+            "reference": reference,
+            "image_id": image_id,
+            "rootfs_layers": layers,
+        }
 
     def _observe_documentation_production(self) -> None:
         root = "public-registries/documentation"

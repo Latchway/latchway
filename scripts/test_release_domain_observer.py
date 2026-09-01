@@ -1732,7 +1732,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
 
     def test_github_authority_file_bound_accepts_exact_schema_maximum_only(self) -> None:
         observer = self.bare_observer("public_registries")
-        self.assertEqual(MODULE.MAXIMUM_AUTHORITY_FILES, 534)
+        self.assertEqual(MODULE.MAXIMUM_AUTHORITY_FILES, 541)
         maximum_files = {
             f"boundary/{index:03d}.json": b"{}\n"
             for index in range(MODULE.MAXIMUM_AUTHORITY_FILES)
@@ -1862,13 +1862,19 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         ios = 1 + 7 + 7 + 6
         android = 1 + 10 + 10 + 10
         documentation = 7
+        public_oci = 7
         self.assertEqual(
-            (javascript, react_native, ios, android, documentation),
-            (230, 245, 21, 31, 7),
+            (javascript, react_native, ios, android, documentation, public_oci),
+            (230, 245, 21, 31, 7, 7),
         )
         self.assertEqual(
             MODULE.MAXIMUM_AUTHORITY_FILES,
-            javascript + react_native + ios + android + documentation,
+            javascript
+            + react_native
+            + ios
+            + android
+            + documentation
+            + public_oci,
         )
 
     def test_supply_chain_validators_reject_digest_scan_sbom_and_signature_tampering(self) -> None:
@@ -1887,22 +1893,29 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 }
                 for name, digest in platforms.items()
             ]
-            + [
-                {
-                    "digest": "sha256:" + str(index + 7) * 64,
-                    "platform": {"os": "unknown", "architecture": "unknown"},
-                    "annotations": {
-                        "vnd.docker.reference.type": "attestation-manifest",
-                        "vnd.docker.reference.digest": digest,
-                    },
-                }
-                for index, digest in enumerate(platforms.values())
-            ]
         }
         payload = json.dumps(index, separators=(",", ":")).encode()
         MODULE.Observer._validate_index(
             payload, "sha256:" + hashlib.sha256(payload).hexdigest(), platforms
         )
+        extra = copy.deepcopy(index)
+        extra["manifests"].append(
+            {
+                "digest": "sha256:" + "7" * 64,
+                "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {
+                    "vnd.docker.reference.type": "attestation-manifest",
+                    "vnd.docker.reference.digest": next(iter(platforms.values())),
+                },
+            }
+        )
+        extra_payload = json.dumps(extra, separators=(",", ":")).encode()
+        with self.assertRaisesRegex(MODULE.ObservationError, "oci_platforms_mismatch"):
+            MODULE.Observer._validate_index(
+                extra_payload,
+                "sha256:" + hashlib.sha256(extra_payload).hexdigest(),
+                platforms,
+            )
         index["manifests"][0]["digest"] = "sha256:" + "9" * 64
         tampered = json.dumps(index, separators=(",", ":")).encode()
         with self.assertRaisesRegex(MODULE.ObservationError, "oci_platforms_mismatch"):
@@ -1925,6 +1938,99 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             MODULE.Observer._validate_spdx(
                 b'{"spdxVersion":"SPDX-2.3","packages":[]}'
             )
+
+        expected_spdx = {
+            "spdxVersion": "SPDX-2.3",
+            "packages": [{"name": "latchway"}],
+        }
+
+        def github_spdx(predicate: dict, digest: str = "2" * 64) -> dict:
+            return {
+                "verificationResult": {
+                    "statement": {
+                        "predicateType": "https://spdx.dev/Document/v2.3",
+                        "subject": [{"digest": {"sha256": digest}}],
+                        "predicate": predicate,
+                    }
+                }
+            }
+
+        historical_and_current = MODULE.canonical_json(
+            [
+                github_spdx({"spdxVersion": "SPDX-2.3", "packages": [{"name": "old"}]}),
+                github_spdx(expected_spdx),
+            ]
+        )
+        MODULE.Observer._validate_github_attestation(
+            historical_and_current,
+            predicate_type="https://spdx.dev/Document/v2.3",
+            digest=platforms["linux/amd64"],
+            code="github_spdx_attestation_invalid",
+            expected_predicate=expected_spdx,
+        )
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "github_spdx_attestation_invalid"
+        ):
+            MODULE.Observer._validate_github_attestation(
+                MODULE.canonical_json([github_spdx({"packages": [{"name": "old"}]})]),
+                predicate_type="https://spdx.dev/Document/v2.3",
+                digest=platforms["linux/amd64"],
+                code="github_spdx_attestation_invalid",
+                expected_predicate=expected_spdx,
+            )
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "github_spdx_attestation_invalid"
+        ):
+            MODULE.Observer._validate_github_attestation(
+                MODULE.canonical_json([github_spdx(expected_spdx, "9" * 64)]),
+                predicate_type="https://spdx.dev/Document/v2.3",
+                digest=platforms["linux/amd64"],
+                code="github_spdx_attestation_invalid",
+                expected_predicate=expected_spdx,
+            )
+
+        public_reference = "ghcr.io/latchway/latchway@" + platforms["linux/amd64"]
+        public_child = [
+            {
+                "Id": "sha256:" + "4" * 64,
+                "Os": "linux",
+                "Architecture": "amd64",
+                "Config": {
+                    "Labels": {
+                        "org.opencontainers.image.source": "https://github.com/Latchway/latchway",
+                        "org.opencontainers.image.revision": "a" * 40,
+                        "org.opencontainers.image.version": "1.0.0",
+                    }
+                },
+                "RepoDigests": [public_reference],
+                "RootFS": {"Layers": ["sha256:" + "5" * 64]},
+            }
+        ]
+        MODULE.Observer._validate_public_child_inspection(
+            MODULE.canonical_json(public_child),
+            architecture="amd64",
+            reference=public_reference,
+            commit="a" * 40,
+            version="1.0.0",
+        )
+        for mutation in ("Architecture", "RepoDigests", "RootFS"):
+            changed = copy.deepcopy(public_child)
+            if mutation == "Architecture":
+                changed[0][mutation] = "arm64"
+            elif mutation == "RepoDigests":
+                changed[0][mutation] = []
+            else:
+                changed[0][mutation] = {"Layers": []}
+            with self.subTest(public_child_mutation=mutation), self.assertRaisesRegex(
+                MODULE.ObservationError, "registry_oci_child_invalid"
+            ):
+                MODULE.Observer._validate_public_child_inspection(
+                    MODULE.canonical_json(changed),
+                    architecture="amd64",
+                    reference=public_reference,
+                    commit="a" * 40,
+                    version="1.0.0",
+                )
 
         image = "ghcr.io/latchway/latchway@sha256:" + "a" * 64
         cosign = [

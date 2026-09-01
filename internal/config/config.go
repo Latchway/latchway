@@ -105,8 +105,8 @@ func (c Config) Validate() error {
 	} else if origin.Scheme != "https" && (origin.Scheme != "http" || !isLoopbackHost(origin.Hostname())) {
 		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must use HTTPS except on localhost or a loopback address"))
 	}
-	if c.AdminBootstrapToken != "" && (len(c.AdminBootstrapToken) < 32 || len(c.AdminBootstrapToken) > 4096) {
-		errs = append(errs, errors.New("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN must be between 32 and 4096 bytes"))
+	if c.AdminBootstrapToken != "" && (len(c.AdminBootstrapToken) < 32 || len(c.AdminBootstrapToken) > 2048) {
+		errs = append(errs, errors.New("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN must be between 32 and 2048 bytes"))
 	}
 	if c.AdminSessionLifetime < 5*time.Minute || c.AdminSessionLifetime > 30*24*time.Hour {
 		errs = append(errs, errors.New("admin session lifetime must be between 5 minutes and 30 days"))

@@ -3,7 +3,7 @@
     {
       "name": "attestation_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 11,
@@ -18,7 +18,7 @@
     {
       "name": "attestation_provider_missing",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 68,
@@ -33,7 +33,7 @@
     {
       "name": "attestation_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 9,
@@ -48,7 +48,7 @@
     {
       "name": "attestation_stale",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 12,
@@ -63,7 +63,7 @@
     {
       "name": "attestation_step_up_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 13,
@@ -78,7 +78,7 @@
     {
       "name": "attestation_unsupported",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 10,
@@ -93,7 +93,7 @@
     {
       "name": "authentication_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 53,
@@ -108,7 +108,7 @@
     {
       "name": "bootstrap_disabled",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 59,
@@ -123,7 +123,7 @@
     {
       "name": "client_configuration_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 65,
@@ -138,7 +138,7 @@
     {
       "name": "component_definition_not_found",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 24,
@@ -153,7 +153,7 @@
     {
       "name": "component_delegation_expired",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 30,
@@ -168,7 +168,7 @@
     {
       "name": "component_direct_attestation_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 33,
@@ -183,7 +183,7 @@
     {
       "name": "component_feature_not_granted",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 31,
@@ -198,7 +198,7 @@
     {
       "name": "component_key_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 28,
@@ -213,7 +213,7 @@
     {
       "name": "component_key_replaced",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 29,
@@ -228,7 +228,7 @@
     {
       "name": "component_not_configured",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 25,
@@ -243,7 +243,7 @@
     {
       "name": "component_not_provisioned",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 26,
@@ -258,7 +258,7 @@
     {
       "name": "component_parent_trust_expired",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 32,
@@ -273,7 +273,7 @@
     {
       "name": "component_revoked",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 27,
@@ -288,7 +288,7 @@
     {
       "name": "concurrency_exceeded",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 43,
@@ -303,7 +303,7 @@
     {
       "name": "configuration_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 50,
@@ -318,7 +318,7 @@
     {
       "name": "conflict",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 56,
@@ -333,7 +333,7 @@
     {
       "name": "containing_app_setup_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 34,
@@ -348,7 +348,7 @@
     {
       "name": "crypto_unavailable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 67,
@@ -363,7 +363,7 @@
     {
       "name": "dpop_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 15,
@@ -378,7 +378,7 @@
     {
       "name": "dpop_missing",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 14,
@@ -393,7 +393,7 @@
     {
       "name": "dpop_nonce_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 17,
@@ -408,7 +408,7 @@
     {
       "name": "dpop_replayed",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 16,
@@ -423,7 +423,7 @@
     {
       "name": "etag_mismatch",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 58,
@@ -438,7 +438,7 @@
     {
       "name": "etag_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 57,
@@ -453,7 +453,7 @@
     {
       "name": "feature_not_allowed",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 40,
@@ -468,7 +468,7 @@
     {
       "name": "feature_not_found",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 39,
@@ -483,7 +483,7 @@
     {
       "name": "framework_integration_unsupported",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 35,
@@ -498,7 +498,7 @@
     {
       "name": "framework_version_unsupported",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 36,
@@ -513,7 +513,7 @@
     {
       "name": "identity_reauthentication_required",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 8,
@@ -528,7 +528,7 @@
     {
       "name": "identity_token_expired",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 7,
@@ -543,7 +543,7 @@
     {
       "name": "identity_token_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 6,
@@ -558,7 +558,7 @@
     {
       "name": "identity_token_missing",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 5,
@@ -573,7 +573,7 @@
     {
       "name": "installation_family_not_found",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 23,
@@ -588,7 +588,7 @@
     {
       "name": "installation_family_revoked",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 22,
@@ -603,7 +603,7 @@
     {
       "name": "installation_revoked",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 21,
@@ -618,7 +618,7 @@
     {
       "name": "internal_error",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 62,
@@ -633,7 +633,7 @@
     {
       "name": "model_not_allowed",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 41,
@@ -648,7 +648,7 @@
     {
       "name": "network_error",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 71,
@@ -663,7 +663,7 @@
     {
       "name": "operation_indeterminate",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 61,
@@ -678,7 +678,7 @@
     {
       "name": "output_limit_exceeded",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 44,
@@ -693,7 +693,7 @@
     {
       "name": "permission_denied",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 54,
@@ -708,7 +708,7 @@
     {
       "name": "pricing_unavailable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 45,
@@ -723,7 +723,7 @@
     {
       "name": "protocol_response_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 69,
@@ -738,7 +738,7 @@
     {
       "name": "protocol_version_unsupported",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 52,
@@ -753,7 +753,7 @@
     {
       "name": "quota_exceeded",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 42,
@@ -768,7 +768,7 @@
     {
       "name": "rate_limited",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 60,
@@ -783,7 +783,7 @@
     {
       "name": "refresh_token_reused",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 20,
@@ -798,7 +798,7 @@
     {
       "name": "request_invalid",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 4,
@@ -813,7 +813,7 @@
     {
       "name": "request_not_replayable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 70,
@@ -828,7 +828,7 @@
     {
       "name": "resource_not_found",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 55,
@@ -843,7 +843,7 @@
     {
       "name": "route_not_found",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 46,
@@ -858,7 +858,7 @@
     {
       "name": "server_not_ready",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 51,
@@ -873,7 +873,7 @@
     {
       "name": "session_expired",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 18,
@@ -888,7 +888,7 @@
     {
       "name": "session_revoked",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 19,
@@ -903,7 +903,7 @@
     {
       "name": "storage_unavailable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 66,
@@ -918,7 +918,7 @@
     {
       "name": "transport_destination_not_allowed",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 37,
@@ -933,7 +933,7 @@
     {
       "name": "transport_request_not_replayable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 38,
@@ -948,7 +948,7 @@
     {
       "name": "upstream_protocol_error",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 49,
@@ -963,7 +963,7 @@
     {
       "name": "upstream_timeout",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 48,
@@ -978,7 +978,7 @@
     {
       "name": "upstream_unavailable",
       "source": {
-        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
+        "commit": "4b0626da478aa412daa07cc7bb595edfb53bf7c7",
         "file": "src/errors.ts",
         "region": {
           "end_line": 47,

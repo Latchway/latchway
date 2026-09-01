@@ -194,6 +194,8 @@
           "group": "Run Latchway",
           "pages": [
             "operations/deployment",
+            "operations/deploy-google-cloud-run",
+            "operations/deploy-cloudflare-containers",
             "operations/telemetry-and-jobs",
             "operations/self-tests"
           ]

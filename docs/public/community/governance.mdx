@@ -39,10 +39,13 @@ advisory process until coordinated disclosure.
 
 ## Releases
 
-A release maintainer may publish only after the exact candidate passes its
-applicable protected gates and the cross-repository completion record closes.
-A source version, local test, tag draft, package archive, or provider smoke
-test is not sufficient by itself.
+A release maintainer may publish immutable product tags, GHCR images, and SDK
+packages only after the exact candidate passes its protected prepublication
+promotion gates. The completion record remains `release_ready: false` until
+clean public consumers and exact registry bytes pass post-publication
+conformance; only then may the finalizer authorize release-qualified claims. A
+source version, local test, tag draft, package archive, or provider smoke test
+is not sufficient by itself.
 
 Version 1 requires compatible core, JavaScript, iOS, Android, and React Native
 coordinates plus the generated public-documentation mirror. Current status is

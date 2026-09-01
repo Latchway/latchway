@@ -44,10 +44,22 @@ and [troubleshooting guide](docs/troubleshooting.md) cover the production path.
 Repository rules are in [`AGENTS.md`](AGENTS.md). The reproducible foundation can be exercised with:
 
 ```sh
+if [ -L .env ]; then
+  printf '%s\n' '.env must not be a symbolic link' >&2
+  exit 1
+fi
 if [ ! -e .env ]; then
   umask 077
-  cp .env.example .env
-  printf 'LATCHWAY_MASTER_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+  latchway_env_tmp=$(mktemp ./.env.bootstrap.XXXXXX)
+  trap 'rm -f -- "$latchway_env_tmp"' EXIT HUP INT TERM
+  chmod 0600 "$latchway_env_tmp"
+  awk '1' .env.example > "$latchway_env_tmp"
+  printf 'LATCHWAY_MASTER_KEY=%s\n' "$(openssl rand -base64 32)" >> "$latchway_env_tmp"
+  printf 'LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=%s\n' "$(openssl rand -hex 32)" >> "$latchway_env_tmp"
+  test ! -e .env && test ! -L .env
+  mv -- "$latchway_env_tmp" .env
+  unset latchway_env_tmp
+  trap - EXIT HUP INT TERM
 fi
 docker compose up -d --build
 curl --fail http://127.0.0.1:8080/healthz
@@ -65,10 +77,27 @@ This smoke check proves the container, embedded console, PostgreSQL connection, 
 
 ### First-owner bootstrap
 
-Set a freshly generated `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` of at least 32 bytes before the first server start. The embedded console can consume it, or the same canonical Admin API can be called through the CLI:
+The first-start command above writes a freshly generated
+`LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` before Compose can initialize the database.
+Open `http://127.0.0.1:8080`, choose first-owner setup, and transfer that token
+from the protected local `.env` into the Console. Alternatively, read only the
+exact bootstrap assignment from that file and prompt for the owner password
+without putting either value in shell history:
 
-```sh
+```bash
+latchway_bootstrap_count=$(awk -F= '$1 == "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN" {count++} END {print count+0}' .env)
+test "$latchway_bootstrap_count" -eq 1
+LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=$(awk -F= '$1 == "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN" {print substr($0, index($0, "=") + 1)}' .env)
+[[ "$LATCHWAY_ADMIN_BOOTSTRAP_TOKEN" =~ ^[0-9a-f]{64}$ ]]
 export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+printf 'First-owner password: ' >&2
+IFS= read -r -s LATCHWAY_ADMIN_PASSWORD
+printf '\n' >&2
+printf 'Confirm first-owner password: ' >&2
+IFS= read -r -s latchway_admin_password_confirmation
+printf '\n' >&2
+test "$LATCHWAY_ADMIN_PASSWORD" = "$latchway_admin_password_confirmation"
+unset latchway_admin_password_confirmation
 export LATCHWAY_ADMIN_PASSWORD
 
 latchway --server http://127.0.0.1:8080 admin bootstrap \
@@ -80,7 +109,32 @@ latchway --server http://127.0.0.1:8080 admin bootstrap \
 unset LATCHWAY_ADMIN_BOOTSTRAP_TOKEN LATCHWAY_ADMIN_PASSWORD
 ```
 
-Populate the two environment variables with a protected prompt or secret manager; the CLI deliberately has no secret-valued flags. Bootstrap creates the owner and secure browser session atomically, stores only hashes for credentials, and closes permanently after the first owner exists. Remote Admin API origins must use HTTPS.
+Bootstrap creates the owner and secure browser session atomically, stores only
+hashes for credentials, and closes permanently after the first owner exists.
+Remove the consumed token from `.env`, then recreate only the gateway service
+so future processes never receive it:
+
+```sh
+umask 077
+test -f .env && test ! -L .env
+latchway_bootstrap_count=$(awk -F= '$1 == "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN" {count++} END {print count+0}' .env)
+test "$latchway_bootstrap_count" -eq 1
+latchway_env_tmp=$(mktemp ./.env.after-bootstrap.XXXXXX)
+trap 'rm -f -- "$latchway_env_tmp"' EXIT HUP INT TERM
+chmod 0600 "$latchway_env_tmp"
+awk '!/^LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=/' .env > "$latchway_env_tmp"
+test "$(awk -F= '$1 == "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN" {count++} END {print count+0}' "$latchway_env_tmp")" -eq 0
+mv -- "$latchway_env_tmp" .env
+unset latchway_env_tmp latchway_bootstrap_count
+trap - EXIT HUP INT TERM
+docker compose up -d --force-recreate latchway
+```
+
+The CLI deliberately has no secret-valued flags. Remote Admin API origins must
+use HTTPS. If a database volume was already initialized with a different,
+unexpired bootstrap token, Latchway fails closed; use the original protected
+token or recreate only the disposable local volume instead of guessing a new
+one.
 
 ### Provider secrets
 

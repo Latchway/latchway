@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,6 +46,20 @@ func TestValidateRejectsUnsafeAdministrativeOriginAndToken(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("unsafe administrative configuration accepted")
+	}
+}
+
+func TestValidateRejectsBootstrapTokenBeyondContractLimit(t *testing.T) {
+	t.Parallel()
+	cfg := Config{
+		ListenAddress: "127.0.0.1:8080", DatabaseURL: "postgres://localhost/latchway",
+		Role: RoleAll, LogLevel: "info", ShutdownTimeout: time.Second,
+		ReadTimeout: time.Second, IdleTimeout: time.Second, DBMaxConnections: 2,
+		PublicOrigin: "http://127.0.0.1:8080", AdminBootstrapToken: strings.Repeat("x", 2049),
+		AdminSessionLifetime: time.Hour,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "32 and 2048 bytes") {
+		t.Fatalf("overlong bootstrap token error = %v", err)
 	}
 }
 

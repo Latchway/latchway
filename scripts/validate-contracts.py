@@ -658,6 +658,25 @@ def validate_installation_family_vectors(vector_set: dict[str, Any]) -> None:
         raise ValueError("family revocation vector must revoke every component")
 
 
+def validate_contract_release_state(manifest: dict[str, Any]) -> None:
+    status = manifest.get("contract_status")
+    released_at = manifest.get("released_at")
+    if status == "draft":
+        if released_at is not None:
+            raise ValueError("draft v1 contract must remain undated")
+        return
+    if status != "released" or not isinstance(released_at, str):
+        raise ValueError("v1 contract release state is invalid")
+    try:
+        parsed = dt.datetime.strptime(released_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+    except ValueError:
+        raise ValueError("released v1 contract must use canonical UTC time") from None
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != released_at:
+        raise ValueError("released v1 contract must use canonical UTC time")
+
+
 def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
@@ -668,8 +687,7 @@ def main() -> None:
         "minimum": 1,
     }:
         raise ValueError("unexpected contract or wire protocol version")
-    if manifest.get("contract_status") != "draft" or manifest.get("released_at") is not None:
-        raise ValueError("unpublished v1 contract must remain an undated draft")
+    validate_contract_release_state(manifest)
 
     client_path = API / "client.openapi.yaml"
     admin_path = API / "admin.openapi.yaml"

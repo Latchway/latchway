@@ -500,11 +500,16 @@ def require_text(path: Path, fragments: Iterable[str], code: str) -> Mapping[str
 def validate_cloud_run_terraform() -> Mapping[str, Any]:
     main = ROOT / "deploy/cloud-run/terraform/main.tf"
     variables = ROOT / "deploy/cloud-run/terraform/variables.tf"
+    versions = ROOT / "deploy/cloud-run/terraform/versions.tf"
     require_text(
         main,
         (
             'resource "google_cloud_run_v2_service" "main"',
             'resource "google_cloud_run_v2_job" "migrate"',
+            '"cloudresourcemanager.googleapis.com"',
+            '"iam.googleapis.com"',
+            'resource "google_service_account" "runtime"',
+            "depends_on = [google_project_service.required]",
             'args    = ["migrate", "up"]',
             'name  = "LATCHWAY_SHUTDOWN_TIMEOUT"',
             'value = "8s"',
@@ -512,18 +517,30 @@ def validate_cloud_run_terraform() -> Mapping[str, Any]:
             "var.inject_admin_bootstrap_token ? [1] : []",
             'path = "/readyz"',
             'path = "/healthz"',
+            "image   = var.service_image",
+            "image   = var.migration_image",
+            'revision = var.service_revision_name',
+            "percent  = var.service_traffic_percent",
+            'dynamic "traffic"',
+            "var.service_image == var.migration_approved_service_image",
         ),
         "cloud_run_terraform_incomplete",
     )
     require_text(
         variables,
         (
-            'regex("@sha256:[0-9a-f]{64}$", var.image)',
+            'regex("@sha256:[0-9a-f]{64}$", var.service_image)',
+            'regex("@sha256:[0-9a-f]{64}$", var.migration_image)',
+            'regex("@sha256:[0-9a-f]{64}$", var.migration_approved_service_image)',
+            'variable "service_revision_name"',
+            'variable "previous_service_revision_name"',
+            'variable "service_traffic_percent"',
             'variable "inject_admin_bootstrap_token"',
             'variable "migrate_on_start"',
         ),
         "cloud_run_variables_incomplete",
     )
+    require_text(versions, ('backend "gcs" {}',), "cloud_run_backend_incomplete")
     return {"terraform_files": len(list(main.parent.glob("*.tf")))}
 
 

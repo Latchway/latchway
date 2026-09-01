@@ -1,6 +1,8 @@
 locals {
   required_apis = toset([
+    "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
+    "iam.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
@@ -162,6 +164,8 @@ resource "google_secret_manager_secret_version" "admin_bootstrap" {
 resource "google_service_account" "runtime" {
   account_id   = "${var.service_name}-runtime"
   display_name = "Latchway Cloud Run runtime"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_project_iam_member" "cloud_sql_client" {
@@ -195,6 +199,7 @@ resource "google_cloud_run_v2_service" "main" {
   deletion_protection = false
 
   template {
+    revision                         = var.service_revision_name
     service_account                  = google_service_account.runtime.email
     timeout                          = "3600s"
     max_instance_request_concurrency = 100
@@ -211,7 +216,7 @@ resource "google_cloud_run_v2_service" "main" {
 
     containers {
       name    = "latchway"
-      image   = var.image
+      image   = var.service_image
       command = ["/latchway"]
       args    = ["serve", "--role", "all"]
 
@@ -317,14 +322,44 @@ resource "google_cloud_run_v2_service" "main" {
   }
 
   traffic {
-    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
-    percent = 100
+    type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+    revision = var.service_revision_name
+    percent  = var.service_traffic_percent
+    tag      = "candidate"
+  }
+
+  dynamic "traffic" {
+    for_each = var.previous_service_revision_name != null && var.service_traffic_percent < 100 ? [var.previous_service_revision_name] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = traffic.value
+      percent  = 100 - var.service_traffic_percent
+    }
   }
 
   depends_on = [
     google_project_iam_member.cloud_sql_client,
     google_secret_manager_secret_iam_member.runtime,
   ]
+
+  lifecycle {
+    precondition {
+      condition     = var.service_image == var.migration_approved_service_image
+      error_message = "service_image must equal the exact migration_approved_service_image before a revision can be created or receive traffic."
+    }
+    precondition {
+      condition     = startswith(var.service_revision_name, "${var.service_name}-")
+      error_message = "service_revision_name must start with the Cloud Run service name and a hyphen."
+    }
+    precondition {
+      condition     = var.previous_service_revision_name != null || var.service_traffic_percent == 100
+      error_message = "A candidate below 100 percent requires previous_service_revision_name to retain the remaining traffic."
+    }
+    precondition {
+      condition     = var.previous_service_revision_name == null || var.previous_service_revision_name != var.service_revision_name
+      error_message = "The previous and candidate Cloud Run revision names must differ."
+    }
+  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public" {
@@ -358,7 +393,7 @@ resource "google_cloud_run_v2_job" "migrate" {
       }
 
       containers {
-        image   = var.image
+        image   = var.migration_image
         command = ["/latchway"]
         args    = ["migrate", "up"]
 

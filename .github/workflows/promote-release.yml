@@ -508,6 +508,10 @@ jobs:
           echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
           echo "core_version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Verify the exact candidate image signature and provenance
         shell: bash
@@ -1258,6 +1262,10 @@ jobs:
           echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Promote only the verified index digest to stable OCI tags
         shell: bash
@@ -1804,11 +1812,14 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=docker.io/moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Verify both immutable and moving OCI coordinates before publication
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.validated.outputs.image }}
           INDEX_DIGEST: ${{ steps.validated.outputs.index_digest }}
           OCI_IMAGE_DIGEST: ${{ steps.validated.outputs.oci_image_digest }}
@@ -1817,6 +1828,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           test -z "${DOCKER_AUTH_CONFIG:-}"
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          public_docker_config=$(mktemp -d "$RUNNER_TEMP/latchway-public-docker.XXXXXX")
+          chmod 0700 "$public_docker_config"
+          printf '{"auths":{}}\n' > "$public_docker_config/config.json"
+          chmod 0600 "$public_docker_config/config.json"
+          export DOCKER_CONFIG="$public_docker_config"
+          jq --exit-status '. == {"auths":{}}' "$DOCKER_CONFIG/config.json" >/dev/null
           verify_coordinate() {
             local coordinate="$1" output="$2"
             docker buildx imagetools inspect --raw "$coordinate" > "$output"
@@ -1829,6 +1848,38 @@ jobs:
             verify_coordinate "$IMAGE:$major" "$RUNNER_TEMP/oci-major-publication.json"
             verify_coordinate "$IMAGE:latest" "$RUNNER_TEMP/oci-latest-publication.json"
           fi
+          candidate="$RUNNER_TEMP/promotion-handoff/release-assets/latchway-candidate.json"
+          for architecture in amd64 arm64; do
+            child_digest=$(jq --raw-output --arg platform "linux/$architecture" '.image.platforms[$platform]' "$candidate")
+            [[ "$child_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            reference="$IMAGE@$child_digest"
+            docker pull --platform "linux/$architecture" "$reference" >/dev/null
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$reference")" = "linux/$architecture"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$reference")" = "https://github.com/$GITHUB_REPOSITORY"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$reference")" = "$CANDIDATE_COMMIT"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$reference")" = "$VERSION"
+            docker image inspect --format '{{json .RepoDigests}}' "$reference" \
+              | jq --exit-status --arg reference "$reference" 'index($reference) != null' >/dev/null
+            docker image inspect --format '{{json .RootFS.Layers}}' "$reference" \
+              | jq --exit-status 'type == "array" and length > 0 and all(.[]; test("^sha256:[0-9a-f]{64}$"))' >/dev/null
+            gh attestation verify "oci://$reference" \
+              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners --bundle-from-oci \
+              --predicate-type https://spdx.dev/Document/v2.3 --format json \
+              > "$RUNNER_TEMP/$architecture-public-spdx.json"
+            jq --exit-status --slurpfile expected \
+              "$RUNNER_TEMP/promotion-handoff/release-assets/latchway-linux-$architecture.spdx.json" \
+              --arg digest "${child_digest#sha256:}" '
+              type == "array" and length >= 1 and
+              all(.[].verificationResult.statement;
+                .predicateType == "https://spdx.dev/Document/v2.3" and
+                any(.subject[]; .digest.sha256 == $digest)) and
+              any(.[].verificationResult.statement;
+                .predicateType == "https://spdx.dev/Document/v2.3" and
+                any(.subject[]; .digest.sha256 == $digest) and .predicate == $expected[0])
+            ' "$RUNNER_TEMP/$architecture-public-spdx.json" >/dev/null
+          done
           cosign verify \
             --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -1837,7 +1888,9 @@ jobs:
           gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+            --source-ref refs/heads/main --deny-self-hosted-runners --bundle-from-oci \
+            --predicate-type https://slsa.dev/provenance/v1 >/dev/null
+          jq --exit-status '. == {"auths":{}}' "$DOCKER_CONFIG/config.json" >/dev/null
       - name: Publish the immutable release record
         shell: bash
         env:

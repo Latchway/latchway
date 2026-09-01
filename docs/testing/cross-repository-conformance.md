@@ -13,10 +13,10 @@ The current source report covers a clean six-repository tuple. It binds core
 contract checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, reproducible
 bundle SHA-256
 `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`,
-JavaScript `182ff23d8365ae37f3e85dfc84485cc762295f67`, Swift
-`31a37ab7435cb01bb0a47262e4ab92e4f016a669`, Android
-`b16b2ac668f994c3a5aed60803b22c853a95e305`, React Native
-`d538752772d2d22ad16e0219c4f87dc014ef9c92`, the final canonical core commit,
+JavaScript `4b0626da478aa412daa07cc7bb595edfb53bf7c7`, Swift
+`aa182f766dc72d57f3915bd1c16678fe4f866ffe`, Android
+`ed1dc06134c5b7f37c03ff92405a5872a0f96457`, React Native
+`cc011841acc1be78022ef65a039d4aabf8a37b57`, the final canonical core commit,
 and its generated Mintlify mirror. Contract locks, fixtures, framework pins,
 SDK documentation bundles, generated public documentation, and mirror bytes
 are synchronized at exact commits.
@@ -31,9 +31,10 @@ Offline/local device build, install, and launch may proceed when it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.
 Starting or reusing ngrok, contacting a provider for device proof, collecting
 live App Attest evidence, or producing a protected device receipt requires the
-exact phrase `I authorize the scoped ngrok device proof.` That phrase has not
-been supplied for the current run. Physical Android verification was
-intentionally skipped because no Android device is available.
+exact phrase `I authorize the scoped ngrok device proof.` The phrase was
+supplied for a scoped run, but no tunnel, service, provider, App Attest, or
+protected-device evidence was started or collected under it. The operator then
+deferred App Intent/extension and physical Android/Google Play evidence.
 
 ## Evidence scopes
 
@@ -179,12 +180,15 @@ Repository tags and versions need not all be equal; they must equal the exact
 coordinates derived from the five local candidates. The repository and draft
 contract coordinates in this version-1 example use `1.0.0`.
 
-The lock's `core_commit` is the contract-source checkpoint, not a
-self-referential release-metadata commit. This permits the core completion
-report to record the exact later SDK commits while preserving an acyclic,
-verifiable chain: core contract checkpoint → SDK locks → final core release
-metadata. The final candidate must retain byte-identical `api/` sources and the
-same deterministic bundle hash from that checkpoint.
+For stable promotion, the lock's `core_commit` is a successor contract
+checkpoint whose manifest is already `released`, whose fresh `released_at` is
+inside the evidence window, and whose deterministic archive has been rebuilt.
+It is not the earlier draft checkpoint and not a self-referential final
+release-metadata commit. This preserves an acyclic chain: released contract
+checkpoint → successor SDK locks/changelogs → final core documentation and
+release-metadata candidate. The final candidate must retain byte-identical
+`api/` sources and the same deterministic bundle hash as that released
+checkpoint.
 
 Documents are accepted only when their timestamps are ordered, start on or
 after the contract's `released_at`, finish no later than the current time, and

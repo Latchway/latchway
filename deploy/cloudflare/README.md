@@ -54,7 +54,6 @@ the reviewed shape:
 pnpm release:config -- \
   --image registry.cloudflare.com/ACCOUNT/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
 pnpm release:dry-run
-pnpm release:deploy
 ```
 
 Retain the signed multi-architecture release index digest, its verified amd64
@@ -70,17 +69,40 @@ Latchway health endpoints, then exercise authenticated non-streaming and SSE
 requests against the exact deployed digest before recording the target as
 verified.
 
-Install secrets interactively. `LATCHWAY_PUBLIC_ORIGIN` must be the final HTTPS
-origin users will call, with no path, query, or fragment. Generate the master
-key once, store it outside Cloudflare as a recovery secret, and never rotate it
-by merely replacing the environment value.
+For a brand-new Worker, prepare a protected temporary JSON file containing the
+four required secrets. A new Worker cannot receive required secrets in advance
+with `wrangler secret put`; the first reviewed deployment must upload them
+atomically with `--secrets-file`. `LATCHWAY_PUBLIC_ORIGIN` must be the final
+HTTPS origin users will call, with no path, query, or fragment. Generate the
+master key once, store it outside Cloudflare as a recovery secret, and never
+rotate it by merely replacing the environment value.
 
 ```bash
-wrangler secret put LATCHWAY_DATABASE_URL
-wrangler secret put LATCHWAY_MASTER_KEY
-wrangler secret put LATCHWAY_PUBLIC_ORIGIN
-wrangler secret put LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+umask 077
+latchway_secrets_file=$(mktemp "${TMPDIR:-/tmp}/latchway-wrangler-secrets.json.XXXXXX")
+trap 'rm -f "$latchway_secrets_file"' EXIT
+"${EDITOR:-vi}" "$latchway_secrets_file"
+jq --exit-status '
+  (keys | sort) == [
+    "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN",
+    "LATCHWAY_DATABASE_URL",
+    "LATCHWAY_MASTER_KEY",
+    "LATCHWAY_PUBLIC_ORIGIN"
+  ] and all(.[]; type == "string" and length > 0)
+' "$latchway_secrets_file" >/dev/null
+pnpm exec wrangler deploy \
+  --config wrangler.release.jsonc \
+  --secrets-file "$latchway_secrets_file"
+rm -f "$latchway_secrets_file"
+unset latchway_secrets_file
+trap - EXIT
 ```
+
+For an existing Worker, `pnpm exec wrangler secret put NAME --config
+wrangler.release.jsonc` rotates one value. Every secret mutation creates and
+deploys a Worker version. Always bind the reviewed generated release config
+explicitly; using the checked-in development config can reactivate a Dockerfile
+build and bootstrap defaults.
 
 The database URL should use `sslmode=verify-full` when the provider exposes a
 trusted CA. Apply embedded forward migrations before a controlled upgrade:
@@ -97,18 +119,22 @@ migrations use a PostgreSQL advisory lock. Mature installations should run the
 explicit migration command, change it to `false`, and deploy by verified image
 digest.
 
-Deploy and create the first administrator. Then delete the bootstrap secret,
-remove its optional declaration from `secrets.required`, regenerate types,
-re-run the checks, and deploy that source change:
+Deploy and create the first administrator. Then generate the reviewed
+post-bootstrap configuration from the same release source and image. This mode
+sets startup migrations to false and omits the bootstrap binding without an ad
+hoc tracked-source edit. Deploy it before deleting the now-unreferenced secret:
 
 ```bash
-pnpm deploy
-wrangler secret delete LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
-# edit wrangler.jsonc, then:
-pnpm types
+pnpm release:config -- \
+  --image registry.cloudflare.com/ACCOUNT/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST \
+  --post-bootstrap
 pnpm check
-pnpm deploy
+pnpm release:deploy
+pnpm exec wrangler secret delete LATCHWAY_ADMIN_BOOTSTRAP_TOKEN --config wrangler.release.jsonc
 ```
+
+The delete deploys another Worker version, so it must use the post-bootstrap
+generated config shown above.
 
 The platform-only health endpoint is
 `/__latchway/cloudflare/healthz`. Use Latchway's forwarded `/healthz` for
@@ -126,7 +152,7 @@ authorize the bounded migration and graceful-stop evidence operations and is
 never written to the artifact:
 
 ```bash
-wrangler secret put LATCHWAY_EVIDENCE_TOKEN
+pnpm exec wrangler secret put LATCHWAY_EVIDENCE_TOKEN --config wrangler.release.jsonc
 ```
 
 Mirror the candidate's verified `linux/amd64` child into

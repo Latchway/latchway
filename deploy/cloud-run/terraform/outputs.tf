@@ -27,7 +27,28 @@ output "migration_job_resource_id" {
 }
 
 output "configured_image" {
-  value = var.image
+  description = "Compatibility alias for the application service image."
+  value       = var.service_image
+}
+
+output "configured_service_image" {
+  value = var.service_image
+}
+
+output "configured_migration_image" {
+  value = var.migration_image
+}
+
+output "configured_service_revision" {
+  value = var.service_revision_name
+}
+
+output "configured_previous_service_revision" {
+  value = var.previous_service_revision_name
+}
+
+output "configured_service_traffic_percent" {
+  value = var.service_traffic_percent
 }
 
 output "maximum_application_database_connections" {

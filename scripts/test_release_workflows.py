@@ -13,6 +13,15 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
+PINNED_BUILDX_VERSION = "v0.36.1"
+PINNED_BUILDKIT_IMAGE = (
+    "docker.io/moby/buildkit@"
+    "sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
+)
+PINNED_BINFMT_IMAGE = (
+    "docker.io/tonistiigi/binfmt@"
+    "sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+)
 
 
 def load_workflow(name: str) -> dict:
@@ -36,6 +45,119 @@ def all_steps(workflow: dict) -> list[dict]:
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_privileged_container_build_helpers_are_immutable(self) -> None:
+        buildx_steps = 0
+        qemu_steps = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            workflow = load_workflow(path.name)
+            for step in all_steps(workflow):
+                uses = step.get("uses", "")
+                if uses.startswith("docker/setup-buildx-action@"):
+                    buildx_steps += 1
+                    configuration = step.get("with", {})
+                    self.assertEqual(
+                        configuration.get("version"), PINNED_BUILDX_VERSION, path.name
+                    )
+                    self.assertEqual(
+                        configuration.get("driver-opts", "").splitlines(),
+                        [f"image={PINNED_BUILDKIT_IMAGE}"],
+                        path.name,
+                    )
+                if uses.startswith("docker/setup-qemu-action@"):
+                    qemu_steps += 1
+                    configuration = step.get("with", {})
+                    self.assertEqual(
+                        configuration.get("image"), PINNED_BINFMT_IMAGE, path.name
+                    )
+                    self.assertEqual(configuration.get("platforms"), "arm64", path.name)
+        self.assertGreaterEqual(buildx_steps, 1)
+        self.assertGreaterEqual(qemu_steps, 1)
+
+    def test_stable_ghcr_closure_verifies_referrers_and_anonymous_children(self) -> None:
+        producer = load_workflow("release-domain-observations.yml")
+        authority = producer["jobs"]["github_authority"]
+        self.assertEqual(authority["permissions"]["packages"], "read")
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in authority["steps"]
+            )
+        )
+        capture = next(
+            step
+            for step in authority["steps"]
+            if step.get("name")
+            == "Capture the fixed GitHub authority set without candidate code"
+        )["run"]
+        self.assertIn("--bundle-from-oci", capture)
+        self.assertIn("--predicate-type https://slsa.dev/provenance/v1", capture)
+        self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", capture)
+        self.assertIn('all(.[].verificationResult.statement;', capture)
+        self.assertIn('any(.[].verificationResult.statement;', capture)
+        self.assertIn('printf \'{\"auths\":{}}\\n\' > "$DOCKER_CONFIG/config.json"', capture)
+        self.assertIn(
+            'env -u GH_TOKEN -u GITHUB_TOKEN docker pull --platform "linux/$architecture"',
+            capture,
+        )
+        for binding in (
+            "org.opencontainers.image.source",
+            "org.opencontainers.image.revision",
+            "org.opencontainers.image.version",
+            ".RepoDigests",
+            ".RootFS.Layers",
+        ):
+            self.assertIn(binding, capture)
+        for relative in (
+            "public-registries/oci/cosign.json",
+            "public-registries/oci/index-$tag.json",
+            "public-registries/oci/child-$architecture.json",
+            "supply-chain/github-provenance.json",
+            "supply-chain/github-spdx-$architecture.json",
+        ):
+            self.assertIn(relative, capture)
+
+        observer_job = producer["jobs"]["observe_non_sdk"]
+        buildx = next(
+            step
+            for step in observer_job["steps"]
+            if step.get("uses", "").startswith("docker/setup-buildx-action@")
+        )
+        cosign = next(
+            step
+            for step in observer_job["steps"]
+            if step.get("uses", "").startswith("sigstore/cosign-installer@")
+        )
+        self.assertEqual(buildx["if"], "inputs.domain == 'supply_chain'")
+        self.assertEqual(cosign["if"], "inputs.domain == 'supply_chain'")
+        observer_text = (ROOT / "scripts/release-domain-observer.py").read_text(
+            encoding="utf-8"
+        )
+        public_registry_body = observer_text[
+            observer_text.index("    def observe_public_registries") :
+            observer_text.index('        javascript = self.identity["repositories"]["javascript"]')
+        ]
+        self.assertNotIn("_execute_command", public_registry_body)
+        self.assertNotIn('("docker", "buildx"', public_registry_body)
+        self.assertNotIn('("cosign", "verify"', public_registry_body)
+        self.assertIn("_github_authority_file", public_registry_body)
+        self.assertIn("_validate_public_child_inspection", public_registry_body)
+
+        promotion = load_workflow("promote-release.yml")
+        publisher = promotion["jobs"]["publish-github-release"]
+        self.assertNotIn("packages", publisher["permissions"])
+        public_step = next(
+            step
+            for step in publisher["steps"]
+            if step.get("name")
+            == "Verify both immutable and moving OCI coordinates before publication"
+        )["run"]
+        self.assertIn('export DOCKER_CONFIG="$public_docker_config"', public_step)
+        self.assertIn('docker pull --platform "linux/$architecture"', public_step)
+        self.assertIn("--bundle-from-oci", public_step)
+        self.assertIn("https://spdx.dev/Document/v2.3", public_step)
+        self.assertIn("https://slsa.dev/provenance/v1", public_step)
+        self.assertIn(".RootFS.Layers", public_step)
+
     def test_release_failure_workflow_runs_repo_owned_disposable_controller(self) -> None:
         workflow = load_workflow("release-failure-evidence.yml")
         serialized = (WORKFLOWS / "release-failure-evidence.yml").read_text(
@@ -122,6 +244,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "deployment-evidence.yml",
                 "finalize-release-record.yml",
                 "operational-resilience-evidence.yml",
+                "preview-image.yml",
                 "promote-release.yml",
                 "release-domain-evidence.yml",
                 "release-domain-observations.yml",
@@ -777,10 +900,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
             serialized_job = json.dumps(jobs[job_name], sort_keys=True)
             self.assertNotIn("scripts/release-domain-observer.py", serialized_job)
             self.assertNotIn("scripts/live-conformance.mjs", serialized_job)
-            self.assertEqual(
-                jobs[job_name]["permissions"],
-                {"actions": "read", "contents": "none"},
-            )
+        self.assertEqual(
+            jobs["live_provider_capture"]["permissions"],
+            {"actions": "read", "contents": "none"},
+        )
+        self.assertEqual(
+            jobs["github_authority"]["permissions"],
+            {"actions": "read", "contents": "none", "packages": "read"},
+        )
         for job_name in ("observe_non_sdk", "aggregate"):
             serialized_job = json.dumps(jobs[job_name], sort_keys=True)
             self.assertNotIn("secrets.", serialized_job, job_name)
@@ -923,9 +1050,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
             ),
             1,
         )
-        self.assertIn("(( file_count <= 535 ))", producer_text)
+        self.assertIn("(( file_count <= 542 ))", producer_text)
         self.assertIn(
-            "MAXIMUM_AUTHORITY_FILES = 534",
+            "MAXIMUM_AUTHORITY_FILES = 541",
             (ROOT / "scripts" / "release-domain-observer.py").read_text(
                 encoding="utf-8"
             ),

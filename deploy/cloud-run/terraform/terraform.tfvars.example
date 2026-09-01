@@ -1,7 +1,12 @@
 project_id    = "replace-with-project-id"
 region        = "asia-southeast1"
-image         = "ghcr.io/latchway/latchway@sha256:replace-with-verified-digest"
-public_origin = "https://ai.example.com"
+service_image                    = "ghcr.io/latchway/latchway@sha256:replace-with-current-service-digest"
+migration_image                  = "ghcr.io/latchway/latchway@sha256:replace-with-next-migration-digest"
+migration_approved_service_image = "ghcr.io/latchway/latchway@sha256:replace-with-current-service-digest"
+service_revision_name            = "latchway-release-id"
+previous_service_revision_name   = null
+service_traffic_percent          = 100
+public_origin                    = "https://ai.example.com"
 
 min_instances               = 1
 max_instances               = 10

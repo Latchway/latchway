@@ -8,6 +8,21 @@ release_image='ghcr.io/latchway/latchway@sha256:00000000000000000000000000000000
 python3 scripts/deployment-evidence.py static --output "$output"
 python3 -m unittest scripts/test_deployment_evidence.py
 
+for ignored in \
+  deploy/cloud-run/terraform/.terraform/provider \
+  deploy/cloud-run/terraform/terraform.tfstate \
+  deploy/cloud-run/terraform/terraform.tfstate.backup \
+  deploy/cloud-run/terraform/production.tfvars \
+  deploy/cloud-run/terraform/latchway.tfplan \
+  deploy/cloud-run/terraform/crash.log \
+  deploy/cloud-run/terraform/operator_override.tf; do
+  git check-ignore --quiet "$ignored"
+done
+if git check-ignore --quiet deploy/cloud-run/terraform/terraform.tfvars.example; then
+  echo "terraform.tfvars.example must remain tracked and reviewable" >&2
+  exit 1
+fi
+
 LATCHWAY_MASTER_KEY='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
   docker compose -f compose.yaml config --quiet
 

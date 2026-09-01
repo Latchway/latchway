@@ -197,7 +197,7 @@ func run(ctx context.Context, values options) error {
 	}
 	bootstrapToken := os.Getenv(values.bootstrapEnv)
 	adminPassword := os.Getenv(values.adminPasswordEnv)
-	if !validSecret(bootstrapToken, 32, 4096) || !validSecret(adminPassword, 12, 1024) {
+	if !validSecret(bootstrapToken, 32, 2048) || !validSecret(adminPassword, 12, 1024) {
 		return errors.New("isolated bootstrap token or owner password is empty or invalid")
 	}
 	if err := prepareOutputDir(values.outputDir); err != nil {

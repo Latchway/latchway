@@ -1,0 +1,244 @@
+---
+title: "Deploy to Cloudflare Containers"
+description: "Mirror the verified GHCR amd64 image into Cloudflare Registry and deploy the streaming Worker shim."
+icon: "cloud"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The Cloudflare deployment keeps authentication, attestation, routing, quota,
+secrets, and upstream access inside the standard Latchway container. A small
+Worker selects one of four container-backed Durable Objects and forwards the
+request and response without buffering.
+
+<Warning>
+  The stable `1.0.0` image has not been published yet. Do not replace the
+  placeholders on this page until the release page supplies the signed GHCR
+  index and `linux/amd64` child digests.
+</Warning>
+
+## Why the image is mirrored
+
+Cloudflare Containers supports Cloudflare Registry, Docker Hub, Amazon ECR,
+and Google Artifact Registry as prebuilt-image sources. It does not pull from
+GHCR directly. The release process therefore keeps
+`ghcr.io/latchway/latchway@sha256:...` as the canonical signed image and copies
+its verified `linux/amd64` child into `registry.cloudflare.com` without
+rebuilding it.
+
+The mirror is acceptable only when its OCI config digest and ordered layer
+descriptors match the canonical amd64 child. A matching version label or a
+successful start is not sufficient. See Cloudflare's
+[image management guide](https://developers.cloudflare.com/containers/guides/image-management/)
+for the supported registry flow.
+
+## Prerequisites
+
+- a Cloudflare account with Containers enabled;
+- Node.js 24 and pnpm 10;
+- the repository-pinned Wrangler 4 release;
+- Docker or a compatible client for the one-time GHCR pull and mirror push;
+- a publicly reachable PostgreSQL 15 or newer endpoint with TLS; and
+- the verified canonical OCI index and `linux/amd64` child digests.
+
+Cloudflare Containers executes `linux/amd64`. Pull the child digest, not the
+multi-architecture index, before mirroring.
+
+## Validate the deployment source
+
+```bash
+cd deploy/cloudflare
+pnpm install --frozen-lockfile
+pnpm types:check
+pnpm check
+pnpm deploy:dry-run
+```
+
+The checked-in `wrangler.jsonc` points to the repository Dockerfile so local
+source review works. A stable deployment must use the generated release config,
+which rejects mutable tags, direct GHCR references, and Dockerfile builds.
+
+## Mirror the exact amd64 child
+
+Substitute the release-provided digest and use a temporary local tag:
+
+```bash
+export LATCHWAY_AMD64_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_AMD64_CHILD_DIGEST'
+docker pull --platform linux/amd64 "$LATCHWAY_AMD64_IMAGE"
+docker tag "$LATCHWAY_AMD64_IMAGE" latchway:1.0.0-amd64
+pnpm exec wrangler containers push latchway:1.0.0-amd64
+```
+
+Wrangler returns a Cloudflare Registry URI. Resolve and record that image by
+digest; never put its tag-only form into the release configuration:
+
+```text
+registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+```
+
+Before deployment, inspect both manifests and require identical `config.digest`
+and ordered `layers[].digest` plus `layers[].size` values. Keep the canonical
+index digest, canonical amd64 child digest, and Cloudflare mirror digest in the
+deployment record. Do not treat the two manifest document hashes themselves as
+interchangeable: registries may serialize equivalent content differently.
+
+## Generate the immutable release config
+
+```bash
+pnpm release:config -- \
+  --image registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+pnpm release:dry-run
+```
+
+The generated `wrangler.release.jsonc` is ignored and mode-restricted. Review
+the dry-run output and confirm the container image is the expected mirror
+digest. Because it is a prebuilt registry image, Docker is not required for the
+deployment step itself.
+
+## Prepare first-deploy secrets
+
+A new Worker cannot receive required secrets in advance with `wrangler secret
+put`. Prepare one protected temporary JSON file and supply it to the first
+reviewed release deployment. Do not put secret values in shell arguments,
+history, the repository, or Terraform state:
+
+```bash
+umask 077
+latchway_secrets_file=$(mktemp "${TMPDIR:-/tmp}/latchway-wrangler-secrets.json.XXXXXX")
+trap 'rm -f "$latchway_secrets_file"' EXIT
+"${EDITOR:-vi}" "$latchway_secrets_file"
+jq --exit-status '
+  (keys | sort) == [
+    "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN",
+    "LATCHWAY_DATABASE_URL",
+    "LATCHWAY_MASTER_KEY",
+    "LATCHWAY_PUBLIC_ORIGIN"
+  ] and all(.[]; type == "string" and length > 0)
+' "$latchway_secrets_file" >/dev/null
+```
+
+Enter a JSON object containing exactly those four keys. The file is mode
+`0600`; keep the trap active until the first deployment completes. For an
+existing Worker, rotate one value with `pnpm exec wrangler secret put NAME
+--config wrangler.release.jsonc`. Each such mutation creates and deploys a
+Worker version, so the explicit immutable-image config is a security boundary.
+
+Requirements:
+
+- `LATCHWAY_DATABASE_URL` uses TLS; prefer `sslmode=verify-full` with a trusted
+  provider CA.
+- `LATCHWAY_MASTER_KEY` decodes to exactly 32 bytes and is escrowed outside
+  Cloudflare with the database recovery material.
+- `LATCHWAY_PUBLIC_ORIGIN` is the exact final HTTPS origin with no path, query,
+  or fragment.
+- `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` is 32–2048 bytes and exists only until
+  the first owner is created.
+
+The default four instances each use a five-connection PostgreSQL pool, for 20
+application connections. Reserve separate headroom for migrations,
+administration, backups, and maintenance before changing either limit.
+
+## Apply migrations
+
+Run migrations from the canonical signed image in a controlled job with the
+database secret injected by the execution environment:
+
+```bash
+docker run --rm \
+  -e LATCHWAY_DATABASE_URL \
+  ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST \
+  migrate up
+```
+
+Run `migrate status` with the same digest and accept the migration only when
+`current` equals `available`. The first deployment retains
+`LATCHWAY_MIGRATE_ON_START=true` as an advisory-lock-protected fallback. After
+bootstrap, set it to `false` and use explicit migrations for every upgrade.
+
+## Deploy and wait for rollout
+
+For the first deployment, atomically create the Worker and its required secrets
+with the reviewed generated config:
+
+```bash
+pnpm exec wrangler deploy \
+  --config wrangler.release.jsonc \
+  --secrets-file "$latchway_secrets_file"
+rm -f "$latchway_secrets_file"
+unset latchway_secrets_file
+trap - EXIT
+```
+
+For an existing Worker whose required secrets already exist, deploy without a
+secrets file:
+
+```bash
+pnpm release:deploy
+pnpm exec wrangler containers list
+```
+
+Cloudflare activates Worker code before the container rollout completes. These
+steps are not transactional, so the Worker URL can be live while the new
+container is still provisioning. Wait until the application and instances are
+active before testing or recording the deployment. Cloudflare documents this
+behavior in [Deploy Containers](https://developers.cloudflare.com/containers/guides/deploy/).
+
+Verify both platform and forwarded probes:
+
+```bash
+curl --fail --show-error https://ai.example.com/__latchway/cloudflare/healthz
+curl --fail --show-error https://ai.example.com/healthz
+curl --fail --show-error https://ai.example.com/readyz
+```
+
+Then run one authenticated non-streaming request and one SSE request against
+the public origin. The Worker must stream responses without buffering.
+
+## Remove bootstrap access
+
+After creating the first owner in the Console, generate the reviewed
+post-bootstrap configuration from the same release source and image. This mode
+sets `LATCHWAY_MIGRATE_ON_START` to `false` and omits the bootstrap binding
+without an ad hoc tracked-source edit. Deploy it first, then delete the
+now-unreferenced Worker secret.
+
+```bash
+pnpm release:config -- \
+  --image registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST \
+  --post-bootstrap
+pnpm check
+pnpm release:deploy
+pnpm exec wrangler secret delete LATCHWAY_ADMIN_BOOTSTRAP_TOKEN --config wrangler.release.jsonc
+```
+
+The delete also deploys a Worker version. Keeping the post-bootstrap config
+explicit prevents that operation from restoring the mutable development image,
+startup migrations, or the removed bootstrap binding.
+
+## Rollback and recovery
+
+The checked-in rollout advances 10%, 50%, then 100%. Wait for completion and
+prove readiness and SSE behavior at every release. Use `wrangler versions list`
+to identify a previous Worker version and `wrangler rollback VERSION_ID` for an
+application rollback. Database migrations are forward-only; schema rollback
+requires a tested backup and the matching master key.
+
+Container disk is ephemeral. PostgreSQL remains the only authoritative
+application state store. Never store recovery data inside the container or
+Durable Object filesystem.
+
+Complete [production readiness](/operations/production-readiness),
+[backup and restore](/operations/backup-restore), and
+[upgrades and rollback](/operations/upgrades) before promotion.
+
+## Release evidence boundary
+
+A successful `wrangler deploy` is deployment evidence, not release evidence.
+The protected release receipt must bind the canonical signed index, canonical
+amd64 child, content-equivalent mirror, active Cloudflare application and
+instances, migration status, secret names without values, health/readiness,
+SSE, SIGTERM replacement, and the exact immutable source coordinates.

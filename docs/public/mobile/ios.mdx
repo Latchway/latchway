@@ -62,15 +62,16 @@ device. A simulator or fixture cannot produce release evidence.
   the beta Xcode toolchain; the stable Xcode installation on the verification
   host lacks its required platform component.
 
-  Current React Native source
-  `d538752772d2d22ad16e0219c4f87dc014ef9c92` also integrates the native Swift
-  extension client into a Debug App Intent for one independently keyed
-  delegated request. Its local checks plus generic iOS and isolated
-  Debug/Release App Intent build gates pass; its development-signed app and
-  embedded extension also pass strict entitlement/provisioning verification,
-  installation, and launch on the connected iPad. The intent has not yet been
-  physically invoked and no new App Attest proof was collected. Its Release
-  target has no executable Latchway request path and fails closed.
+  React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
+  integrates the native Swift extension client into a Debug App Intent for one
+  independently keyed delegated request. Its Apple Development app and
+  embedded extension passed strict entitlement/provisioning,
+  registered-device install, and launch checks without new App Attest or App
+  Intent execution. Current `cc011841acc1be78022ef65a039d4aabf8a37b57`
+  adds release retry-closure and transition-order hardening and passes the
+  local plus generic iOS and isolated Debug/Release build gates; its physical
+  path was not rerun. The Release target has no executable Latchway request
+  path and fails closed. App Intent evidence is operator-deferred.
 </Info>
 
 The provider single-flights first-use key creation, persists a generated key

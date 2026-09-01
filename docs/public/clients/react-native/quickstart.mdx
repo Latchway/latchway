@@ -45,14 +45,16 @@ own component keys, DPoP, session rotation, and platform attestation.
   the prepublication integration path. Current evidence covers React Native
   commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` on a real iPad running
   iPadOS 26.5 in Debug configuration with automatic Apple Development signing.
-  Current source `d538752772d2d22ad16e0219c4f87dc014ef9c92` passes the full
-  local suite plus generic iOS and isolated Debug/Release App Intent build
-  gates. Its development-signed app and embedded extension also pass strict
-  entitlement/provisioning verification, installation, and launch on the
-  connected iPad. It adds a Debug native delegated-request path, but that
-  intent has not yet been physically invoked and no new App Attest proof was
-  collected. Android physical, protected extension-matrix, and protected
-  distribution evidence remain release gates.
+  Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` adds a Debug
+  native delegated-request path and passed strict Apple Development
+  root/extension entitlement/provisioning, registered-device install, and
+  launch checks without new App Attest or App Intent execution. Current source
+  `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and
+  transition-order hardening and passes the full local plus generic iOS
+  and isolated Debug/Release build gates; its physical path was not rerun.
+  Android physical, App Intent, and protected extension-matrix evidence are
+  operator-deferred release gates. Protected Apple distribution evidence
+  remains open and is not claimed as deferred.
 </Warning>
 
 ### Use one public coordinate set on both hosts

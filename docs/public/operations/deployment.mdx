@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
@@ -82,6 +82,13 @@ The core source candidate contains Compose, Terraform, Cloud Run YAML,
 Fly, and Cloudflare assets that pass repository-local static validation. That
 is source evidence only; it is not an independent deployment review or proof
 that an operator account deployed them.
+
+For a complete provider walkthrough, use [Google Cloud Run](/operations/deploy-google-cloud-run)
+or [Cloudflare Containers](/operations/deploy-cloudflare-containers). Both
+guides preserve GHCR as the canonical release registry. Cloud Run can import the
+public GHCR image directly. Cloudflare cannot pull from GHCR, so its guide
+mirrors the verified `linux/amd64` child into Cloudflare Registry without
+rebuilding it.
 
 For the current source checkpoint, the PostgreSQL image reference is
 `docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2`.

@@ -5,7 +5,9 @@ the original A-to-Z plan with the framework-integration, Installation Family,
 Admin Console, and Mintlify addenda. The version 1 API contract is frozen at
 the contract checkpoint below; the runtime and control-plane implementation is
 the named contract-preserving descendant. Every SDK is bound to the frozen
-contract, and its complete local release gates pass. Canonical SDK documentation
+draft contract and its source/check gates pass. Stable release preflights remain
+closed until coordinated released locks and changelogs replace the draft
+coordinates. Canonical SDK documentation
 bundles are imported into this source tree; the generated
 Mintlify mirror and the final clean source-conformance report bind the commit
 containing this ledger. Release promotion remains blocked on protected
@@ -38,14 +40,14 @@ mirror.
 | Contract source checkpoint | Core checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
 | Bundle SHA-256 | `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Core implementation checkpoint | `77069816dd68174052e7ebc163911883f8f07e7e`; the final canonical-doc commit is a contract-preserving descendant |
+| Core implementation checkpoint | Contract/runtime checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; the final canonical-doc commit is an API-preserving descendant |
 | Canonical SDK-bundle/public-doc source | The core commit containing this ledger; its generated mirror manifest records the exact source commit |
-| Database | Schema `27` at the implementation checkpoint above |
+| Database | Schema `28` at `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `182ff23d8365ae37f3e85dfc84485cc762295f67` |
-| Swift source | `31a37ab7435cb01bb0a47262e4ab92e4f016a669` |
-| Android source | `b16b2ac668f994c3a5aed60803b22c853a95e305` |
-| React Native source | `d538752772d2d22ad16e0219c4f87dc014ef9c92` |
+| JavaScript source | `4b0626da478aa412daa07cc7bb595edfb53bf7c7` |
+| Swift source | `aa182f766dc72d57f3915bd1c16678fe4f866ffe` |
+| Android source | `ed1dc06134c5b7f37c03ff92405a5872a0f96457` |
+| React Native source | `cc011841acc1be78022ef65a039d4aabf8a37b57` |
 | Mintlify mirror source | Generated from the final canonical core commit; the source-conformance report records the exact mirror commit |
 | Release state | `unreleased`; local source convergence only, with no version 1 tag, release, package, image, or production deployment |
 
@@ -256,12 +258,12 @@ to apply to supported Android application trust surfaces.
   mirror drift.
 - [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
   verifiable-language rules.
-- [x] Pass the local 226-page Mintlify validation suite.
+- [x] Pass the local 228-page Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `182ff23d8365ae37f3e85dfc84485cc762295f67`, Swift
-  `31a37ab7435cb01bb0a47262e4ab92e4f016a669`, Android
-  `b16b2ac668f994c3a5aed60803b22c853a95e305`, and React Native
-  `d538752772d2d22ad16e0219c4f87dc014ef9c92`.
+  `4b0626da478aa412daa07cc7bb595edfb53bf7c7`, Swift
+  `aa182f766dc72d57f3915bd1c16678fe4f866ffe`, Android
+  `ed1dc06134c5b7f37c03ff92405a5872a0f96457`, and React Native
+  `cc011841acc1be78022ef65a039d4aabf8a37b57`.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
@@ -294,10 +296,22 @@ complete; protected execution open
 - [x] Prepare the six authorized branch histories for audited non-force
   delivery; record synchronization outside this source plan and do not infer a
   merge, tag, release, deployment, or publication from a branch push.
+- [ ] Prepare the stable successor source tuple before candidate production:
+  create the released contract checkpoint with a fresh `released_at`, promote
+  the core binary metadata and changelog to `1.0.0`, regenerate the contract
+  bundle, update the JavaScript/iOS/Android locks and final changelogs, update
+  the React Native dependency pins and final changelog, rebuild and import all
+  SDK documentation bundles, synchronize the Mintlify mirror, and rerun clean
+  cross-repository source conformance. The current draft/RC tuple cannot enter
+  the protected release-candidate workflow.
 - [ ] Build and observe one final immutable multi-architecture image in the
   protected registry and run all external domains against its exact digests.
-- [ ] Publish signed tags, GitHub releases, OCI image, packages, and docs only
-  after the release finalizer accepts every domain.
+- [ ] Produce the protected prepublication promotion record, then publish the
+  immutable product tag, GHCR image, SDK packages, and their GitHub releases
+  while the completion record remains `release_ready: false`.
+- [ ] Run clean public-consumer and registry conformance, close every domain in
+  the post-publication finalizer, and only then publish final completion
+  evidence and release-qualified documentation claims.
 
 ## Version 1 Definition of Done
 
@@ -318,13 +332,21 @@ candidate also has protected evidence for:
 ## Promotion rule
 
 No source edit, local test, manually written receipt, prior-candidate result, or
-version string may substitute for protected exact-candidate evidence. The draft
-coordinate stays unreleased and no `v1.0.0` tag or public package is authorized
-until the finalizer closes every applicable domain without skips or drift.
+version string may substitute for protected exact-candidate evidence. The
+prepublication promotion record must accept every gate that can be evaluated
+before registry mutation before an immutable `v1.0.0` product tag, GHCR image,
+or SDK package is published. Those artifacts are publicly published but are not
+release-qualified, and the completion record remains `release_ready: false`,
+while clean public consumers and registry bytes are verified. Only the
+post-publication finalizer may close every domain and authorize final evidence
+plus release-qualified claims.
 
 Offline/local device build, install, and launch may proceed when it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.
-Any scoped ngrok/provider/App Attest device proof requires the exact phrase
-`I authorize the scoped ngrok device proof.` That phrase has not been supplied
-for the current run. Physical Android verification is intentionally deferred
-because no Android device is available.
+The operator supplied the scoped ngrok authorization, but no tunnel, service,
+provider, App Attest, or protected-device evidence was started or collected
+under that authorization. App Intent/extension invocation and physical
+Android/Google Play evidence are explicitly deferred for later operator
+submission. Apple distribution-derived proof remains open but was not
+explicitly deferred; none of these gates may be inferred from local builds or
+earlier observations.

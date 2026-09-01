@@ -123,7 +123,12 @@ CLAIM_REQUIREMENTS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
             "supply.license.amd64",
             "supply.license.arm64",
         ),
-        "sbom_verified": ("supply.sbom.amd64", "supply.sbom.arm64"),
+        "sbom_verified": (
+            "supply.sbom.amd64",
+            "supply.sbom.arm64",
+            "supply.github-spdx.amd64",
+            "supply.github-spdx.arm64",
+        ),
         "signature_verified": ("supply.cosign-signature",),
         "provenance_verified": ("supply.github-provenance",),
     },
@@ -174,6 +179,8 @@ OBSERVATION_TOOLS: Mapping[str, str] = {
     "supply.license.arm64": "candidate-trivy-report-validator",
     "supply.sbom.amd64": "candidate-spdx-report-validator",
     "supply.sbom.arm64": "candidate-spdx-report-validator",
+    "supply.github-spdx.amd64": "github-attestation",
+    "supply.github-spdx.arm64": "github-attestation",
     "supply.cosign-signature": "cosign",
     "supply.github-provenance": "github-attestation",
     **{

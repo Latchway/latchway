@@ -50,15 +50,17 @@ are development-only and must not appear in a published package.
   same-key assertion, Secure Enclave DPoP, upstream non-streaming and streaming
   requests, quota, typed component denial, bridge behavior, and cleanup passed
   against the current source gateway. This is development-signed iOS evidence,
-  not an Apple distribution-derived protected release receipt. Current React
-  Native source `d538752772d2d22ad16e0219c4f87dc014ef9c92` adds root-owned
-  component lifecycle and the Debug native App Intent path; its full local
-  check plus generic iOS and isolated Debug/Release App Intent build gates
-  pass. The development-signed app and embedded extension also pass strict
-  entitlement/provisioning verification, installation, and launch on the
-  connected iPad, but that intent has not yet been physically invoked and no
-  new App Attest proof was collected. Android and the protected extension
-  runtime matrix remain open.
+  not an Apple distribution-derived protected release receipt. React Native
+  predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` adds root-owned
+  component lifecycle and the Debug native App Intent path. Its Apple
+  Development app and embedded extension passed strict
+  entitlement/provisioning, registered-device install, and launch checks
+  without new App Attest or App Intent execution. Current
+  `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and
+  transition-order hardening and passes the full local plus generic iOS
+  and isolated Debug/Release build gates; its physical path was not rerun.
+  Android, App Intent, and the protected extension runtime matrix remain
+  operator-deferred release gates.
 </Info>
 
 ## Create a client
