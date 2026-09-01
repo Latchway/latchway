@@ -8,8 +8,10 @@ const DEFAULT_SOURCE = resolve(DEPLOYMENT_DIRECTORY, "wrangler.jsonc");
 const DEFAULT_OUTPUT = resolve(DEPLOYMENT_DIRECTORY, "wrangler.release.jsonc");
 const DIGEST_REFERENCE =
   /^(?<host>[a-z0-9.-]+)\/(?<path>[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*)@sha256:(?<digest>[a-f0-9]{64})$/;
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const SOURCE_IMAGE_BLOCK =
   '      "image": "../../Dockerfile",\n      "image_build_context": "../..",';
+const SOURCE_CONTAINERS_BLOCK = '  "containers": [';
 const SOURCE_MIGRATION_SETTING =
   '    "LATCHWAY_MIGRATE_ON_START": "true",';
 const SOURCE_BOOTSTRAP_SECRET =
@@ -54,6 +56,44 @@ export function validateImmutableImageReference(image) {
   return image;
 }
 
+export function validateCustomDomain(domain) {
+  if (
+    typeof domain !== "string" ||
+    domain.length > 253 ||
+    domain !== domain.toLowerCase() ||
+    domain.includes("*")
+  ) {
+    throw new Error(
+      "domain must be one lowercase DNS hostname without a wildcard",
+    );
+  }
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => !DNS_LABEL.test(label))) {
+    throw new Error(
+      "domain must be one lowercase DNS hostname without a wildcard",
+    );
+  }
+  return domain;
+}
+
+function releaseCustomDomain(source) {
+  const routeKeys = source.match(/"routes"\s*:/g) ?? [];
+  const matches = [
+    ...source.matchAll(
+      /"routes"\s*:\s*\[\s*\{\s*"pattern"\s*:\s*"([^"]+)"\s*,\s*"custom_domain"\s*:\s*true\s*\}\s*\]/g,
+    ),
+  ];
+  const customDomainFlags = source.match(/"custom_domain"\s*:\s*true/g) ?? [];
+  if (
+    routeKeys.length !== 1 ||
+    matches.length !== 1 ||
+    customDomainFlags.length !== 1
+  ) {
+    throw new Error("release configuration must contain exactly one custom domain");
+  }
+  return validateCustomDomain(matches[0][1]);
+}
+
 export function releaseConfigurationMode(source) {
   const migrationTrue = (source.match(
     /"LATCHWAY_MIGRATE_ON_START"\s*:\s*"true"/g,
@@ -73,13 +113,24 @@ export function releaseConfigurationMode(source) {
   throw new Error("release configuration bootstrap lifecycle is incoherent");
 }
 
-export function generateReleaseConfig(source, image, { postBootstrap = false } = {}) {
+export function generateReleaseConfig(
+  source,
+  image,
+  { postBootstrap = false, domain } = {},
+) {
   validateImmutableImageReference(image);
+  validateCustomDomain(domain);
   let generated = replaceExactlyOnce(
     source,
     SOURCE_IMAGE_BLOCK,
     `      "image": "${image}",`,
     "source Wrangler container image block",
+  );
+  generated = replaceExactlyOnce(
+    generated,
+    SOURCE_CONTAINERS_BLOCK,
+    `  "routes": [\n    {\n      "pattern": "${domain}",\n      "custom_domain": true\n    }\n  ],\n\n${SOURCE_CONTAINERS_BLOCK}`,
+    "source Wrangler containers block",
   );
   if (postBootstrap) {
     generated = replaceExactlyOnce(
@@ -110,8 +161,25 @@ export function validateReleaseConfig(source) {
   if (matches.length !== 1 || matches[0]?.[1] === undefined) {
     throw new Error("release configuration must contain exactly one image");
   }
+  releaseCustomDomain(source);
   releaseConfigurationMode(source);
   return validateImmutableImageReference(matches[0][1]);
+}
+
+export function validateGeneratedReleaseConfig(source, reviewedSource) {
+  const image = validateReleaseConfig(source);
+  const domain = releaseCustomDomain(source);
+  const mode = releaseConfigurationMode(source);
+  const expected = generateReleaseConfig(reviewedSource, image, {
+    domain,
+    postBootstrap: mode === "post-bootstrap",
+  });
+  if (source !== expected) {
+    throw new Error(
+      "release configuration must exactly match deterministic generation from the reviewed source",
+    );
+  }
+  return { domain, image, mode };
 }
 
 export function parseArguments(arguments_) {
@@ -122,12 +190,16 @@ export function parseArguments(arguments_) {
     return { check: resolve(arguments_[1]) };
   }
   let image;
+  let domain;
   let output = DEFAULT_OUTPUT;
   let postBootstrap = false;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--image" && index + 1 < arguments_.length) {
       image = arguments_[index + 1];
+      index += 1;
+    } else if (argument === "--domain" && index + 1 < arguments_.length) {
+      domain = arguments_[index + 1];
       index += 1;
     } else if (argument === "--output" && index + 1 < arguments_.length) {
       output = resolve(arguments_[index + 1]);
@@ -136,14 +208,18 @@ export function parseArguments(arguments_) {
       postBootstrap = true;
     } else {
       throw new Error(
-        "usage: prepare-release-config.mjs --image IMAGE [--post-bootstrap] [--output FILE] | --check FILE",
+        "usage: prepare-release-config.mjs --image IMAGE --domain DOMAIN [--post-bootstrap] [--output FILE] | --check FILE",
       );
     }
   }
   if (image === undefined) {
     throw new Error("--image is required");
   }
-  return { image, output, postBootstrap };
+  if (domain === undefined) {
+    throw new Error("--domain is required");
+  }
+  validateCustomDomain(domain);
+  return { image, domain, output, postBootstrap };
 }
 
 async function refuseSymlink(path) {
@@ -160,14 +236,23 @@ async function refuseSymlink(path) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.check !== undefined) {
-    const image = validateReleaseConfig(await readFile(options.check, "utf8"));
-    process.stdout.write(`validated immutable Cloudflare image ${image}\n`);
+    await refuseSymlink(options.check);
+    const source = await readFile(options.check, "utf8");
+    const reviewedSource = await readFile(DEFAULT_SOURCE, "utf8");
+    const { domain, image } = validateGeneratedReleaseConfig(
+      source,
+      reviewedSource,
+    );
+    process.stdout.write(
+      `validated immutable Cloudflare image ${image} on ${domain}\n`,
+    );
     return;
   }
 
   await refuseSymlink(options.output);
   const source = await readFile(DEFAULT_SOURCE, "utf8");
   const generated = generateReleaseConfig(source, options.image, {
+    domain: options.domain,
     postBootstrap: options.postBootstrap,
   });
   const temporary = `${options.output}.tmp-${process.pid}`;

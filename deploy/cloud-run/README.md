@@ -41,6 +41,32 @@ allows unauthenticated Cloud Run ingress because Latchway performs its own
 session and DPoP authorization; use an external load balancer or Cloud Armor if
 additional edge policy is required.
 
+The stack does not provision a custom-domain frontend. For production, bind
+`public_origin` through Google's recommended global external Application Load
+Balancer with a serverless NEG, managed certificate, and final DNS record. Keep
+buffering and caching disabled for API and SSE paths. Native Cloud Run domain
+mapping remains limited-availability Preview and is not production-ready; use
+it only for evaluation after reviewing Google's current region and TLS
+limitations:
+
+```bash
+gcloud domains list-user-verified
+gcloud domains verify example.com
+gcloud beta run domain-mappings create \
+  --service latchway \
+  --domain ai.example.com \
+  --project PROJECT_ID \
+  --region REGION
+gcloud beta run domain-mappings describe \
+  --domain ai.example.com \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='yaml(status,resourceRecords)'
+```
+
+Add the returned `resourceRecords` at the authoritative DNS provider and wait
+for the managed certificate before using that origin.
+
 The first deployment permits advisory-lock-protected startup migrations. Once
 the service is healthy, execute the one-shot job shown by
 `terraform output -raw migration_command`, then execute that job with the
@@ -76,6 +102,28 @@ configuration, master/signing keys, and worker heartbeat.
 Cloud Run allows ten seconds between SIGTERM and forced termination; this
 template gives the application eight seconds to drain so the process can exit
 before the platform deadline.
+
+Verify the ready revision resolved the configured immutable image before
+accepting traffic:
+
+```bash
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+latchway_revision=$(gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(status.latestReadyRevisionName)')
+test -n "$latchway_revision"
+latchway_configured_image=$(gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(spec.template.spec.containers[0].image)')
+test "$latchway_configured_image" = "$LATCHWAY_IMAGE"
+latchway_resolved_digest=$(gcloud run revisions describe "$latchway_revision" \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(status.imageDigest)')
+test "$latchway_resolved_digest" = "${LATCHWAY_IMAGE##*@}"
+```
 
 ## Connection budget
 

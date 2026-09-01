@@ -164,6 +164,43 @@ terraform output -raw configured_service_revision
 terraform output -raw maximum_application_database_connections
 ```
 
+## Bind the public origin
+
+The checked-in Terraform stack intentionally stops at the Cloud Run service; it
+does not create a DNS name, certificate, or domain frontend. Bind the exact
+hostname used by `public_origin` before creating the first owner.
+
+For production, use Google's recommended
+[global external Application Load Balancer](https://docs.cloud.google.com/run/docs/mapping-custom-domains)
+with a serverless NEG, managed certificate, and the final DNS record. Keep
+response buffering and CDN caching disabled for Latchway API and SSE paths. If
+your platform stack restricts ingress to the load balancer, apply that policy as
+an explicitly reviewed change to the checked-in `INGRESS_TRAFFIC_ALL` setting.
+
+Native Cloud Run domain mapping is limited-availability Preview, is not
+production-ready, and is available only in selected regions. It is suitable for
+an evaluation deployment when those constraints are acceptable:
+
+```bash
+gcloud domains list-user-verified
+gcloud domains verify example.com
+gcloud beta run domain-mappings create \
+  --service latchway \
+  --domain ai.example.com \
+  --project PROJECT_ID \
+  --region REGION
+gcloud beta run domain-mappings describe \
+  --domain ai.example.com \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='yaml(status,resourceRecords)'
+```
+
+Add every returned `resourceRecords` entry at the authoritative DNS provider,
+wait for the managed certificate, and do not continue until
+`https://ai.example.com/readyz` succeeds. See Google's current
+[Cloud Run domain-mapping limitations](https://docs.cloud.google.com/run/docs/mapping-custom-domains).
+
 ## Create the first owner
 
 Terraform creates a random one-use administrator bootstrap token and grants the
@@ -256,16 +293,30 @@ unready deployment, not a successful rollout.
 Also verify the provider-resolved image and revision:
 
 ```bash
-gcloud run services describe latchway \
+latchway_revision=$(gcloud run services describe latchway \
   --project PROJECT_ID \
   --region REGION \
-  --format=json
+  --format='value(status.latestReadyRevisionName)')
+test -n "$latchway_revision"
+
+latchway_configured_image=$(gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(spec.template.spec.containers[0].image)')
+test "$latchway_configured_image" = "$LATCHWAY_IMAGE"
+
+latchway_resolved_digest=$(gcloud run revisions describe "$latchway_revision" \
+  --project PROJECT_ID \
+  --region REGION \
+  --format='value(status.imageDigest)')
+test "$latchway_resolved_digest" = "${LATCHWAY_IMAGE##*@}"
 ```
 
-Confirm the revision resolves to the intended digest, then exercise one
-authenticated non-streaming request and one SSE request. Cloud Run's template
-uses a 60-minute request timeout; clients must reconnect before that boundary.
-Do not enable response buffering at a load balancer or CDN.
+These assertions prove both the configured immutable reference and the digest
+that Cloud Run resolved for the ready revision. Then exercise one authenticated
+non-streaming request and one SSE request. Cloud Run's template uses a
+60-minute request timeout; clients must reconnect before that boundary. Do not
+enable response buffering at a load balancer or CDN.
 
 ## Operate and recover
 

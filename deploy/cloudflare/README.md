@@ -15,7 +15,9 @@ platforms.
 
 - Node.js 24 and pnpm 10
 - Wrangler 4 authenticated to a Containers-enabled Cloudflare account
-- Docker for local container builds
+- Docker Buildx, `jq`, and `sha256sum` for image mirroring and verification
+- an active Cloudflare DNS zone for the final hostname, with no existing CNAME
+  at that hostname
 - a publicly reachable PostgreSQL 15+ database with TLS enforced
 
 The four container instances are each limited to five PostgreSQL connections,
@@ -45,16 +47,72 @@ is not a direct source. If the canonical release is only in GHCR, copy its
 verified amd64 manifest into Cloudflare Registry without rebuilding it and
 verify that the source and mirror config/layer digests match.
 
+```bash
+set -Eeuo pipefail
+umask 077
+export LATCHWAY_AMD64_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_AMD64_CHILD_DIGEST'
+docker pull --platform linux/amd64 "$LATCHWAY_AMD64_IMAGE"
+docker tag "$LATCHWAY_AMD64_IMAGE" latchway:1.0.0-amd64
+pnpm exec wrangler containers push latchway:1.0.0-amd64
+
+export LATCHWAY_CLOUDFLARE_TAG='registry.cloudflare.com/ACCOUNT_ID/latchway:1.0.0-amd64'
+latchway_manifest_dir=$(mktemp -d "${TMPDIR:-/tmp}/latchway-manifests.XXXXXX")
+install -d -m 0700 "$latchway_manifest_dir/docker-config"
+trap 'rm -rf "$latchway_manifest_dir"' EXIT HUP INT TERM
+pnpm exec wrangler containers registries credentials registry.cloudflare.com \
+  --pull --expiration-minutes 15 --json \
+  > "$latchway_manifest_dir/cloudflare-registry-credentials.json"
+latchway_registry_username=$(jq -er '.username | select(type == "string" and length > 0)' \
+  "$latchway_manifest_dir/cloudflare-registry-credentials.json")
+jq -er '.password | select(type == "string" and length > 0)' \
+  "$latchway_manifest_dir/cloudflare-registry-credentials.json" \
+  | docker --config "$latchway_manifest_dir/docker-config" \
+      login registry.cloudflare.com \
+      --username "$latchway_registry_username" --password-stdin
+docker --config "$latchway_manifest_dir/docker-config" \
+  buildx imagetools inspect --raw "$LATCHWAY_AMD64_IMAGE" \
+  > "$latchway_manifest_dir/canonical.json"
+docker --config "$latchway_manifest_dir/docker-config" \
+  buildx imagetools inspect --raw "$LATCHWAY_CLOUDFLARE_TAG" \
+  > "$latchway_manifest_dir/mirror.json"
+latchway_canonical_digest="sha256:$(sha256sum \
+  "$latchway_manifest_dir/canonical.json" | awk '{print $1}')"
+latchway_mirror_digest="sha256:$(sha256sum \
+  "$latchway_manifest_dir/mirror.json" | awk '{print $1}')"
+test "$latchway_canonical_digest" = "${LATCHWAY_AMD64_IMAGE##*@}"
+jq -S '{config_digest:.config.digest,layers:[.layers[]|{digest,size}]}' \
+  "$latchway_manifest_dir/canonical.json" \
+  > "$latchway_manifest_dir/canonical-descriptors.json"
+jq -S '{config_digest:.config.digest,layers:[.layers[]|{digest,size}]}' \
+  "$latchway_manifest_dir/mirror.json" \
+  > "$latchway_manifest_dir/mirror-descriptors.json"
+cmp "$latchway_manifest_dir/canonical-descriptors.json" \
+  "$latchway_manifest_dir/mirror-descriptors.json"
+export LATCHWAY_CLOUDFLARE_IMAGE="${LATCHWAY_CLOUDFLARE_TAG%:*}@$latchway_mirror_digest"
+rm -rf "$latchway_manifest_dir"
+trap - EXIT HUP INT TERM
+unset latchway_manifest_dir latchway_registry_username
+```
+
 Generate the ignored production-only configuration from an immutable mirror
 digest. The generator rejects tag-only references, unsupported registries,
 GHCR, a mutable Dockerfile build, and a source template that has drifted from
-the reviewed shape:
+the reviewed shape. It also requires one exact, lowercase, non-wildcard Custom
+Domain:
 
 ```bash
+export LATCHWAY_DOMAIN='ai.example.com'
 pnpm release:config -- \
-  --image registry.cloudflare.com/ACCOUNT/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+  --image "$LATCHWAY_CLOUDFLARE_IMAGE" \
+  --domain "$LATCHWAY_DOMAIN"
 pnpm release:dry-run
 ```
+
+The generated config retains the exact Custom Domain on every deploy.
+Cloudflare creates its DNS record and manages the certificate. The hostname
+must belong to an active zone and must not already have a CNAME. The deploy
+command byte-compares the ignored config with deterministic regeneration from
+the reviewed source, so comments, extra routes, and manual edits fail closed.
 
 Retain the signed multi-architecture release index digest, its verified amd64
 child digest, and the content-equivalent mirror digest in deployment evidence.
@@ -126,7 +184,8 @@ hoc tracked-source edit. Deploy it before deleting the now-unreferenced secret:
 
 ```bash
 pnpm release:config -- \
-  --image registry.cloudflare.com/ACCOUNT/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST \
+  --image "$LATCHWAY_CLOUDFLARE_IMAGE" \
+  --domain "$LATCHWAY_DOMAIN" \
   --post-bootstrap
 pnpm check
 pnpm release:deploy

@@ -41,7 +41,10 @@ for the supported registry flow.
 - a Cloudflare account with Containers enabled;
 - Node.js 24 and pnpm 10;
 - the repository-pinned Wrangler 4 release;
-- Docker or a compatible client for the one-time GHCR pull and mirror push;
+- Docker Buildx, `jq`, and `sha256sum` for the one-time GHCR pull, mirror push,
+  and manifest comparison;
+- an active Cloudflare DNS zone for the final hostname, with no existing CNAME
+  at that hostname;
 - a publicly reachable PostgreSQL 15 or newer endpoint with TLS; and
 - the verified canonical OCI index and `linux/amd64` child digests.
 
@@ -61,6 +64,7 @@ pnpm deploy:dry-run
 The checked-in `wrangler.jsonc` points to the repository Dockerfile so local
 source review works. A stable deployment must use the generated release config,
 which rejects mutable tags, direct GHCR references, and Dockerfile builds.
+It also requires one exact, lowercase, non-wildcard Custom Domain.
 
 ## Mirror the exact amd64 child
 
@@ -74,30 +78,85 @@ pnpm exec wrangler containers push latchway:1.0.0-amd64
 ```
 
 Wrangler returns a Cloudflare Registry URI. Resolve and record that image by
-digest; never put its tag-only form into the release configuration:
+digest; never put its tag-only form into the release configuration. Export the
+exact URI printed by Wrangler, obtain a 15-minute pull credential, and compare
+the two raw manifests:
 
-```text
-registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+```bash
+set -Eeuo pipefail
+umask 077
+export LATCHWAY_CLOUDFLARE_TAG='registry.cloudflare.com/ACCOUNT_ID/latchway:1.0.0-amd64'
+latchway_manifest_dir=$(mktemp -d "${TMPDIR:-/tmp}/latchway-manifests.XXXXXX")
+install -d -m 0700 "$latchway_manifest_dir/docker-config"
+trap 'rm -rf "$latchway_manifest_dir"' EXIT HUP INT TERM
+
+pnpm exec wrangler containers registries credentials registry.cloudflare.com \
+  --pull \
+  --expiration-minutes 15 \
+  --json > "$latchway_manifest_dir/cloudflare-registry-credentials.json"
+latchway_registry_username=$(jq -er '.username | select(type == "string" and length > 0)' \
+  "$latchway_manifest_dir/cloudflare-registry-credentials.json")
+jq -er '.password | select(type == "string" and length > 0)' \
+  "$latchway_manifest_dir/cloudflare-registry-credentials.json" \
+  | docker --config "$latchway_manifest_dir/docker-config" \
+      login registry.cloudflare.com \
+      --username "$latchway_registry_username" \
+      --password-stdin
+
+docker --config "$latchway_manifest_dir/docker-config" \
+  buildx imagetools inspect --raw "$LATCHWAY_AMD64_IMAGE" \
+  > "$latchway_manifest_dir/canonical.json"
+docker --config "$latchway_manifest_dir/docker-config" \
+  buildx imagetools inspect --raw "$LATCHWAY_CLOUDFLARE_TAG" \
+  > "$latchway_manifest_dir/mirror.json"
+
+latchway_canonical_digest="sha256:$(sha256sum \
+  "$latchway_manifest_dir/canonical.json" | awk '{print $1}')"
+latchway_mirror_digest="sha256:$(sha256sum \
+  "$latchway_manifest_dir/mirror.json" | awk '{print $1}')"
+test "$latchway_canonical_digest" = "${LATCHWAY_AMD64_IMAGE##*@}"
+
+jq -S '{config_digest:.config.digest,layers:[.layers[]|{digest,size}]}' \
+  "$latchway_manifest_dir/canonical.json" \
+  > "$latchway_manifest_dir/canonical-descriptors.json"
+jq -S '{config_digest:.config.digest,layers:[.layers[]|{digest,size}]}' \
+  "$latchway_manifest_dir/mirror.json" \
+  > "$latchway_manifest_dir/mirror-descriptors.json"
+cmp "$latchway_manifest_dir/canonical-descriptors.json" \
+  "$latchway_manifest_dir/mirror-descriptors.json"
+
+export LATCHWAY_CLOUDFLARE_IMAGE="${LATCHWAY_CLOUDFLARE_TAG%:*}@$latchway_mirror_digest"
+rm -rf "$latchway_manifest_dir"
+trap - EXIT HUP INT TERM
+unset latchway_manifest_dir latchway_registry_username
 ```
 
-Before deployment, inspect both manifests and require identical `config.digest`
-and ordered `layers[].digest` plus `layers[].size` values. Keep the canonical
-index digest, canonical amd64 child digest, and Cloudflare mirror digest in the
-deployment record. Do not treat the two manifest document hashes themselves as
-interchangeable: registries may serialize equivalent content differently.
+The raw mirror-document digest becomes the immutable Cloudflare reference. The
+descriptor comparison separately proves that the mirror has the canonical
+config and ordered `layers[].digest` plus `layers[].size` values. Keep the
+canonical index digest, canonical amd64 child digest, and Cloudflare mirror
+digest in the deployment record; registries may serialize content-equivalent
+manifests differently.
 
 ## Generate the immutable release config
 
 ```bash
+export LATCHWAY_DOMAIN='ai.example.com'
 pnpm release:config -- \
-  --image registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+  --image "$LATCHWAY_CLOUDFLARE_IMAGE" \
+  --domain "$LATCHWAY_DOMAIN"
 pnpm release:dry-run
 ```
 
 The generated `wrangler.release.jsonc` is ignored and mode-restricted. Review
-the dry-run output and confirm the container image is the expected mirror
-digest. Because it is a prebuilt registry image, Docker is not required for the
-deployment step itself.
+the dry-run output and confirm the container image and exact Custom Domain are
+the expected values. Cloudflare creates the DNS record and manages its
+certificate when Wrangler deploys this config. Because it is a prebuilt
+registry image, Docker is not required for the deployment step itself. See
+Cloudflare's [Custom Domains requirements](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/#add-a-custom-domain).
+Every release deploy byte-compares the ignored file with deterministic
+regeneration from the reviewed source; comments, extra routes, duplicate
+content, or manual edits fail closed.
 
 ## Prepare first-deploy secrets
 
@@ -208,7 +267,8 @@ now-unreferenced Worker secret.
 
 ```bash
 pnpm release:config -- \
-  --image registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST \
+  --image "$LATCHWAY_CLOUDFLARE_IMAGE" \
+  --domain "$LATCHWAY_DOMAIN" \
   --post-bootstrap
 pnpm check
 pnpm release:deploy
