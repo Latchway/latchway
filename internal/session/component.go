@@ -849,6 +849,12 @@ func (store *Store) RevokeComponent(ctx context.Context, access AccessRequestInp
 				return fmt.Errorf("revoke component refresh credentials: %w", err)
 			}
 			if _, err := tx.Exec(ctx, `
+				DELETE FROM refresh_rotation_results
+				WHERE client_component_id = $1
+			`, componentID); err != nil {
+				return fmt.Errorf("remove revoked-component refresh results: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
 				UPDATE session_grants
 				SET revoked_at = COALESCE(revoked_at, GREATEST(issued_at, $2)),
 				    revoke_reason = COALESCE(revoke_reason, 'client_component_revoked')
@@ -929,6 +935,15 @@ func (store *Store) RevokeCurrentFamily(ctx context.Context, access AccessReques
 				) AND status IN ('staged', 'active')
 			`, state.InstallationFamilyID, now); err != nil {
 				return fmt.Errorf("revoke family component refresh credentials: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM refresh_rotation_results
+				WHERE client_component_id IN (
+					SELECT client_component_id FROM client_components
+					WHERE installation_family_id = $1
+				)
+			`, state.InstallationFamilyID); err != nil {
+				return fmt.Errorf("remove revoked-family refresh results: %w", err)
 			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE session_grants

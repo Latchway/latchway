@@ -18,6 +18,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +42,56 @@ const (
 	clientHTTPIdentityIssuer   = "https://identity.example.test"
 	clientHTTPIdentityAudience = "latchway-client"
 )
+
+type componentRefreshRaceAccessIssuer struct {
+	delegate    AccessIssuer
+	armed       atomic.Bool
+	blockOnce   sync.Once
+	releaseOnce sync.Once
+	entered     chan struct{}
+	release     chan struct{}
+}
+
+func newComponentRefreshRaceAccessIssuer(delegate AccessIssuer) *componentRefreshRaceAccessIssuer {
+	return &componentRefreshRaceAccessIssuer{
+		delegate: delegate,
+		entered:  make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+}
+
+func (issuer *componentRefreshRaceAccessIssuer) Prepare(ctx context.Context) (PreparedAccessIssuer, error) {
+	prepared, err := issuer.delegate.Prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &componentRefreshRacePreparedIssuer{delegate: prepared, owner: issuer}, nil
+}
+
+func (issuer *componentRefreshRaceAccessIssuer) arm() {
+	issuer.armed.Store(true)
+}
+
+func (issuer *componentRefreshRaceAccessIssuer) unblock() {
+	issuer.releaseOnce.Do(func() { close(issuer.release) })
+}
+
+type componentRefreshRacePreparedIssuer struct {
+	delegate PreparedAccessIssuer
+	owner    *componentRefreshRaceAccessIssuer
+}
+
+func (*componentRefreshRacePreparedIssuer) preparedAccessIssuer() {}
+
+func (issuer *componentRefreshRacePreparedIssuer) IssueFor(input AccessIssueInput, lifetime time.Duration) (IssuedAccess, error) {
+	if issuer.owner.armed.Load() {
+		issuer.owner.blockOnce.Do(func() {
+			close(issuer.owner.entered)
+			<-issuer.owner.release
+		})
+	}
+	return issuer.delegate.IssueFor(input, lifetime)
+}
 
 func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	pool, ctx := isolatedSessionPool(t)
@@ -132,8 +184,10 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct access-token verifier: %v", err)
 	}
+	raceAccessIssuer := newComponentRefreshRaceAccessIssuer(accessIssuer)
+	t.Cleanup(raceAccessIssuer.unblock)
 	sessionStore, err := NewStore(StoreConfig{
-		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
+		Pool: pool, AccessTokens: raceAccessIssuer, Configuration: configurationStore,
 		Now: func() time.Time { return now }, RotationProtector: envelope,
 	})
 	if err != nil {
@@ -392,13 +446,61 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatalf("component access token omitted the delegated principal boundary: %#v", componentPrincipal)
 	}
 
-	componentRefreshProof := signedSessionDPoP(
+	componentRefreshToken, err := NewRefreshToken(componentSession.RefreshToken)
+	if err != nil {
+		t.Fatalf("parse component refresh token: %v", err)
+	}
+	raceProofs := []DPoPProof{
+		signedSessionDPoP(t, childPrivateKey, http.MethodPost, refreshTarget, now,
+			"client-http-refresh-widget-race-a"),
+		signedSessionDPoP(t, childPrivateKey, http.MethodPost, refreshTarget, now,
+			"client-http-refresh-widget-race-b"),
+	}
+	type componentRaceResult struct {
+		issued IssuedSession
+		err    error
+	}
+	raceAccessIssuer.arm()
+	startRace := make(chan struct{})
+	raceResults := make(chan componentRaceResult, len(raceProofs))
+	for _, proof := range raceProofs {
+		go func(proof DPoPProof) {
+			<-startRace
+			issued, rotateErr := sessionStore.Rotate(ctx, RotateInput{
+				RefreshToken: componentRefreshToken,
+				DPoPProof:    proof, HTTPMethod: http.MethodPost, RequestURI: refreshTarget,
+			})
+			raceResults <- componentRaceResult{issued: issued, err: rotateErr}
+		}(proof)
+	}
+	close(startRace)
+	select {
+	case <-raceAccessIssuer.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first component refresh did not reach the in-transaction issuance barrier")
+	}
+	waitForComponentRefreshLock(t, ctx, pool)
+	raceAccessIssuer.unblock()
+	firstRace := <-raceResults
+	secondRace := <-raceResults
+	if firstRace.err != nil || secondRace.err != nil {
+		t.Fatalf("simultaneous component refresh errors = %v / %v", firstRace.err, secondRace.err)
+	}
+	if firstRace.issued.Access.Token.Reveal() != secondRace.issued.Access.Token.Reveal() ||
+		firstRace.issued.Refresh.Reveal() != secondRace.issued.Refresh.Reveal() ||
+		firstRace.issued.RefreshID != secondRace.issued.RefreshID ||
+		firstRace.issued.GrantID != secondRace.issued.GrantID ||
+		!firstRace.issued.RefreshExpiresAt.Equal(secondRace.issued.RefreshExpiresAt) {
+		t.Fatal("simultaneous component refreshes did not recover the exact committed rotation")
+	}
+
+	componentRefreshRetryProof := signedSessionDPoP(
 		t, childPrivateKey, http.MethodPost, refreshTarget, now,
-		"client-http-refresh-widget",
+		"client-http-refresh-widget-idempotent-retry",
 	)
 	var refreshedComponent clientHTTPGrantDocument
 	clientHTTPPostJSON(
-		t, handler, "/client/v1/sessions/refresh", componentRefreshProof,
+		t, handler, "/client/v1/sessions/refresh", componentRefreshRetryProof,
 		map[string]any{"refresh_token": componentSession.RefreshToken},
 		http.StatusOK,
 		&refreshedComponent,
@@ -420,22 +522,15 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 			refreshedComponent.InstallationFamily, refreshedComponent.Component,
 			refreshedComponent.Trust.Source, refreshedComponent.Trust.ParentComponentID)
 	}
-	componentRefreshRetryProof := signedSessionDPoP(
-		t, childPrivateKey, http.MethodPost, refreshTarget, now,
-		"client-http-refresh-widget-idempotent-retry",
-	)
-	var retriedComponent clientHTTPGrantDocument
-	clientHTTPPostJSON(
-		t, handler, "/client/v1/sessions/refresh", componentRefreshRetryProof,
-		map[string]any{"refresh_token": componentSession.RefreshToken},
-		http.StatusOK,
-		&retriedComponent,
-	)
-	if retriedComponent.AccessToken != refreshedComponent.AccessToken ||
-		retriedComponent.RefreshToken != refreshedComponent.RefreshToken ||
-		!retriedComponent.Trust.ExpiresAt.Equal(refreshedComponent.Trust.ExpiresAt) {
-		t.Fatal("component refresh retry did not recover the exact committed rotation")
+	if refreshedComponent.AccessToken != firstRace.issued.Access.Token.Reveal() ||
+		refreshedComponent.RefreshToken != firstRace.issued.Refresh.Reveal() ||
+		!refreshedComponent.Trust.ExpiresAt.Equal(firstRace.issued.Trust.ExpiresAt) {
+		t.Fatal("HTTP component refresh retry did not recover the exact concurrent rotation")
 	}
+	assertEncryptedComponentRotationResult(
+		t, ctx, pool, envelope, componentSession.RefreshToken,
+		provisionedComponent.ComponentID, firstRace.issued, now,
+	)
 	wrongComponentKey, _, _ := newChallengeKey(t)
 	wrongComponentRefreshProof := signedSessionDPoP(
 		t, wrongComponentKey, http.MethodPost, refreshTarget, now,
@@ -713,6 +808,36 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t, handler, actionExchangePath, elevatedActionToken, retryActionProof,
 		actionExchangeBody, http.StatusCreated, &directActionGrant,
 	)
+	// The direct Action may refresh only while its parent retains the exact
+	// attested trust used by the exchange. Rotate once inside that boundary so
+	// component revocation can later prove deletion of a still-live cache.
+	actionRefreshProof := signedSessionDPoP(
+		t, actionPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-action-before-revoke",
+	)
+	var refreshedAction clientHTTPGrantDocument
+	clientHTTPPostJSON(
+		t, handler, "/client/v1/sessions/refresh", actionRefreshProof,
+		map[string]any{"refresh_token": directActionGrant.RefreshToken},
+		http.StatusOK,
+		&refreshedAction,
+	)
+	if refreshedAction.Component == nil ||
+		refreshedAction.Component.ID != provisionedAction.ComponentID ||
+		refreshedAction.RefreshToken == directActionGrant.RefreshToken {
+		t.Fatal("Action refresh did not create an independent rotated result")
+	}
+	actionOldRefreshDigest := sha256.Sum256([]byte(directActionGrant.RefreshToken))
+	var actionRotationResults int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM refresh_rotation_results
+		WHERE old_refresh_token_hash = $1 AND client_component_id = $2
+	`, actionOldRefreshDigest[:], provisionedAction.ComponentID).Scan(&actionRotationResults); err != nil {
+		t.Fatalf("inspect live Action rotation cache: %v", err)
+	}
+	if actionRotationResults != 1 {
+		t.Fatalf("live Action rotation cache rows = %d, want 1", actionRotationResults)
+	}
 	if _, err := pool.Exec(ctx, `
 		UPDATE client_components
 		SET trust_source = $2
@@ -793,6 +918,96 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 			siblingDiagnosticsResponse.Code, siblingDiagnosticsResponse.Body.String())
 	}
 
+	// Revoke the directly attested Action while its exact-retry cache is still
+	// live. The cache must be deleted transactionally, the old credential must
+	// not recover it, and the widget sibling must remain usable.
+	actionRevokePath := "/client/v1/installation-families/current/components/" + provisionedAction.ComponentID
+	actionRevokeTarget := clientHTTPURL(t, actionRevokePath)
+	actionRevokeProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodDelete, actionRevokeTarget, now,
+		refreshed.AccessToken, "client-http-revoke-action-with-cache",
+	)
+	actionRevokeResponse := clientHTTPDeleteAuthorized(
+		t, handler, actionRevokePath, refreshed.AccessToken, actionRevokeProof,
+	)
+	assertClientHTTPNoContent(t, actionRevokeResponse)
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM refresh_rotation_results
+		WHERE client_component_id = $1
+	`, provisionedAction.ComponentID).Scan(&actionRotationResults); err != nil {
+		t.Fatalf("inspect revoked Action rotation cache: %v", err)
+	}
+	if actionRotationResults != 0 {
+		t.Fatalf("revoked Action retained %d encrypted rotation caches", actionRotationResults)
+	}
+	postActionRevokeRefreshProof := signedSessionDPoP(
+		t, actionPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-action-after-component-revoke",
+	)
+	postActionRevokeRefreshResponse := clientHTTPPostJSONResponse(
+		t, handler, "/client/v1/sessions/refresh", postActionRevokeRefreshProof,
+		map[string]any{"refresh_token": directActionGrant.RefreshToken},
+	)
+	assertClientHTTPProblem(
+		t, postActionRevokeRefreshResponse, http.StatusForbidden, "component_revoked",
+	)
+	widgetAfterActionRevokeProof := signedSessionAccessDPoP(
+		t, childPrivateKey, http.MethodGet, componentDiagnosticsTarget, now,
+		refreshedComponent.AccessToken, "client-http-widget-after-action-revoke",
+	)
+	widgetAfterActionRevokeResponse := clientHTTPGetDiagnostics(
+		t, handler, refreshedComponent.AccessToken, widgetAfterActionRevokeProof, "ios",
+	)
+	if widgetAfterActionRevokeResponse.Code != http.StatusOK {
+		t.Fatalf("Action revocation affected widget sibling: status=%d body=%s",
+			widgetAfterActionRevokeResponse.Code, widgetAfterActionRevokeResponse.Body.String())
+	}
+
+	// Once the bounded exact-retry window closes, reusing the old credential
+	// revokes only this component-session family and deletes its encrypted cache.
+	now = now.Add(componentRefreshIdempotencyGrace + time.Second)
+	expiredRetryProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget-after-grace",
+	)
+	expiredRetryResponse := clientHTTPPostJSONResponse(
+		t, handler, "/client/v1/sessions/refresh", expiredRetryProof,
+		map[string]any{"refresh_token": componentSession.RefreshToken},
+	)
+	assertClientHTTPProblem(t, expiredRetryResponse, http.StatusUnauthorized, "refresh_token_reused")
+	oldRefreshDigest := sha256.Sum256([]byte(componentSession.RefreshToken))
+	newRefreshDigest := sha256.Sum256([]byte(refreshedComponent.RefreshToken))
+	var oldRefreshStatus, newRefreshStatus, componentSessionStatus string
+	var retainedRotationResults int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT status FROM component_refresh_tokens WHERE token_hash = $1),
+			(SELECT status FROM component_refresh_tokens WHERE token_hash = $2),
+			(SELECT status FROM component_session_families
+			 WHERE component_session_family_id = $3),
+			(SELECT count(*) FROM refresh_rotation_results
+			 WHERE old_refresh_token_hash IN ($1, $2))
+	`, oldRefreshDigest[:], newRefreshDigest[:], firstRace.issued.RefreshFamilyID).Scan(
+		&oldRefreshStatus, &newRefreshStatus, &componentSessionStatus,
+		&retainedRotationResults,
+	); err != nil {
+		t.Fatalf("inspect after-grace component refresh reuse: %v", err)
+	}
+	if oldRefreshStatus != "reused" || newRefreshStatus != "revoked" ||
+		componentSessionStatus != "revoked" || retainedRotationResults != 0 {
+		t.Fatalf("after-grace reuse state old=%q new=%q family=%q cached=%d",
+			oldRefreshStatus, newRefreshStatus, componentSessionStatus, retainedRotationResults)
+	}
+	revokedFamilyRefreshProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget-revoked-family",
+	)
+	revokedFamilyRefreshResponse := clientHTTPPostJSONResponse(
+		t, handler, "/client/v1/sessions/refresh", revokedFamilyRefreshProof,
+		map[string]any{"refresh_token": refreshedComponent.RefreshToken},
+	)
+	assertClientHTTPProblem(t, revokedFamilyRefreshResponse, http.StatusUnauthorized, "session_revoked")
+
 	componentRevokePath := "/client/v1/installation-families/current/components/" + provisionedComponent.ComponentID
 	componentRevokeTarget := clientHTTPURL(t, componentRevokePath)
 	componentRevokeProof := signedSessionAccessDPoP(
@@ -819,6 +1034,15 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t, handler, refreshedComponent.AccessToken, postComponentRevokeProof, "ios",
 	)
 	assertClientHTTPProblem(t, postComponentRevokeResponse, http.StatusForbidden, "component_revoked")
+	postComponentRevokeRefreshProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget-after-component-revoke",
+	)
+	postComponentRevokeRefreshResponse := clientHTTPPostJSONResponse(
+		t, handler, "/client/v1/sessions/refresh", postComponentRevokeRefreshProof,
+		map[string]any{"refresh_token": componentSession.RefreshToken},
+	)
+	assertClientHTTPProblem(t, postComponentRevokeRefreshResponse, http.StatusForbidden, "component_revoked")
 
 	diagnosticsTarget := clientHTTPURL(t, "/client/v1/diagnostics")
 	mismatchedSDKProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodGet, diagnosticsTarget,
@@ -855,7 +1079,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if diagnostics.RequestID == "" || diagnostics.RequestID != diagnosticsResponse.Header().Get("X-Latchway-Request-ID") ||
 		diagnostics.ServerVersion != buildinfo.Version || diagnostics.ContractVersion != buildinfo.ContractVersion ||
 		diagnostics.ProtocolVersion != buildinfo.CurrentProtocolVersion || diagnostics.Installation != refreshed.Installation ||
-		!diagnostics.Session.ExpiresAt.Equal(now.Add(10*time.Minute)) || !diagnostics.Session.RefreshAvailable ||
+		!diagnostics.Session.ExpiresAt.Equal(refreshed.Trust.ExpiresAt) || !diagnostics.Session.RefreshAvailable ||
 		diagnostics.Trust != refreshed.Trust {
 		t.Fatalf("client diagnostics violated the redacted session contract: %#v", diagnostics)
 	}
@@ -875,20 +1099,20 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		now, unknownKeyToken, "client-http-revoke-unknown-access-kid")
 	unknownKeyResponse := clientHTTPDeleteInstallation(t, handler, unknownKeyToken, unknownKeyProof)
 	assertClientHTTPProblem(t, unknownKeyResponse, http.StatusUnauthorized, "session_expired")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
 
 	wrongRevokeKey, _, _ := newChallengeKey(t)
 	wrongKeyProof := signedSessionAccessDPoP(t, wrongRevokeKey, http.MethodDelete, revokeTarget,
 		now, refreshed.AccessToken, "client-http-revoke-wrong-key")
 	wrongKeyResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongKeyProof)
 	assertClientHTTPProblem(t, wrongKeyResponse, http.StatusUnauthorized, "dpop_invalid")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
 
 	wrongAccessHashProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
 		now, exchanged.AccessToken, "client-http-revoke-wrong-ath")
 	wrongAccessHashResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongAccessHashProof)
 	assertClientHTTPProblem(t, wrongAccessHashResponse, http.StatusUnauthorized, "dpop_invalid")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
 
 	familyRevokePath := "/client/v1/installation-families/current"
 	familyRevokeTarget := clientHTTPURL(t, familyRevokePath)
@@ -900,6 +1124,19 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t, handler, familyRevokePath, refreshed.AccessToken, familyRevokeProof,
 	)
 	assertClientHTTPNoContent(t, familyRevokeResponse)
+	var retainedFamilyRotationResults int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM refresh_rotation_results AS result
+		JOIN client_components AS component
+		  ON component.client_component_id = result.client_component_id
+		WHERE component.installation_family_id = $1
+	`, provisionedComponent.InstallationFamilyID).Scan(&retainedFamilyRotationResults); err != nil {
+		t.Fatalf("inspect revoked-family rotation caches: %v", err)
+	}
+	if retainedFamilyRotationResults != 0 {
+		t.Fatalf("revoked family retained %d encrypted rotation caches", retainedFamilyRotationResults)
+	}
 	assertAppAttestComponentKeyLink(
 		t, ctx, pool, actionAppAttestKeyID, provisionedAction.InstallationFamilyID,
 		provisionedAction.ComponentID, directActionComponentKeyID, "revoked", 1,
@@ -945,7 +1182,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 
 	var activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants int
-	var activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh int
+	var activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh, reusedComponentRefresh int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE status = 'active'),
 		       count(*) FILTER (WHERE status = 'rotated'),
@@ -962,17 +1199,20 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE status = 'active'),
 		       count(*) FILTER (WHERE status = 'rotated'),
-		       count(*) FILTER (WHERE status = 'revoked')
+		       count(*) FILTER (WHERE status = 'revoked'),
+		       count(*) FILTER (WHERE status = 'reused')
 		FROM component_refresh_tokens
-	`).Scan(&activeComponentRefresh, &rotatedComponentRefresh, &revokedComponentRefresh); err != nil {
+	`).Scan(&activeComponentRefresh, &rotatedComponentRefresh, &revokedComponentRefresh,
+		&reusedComponentRefresh); err != nil {
 		t.Fatalf("inspect component refresh rotation state: %v", err)
 	}
 	if activeRefresh != 0 || rotatedRefresh != 0 || revokedRefresh != 0 ||
 		activeComponentRefresh != 0 || rotatedComponentRefresh != 4 || revokedComponentRefresh != 4 ||
-		grantCount != 6 || revokedGrants != 6 {
-		t.Fatalf("persisted revoked session state = legacy(active:%d rotated:%d revoked:%d) component(active:%d rotated:%d revoked:%d) grants:%d revoked_grants:%d",
+		reusedComponentRefresh != 1 ||
+		grantCount != 7 || revokedGrants != 7 {
+		t.Fatalf("persisted revoked session state = legacy(active:%d rotated:%d revoked:%d) component(active:%d rotated:%d revoked:%d reused:%d) grants:%d revoked_grants:%d",
 			activeRefresh, rotatedRefresh, revokedRefresh,
-			activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh,
+			activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh, reusedComponentRefresh,
 			grantCount, revokedGrants)
 	}
 	metricResponse := httptest.NewRecorder()
@@ -1647,6 +1887,115 @@ func clientHTTPURL(t *testing.T, path string) *url.URL {
 		t.Fatalf("parse trusted client HTTP target: %v", err)
 	}
 	return parsed
+}
+
+func waitForComponentRefreshLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND query ILIKE '%component_refresh%'
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect concurrent component refresh lock: %v", err)
+		}
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second component refresh did not overlap on the PostgreSQL rotation lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func assertEncryptedComponentRotationResult(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	protector secrets.Provider,
+	oldRefreshToken string,
+	componentID string,
+	issued IssuedSession,
+	now time.Time,
+) {
+	t.Helper()
+	oldDigest := sha256.Sum256([]byte(oldRefreshToken))
+	var resultID, algorithm, keyID string
+	var ciphertext, nonce []byte
+	var formatVersion int
+	var createdAt, expiresAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT refresh_rotation_result_id, rotation_response_ciphertext,
+		       rotation_response_nonce, encryption_format_version,
+		       encryption_algorithm, master_key_identifier, created_at, expires_at
+		FROM refresh_rotation_results
+		WHERE old_refresh_token_hash = $1 AND client_component_id = $2
+	`, oldDigest[:], componentID).Scan(
+		&resultID, &ciphertext, &nonce, &formatVersion,
+		&algorithm, &keyID, &createdAt, &expiresAt,
+	); err != nil {
+		t.Fatalf("load encrypted component refresh rotation result: %v", err)
+	}
+	if formatVersion != 1 || algorithm != "AES-256-GCM" || keyID == "" ||
+		len(ciphertext) == 0 || len(nonce) == 0 || !createdAt.Equal(now) ||
+		!expiresAt.Equal(now.Add(componentRefreshIdempotencyGrace)) {
+		t.Fatalf("component rotation cache envelope metadata is invalid: format=%d algorithm=%q created=%s expires=%s",
+			formatVersion, algorithm, createdAt, expiresAt)
+	}
+	for label, plaintext := range map[string]string{
+		"old refresh": oldRefreshToken,
+		"new refresh": issued.Refresh.Reveal(),
+		"access":      issued.Access.Token.Reveal(),
+	} {
+		if bytes.Contains(ciphertext, []byte(plaintext)) {
+			t.Fatalf("component rotation cache disclosed the %s credential at rest", label)
+		}
+	}
+	// The production decrypt path binds organization, environment, result ID,
+	// version, and format. Query the non-secret scope only after proving the
+	// row carries no plaintext credential bytes.
+	var organizationID, environmentID string
+	if err := pool.QueryRow(ctx, `
+		SELECT component.organization_id, component.environment_id
+		FROM client_components AS component
+		WHERE component.client_component_id = $1
+	`, componentID).Scan(&organizationID, &environmentID); err != nil {
+		t.Fatalf("load component rotation cache scope: %v", err)
+	}
+	plaintext, err := protector.Decrypt(secrets.Envelope{
+		FormatVersion: formatVersion,
+		Algorithm:     algorithm,
+		KeyID:         keyID,
+		Nonce:         nonce,
+		Ciphertext:    ciphertext,
+	}, secrets.AssociatedData{
+		OrganizationID: organizationID,
+		EnvironmentID:  environmentID,
+		SecretID:       resultID,
+		SecretVersion:  1,
+		FormatVersion:  1,
+	})
+	if err != nil {
+		t.Fatalf("decrypt component rotation cache with exact associated data: %v", err)
+	}
+	defer clear(plaintext)
+	var cached cachedComponentRotation
+	if err := json.Unmarshal(plaintext, &cached); err != nil {
+		t.Fatalf("decode decrypted component rotation cache: %v", err)
+	}
+	if cached.AccessToken != issued.Access.Token.Reveal() ||
+		cached.RefreshToken != issued.Refresh.Reveal() ||
+		cached.RefreshTokenID != issued.RefreshID ||
+		cached.SessionGrantID != issued.GrantID ||
+		cached.SessionFamilyID != issued.RefreshFamilyID {
+		t.Fatal("decrypted component rotation cache did not bind the exact committed result")
+	}
 }
 
 func assertClientHTTPGrant(t *testing.T, grant clientHTTPGrantDocument, dpopJKT string) {
