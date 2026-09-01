@@ -1,0 +1,100 @@
+---
+title: "Apply a user limit override"
+description: "Replace or clear one environment-scoped limit-plan override without changing feature access, routes, pricing, or trusted accounting."
+icon: "sliders-horizontal"
+audience: "operator"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+A user override selects one server-owned limit plan for one pseudonymous user
+in one environment. It cannot grant a feature, change route priority or
+weight, select a physical model, alter pricing, or supply usage totals.
+
+## Prerequisites and impact
+
+- `inspect_users` is required to load the user and current effective state.
+- `activate_configuration` is required to replace or clear an override.
+- The selected limit-plan ID must exist in the environment's active revision.
+- The reason is required and contains 1 to 500 characters. Do not include
+  identity tokens, incident secrets, provider keys, or user content.
+- An optional RFC 3339 expiry must be later than the authoritative database
+  time when the mutation commits.
+
+There is at most one unrevoked override for a user/environment pair.
+An exact repeat of the same plan, reason, and expiry while the current override
+is effective is idempotent: it retains the same immutable row and override ID,
+and the operation remains audited. A different replacement, or replacement of
+an expired row, revokes the previous row and creates a new immutable record in
+one transaction. An expired override is retained as history but no longer
+affects policy.
+
+## Review the effective result
+
+Before changing state, inspect the current user and project a representative
+request:
+
+```bash
+latchway users inspect usr_... --environment env_...
+latchway users effective usr_... \
+  --environment env_... \
+  --feature habit-assistant \
+  --estimated-input-tokens 1200 \
+  --maximum-output-tokens 800
+```
+
+In the Console, open **Governance → User overrides**, select the exact
+environment and user, and compare the active plan with the proposed plan. The
+projection is read-only and does not reserve quota.
+
+## Replace the override
+
+```bash
+latchway admin users limit-override set usr_... \
+  --environment env_... \
+  --limit-plan priority \
+  --reason 'operator-approved temporary plan'
+```
+
+Add `--expires-at RFC3339_INSTANT` when the exception must close automatically.
+The Admin API operation is `PUT
+/admin/v1/users/{userId}/limit-override?environment_id=env_...`; cookie
+requests require the session CSRF value, while bearer requests require the
+same capability checks without browser CSRF.
+
+## Verification
+
+1. Inspect the user and confirm the returned override ID, plan, creation time,
+   and optional expiry.
+   Repeating an identical effective override must return the same override ID.
+2. Run `users effective` again with the same feature/request shape.
+3. Confirm the effective plan changed but access, route inputs, accounting
+   authority, and pricing remain sourced from the active revision.
+4. Observe a new request and verify its selected plan and quota result.
+5. Inspect `admin.user_limit_override_replace` in the audit log.
+
+There is no override-specific Prometheus series. Request metrics may carry the
+bounded effective `plan` label; durable user, request, and audit views remain
+the authoritative explanation.
+
+## Clear or roll back
+
+Clear is idempotent and also retires an expired unrevoked row:
+
+```bash
+latchway admin users limit-override clear usr_... \
+  --environment env_...
+```
+
+After clearing, policy selects the plan from verified claims and active
+configuration again. Clearing does not restore a previously superseded
+override. If rollback requires the prior plan, create a new reviewed override
+with that plan and a new reason/expiry.
+
+Verify the effective result and the
+`admin.user_limit_override_clear` audit event. A concurrent configuration
+activation can remove the proposed plan before replacement; the server then
+rejects the operation instead of retaining a dangling override.

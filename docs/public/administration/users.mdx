@@ -1,0 +1,149 @@
+---
+title: "Manage application users"
+description: "Inspect pseudonymous users, preview credential impact, block access, and require identity or app-trust renewal with auditable confirmation."
+icon: "user-cog"
+audience: "operator"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Application users are derived from verified external identity and represented
+by opaque Latchway IDs. The built-in user record does not return the original
+identity token or a separate raw-subject field. User inspection does return the
+values of operator-configured normalized claims, and a mapping can copy
+subject-like or personally identifying values into that set.
+
+## Outcome and impact
+
+| Action | Immediate effect | What it does not do |
+| --- | --- | --- |
+| Inspect | Reads bounded operator-configured normalized claim values, status, last-seen state, and the environment override | Does not return the original identity token or a separate raw-subject field |
+| Block | Denies future access and revokes active user and component sessions and refresh state across the application | Does not delete audit, request, or usage history |
+| Unblock | Restores eligibility for a future enrollment | Does not resurrect revoked credentials |
+| Require reauthentication | Revokes user/component sessions and refresh state so identity must be verified again | Does not change the identity provider configuration |
+| Require app reverification | Expires platform trust and refresh state | Does not extend or immediately revoke already-issued access grants before their bounded expiry |
+
+Reading requires `inspect_users`. Impact preview and the four sensitive user
+actions require `revoke_installations`. A Console button is not an
+authorization boundary; the Admin API checks both capability and tenant scope.
+
+<Warning>
+  Normalization bounds claim names, value types, collection depth, and encoded
+  size; it does not make claim values non-sensitive. Keep mappings minimal, do
+  not map tokens or secrets, and treat email addresses, subject-like identifiers,
+  and other personal data as sensitive. Any principal granted `inspect_users`
+  can read these normalized values. The `users effective` projection below is
+  narrower and returns claim keys only.
+</Warning>
+
+## Inspect current state
+
+Select the exact application and environment in **Users**, then open the opaque
+`usr_...` record. With the CLI:
+
+```bash
+latchway users list --environment env_...
+latchway users inspect usr_... --environment env_...
+latchway users effective usr_... \
+  --environment env_... \
+  --feature habit-assistant \
+  --estimated-input-tokens 1200 \
+  --maximum-output-tokens 800 \
+  --streaming
+```
+
+`users effective` evaluates the exact active compiled revision without
+reserving quota or dispatching upstream traffic. It can name normalized claim
+keys but never returns their values, tokens, proofs, credentials, headers, or
+bodies. When there is no matching active session, trust-dependent facts are
+reported unavailable rather than inferred.
+
+## Preview before mutation
+
+Sensitive user state is application-wide, even though the command is entered
+from one environment context. Preview the exact action:
+
+```bash
+latchway users impact usr_... \
+  --environment env_... \
+  --action block
+```
+
+Review the returned counts for active user sessions, refresh credentials,
+component session families, component refresh credentials, Installation
+Families, and components. Record the short-lived optimistic impact token.
+
+In the Console, the same preview appears before the confirmation dialog. The
+operator must enter a redaction-safe reason, type the exact user ID, and
+acknowledge the immediate effect.
+
+## Perform the reviewed action
+
+Pass the current preview token and exact ID:
+
+```bash
+latchway users block usr_... \
+  --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW \
+  --confirm usr_... \
+  --reason 'reviewed incident containment'
+```
+
+Use the same preview-confirm pattern with one of:
+
+```bash
+latchway users unblock usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... \
+  --reason 'reviewed access restoration'
+
+latchway users require-reauthentication usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... \
+  --reason 'reviewed identity renewal'
+
+latchway users require-app-reverification usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... \
+  --reason 'reviewed app trust renewal'
+```
+
+The server recomputes impact while holding the user row. If status or counts
+changed, it returns `409 Conflict`; obtain and review a new preview rather than
+reusing the token.
+
+## Verification
+
+1. Inspect the user again and confirm the intended status.
+2. Inspect affected components and Installation Families.
+3. For a block or required reauthentication, verify old access and refresh
+   credentials fail before upstream dispatch.
+4. For required app reverification, verify refresh or a new trust exchange
+   requires fresh platform evidence. An already-issued access grant is not
+   immediately revoked and may remain usable until its normal bounded expiry;
+   verify it fails after that expiry rather than expecting instant denial.
+5. For an unblock or renewal, complete a fresh client exchange and confirm a
+   new bounded session rather than attempting to restore the old one.
+6. Inspect the corresponding audit event and operation ID.
+
+The stable actions are `admin.user_block`, `admin.user_unblock`,
+`admin.user_require_reauthentication`, and
+`admin.user_require_app_reverification`. The free-form operator reason is not
+copied into audit metadata; the event retains a safe reason-present marker and
+value-free change classifications.
+
+## Rollback and failure modes
+
+Unblocking is the operational reversal of a block, but revoked credentials
+remain revoked. Reauthentication and app reverification have no credential
+rollback; the client must establish new trust.
+
+- `403` means the principal lacks the capability or tenant scope.
+- `404` means the environment/user pairing is not visible in the current
+  organization.
+- `409` means the impact preview is stale.
+- `operation_indeterminate` requires correlation with the exact succeeded
+  audit event before retrying; current state alone may reflect a later actor.
+
+Use [User limit overrides](/administration/overrides) for a bounded plan change,
+not as a substitute for access containment.

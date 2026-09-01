@@ -37,10 +37,10 @@ mirror.
 | Canonical SDK-bundle/public-doc checkpoint | `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3` |
 | Database | Schema `27` at the clean implementation checkpoint above |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `6b0c08ded377011044462d1ba6aa46cb34d7ee8f` |
-| Swift source | `af87b4454e4b6a159b9da7bd50550865c74684a2` |
-| Android source | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` |
-| React Native source | `111e7841f81e87ab471c18d381fed18ec8335760` |
+| JavaScript source | `f9439bdeb56d93218cd63008f7c0f2b2d14821bf` |
+| Swift source | `8acd72a7fbbff019ffeb1c7be0264f671c636168` |
+| Android source | `349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7` |
+| React Native source | `2d78f588671d35512c6d0d244c89ec61e6a48cfa` |
 | Mintlify mirror source | `ce4ea1e1cf56404da7146b98ca2744b194050fd5` |
 | Release state | `unreleased`; pushed branch source candidates only |
 

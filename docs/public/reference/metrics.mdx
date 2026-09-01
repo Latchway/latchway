@@ -1,0 +1,121 @@
+---
+title: "Metrics"
+description: "Reference the version 1 Prometheus instruments, bounded labels, circuit observations, and alerting boundaries."
+icon: "chart-no-axes-combined"
+audience: "reference"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+`GET /metrics` exposes one process-local Prometheus surface backed by the
+OpenTelemetry metric SDK when the process runs `serve --role api` or `serve
+--role all`. The application router does not authenticate this endpoint.
+Restrict it with a private network, service mesh, load balancer, or scrape
+identity.
+
+`serve --role worker` creates no HTTP listener in version 1. Its process-local
+observations therefore have no scrape endpoint; worker-job and scheduled
+self-test series are externally visible only when the worker is co-located in
+an `all` process. For split workers, use durable heartbeat/job state, Admin
+operational views, `latchway doctor`, and platform logs rather than assuming an
+API replica exports another process's metrics.
+
+Metrics are diagnostic. PostgreSQL remains authoritative for quota, replay,
+configuration, audit, request attempts, usage, and recovery.
+
+## Instrument index
+
+| Instrument | Type | Meaning |
+| --- | --- | --- |
+| `latchway_client_requests_total` | Counter | Completed client requests by bounded outcome/context |
+| `latchway_upstream_attempts_total` | Counter | Physical upstream attempts, including retry/fallback observations |
+| `latchway_request_duration_seconds` | Histogram | End-to-end Latchway request duration |
+| `latchway_time_to_first_token_seconds` | Histogram | Protocol-validated generated-content first-token latency when available |
+| `latchway_input_tokens_total` | Counter | Non-negative trusted/normalized input usage recorded for attempts |
+| `latchway_output_tokens_total` | Counter | Non-negative output usage recorded for attempts |
+| `latchway_cost_nano_usd_total` | Counter | Non-negative integer nano-USD attempt cost |
+| `latchway_quota_denials_total` | Counter | Hard quota denials |
+| `latchway_concurrency_denials_total` | Counter | Concurrency-lease denials |
+| `latchway_identity_failures_total` | Counter | Identity verification failures |
+| `latchway_attestation_results_total` | Counter | Closed attestation outcome by tenant/platform/trust level |
+| `latchway_app_attest_verifier_failures_total` | Counter | App Attest verifier failure phase without evidence or key identifiers |
+| `latchway_dpop_failures_total` | Counter | DPoP verification/replay failures |
+| `latchway_active_requests` | Up/down counter | Requests active in this process |
+| `latchway_active_streams` | Up/down counter | Streams active in this process |
+| `latchway_reservations_active` | Up/down counter | Reservations currently observed as active by instrumentation |
+| `latchway_reservations_reclaimed_total` | Counter | Expired reservations reclaimed by workers |
+| `latchway_config_revision_activations_total` | Counter | Configuration outcomes `activated` or `rolled_back` |
+| `latchway_scheduled_self_tests_total` | Counter | Scheduled self-test outcomes `passed`, `failed`, `rejected`, or `recovered` |
+| `latchway_worker_job_duration_seconds` | Histogram | Duration of a closed worker-job type and outcome |
+
+Prometheus exposition adds the normal histogram bucket, sum, and count series
+for histogram instruments.
+
+## General label vocabulary
+
+Where applicable, instruments may use these bounded labels:
+
+```text
+application  environment  feature  route  upstream  model_alias
+platform     attestation_level  plan  outcome
+```
+
+Values must match a bounded telemetry pattern and cannot resemble a
+high-cardinality user, installation, request, session, or proof identifier.
+Unsafe values collapse to `invalid`. User IDs, component/family IDs, request
+IDs, external subjects, tokens, proofs, credentials, prompt content, provider
+error text, and arbitrary raw models are prohibited as dimensions.
+
+Use durable request and usage APIs for exact attribution. Do not add an
+identifier label downstream by joining logs into scrape data.
+
+## Attempt observations
+
+Upstream attempt/token/cost/first-token series add:
+
+| Label | Closed values |
+| --- | --- |
+| `condition` | `none`, `connect_error`, `timeout_before_headers`, `first_byte_timeout`, `status_408`, `status_429`, `status_500`, `status_502`, `status_503`, `status_504`, `invalid` |
+| `outcome` | `succeeded`, `failed`, `cancelled`, `timed_out`, `invalid` |
+| `circuit_state` | `stale`, `closed`, `open`, `half_open`, `invalid` |
+
+Circuit state is a bounded recent observation within one process. It does not
+open or close an admission breaker, reserve a probe, reorder routes, or become
+consistent across replicas.
+
+## Restricted instruments
+
+- Attestation results contain only application, environment, one of the
+  supported platform values, a closed trust level, and
+  `succeeded`/`rejected`/`unavailable`.
+- App Attest failures add only a closed `phase`, including request/binding,
+  object/certificate/credential/authenticator/environment/extension/nonce,
+  registration, assertion key/scope/counter/signature, key-store, and result
+  phases.
+- Configuration activation contains application, environment, and
+  `activated` or `rolled_back`; revision and administrator IDs are absent.
+- Scheduled self-tests contain application, environment, and a closed outcome;
+  schedule, token, provider response, and secret IDs are absent.
+- Worker duration contains `job` and `outcome`. Unknown jobs collapse to
+  `unknown`.
+
+## Alert starting points
+
+Alert on sustained readiness failure, missing worker coverage, database pool
+pressure, stale recovery/rotation/JWKS/retention jobs, settlement backlog,
+reservation reclamation shifts, self-test failures, identity/attestation/DPoP
+failure-rate changes, quota-denial anomalies, upstream attempt failure and
+latency, stream saturation, and backup age.
+
+This is an alert-source checklist, not a list of metric names. `/metrics` does
+not expose backup age, durable worker-heartbeat freshness, or every job's
+last-run state. Combine scrape data with readiness, doctor/Admin operational
+state, and database or deployment-platform monitoring.
+
+Tie dashboards to image digest, application, environment, active revision, and
+bounded aliases. Use [Audit event types](/reference/audit-event-types) and
+[Operational views](/administration/observability) for exact state rather than
+interpreting a process metric as proof of one mutation or request.

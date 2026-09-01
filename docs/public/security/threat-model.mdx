@@ -1,0 +1,146 @@
+---
+title: "Threat model"
+description: "Review protected assets, adversaries, trust boundaries, security objectives, controls, and accepted residual risks for Latchway version 1."
+icon: "shield"
+audience: "security"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "security"
+---
+
+Latchway is the security and accounting boundary between an untrusted client
+application and operator-approved AI or HTTP infrastructure. This model covers
+the client session endpoints, protected proxy, Admin API, embedded Console,
+CLI, PostgreSQL, workers, deployment edge, identity and attestation providers,
+and configured upstreams.
+
+<Warning>
+  This is the pre-release version 1 design model. It does not prove that a
+  deployment is configured correctly, that an exact candidate passed external
+  evidence gates, or that an independent security review has completed. Check
+  [Release status](/release-status) for current evidence.
+</Warning>
+
+## Assets
+
+| Asset | Required property | Prohibited routine exposure |
+| --- | --- | --- |
+| Upstream credentials | Confidentiality, integrity, rotation, tenant binding | Clients, read APIs, logs, audit values, arguments, diagnostics |
+| Environment master key | Confidentiality and availability outside PostgreSQL | Database persistence, API responses, logs, crash reports |
+| Gateway signing keys | Encrypted storage, issuer binding, controlled rotation | JWKS private material, client bundles, plaintext database rows |
+| Component DPoP keys | Non-exportability where the platform permits | Server receipt, diagnostics, insecure backup |
+| Access/refresh credentials | Short access lifetime, key binding, bounded rotating refresh, revocation | Telemetry, logs, server-side plaintext persistence, or unreviewed client export |
+| Identity and attestation input | Verification, challenge binding, minimal retention | Raw token/evidence storage and general Admin responses |
+| Active configuration | Tenant isolation, immutable revisions, atomic activation | Silent overwrite, partial activation, embedded secret values |
+| Quota and usage state | Atomicity, idempotency, checked integer accounting | Client-supplied authority, double settlement, overspend |
+| Audit history | Complete mutation correlation and structural redaction | Unrecorded mutation or before/after secret values |
+| Request and response content | Confidentiality and minimal collection | Storage or logging by default |
+| Availability | Bounded parser, body, stream, job, and connection state | Unbounded attacker-controlled resource use |
+
+Opaque resource IDs are not credentials, but remain tenant-scoped and must not
+be enumerable across organization boundaries.
+
+## Adversaries
+
+The model includes:
+
+- a malicious or reverse-engineered client controlling HTTP and local storage;
+- a legitimate user attempting to exceed plan or feature limits;
+- a stolen access or refresh credential, with or without the component key;
+- XSS, malicious extensions, compromised browser dependencies, and automation;
+- a tenant administrator attempting cross-tenant access or unsafe routing;
+- compromised identity, attestation, DNS, or upstream services;
+- network attackers probing parsers, redirects, streaming, and exhaustion;
+- an operator or database reader without authority to see plaintext secrets;
+- failed, delayed, or duplicate replicas producing replay, reservation,
+  settlement, or job races.
+
+## Trust boundaries
+
+```text
+Untrusted client
+  identity token + public key + proof + attestation + request
+             |
+             v
+Public TLS edge
+             |
+             v
+Latchway API: parse -> verify -> authorize -> reserve -> route -> settle
+       |                                      |
+       v                                      v
+PostgreSQL durable truth               IdP / attestation / upstream
+       |
+       v
+Worker recovery and maintenance
+
+Admin browser or CLI -> authenticated canonical Admin API
+```
+
+The client cannot assert trusted tenancy, identity, plan, trust level, route,
+upstream, price, or usage. The outbound boundary accepts only configured
+destinations after scheme, host, port, path, DNS/IP, header, redirect, timeout,
+and response checks. The control plane requires authenticated identity,
+capability and tenant checks, CSRF/origin protection for cookies, strong ETags,
+and an audit event.
+
+PostgreSQL owns correctness across replicas. Caches and per-process circuit
+observations are optimizations and diagnostics, never authorization state.
+
+## Security objectives and controls
+
+| Objective | Principal controls |
+| --- | --- |
+| Keep provider credentials server-side | Write-only encrypted secrets, redaction, destination/header boundary |
+| Attribute requests to verified context | Identity verification, challenge-bound attestation, component key, DPoP |
+| Prevent bearer-only replay | Short access grants, exact method/URI/token proof, PostgreSQL replay uniqueness |
+| Enforce policy and quotas under concurrency | Active compiled revision, sealed context, reserve-execute-settle, checked integers |
+| Prevent arbitrary proxying and amplification | Feature-bound routes, SSRF policy, bounded retries/fallback, no retry after client bytes |
+| Preserve administrative integrity | Capabilities, tenant scope, secure sessions/tokens, ETags, immutable revisions, audit |
+| Limit sensitive observability | No body storage by default, bounded labels, structured redaction, scoped views |
+| Recover process failure safely | Durable leases, idempotent settlement/release, worker reconciliation, tested backups |
+
+Authentication identifies the application user. Attestation supplies evidence
+about the client. Authorization decides whether the verified context may use a
+feature. DPoP proves possession of the key bound to that session and exact
+request. None of these controls proves that model output is true or safe.
+
+## Platform residual risks
+
+Native attestation does not make a rooted, instrumented, stolen unlocked, or
+otherwise compromised endpoint trustworthy. A valid application identity is
+not automatically a verified physical device or licensed account.
+
+WebCrypto can prevent raw private-key export through its API, but same-origin
+malicious code can invoke the key and read browser storage. Firebase App Check
+and Turnstile are browser risk signals, not Secure Enclave, StrongBox, App
+Attest, or Play Integrity equivalents.
+
+For continuity, the version 1 Web SDK stores access and refresh token strings in
+same-origin IndexedDB alongside the non-exportable component key. This is an
+accepted browser residual risk, not a confidentiality boundary against XSS: the
+browser cannot encrypt those values from code already executing in the origin.
+Applications must not copy them into logs, telemetry, exports, or other storage.
+
+An intentionally configured upstream receives request content and may retain
+or misuse it under its own policy. Latchway cannot enforce data handling after
+dispatch, validate semantic truth, or provide content moderation by default.
+
+Hard cost reservation requires trusted model-aware accounting and pricing.
+Provider usage that arrives only after execution can require conservative
+settlement; missing or invalid cost never becomes zero for a hard cap.
+
+## Operator assumptions
+
+Operators must protect TLS termination, forwarding metadata, PostgreSQL,
+backup custody, the master-key source, deployment identity, gateway signing
+state, administrator credentials, and approved identity/attestation trust
+roots. They must keep one authoritative database per environment in version 1,
+restrict `/metrics`, exercise restore and incident runbooks, and record any
+accepted residual risk in a reviewed architecture decision or release security
+statement.
+
+High or critical unresolved risk blocks release. Report suspected weaknesses
+through [Security reporting](/community/security-reporting), not a public
+issue.

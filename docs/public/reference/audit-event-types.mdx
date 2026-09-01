@@ -1,0 +1,126 @@
+---
+title: "Audit event types"
+description: "Reference stable audit actors, sources, outcomes, change operations, and administrative action names emitted by version 1."
+icon: "list-checks"
+audience: "reference"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-api"
+---
+
+Audit events are append-only, tenant-scoped, and value-free. Use the generated
+[Admin API](/reference/admin-api) for field schemas and
+[Investigate the audit log](/administration/audit-log) for the operational
+workflow.
+
+## Actor, source, and result
+
+| Field | Values | Constraint |
+| --- | --- | --- |
+| `actor_kind` | `admin_user`, `admin_api_token`, `system` | System has no actor ID |
+| `source` | `console`, `cli`, `api`, `system` | Console is session-derived; CLI is a bounded API-token client claim; source is not authorization evidence |
+| `result` | `succeeded`, `denied`, `failed`, `indeterminate` | Indeterminate means database commit acknowledgement was lost |
+| `classification` | `public`, `sensitive` | Sensitive changes set `redacted: true`; neither class contains values |
+| `operation` | `set`, `clear`, `add`, `remove`, `rotate`, `consume`, `revoke` | Describes field change without before/after content |
+
+An optional reason code begins with a lowercase letter, contains at most 100
+lowercase letters, digits, dots, underscores, or hyphens, and rejects
+credential-related terms. Free-form operator narratives belong in the
+restricted incident/change system, not this field.
+
+## Authentication and administrator actions
+
+```text
+admin.bootstrap_owner
+admin.session_create
+admin.session_revoke
+admin.login
+admin.logout
+admin.administrator_create
+admin.administrator_role_change
+admin.administrator_disable
+admin.administrator_enable
+admin.administrator_password_reset
+admin.api_token_create
+admin.api_token_revoke
+```
+
+Successful login/bootstrap session issuance records `admin.session_create`,
+and successful logout/session invalidation records `admin.session_revoke`.
+`admin.login` and `admin.logout` identify rejected mutation attempts at those
+routes.
+
+## Tenant and configuration actions
+
+```text
+admin.organization_create
+admin.application_create
+admin.environment_create
+admin.configuration_revision_create
+admin.configuration_revision_update
+admin.configuration_revision_validate
+admin.configuration_plan
+admin.configuration_activate
+admin.configuration_rollback
+```
+
+Planning is non-dispatching and redaction-safe. Its action name can appear for
+a rejected mutation; activation and rollback name the effective pointer
+change.
+
+## Secret and user actions
+
+```text
+admin.secret_create
+admin.secret_rotate
+admin.secret_delete
+admin.user_limit_override_replace
+admin.user_limit_override_clear
+admin.user_block
+admin.user_unblock
+admin.user_require_reauthentication
+admin.user_require_app_reverification
+```
+
+Secret events classify secret-bearing fields as sensitive and never include
+plaintext. User actions target opaque application-user IDs and record
+value-free credential effects.
+
+## Installation and component actions
+
+```text
+admin.installation_revoke
+admin.installation_family_require_renewal
+admin.installation_family_revoke
+admin.client_component_require_reattestation
+admin.client_component_revoke
+```
+
+Family/component events distinguish renewal, re-attestation, and revocation;
+they do not imply that a delegated component was directly attested.
+
+## Self-test and system actions
+
+```text
+admin.self_test_run
+admin.self_test_schedule_create
+admin.self_test_schedule_disable
+system.self_test_schedule_run
+system.self_test_schedule_disable
+```
+
+System actions have `actor_kind: system` and `source: system`. They preserve
+schedule/run correlation without provider credentials or response bodies.
+
+## Rejected fallback
+
+`admin.request_rejected` is the fallback for a rejected Admin mutation whose
+route does not have a more specific action mapping. Known routes retain their
+intended action with a `denied`, `failed`, or `indeterminate` result so
+operators can investigate failed attempts.
+
+New action values require a server/API/documentation change. Consumers should
+display an unknown valid bounded action without treating it as permission,
+success, or evidence of a field value.

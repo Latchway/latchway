@@ -1,0 +1,121 @@
+---
+title: "Use Latchway in a service worker"
+description: "Route exact gateway requests through the explicit service-worker adapter without widening origin, feature, replay, or browser-trust boundaries."
+icon: "workflow"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "javascript-sdk"
+---
+
+`@latchway/client/service-worker` adapts an existing `LatchwayClient` to a
+fetch-event router. It does not register a listener, patch global `fetch`, or
+claim requests outside the configured gateway origin.
+
+<Info>
+  Version 1.0.0 is the intended package coordinate for the source candidate.
+  Confirm publication on [Release status](/release-status) before installing
+  it from a registry.
+</Info>
+
+## Before you start
+
+- Create and configure the browser client as described in
+  [Installation](/clients/web/installation).
+- Keep the service worker and the page on the same application origin when
+  they are expected to share IndexedDB session state.
+- Decide a fixed application mapping from gateway route to feature ID. Never
+  derive the feature from an arbitrary request header or destination.
+- Ensure the worker build includes the `WebWorker` TypeScript library.
+
+## Create the handler
+
+The following adapter is the tested shape in the JavaScript SDK's
+`examples/service-worker/handler.ts` source:
+
+```ts
+import type { LatchwayClient } from "@latchway/client";
+import { createLatchwayServiceWorkerHandler } from "@latchway/client/service-worker";
+
+export function createGatewayHandler(latchway: LatchwayClient) {
+  return createLatchwayServiceWorkerHandler({
+    client: latchway,
+    featureFor(request) {
+      const path = new URL(request.url).pathname;
+      return path === "/v1/responses" ? "habit-assistant" : undefined;
+    },
+  });
+}
+```
+
+Register the listener in the worker entry point. `handle` returns `true` only
+when it synchronously calls `respondWith`; unrelated requests continue through
+the application's existing worker path.
+
+```ts
+const gatewayHandler = createGatewayHandler(latchway);
+
+self.addEventListener("fetch", (event) => {
+  if (gatewayHandler.handle(event)) return;
+  // Continue with the application's existing routing for unclaimed requests.
+});
+```
+
+If a router already owns `respondWith`, call `route(request)` instead. It
+resolves to `undefined` when the request is not eligible, so the router can
+continue without a second fetch event.
+
+## Request boundary
+
+The adapter checks the exact configured gateway origin before asking
+`featureFor` to select a feature. The base client then independently verifies
+the final origin, method, structured or opaque route, credential-like query
+names, redirect result, and feature binding.
+
+The worker returns the response body without buffering and preserves the
+incoming `Request.signal`. A consumed or streaming request body is not replayed
+when nonce or session rotation becomes necessary; the client reports
+[`transport_request_not_replayable`](/errors/transport-request-not-replayable)
+instead.
+
+## Storage and updates
+
+IndexedDB remains origin-scoped in a service worker. A page and worker using
+the same database name participate in the same rotating-session refresh lease.
+Do not copy a private key, access token, refresh token, or IndexedDB export
+between them.
+
+During a worker update:
+
+1. let in-flight streams finish or cancel them through their existing signal;
+2. activate the new worker without deleting the Latchway database;
+3. send one diagnostic request through the new worker;
+4. inspect the resulting request and component in the Console.
+
+Deleting the database during activation can race open tabs and discard local
+key continuity. Use the reviewed [browser-storage reset](/clients/web/browser-storage-reset)
+workflow when a reset is intended.
+
+## Verification
+
+In browser developer tools, verify that an eligible request:
+
+- targets the exact configured gateway origin;
+- carries `X-Latchway-Feature: habit-assistant` only after authorization;
+- returns through the service worker without a redirect;
+- remains streaming rather than becoming one buffered response.
+
+Then inspect the logical request in the Console. Confirm its feature,
+pseudonymous user, browser component, configuration revision, usage, and
+terminal status. Do not capture authorization or DPoP header values.
+
+## Security boundary
+
+Service-worker execution provides WebCrypto key possession in the browser
+origin. It is not native application identity or physical-device attestation.
+Same-origin malicious script, a compromised worker bundle, or a malicious
+extension can invoke the legitimate non-exportable key. Apply the controls in
+[XSS response and key invalidation](/clients/web/xss-and-key-invalidation) and
+[Model browser trust](/clients/web/browser-trust).

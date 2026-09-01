@@ -33,9 +33,12 @@ WEB_PAGES = {
     "clients/web/origins-and-cors",
     "clients/web/content-security-policy",
     "clients/web/session-storage",
+    "clients/web/xss-and-key-invalidation",
+    "clients/web/browser-storage-reset",
     "clients/web/multiple-tabs",
     "clients/web/browser-vs-node",
     "clients/web/server-rendering",
+    "clients/web/service-workers",
     "clients/web/react",
     "clients/web/nextjs",
     "clients/web/vite",
@@ -142,6 +145,17 @@ REQUIRED_PAGES = {
     "operate/installation-families/revocation",
     "operate/installation-families/troubleshooting",
     "security/delegated-components",
+    "security/threat-model",
+    "security/incident-response",
+    "administration/users",
+    "administration/overrides",
+    "administration/audit-log",
+    "operations/rollbacks",
+    "operations/scaling",
+    "operations/disaster-recovery",
+    "reference/environment-variables",
+    "reference/metrics",
+    "reference/audit-event-types",
     "reference/admin-api",
     "reference/errors",
     "reference/config-schema",
@@ -152,6 +166,11 @@ REQUIRED_PAGES = {
     "reference/sdk-bundles/ios",
     "reference/sdk-bundles/js",
     "reference/sdk-bundles/react-native",
+    "community/architecture",
+    "community/adrs",
+    "community/governance",
+    "community/security-reporting",
+    "community/roadmap",
     "community/agent-resources",
 } | GOLDEN_PAGES | WEB_PAGES | IOS_PAGES | ANDROID_PAGES | REACT_NATIVE_PAGES
 INTEGRATION_PAGES = {
@@ -260,6 +279,81 @@ PRE_RELEASE_PAGES = {
     page
     for page in REQUIRED_PAGES
     if page.startswith(("concepts/", "build/app-extensions/", "integrations/", "operate/", "security/"))
+}
+FACTUAL_PAGE_GUARDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "operations/rollbacks": {
+        "required": (
+            "before routing any production traffic",
+            "latchway_migrate_on_start=false",
+        ),
+        "forbidden": (
+            "previous binary declares the current schema compatible",
+            "use the previous immutable digest only when its declared schema range",
+        ),
+    },
+    "operations/upgrades": {
+        "required": (
+            "the binary has no declared schema range",
+            "against an isolated copy of the current database",
+        ),
+        "forbidden": ("confirm that binary's declared schema range includes",),
+    },
+    "operations/disaster-recovery": {
+        "required": ("passes isolated current-schema proof",),
+        "forbidden": ("route to a schema-compatible previous digest",),
+    },
+    "security/threat-model": {
+        "required": ("same-origin indexeddb", "accepted browser residual risk"),
+        "forbidden": ("plaintext persistence or telemetry",),
+    },
+    "administration/users": {
+        "required": (
+            "normalization bounds claim names",
+            "normal bounded expiry",
+        ),
+        "forbidden": ("reads safe normalized claims",),
+    },
+    "administration/overrides": {
+        "required": (
+            "same immutable row and override id",
+            "repeating an identical effective override must return the same override id",
+        ),
+        "forbidden": (
+            "replacement revokes the previous row and creates a new immutable record",
+        ),
+    },
+    "clients/web/browser-storage-reset": {
+        "required": (
+            "server diagnostics expose the active installation id, not a component id",
+        ),
+        "forbidden": ("component: diagnostics.server.installation.id",),
+    },
+    "reference/environment-variables": {
+        "required": ("serve --role worker", "has no http listener or scrape endpoint"),
+        "forbidden": ("metrics are always exposed at /metrics",),
+    },
+    "reference/metrics": {
+        "required": (
+            "creates no http listener in version 1",
+            "its process-local observations therefore have no scrape endpoint",
+        ),
+    },
+    "operations/scaling": {
+        "required": ("a worker-only process has no http listener",),
+    },
+    "operations/key-rotation": {
+        "required": (
+            "no admin api or cli operation to force signing-key rotation",
+            "scheduled rotation is therefore not emergency containment",
+        ),
+    },
+    "security/incident-response": {
+        "required": (
+            "api-token-authenticated cli revocation is self-only",
+            "there is no admin api or cli emergency-rotation operation",
+        ),
+        "forbidden": ("follow the emergency path in key rotation",),
+    },
 }
 
 
@@ -534,6 +628,18 @@ def main() -> int:
         for field in ("attestationPolicies:", "web:", "allowedOrigins:"):
             if field not in origins_text:
                 errors.append(f"Web origin guide lacks canonical configuration path: {field}")
+
+    for route, guards in FACTUAL_PAGE_GUARDS.items():
+        page = files_by_route.get(route)
+        if page is None:
+            continue
+        normalized_text = " ".join(page.read_text(encoding="utf-8").casefold().split())
+        for phrase in guards.get("required", ()):
+            if phrase.casefold() not in normalized_text:
+                errors.append(f"factual documentation guard is missing on {route}: {phrase}")
+        for phrase in guards.get("forbidden", ()):
+            if phrase.casefold() in normalized_text:
+                errors.append(f"factual documentation guard is violated on {route}: {phrase}")
 
     seen_titles: dict[str, str] = {}
     seen_descriptions: dict[str, str] = {}

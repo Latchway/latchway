@@ -1,0 +1,77 @@
+---
+title: "Product roadmap and scope"
+description: "Understand the evidence-gated path to version 1, the stable product boundary, and how future work becomes a commitment."
+icon: "map"
+audience: "community"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "community"
+---
+
+Latchway's current roadmap has one committed outcome: publish a coherent,
+evidence-backed version 1 across the core gateway, JavaScript, iOS, Android,
+React Native, and public documentation repositories.
+
+Source implementation is not the release milestone. The authoritative current
+state, including open external gates, is [Release status](/release-status).
+
+## Version 1 outcome
+
+Version 1 is the boundary between untrusted client applications and
+operator-approved AI infrastructure:
+
+- verify existing user identity and platform-appropriate client trust;
+- bind short sessions and protected requests to component-held DPoP keys;
+- authorize named application features rather than client-selected provider
+  credentials or physical models;
+- enforce trusted request bounds, per-request/concurrency/calendar quotas, and
+  integer cost reservation/settlement;
+- route deterministically across configured upstreams with bounded retry and
+  fallback;
+- provide one canonical Admin API with Console/CLI workflows, immutable
+  configuration, audit, request/usage views, and operational runbooks;
+- ship idiomatic Web, iOS, Android, and React Native integrations while keeping
+  their trust claims distinct;
+- publish one signed multi-architecture server image, verified packages, and a
+  synchronized public documentation site.
+
+## Release milestone
+
+The first supported release requires one exact candidate to close local and
+protected evidence for contracts, clean consumers, live providers, Web risk
+providers, physical mobile devices, cloud templates, multi-replica failure,
+backup/restore, upgrade/application rollback, load, vulnerability/license
+scans, SBOM, signing, provenance, registry state, documentation, and
+cross-repository conformance.
+
+Unavailable credentials, devices, accounts, reviewers, or registries remain
+open gates. They never become synthetic passes or a revised claim of support.
+No public release date is promised until those independently controlled gates
+close.
+
+## Stable non-goals for version 1
+
+Version 1 deliberately does not include agent orchestration, retrieval/vector
+databases, MCP execution, prompt hosting/versioning, fine-tuning, semantic
+caching, AI evaluation, subscription billing, application-user sign-in UI,
+multi-region strongly consistent quotas, or a proprietary AI request
+framework. It does not require Redis, Kafka, ClickHouse, or Elasticsearch.
+
+These exclusions keep correctness focused on identity, trust, DPoP, feature
+authorization, routing, quota/accounting, secret custody, and portable
+operation. They are not unfinished version 1 promises.
+
+## How future work is scheduled
+
+After the first release, maintainers prioritize observed security issues,
+compatibility gaps backed by conformance cases, operational evidence, and
+high-frequency support/documentation failures. A future capability becomes a
+project commitment only when its proposal is accepted through
+[governance](/community/governance), its security and migration boundaries are
+recorded in an [ADR](/community/adrs), and a release target is published.
+
+Public issues may propose work, but an issue, discussion, prototype, or ADR
+draft is not a delivery promise. Changelog and release records describe shipped
+behavior; this page describes scope and decision policy.

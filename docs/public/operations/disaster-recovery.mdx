@@ -1,0 +1,90 @@
+---
+title: "Recover from a deployment disaster"
+description: "Restore the database, matching master key, immutable image, and protocol origin into an isolated environment before controlled traffic recovery."
+icon: "life-buoy"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Disaster recovery restores a coherent Latchway security and accounting state,
+not only a running process. The minimum recoverable set is PostgreSQL, its
+matching `LATCHWAY_MASTER_KEY`, an immutable compatible image, and the exact
+external-origin configuration.
+
+## Define the recovery contract
+
+Before an incident, the operator must choose and test:
+
+- recovery point and recovery time objectives;
+- PostgreSQL backup/PITR cadence and retention;
+- separate custody and recovery access for the master key;
+- immutable image, signature, provenance, SBOM, and version retention;
+- DNS/TLS and `LATCHWAY_PUBLIC_ORIGIN` recovery ownership;
+- the isolated restore environment and traffic-switch procedure;
+- incident roles, audit export policy, and decision authority.
+
+Latchway does not set an RPO or RTO for the deployment and does not provide
+automatic multi-region failover in version 1.
+
+## Failure matrix
+
+| Failure | Recovery action | Critical boundary |
+| --- | --- | --- |
+| One API replica | Replace it and verify readiness | Durable state remains in PostgreSQL |
+| Worker outage | Restore compatible worker coverage | Readiness and maintenance remain failed until heartbeat recovers |
+| PostgreSQL loss/corruption | Restore backup or PITR into a new instance | Never repair quota, audit, or signing tables by hand |
+| Master-key loss | Recover the escrowed matching key | Database secrets and signing material cannot be decrypted without it |
+| Master-key compromise | Isolate the environment and follow incident containment | Version 1 has no in-place online master-key rotation |
+| Bad configuration | Reactivate a reviewed immutable revision | Do not restore the database for a control-plane rollback |
+| Bad application image | Route to a previous digest only after it passes isolated current-schema proof | Otherwise use schema recovery |
+| Origin/TLS loss | Restore the exact approved external origin | DPoP binds proofs to the request URI; an alias is not transparent recovery |
+
+## Recovery procedure
+
+1. Remove or freeze client and Admin API traffic. Record the incident point,
+   image digest, schema, active revision, worker status, and safe request/audit
+   IDs.
+2. Preserve the failed environment for forensics under restricted access.
+3. Select the approved backup/PITR point and verify its checksum and metadata.
+4. Restore into a newly created isolated PostgreSQL instance. Do not overwrite
+   the failed database.
+5. Install the escrowed master key and the immutable image recorded for that
+   backup or recovery point.
+6. Run `latchway migrate status` and `latchway --output json doctor` before
+   deciding whether to migrate.
+7. Verify active configuration, signing/JWKS state, managed-secret decryption,
+   audit continuity, quota snapshots, worker recovery, and one controlled
+   debug-only session/proxy flow.
+8. If an upgrade is required, follow the normal forward-only
+   [upgrade procedure](/operations/upgrades) in isolation.
+9. Shift a small traffic slice, verify JSON and streaming requests, quota
+   settlement, fallback, audit, metrics, and client session behavior, then
+   increase traffic deliberately.
+
+Use the exact restore commands and backup-set requirements in
+[Backup and restore](/operations/backup-restore).
+
+## Security recovery
+
+A restore can reintroduce credentials that were valid at the recovery point.
+After containment, rotate compromised upstream/admin credentials, revoke
+affected users/components/families, and review signing-key rotation separately.
+Do not change the master key in place to silence a decryption mismatch.
+
+When recovering to a different external origin is unavoidable, treat it as a
+protocol migration. Update trusted configuration, clients, CORS/CSP, and DPoP
+expectations through a reviewed rollout; existing origin-bound requests and
+sessions cannot be assumed portable.
+
+## Completion evidence
+
+Record backup identity and checksum, recovery point, database major/schema,
+master-key identifier without key material, image digest, migration and doctor
+results, health/readiness, worker coverage, state fingerprint, controlled
+request IDs, traffic-switch times, and follow-up revocations. A locally written
+summary is operational evidence for that drill, not proof of a published or
+release-qualified deployment.

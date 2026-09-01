@@ -1,0 +1,65 @@
+---
+title: "Report a security vulnerability"
+description: "Submit suspected Latchway vulnerabilities privately with enough bounded evidence for safe triage and coordinated remediation."
+icon: "shield-alert"
+audience: "community"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "security"
+---
+
+Do not disclose a suspected vulnerability in a public issue, discussion, pull
+request, test fixture, documentation preview, or chat transcript.
+
+## Submit privately
+
+Use GitHub's
+[Report a vulnerability](https://github.com/Latchway/latchway/security/advisories/new)
+flow for the core repository. If that flow is unavailable, contact a repository
+owner through an existing private organization channel and request a draft
+GitHub security advisory before sending technical details.
+
+No public security email or encryption key is currently published. Do not send
+sensitive material to an address or key inferred from a username, commit, or
+package record.
+
+## Include
+
+- affected release or complete commit coordinate;
+- affected core/SDK repository, deployment, client platform, and database
+  version;
+- realistic impact and attack prerequisites;
+- minimal reproduction steps using deterministic or revoked credentials;
+- whether provider secrets, master/signing keys, administrator access, user
+  identity, attestation, DPoP, quotas, routing, upstream traffic, or content may
+  be affected;
+- safe request/audit IDs and a redacted timeline;
+- suggested remediation or a coordinated-disclosure constraint, if any.
+
+Do not include live provider/master/admin keys, passwords, identity/access/
+refresh tokens, DPoP private keys or proofs, App Attest or Play Integrity
+payloads, browser-storage exports, raw prompt/response bodies, or an active
+production exploit. Revoke and rotate a credential accidentally included in a
+report and notify the security maintainer immediately.
+
+## Response expectations
+
+Maintainers aim to acknowledge a complete report within three business days
+and establish severity and next steps within seven business days. These are
+coordination targets, not an uptime SLA, bounty promise, or compensation
+commitment.
+
+The reporter and security maintainers coordinate testing, patch availability,
+release handling, CVE/advisory needs, and public disclosure timing. A public
+fix should include regression coverage and an ADR when the security boundary
+changes, without publishing exploit detail before affected users can respond.
+
+## Supported-version boundary
+
+Latchway has not published a supported production release. Until the first
+release, security fixes apply to the default branch. A supported-version table
+will appear in the repository security policy only when public releases and
+their evidence exist. See [Release status](/release-status) rather than
+inferring support from a source version.

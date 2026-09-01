@@ -1,0 +1,109 @@
+---
+title: "Contributor architecture"
+description: "Understand Latchway runtime, domain, repository, contract, and extension boundaries before changing implementation or public behavior."
+icon: "landmark"
+audience: "community"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "core-architecture"
+---
+
+Latchway owns identity, client-trust, proof-of-possession, authorization,
+quota, routing, credential injection, and usage settlement between an
+untrusted application client and operator-approved upstream infrastructure.
+
+Use [Architecture at a glance](/start/architecture-at-a-glance) for the reader
+model. This page maps that model to contributor-owned source boundaries.
+
+## Runtime shape
+
+```text
+Untrusted client
+  -> client/session HTTP boundary
+  -> identity + attestation + DPoP
+  -> active compiled configuration + feature authorization
+  -> atomic quota/concurrency reservation
+  -> deterministic route/model selection
+  -> bounded upstream adapter and credential injection
+  -> streaming observation and idempotent settlement
+
+Admin Console / CLI
+  -> canonical Admin API
+  -> immutable revisions, resources, audit, operational views
+
+API and worker replicas
+  -> PostgreSQL durable truth
+```
+
+One Go binary provides API, worker, migration, diagnostics, verification, and
+CLI roles. The production image embeds the built Console and forward-only
+migrations. It contains neither the Node.js nor Go toolchain.
+
+## Core source map
+
+| Source | Responsibility |
+| --- | --- |
+| `api/` | Normative Client/Admin OpenAPI, configuration schema, error registries, protocol and evidence contracts |
+| `cmd/latchway/` and `internal/cli/` | One binary and credential-safe operator workflows |
+| `internal/adminapi/`, `internal/adminauth/` | Canonical control plane, capability/tenant enforcement, sessions/tokens, audit |
+| `internal/session/`, `internal/attestation/` | Challenge binding, component/session lifecycle, DPoP and trust normalization |
+| `internal/policy/`, `internal/configuration/` | Immutable revisions, CEL, effective policy and validation |
+| `internal/quota/`, `internal/dataplane/` | Reserve-execute-settle, request lifecycle, routing, retry/fallback, proxy boundary |
+| `internal/upstream/`, `adapters/` | Protocol parsing/rewriting and bounded upstream execution |
+| `internal/worker/`, `internal/telemetry/` | Durable maintenance/recovery and redaction-safe process telemetry |
+| `migrations/` | Embedded transactional forward-only PostgreSQL schema |
+| `web/console/` | Same-origin Admin API client; no database or browser policy authority |
+| `deploy/` | One-image platform templates and static validation inputs |
+| `conformance/`, `tests/`, `scripts/` | Cross-protocol, security, operational, release, and evidence gates |
+| `docs/public/` | Canonical public Mintlify source; the docs repository is a generated mirror |
+
+## Domain invariants
+
+- Organization → application → environment owns tenancy and active
+  configuration.
+- A user is derived from verified external identity; routine persistence and
+  views use a pseudonymous application-scoped ID.
+- An Installation Family contains independently keyed Client Components.
+  Delegated trust never means independent direct attestation.
+- A feature is the client-facing authorization/routing name. A physical model
+  remains server-owned.
+- A configuration revision is immutable. One atomic environment pointer
+  selects the active revision.
+- One logical request can have ordered upstream attempts without double
+  counting the user operation.
+- Quota reserves before dispatch and settles/reclaims exactly once after
+  execution or failure.
+
+## Repository contracts
+
+The core repository owns wire/configuration/error contracts. JavaScript, iOS,
+Android, and React Native repositories consume the sealed bundle and publish
+their own idiomatic transport APIs and conformance evidence. React Native uses
+native iOS/Android key and attestation implementations; it is not the browser
+JavaScript SDK in a native shell.
+
+Public SDK snippets are extracted from tested SDK source and synchronized into
+the canonical docs. Support claims come from the compatibility registry and
+release evidence rather than handwritten prose.
+
+## Extension boundary
+
+Identity, attestation, protocol, upstream, and pricing implementations use
+narrow interfaces, but trusted version 1 implementations are statically
+compiled. Runtime JavaScript, shell, Go shared objects, arbitrary SQL, and
+downloaded operator code are prohibited. CEL is the only configurable policy
+language.
+
+An extension change must:
+
+1. update the normative contract first when public behavior changes;
+2. define input/output bounds and secret/redaction behavior;
+3. add positive, negative, adversarial, and cross-tenant tests;
+4. preserve DPoP, feature, destination, quota, retry, and settlement invariants;
+5. update compatibility, docs, examples, and an ADR when the decision is
+   durable or security-sensitive.
+
+See [Architecture decisions](/community/adrs) and
+[Add a framework integration](/community/add-framework-integration).

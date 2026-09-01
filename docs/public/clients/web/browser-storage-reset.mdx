@@ -1,0 +1,101 @@
+---
+title: "Reset browser storage safely"
+description: "Retire server-side browser credentials, remove origin storage without racing active runtimes, and verify a clean component enrollment."
+icon: "database-backup"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "javascript-sdk"
+---
+
+Reset browser storage when an operator has approved loss of local component
+continuity, or when IndexedDB state cannot be recovered. A reset creates a new
+browser key and component on next use. It does not, by itself, revoke the old
+server record.
+
+## Choose the correct path
+
+| Situation | Required first action |
+| --- | --- |
+| Planned sign-out on a healthy client | Revoke the current Installation Family through the SDK |
+| One known browser component is compromised | Revoke that component from a trusted operator context |
+| The browser origin or sibling state is compromised | Revoke the complete Installation Family |
+| IndexedDB is corrupt or unavailable | Record the old component ID if possible, then revoke through the operator plane |
+| User identity is compromised | Use the reviewed user reauthentication or block workflow before local cleanup |
+
+## Planned reset
+
+From a client that is still trusted to execute the sign-out flow, revoke first:
+
+```ts
+await latchway.revokeCurrentInstallationFamily();
+```
+
+The call revokes every component and session in the current family. After the
+server confirms success, the SDK clears its local installation and session
+state. Do not treat a network error as confirmed revocation; inspect the family
+from the operator plane before continuing.
+
+## Forced recovery
+
+When the client cannot load its state or cannot be trusted:
+
+1. locate the old browser component or family in the Console using the
+   pseudonymous user, environment, safe request IDs, and last-seen metadata;
+2. revoke the component or family from a trusted operator session;
+3. confirm the audit event succeeded;
+4. close every tab for the origin and stop or unregister its service worker;
+5. use the browser's site-data controls to remove storage for the exact
+   application origin;
+6. reload the repaired application and complete identity and browser-trust
+   exchange again.
+
+Do not ship code that calls `indexedDB.deleteDatabase()` during normal startup.
+Open tabs or workers can block deletion, and an automatic delete loop can
+create repeated components without closing the old server records. The
+version 1 Web SDK intentionally has no unauthenticated local-only reset API.
+
+## What the reset removes
+
+For the selected Latchway database scope, the reset removes the non-exportable
+P-256 `CryptoKey`, public-key metadata, short-lived access and rotating refresh
+credentials, and cross-tab refresh lease. It does not remove:
+
+- the former component or Installation Family from PostgreSQL;
+- audit, request, usage, or revocation history;
+- identity-provider session state stored outside that database;
+- service-worker caches or other application storage unless the browser's site
+  data operation includes them.
+
+A browser's broader site-data control can remove more than the Latchway
+database, including same-origin identity cookies or storage. Plan for the user
+to authenticate again after forced recovery.
+
+## Verification
+
+After re-enrollment:
+
+```ts
+const diagnostics = await latchway.diagnostics();
+console.log({
+  installation: diagnostics.server.installation.id,
+  persistence: diagnostics.client.sessionPersistence,
+  trust: diagnostics.server.trust.level,
+});
+```
+
+Use the values only for local verification; do not log them routinely in
+production. Server diagnostics expose the active Installation ID, not a
+component ID. Confirm that the new Installation differs from the recorded old
+Installation, then inspect its family/component graph in the Console to confirm
+the new browser component, intended `indexeddb` persistence mode, and expected
+browser trust level. A storage reset never upgrades Web trust to native app or
+physical-device attestation.
+
+If the operation still returns
+[`storage_unavailable`](/errors/storage-unavailable), verify browser policy,
+private-browsing restrictions, available quota, and CryptoKey structured-clone
+support. Select `allow-memory` only after accepting session-only continuity and
+new component enrollment after navigation.

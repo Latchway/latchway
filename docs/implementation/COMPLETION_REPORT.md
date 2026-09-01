@@ -18,7 +18,7 @@ deployments, or protected evidence that does not exist.
 | Database | Schema `27` at clean core implementation checkpoint `82c9d3663a0532210d6a99ebecaa179f05797115` |
 | Contract bundle | SHA-256 `3a88fb69b911724da849229f34f735608e829bcfb0658087313c8d31441e9927` at contract source checkpoint `a59a2c1c807aec50093ae6346492a05148c72899` |
 | Core implementation source | `82c9d3663a0532210d6a99ebecaa179f05797115`; subsequent ledger-only changes do not alter runtime source |
-| SDK source tuple | JavaScript `6b0c08ded377011044462d1ba6aa46cb34d7ee8f`; Swift `af87b4454e4b6a159b9da7bd50550865c74684a2`; Android `9d83a635fc0e5f1a79582c73f0fb61acc9e24471`; React Native `111e7841f81e87ab471c18d381fed18ec8335760` |
+| SDK source tuple | JavaScript `f9439bdeb56d93218cd63008f7c0f2b2d14821bf`; Swift `8acd72a7fbbff019ffeb1c7be0264f671c636168`; Android `349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7`; React Native `2d78f588671d35512c6d0d244c89ec61e6a48cfa` |
 | Public documentation source | Canonical core checkpoint `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3`; synchronized Mintlify mirror `ce4ea1e1cf56404da7146b98ca2744b194050fd5` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | Pushed branch source candidates only; no version 1 merge, tag, package, image, or production-docs publication is authorized |
@@ -35,7 +35,7 @@ authorize version 1.
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
 | Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, and scoped actions | Deployment operator acceptance on the final image |
-| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate. React Native `111e7841f81e87ab471c18d381fed18ec8335760` adds root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed; historical root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a real iPadOS 26.5 Debug run with automatic Apple Development signing. | Physical invocation of the current Debug App Intent, protected Apple distribution/extension-matrix proof, physical Android proof, and publication |
+| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate. React Native `2d78f588671d35512c6d0d244c89ec61e6a48cfa` adds root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed; historical root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a real iPadOS 26.5 Debug run with automatic Apple Development signing. | Physical invocation of the current Debug App Intent, protected Apple distribution/extension-matrix proof, physical Android proof, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
@@ -99,7 +99,7 @@ input/output/total usage, production quota settlement, and terminal session and
 installation revocation all passed. This is development-signed physical
 evidence, not a protected immutable-candidate or distribution receipt.
 
-Current React Native source `111e7841f81e87ab471c18d381fed18ec8335760`
+Current React Native source `2d78f588671d35512c6d0d244c89ec61e6a48cfa`
 materially extends that predecessor with root-owned descriptor lifecycle and a
 Debug App Intent that uses the native extension client for an independently
 keyed delegated request with exact-run challenge/receipt binding. Its full

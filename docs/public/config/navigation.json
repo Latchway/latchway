@@ -85,6 +85,8 @@
             "clients/web/origins-and-cors",
             "clients/web/content-security-policy",
             "clients/web/session-storage",
+            "clients/web/xss-and-key-invalidation",
+            "clients/web/browser-storage-reset",
             "clients/web/multiple-tabs"
           ]
         },
@@ -93,6 +95,7 @@
           "pages": [
             "clients/web/browser-vs-node",
             "clients/web/server-rendering",
+            "clients/web/service-workers",
             "clients/web/react",
             "clients/web/nextjs",
             "clients/web/vite"
@@ -176,7 +179,15 @@
           "pages": [
             "administration/configuration",
             "administration/console",
-            "administration/observability"
+            "administration/users",
+            "administration/overrides"
+          ]
+        },
+        {
+          "group": "Observe and investigate",
+          "pages": [
+            "administration/observability",
+            "administration/audit-log"
           ]
         },
         {
@@ -184,10 +195,18 @@
           "pages": [
             "operations/deployment",
             "operations/telemetry-and-jobs",
-            "operations/self-tests",
-            "operations/key-rotation",
+            "operations/self-tests"
+          ]
+        },
+        {
+          "group": "Maintain and recover",
+          "pages": [
             "operations/backup-restore",
-            "operations/upgrades"
+            "operations/upgrades",
+            "operations/rollbacks",
+            "operations/key-rotation",
+            "operations/scaling",
+            "operations/disaster-recovery"
           ]
         },
         {
@@ -214,8 +233,13 @@
             "concepts/client-components",
             "concepts/trust-provenance",
             "security/delegated-components",
+            "security/threat-model",
             "mobile/device-proof"
           ]
+        },
+        {
+          "group": "Respond",
+          "pages": ["security/incident-response"]
         }
       ]
     },
@@ -229,6 +253,14 @@
             "reference/admin-api",
             "reference/cli",
             "reference/errors"
+          ]
+        },
+        {
+          "group": "Operational reference",
+          "pages": [
+            "reference/environment-variables",
+            "reference/metrics",
+            "reference/audit-event-types"
           ]
         },
         {
@@ -344,8 +376,18 @@
           "group": "Contribute",
           "pages": [
             "community/contributing",
+            "community/architecture",
+            "community/adrs",
             "community/add-framework-integration",
             "community/agent-resources"
+          ]
+        },
+        {
+          "group": "Project",
+          "pages": [
+            "community/governance",
+            "community/security-reporting",
+            "community/roadmap"
           ]
         },
         {

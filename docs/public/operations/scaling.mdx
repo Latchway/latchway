@@ -1,0 +1,93 @@
+---
+title: "Scale API and worker replicas"
+description: "Increase Latchway capacity while preserving PostgreSQL connection headroom, worker readiness, streaming drains, and server-authoritative correctness."
+icon: "scale"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Latchway is stateless outside PostgreSQL and process-local caches. API and
+worker replicas coordinate replay, quota, configuration, signing rotation,
+maintenance leases, and recovery through one PostgreSQL authority.
+
+## Capacity boundary
+
+Budget the maximum rather than the steady state:
+
+```text
+maximum application connections
+  = maximum API replicas × API pool size
+  + maximum worker replicas × worker pool size
+  + migration, backup, administration, and maintenance slots
+```
+
+Leave at least 20 percent additional database headroom. Set
+`LATCHWAY_DB_MAX_CONNECTIONS` per process before raising replica maxima. Its
+accepted range is 2 through 500; the default is 20. A connection pooler can
+reduce churn but cannot replace the end-to-end budget.
+
+## Scale out
+
+1. Capture the current image digest, role counts, pool size, worker heartbeat,
+   database connection use, request/stream concurrency, latency, errors, and
+   reservation backlog.
+2. Start with `serve --role all`. Separate `serve --role api` and
+   `serve --role worker` only when independent scaling is needed.
+3. Preserve at least one compatible worker heartbeat before adding API
+   capacity; API-only replicas can be live while production readiness remains
+   correctly failed.
+4. Add a small replica increment. For `api` or `all` replicas, require `/readyz`
+   plus `latchway doctor` to pass. A worker-only process has no HTTP listener in
+   version 1; verify its startup and use doctor or Admin operational state from
+   a trusted control context to confirm its durable heartbeat, replica count,
+   and job coverage.
+5. Exercise non-streaming requests, SSE, quota contention, fallback, and
+   settlement at the new concurrency level.
+6. Increase traffic while monitoring the metrics in
+   [Metrics](/reference/metrics).
+
+Configuration caches and bounded circuit observations are process-local. They
+may differ briefly between replicas; neither is authorization or route
+admission authority. PostgreSQL and the active immutable revision remain
+decisive.
+
+## Streams and scale-in
+
+Keep the platform request timeout longer than the longest supported stream.
+Disable proxy buffering for server-sent events. On scale-in, the runtime stops
+accepting new work after `SIGTERM` and drains for
+`LATCHWAY_SHUTDOWN_TIMEOUT`—30 seconds by default. Load-balancer deregistration
+and platform termination grace must be at least that long.
+
+Before removing a worker replica, confirm another compatible worker owns
+heartbeat and scheduled maintenance coverage. PostgreSQL leases allow recovery
+after process loss, but killing every worker intentionally makes readiness and
+maintenance freshness fail.
+
+## Verify and reverse
+
+Compare the before/after interval for:
+
+- request rate and duration;
+- active requests and streams;
+- database pool pressure and readiness;
+- upstream attempts, time to first token, and bounded failure conditions;
+- quota/concurrency denials and active/reclaimed reservations;
+- worker-job duration, scheduled self-tests, and stale job checks.
+
+If correctness, database pressure, latency, or recovery degrades, stop traffic
+growth, return to the previous replica/pool limits, drain removed replicas, and
+repeat doctor plus client verification. Scaling changes do not require a
+configuration revision unless application policy also changes.
+
+## Version 1 limits
+
+Version 1 does not provide multi-region strongly consistent quotas or an
+active-active PostgreSQL abstraction. Do not split one environment across
+independent writable databases. Redis, Kafka, and process-local caches are not
+substitutes for PostgreSQL correctness. A cross-region design requires a
+separate reviewed architecture decision and failure proof.

@@ -30,6 +30,9 @@
 - [Browser versus Node.js](https://docs.latchway.dev/clients/web/browser-vs-node.md): Keep browser and server runtime trust claims separate.
 - [Origins and CORS](https://docs.latchway.dev/clients/web/origins-and-cors.md): Configure exact browser origins and preflight behavior.
 - [Content Security Policy](https://docs.latchway.dev/clients/web/content-security-policy.md): Add the gateway origin to a bounded browser CSP.
+- [Service workers](https://docs.latchway.dev/clients/web/service-workers.md): Use the tested worker adapter without pretending a worker is a separate trust principal.
+- [XSS and key invalidation](https://docs.latchway.dev/clients/web/xss-and-key-invalidation.md): Contain browser compromise and revoke affected component or family credentials.
+- [Browser storage reset](https://docs.latchway.dev/clients/web/browser-storage-reset.md): Distinguish local browser cleanup from authoritative server-side revocation.
 - [Web production checklist](https://docs.latchway.dev/clients/web/production-checklist.md): Review identity, origin, risk-signal, XSS, and storage controls.
 
 ## Security and Installation Families
@@ -40,17 +43,25 @@
 - [Client Components](https://docs.latchway.dev/concepts/client-components.md): Understand root, delegated, identity-only, and browser-risk trust.
 - [Trust provenance](https://docs.latchway.dev/concepts/trust-provenance.md): Follow trust sources, expiry, and revocation through a component graph.
 - [Delegated component security](https://docs.latchway.dev/security/delegated-components.md): Understand why delegated trust is not independent App Attest.
+- [Threat model](https://docs.latchway.dev/security/threat-model.md): Review assets, trust boundaries, attack objectives, controls, and accepted residual risk.
+- [Incident response](https://docs.latchway.dev/security/incident-response.md): Contain and investigate identity, client, key, upstream, and operator incidents safely.
 - [Physical-device proof](https://docs.latchway.dev/mobile/device-proof.md): Bind an exact signed artifact and source coordinate to device evidence.
 
 ## Operate and investigate
 
 - [Admin console](https://docs.latchway.dev/administration/console.md): Use capability-scoped, same-origin control-plane workflows.
 - [Configuration](https://docs.latchway.dev/administration/configuration.md): Create, validate, plan, simulate, activate, and roll back immutable revisions.
+- [Application users](https://docs.latchway.dev/administration/users.md): Inspect pseudonymous users and perform capability-scoped block or trust-renewal workflows.
+- [User limit overrides](https://docs.latchway.dev/administration/overrides.md): Replace or clear one environment-scoped limit-plan override with review and audit evidence.
 - [Operational observability](https://docs.latchway.dev/administration/observability.md): Inspect request, usage, cost, latency, trust, and audit metadata.
+- [Audit log](https://docs.latchway.dev/administration/audit-log.md): Investigate immutable administrative actions and reconcile indeterminate mutations.
 - [Production readiness](https://docs.latchway.dev/operations/production-readiness.md): Review the complete deployment and release checklist.
 - [Deployment](https://docs.latchway.dev/operations/deployment.md): Deploy API, worker, and migration roles with PostgreSQL as the required external service.
 - [Backup and restore](https://docs.latchway.dev/operations/backup-restore.md): Capture, restore, and verify recoverable PostgreSQL state.
 - [Upgrades](https://docs.latchway.dev/operations/upgrades.md): Upgrade with compatibility checks and a documented rollback boundary.
+- [Rollbacks](https://docs.latchway.dev/operations/rollbacks.md): Choose configuration, application, or data recovery without conflating their guarantees.
+- [Scaling](https://docs.latchway.dev/operations/scaling.md): Size API and worker replicas while preserving PostgreSQL connection headroom.
+- [Disaster recovery](https://docs.latchway.dev/operations/disaster-recovery.md): Restore a coherent database, key, image, configuration, and public-origin set.
 - [Troubleshooting](https://docs.latchway.dev/troubleshooting.md): Start from stable error codes and redaction-safe request identifiers.
 
 ## Contracts and agent resources
@@ -61,6 +72,14 @@
 - [Compatibility matrix](https://docs.latchway.dev/reference/compatibility.md): Read support claims generated from the canonical compatibility registry.
 - [Configuration schema](https://docs.latchway.dev/reference/config-schema.md): Inspect the generated immutable configuration contract.
 - [CLI reference](https://docs.latchway.dev/reference/cli.md): Use credential-safe administrative commands and verification workflows.
+- [Environment variables](https://docs.latchway.dev/reference/environment-variables.md): Configure runtime, trust, operations, telemetry, and CLI settings with exact defaults and bounds.
+- [Metrics](https://docs.latchway.dev/reference/metrics.md): Interpret exported instruments, labels, and operational signals without unbounded cardinality.
+- [Audit-event types](https://docs.latchway.dev/reference/audit-event-types.md): Map actors, results, change operations, and action families to investigation workflows.
+- [Contributor architecture](https://docs.latchway.dev/community/architecture.md): Map domain invariants and repository responsibilities before changing public behavior.
+- [Architecture decisions](https://docs.latchway.dev/community/adrs.md): Find canonical ADRs and propose durable technical decisions.
+- [Project governance](https://docs.latchway.dev/community/governance.md): Understand maintainer, security, and release responsibilities.
+- [Security reporting](https://docs.latchway.dev/community/security-reporting.md): Submit suspected vulnerabilities through the private advisory workflow.
+- [Product roadmap and scope](https://docs.latchway.dev/community/roadmap.md): Separate the version 1 evidence milestone from future proposals.
 - [Agent resources](https://docs.latchway.dev/community/agent-resources.md): Use Latchway instructions and skills without inventing fields or security claims.
 - [Latchway skill](https://docs.latchway.dev/skill.md): Integrate, operate, and troubleshoot Latchway with explicit trust boundaries.
 

@@ -1,0 +1,118 @@
+---
+title: "Incident response"
+description: "Triage, contain, recover, and review Latchway security incidents with scoped revocation and redaction-safe evidence."
+icon: "siren"
+audience: "security"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "security"
+---
+
+Use this runbook for suspected credential disclosure, unauthorized
+administrative change, client compromise, quota bypass, upstream proxy abuse,
+or loss of database/key integrity.
+
+<Warning>
+  Latchway remains a pre-release source candidate. Adapt this runbook to the
+  deployment's incident authority, legal obligations, identity provider,
+  upstream contracts, and tested recovery environment before production use.
+</Warning>
+
+## First response
+
+1. Assign an incident lead, evidence owner, containment owner, and
+   communications owner. Record all decisions in a restricted incident log.
+2. Establish the exact organization, application, environments, external
+   origin, image/client commits, configuration revision, and time window.
+3. Preserve safe request IDs, audit event IDs, Admin operation IDs, deployment
+   events, metric ranges, and redacted logs. Generate a bounded support bundle
+   when the runtime is trustworthy enough to do so:
+
+   ```bash
+   latchway --output json doctor
+   latchway doctor --support-bundle ./latchway-support-bundle.json
+   ```
+
+4. Remove affected traffic or administrative access when continued operation
+   can increase harm. Availability is secondary to identity, DPoP, revocation,
+   hard-quota, configuration, and destination safety.
+5. Report a suspected product vulnerability privately through
+   [Security reporting](/community/security-reporting).
+
+## Containment matrix
+
+| Suspected scope | Containment |
+| --- | --- |
+| One Client Component | `latchway components revoke cmp_... --reason 'reviewed incident response'` |
+| Complete Installation Family | `latchway installation-families revoke fam_... --reason 'reviewed incident response'` |
+| User identity/session | Preview and perform block or require-reauthentication through [Manage application users](/administration/users) |
+| Browser XSS | Revoke from a trusted operator context, remove the vulnerable release, then follow [XSS response](/clients/web/xss-and-key-invalidation) |
+| Current administrator's Admin API token | From another trusted API token owned by that same administrator, run `latchway admin api-tokens revoke tok_...`, then remove the compromised value from every secret store or runner. API-token-authenticated CLI revocation is self-only. |
+| Another administrator's token or account | An active owner using a trusted browser Admin session can revoke that exact token. Disable the membership or reset its password to revoke the affected account credentials; an API-token actor cannot revoke another administrator's token. |
+| Upstream credential | Create/rotate the write-only secret, verify the target, and retire the old provider credential |
+| Unsafe active configuration | Reactivate a reviewed revision through [Choose and execute a rollback](/operations/rollbacks) |
+| Gateway signing-key exposure | Isolate the affected environment immediately and follow the explicit version 1 limitation in [Key rotation](/operations/key-rotation). There is no Admin API or CLI emergency-rotation operation, and scheduled rotation is not containment. |
+| PostgreSQL or master-key compromise | Isolate traffic and follow [Disaster recovery](/operations/disaster-recovery) |
+
+Use the narrowest scope that completely contains the incident. When attribution
+or sibling credential delivery is uncertain, prefer family or user-level
+containment. Version 1 has no unaudited bulk mutation or online in-place master
+key rotation; do not create one during an incident.
+
+## Investigate
+
+- Filter [the audit log](/administration/audit-log) by time, actor, action,
+  resource, source, reason code, and result.
+- Correlate `operation_indeterminate` only with the exact Admin request or
+  operation ID; current state cannot prove the original outcome.
+- Inspect logical request stages and upstream attempts. Identify whether
+  denial occurred before reservation/dispatch and whether any response byte
+  reached the client.
+- Compare the active immutable configuration, route simulation, user effective
+  state, deployment digest, and signing/JWKS state.
+- Use aggregate metrics to find onset and scope, then use tenant-scoped durable
+  records for exact attribution. Metrics intentionally contain no user,
+  component, installation, or request IDs.
+
+Do not export raw database tables to make investigation easier. Their schema
+contains tenant security state that bounded Admin views intentionally omit.
+
+## Eradicate and recover
+
+1. Remove the cause: patch code/configuration, close unsafe network access,
+   repair identity or attestation trust, and rotate only credentials within the
+   credible exposure path.
+2. Build and verify an immutable replacement. Preserve the affected artifact
+   under forensic access control rather than overwriting it.
+3. Restore database state only when integrity or availability requires it. A
+   configuration rollback or credential revocation should not become a broad
+   database rollback.
+4. Run migration status, doctor, liveness/readiness, bounded self-tests, and
+   representative client requests before traffic returns.
+5. Re-enroll revoked clients and require fresh identity/attestation where the
+   incident invalidated prior trust.
+6. Watch audit outcomes, denial/failure rates, request and first-token latency,
+   reservation recovery, worker jobs, and upstream behavior through an agreed
+   observation window.
+
+## Evidence handling
+
+Allowed evidence includes immutable source/image/package coordinates,
+configuration revision IDs and redacted diffs, safe request/audit IDs, bounded
+support bundles, sanitized logs, aggregate metrics, and a decision timeline.
+
+Never place live provider/admin/master keys, passwords, identity/access/refresh
+tokens, DPoP private keys or proofs, App Attest or Play Integrity payloads,
+browser storage exports, authorization headers, prompt/response bodies, or an
+active exploit in a public issue, chat, or pull request. Revoke and rotate any
+credential accidentally copied into evidence.
+
+## Close and learn
+
+Document root cause, attack prerequisites, affected scope, containment and
+recovery times, data handling, every credential/revision changed, residual
+risk, and follow-up owners. Add adversarial tests and an ADR when the fix
+changes a durable security boundary. Update public guidance only after doing so
+does not reveal an unremediated exploit.

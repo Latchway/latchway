@@ -1,0 +1,93 @@
+---
+title: "Environment variables"
+description: "Configure the Latchway runtime, OpenTelemetry trace exporter, CLI authentication, and local Compose interpolation with exact defaults and bounds."
+icon: "variable"
+audience: "reference"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Process environment configures deployment/runtime concerns. Tenant identity,
+attestation, upstreams, models, features, routes, pricing, and limits belong in
+immutable PostgreSQL-backed environment revisions, not process variables.
+
+## Gateway runtime
+
+| Variable | Required/default | Constraints and effect |
+| --- | --- | --- |
+| `LATCHWAY_DATABASE_URL` | Required; `DATABASE_URL` is the fallback | PostgreSQL connection string. Keep it in the deployment secret boundary. |
+| `LATCHWAY_MASTER_KEY` | Required by the server | Padded or unpadded standard Base64 that decodes to exactly 32 random bytes. Keep it stable for the lifetime of the encrypted database. |
+| `PORT` | `8080` | Supplies the default listen port and loopback public-origin port. The resulting port must be 1–65535. |
+| `LATCHWAY_LISTEN_ADDRESS` | `0.0.0.0:$PORT` | Exact host:port bind address. |
+| `LATCHWAY_PUBLIC_ORIGIN` | `http://localhost:$PORT` | Absolute origin with no credentials, path, query, or fragment. Production and non-loopback origins require HTTPS. This is DPoP protocol input. |
+| `LATCHWAY_ROLE` | `all` | One of `all`, `api`, or `worker`. |
+| `LATCHWAY_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, or `error`. |
+| `LATCHWAY_MIGRATE_ON_START` | `true` | Go boolean. At scale, prefer one explicit migration job and disable per-replica migration after reviewing the deployment template. |
+| `LATCHWAY_SHUTDOWN_TIMEOUT` | `30s` | Positive Go duration used for graceful draining. Platform termination grace must be at least this long. |
+| `LATCHWAY_READ_TIMEOUT` | `15s` | Positive Go duration for the HTTP server read/header boundary. |
+| `LATCHWAY_IDLE_TIMEOUT` | `90s` | Positive Go duration for idle HTTP connections. Route-specific upstream/stream timeouts remain revisioned configuration. |
+| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` | Integer from 2 through 500 per process. Budget the maximum across every API and worker replica. |
+| `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Empty unless bootstrapping | When present, 32–4096 bytes. High-entropy, one-time first-owner input. Remove it after bootstrap; retaining it cannot reopen a consumed flow. |
+| `LATCHWAY_ADMIN_SESSION_LIFETIME` | `12h` | Go duration from 5 minutes through 30 days. A shorter value reduces browser-session lifetime. |
+
+Whitespace-only values are treated as absent for variables with defaults. An
+invalid value fails configuration loading rather than falling back silently.
+
+<Warning>
+  Changing `LATCHWAY_MASTER_KEY` in place is not key rotation. A mismatched key
+  prevents managed-secret and signing-material recovery. Escrow the matching
+  key separately from PostgreSQL and use the reviewed
+  [disaster-recovery runbook](/operations/disaster-recovery).
+</Warning>
+
+## OpenTelemetry traces
+
+The API router exposes process-local metrics at `/metrics` for `serve --role
+api` and `serve --role all`. A `serve --role worker` process has no HTTP listener
+or scrape endpoint in version 1, so metrics recorded only in that process are
+not externally readable. Traces are disabled when `OTEL_TRACES_EXPORTER` is
+empty or `none`, or when `OTEL_SDK_DISABLED=true`.
+
+| Variable | Supported behavior |
+| --- | --- |
+| `OTEL_TRACES_EXPORTER` | Set to `otlp` to enable export. Any other non-empty exporter fails startup. |
+| `OTEL_SDK_DISABLED` | `true` disables the exporter. |
+| `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | Empty or `http/protobuf`; falls back to `OTEL_EXPORTER_OTLP_PROTOCOL`. Other protocols fail startup. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Trace-specific OTLP/HTTP endpoint. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | General OTLP endpoint when no trace-specific endpoint overrides it. |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS` | Collector authentication/metadata consumed by the official exporter. Store secret-bearing values in the deployment secret boundary. |
+| `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE` / `OTEL_EXPORTER_OTLP_CERTIFICATE` | Trace-specific or general certificate path. |
+| `OTEL_EXPORTER_OTLP_TRACES_COMPRESSION` / `OTEL_EXPORTER_OTLP_COMPRESSION` | Trace-specific or general exporter compression setting. |
+
+Latchway does not mutate the process-global OpenTelemetry provider. It flushes
+its batch trace provider during graceful shutdown. Validate endpoint, TLS,
+authentication, sampling, shutdown grace, and retention in the target
+collector before enabling production traffic.
+
+## CLI environment
+
+| Variable | Use |
+| --- | --- |
+| `LATCHWAY_SERVER` | Default Admin API origin for control-plane commands; remote values require HTTPS. |
+| `LATCHWAY_ADMIN_API_TOKEN` | Default scoped bearer for CLI commands. Use `--api-token-env NAME` to select a different variable. |
+| `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Default one-time bootstrap-token source for `latchway admin bootstrap`. |
+| `LATCHWAY_ADMIN_PASSWORD` | Default write-only first-owner password source for bootstrap. |
+| `LATCHWAY_DATABASE_URL` / `DATABASE_URL` | Database source for local `serve`, `migrate`, `doctor`, `develop`, and `verify local` workflows. |
+
+Provider verification and secret commands accept a caller-selected environment
+variable name. There is no required global provider-key variable, and a
+provider credential must never enter a client application.
+
+## Local Compose interpolation
+
+The development Compose file also reads `POSTGRES_DB`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `LATCHWAY_PORT`, and `LATCHWAY_POSTGRES_PORT`. These are
+template inputs, not additional gateway configuration fields. The checked-in
+password/bootstrap defaults are local-development values and must not be used
+for a production deployment.
+
+Use [Deployment](/operations/deployment) for secret custody, public-origin, and
+multi-replica requirements.

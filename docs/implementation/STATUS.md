@@ -32,10 +32,10 @@ domains remain open.
 | Core contract source checkpoint `latchway` | `a59a2c1c807aec50093ae6346492a05148c72899` |
 | Core implementation source checkpoint `latchway` | `82c9d3663a0532210d6a99ebecaa179f05797115` |
 | Core SDK-bundle and canonical-public-doc checkpoint `latchway` | `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3` |
-| JavaScript `latchway-js` | `6b0c08ded377011044462d1ba6aa46cb34d7ee8f` |
-| Swift `latchway-ios-sdk` | `af87b4454e4b6a159b9da7bd50550865c74684a2` |
-| Android `latchway-android` | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` |
-| React Native `latchway-react-native-sdk` | `111e7841f81e87ab471c18d381fed18ec8335760` |
+| JavaScript `latchway-js` | `f9439bdeb56d93218cd63008f7c0f2b2d14821bf` |
+| Swift `latchway-ios-sdk` | `8acd72a7fbbff019ffeb1c7be0264f671c636168` |
+| Android `latchway-android` | `349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7` |
+| React Native `latchway-react-native-sdk` | `2d78f588671d35512c6d0d244c89ec61e6a48cfa` |
 | Mintlify mirror `latchway-docs` | `ce4ea1e1cf56404da7146b98ca2744b194050fd5` |
 
 These exact commits are pushed branch source candidates. They are not merged,
@@ -116,7 +116,7 @@ checkpoint and reproducible draft bundle above.
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete, including redaction-safe audit filtering/detail, a shared doctor/support-bundle contract, the exact `latchway test-upstream serve` fixture command, and separate first-byte/first-token request timestamps | Deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a historical development-signed physical React Native iOS root run passed production App Attest registration and same-key assertion, the current source adds a Debug-only native App Intent delegated-request path, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical invocation of the current Debug App Intent path, protected extension matrix, physical Play Integrity, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
-| React Native SDK | Commit `111e7841f81e87ab471c18d381fed18ec8335760` is implemented, fully checked, and pinned to the exact three native/source commits. It adds root-owned component descriptor lifecycle plus a Debug-only native App Intent delegated request with exact-run challenge/receipt binding; the Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the physical root-app proof. | Physical invocation of the current Debug App Intent path, protected Apple distribution and extension-matrix proof, physical Android proof, and publication |
+| React Native SDK | Commit `2d78f588671d35512c6d0d244c89ec61e6a48cfa` is implemented, fully checked, and pinned to the exact three native/source commits. It adds root-owned component descriptor lifecycle plus a Debug-only native App Intent delegated request with exact-run challenge/receipt binding; the Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the physical root-app proof. | Physical invocation of the current Debug App Intent path, protected Apple distribution and extension-matrix proof, physical Android proof, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
@@ -167,10 +167,10 @@ whose runtime implementation is checkpoint
 `82c9d3663a0532210d6a99ebecaa179f05797115` and whose canonical SDK-bundle
 and public-documentation checkpoint is
 `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3`, together with JavaScript
-`6b0c08ded377011044462d1ba6aa46cb34d7ee8f`, iOS
-`af87b4454e4b6a159b9da7bd50550865c74684a2`, Android
-`9d83a635fc0e5f1a79582c73f0fb61acc9e24471`, and React Native
-`111e7841f81e87ab471c18d381fed18ec8335760`. The physical iPad root-app
+`f9439bdeb56d93218cd63008f7c0f2b2d14821bf`, iOS
+`8acd72a7fbbff019ffeb1c7be0264f671c636168`, Android
+`349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7`, and React Native
+`2d78f588671d35512c6d0d244c89ec61e6a48cfa`. The physical iPad root-app
 observation remains bound to predecessor
 `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`. The current React Native source
 materially adds component lifecycle and the Debug native App Intent request

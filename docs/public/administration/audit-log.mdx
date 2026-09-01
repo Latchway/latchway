@@ -1,0 +1,91 @@
+---
+title: "Investigate the audit log"
+description: "Filter append-only redaction-safe administrative events, correlate indeterminate operations, and preserve incident evidence without exposing values."
+icon: "scroll-text"
+audience: "operator"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The audit log records administrative and system mutations with actor, target,
+outcome, correlation, and value-free change metadata. It is the authoritative
+place to determine whether a specific ambiguous Admin API operation committed.
+
+## Event shape
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `timestamp` | Opaque audit ID and database timestamp |
+| `actor_kind`, `actor_id` | `admin_user`, `admin_api_token`, or `system`; system has no actor ID |
+| `source` | `console`, `cli`, `api`, or `system`; descriptive transport attribution, not authorization evidence |
+| `action` | Stable bounded action such as `admin.configuration_activate` |
+| `resource_type`, `resource_id`, `environment_id` | Tenant-scoped target coordinates |
+| `result` | `succeeded`, `denied`, `failed`, or `indeterminate` |
+| `request_id` | Exact Admin operation correlation when one exists |
+| `reason` | Optional stable redaction-safe code, never a free-form incident narrative |
+| `changes` | Ordered field, operation, classification, and redacted marker without before/after values |
+
+Sensitive values are structurally absent. Passwords, bootstrap/API tokens,
+provider secrets, identity and refresh tokens, DPoP proofs, attestation
+evidence, headers, and bodies do not belong in an audit event.
+
+## Filter an investigation
+
+Use the Console **Operations → Audit log** view or the CLI. Begin with the
+narrowest known tenant and half-open time range, then add exact filters:
+
+```bash
+latchway audit \
+  --organization org_... \
+  --environment env_... \
+  --action admin.configuration_activate \
+  --source cli \
+  --result succeeded
+
+latchway audit inspect aud_...
+```
+
+Supported filters include actor kind/ID, action, resource type/ID, environment,
+source, stable reason code, result, start, and end. Pagination uses an opaque
+keyset cursor; pass it back unchanged.
+
+The API operations are `GET /admin/v1/audit-events` and `GET
+/admin/v1/audit-events/{auditEventId}`. They require a principal allowed to
+inspect operational state in the organization.
+
+## Resolve an indeterminate mutation
+
+`operation_indeterminate` means PostgreSQL may have committed but the server
+lost the commit acknowledgement. Preserve the returned `operation_id` or Admin
+request ID.
+
+1. Filter for the exact `request_id` and intended action.
+2. A correlated `succeeded` event proves that operation committed.
+3. A correlated `denied` or `failed` event proves the recorded terminal
+   outcome described by the event.
+4. An `indeterminate` event or no terminal event does not prove failure.
+5. Do not infer the original outcome from current resource state or a later
+   conflict; another administrator may have changed it.
+
+Retry only after the operation's documented reconciliation rule permits it.
+Secret deletion is idempotent only for the exact record ID; create and rotate
+operations require correlation first.
+
+## Verify integrity and access
+
+- Confirm actor kind and source are a valid pair: Console sessions record
+  `admin_user`/`console`; CLI/API tokens record `admin_api_token` with `cli` or
+  `api`; system work records `system`/`system`.
+- Confirm action and target match the task that was reviewed.
+- Confirm every change has one of `set`, `clear`, `add`, `remove`, `rotate`,
+  `consume`, or `revoke` and a `public` or `sensitive` classification.
+- Correlate suspicious changes with configuration revisions, request IDs,
+  deployment coordinates, and operator identity without exporting private
+  payloads.
+
+Use [Audit event types](/reference/audit-event-types) for the current stable
+vocabulary and [Incident response](/security/incident-response) for evidence
+handling.

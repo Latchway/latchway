@@ -1,0 +1,63 @@
+---
+title: "Project governance"
+description: "Understand contributor, maintainer, security, and release roles plus the decision and governance-change process."
+icon: "scale"
+audience: "community"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "community"
+---
+
+Latchway uses maintainer stewardship with transparent technical records.
+Repository permissions and public organization membership appropriate to each
+role are the authoritative membership record.
+
+## Roles
+
+| Role | Responsibility |
+| --- | --- |
+| Contributor | Propose focused changes, tests, documentation, and review feedback |
+| Maintainer | Merge changes and uphold compatibility, security, quality, and documentation gates |
+| Security maintainer | Receive private reports and coordinate assessment, remediation, and disclosure |
+| Release maintainer | Verify cross-repository artifacts, provenance, signatures, publication, and completion evidence |
+
+No role grants permission to bypass required reviews, protected environments,
+security checks, or evidence gates.
+
+## Decisions
+
+Routine implementation decisions use pull-request review. Durable or
+security-sensitive decisions use an [ADR](/community/adrs). Maintainers seek
+consensus; when consensus cannot be reached, a repository owner records the
+decision and rationale in the relevant ADR.
+
+Conflicts of interest must be disclosed. A materially affected maintainer
+should recuse from final approval. Security reports stay within the private
+advisory process until coordinated disclosure.
+
+## Releases
+
+A release maintainer may publish only after the exact candidate passes its
+applicable protected gates and the cross-repository completion record closes.
+A source version, local test, tag draft, package archive, or provider smoke
+test is not sufficient by itself.
+
+Version 1 requires compatible core, JavaScript, iOS, Android, and React Native
+coordinates plus the generated public-documentation mirror. Current status is
+published on [Release status](/release-status).
+
+## Governance changes
+
+Governance changes require a documented public proposal. Once two maintainers
+exist, they require at least two maintainer approvals and a public review
+period of at least seven days. Until then, the repository owner may approve a
+change but must record the rationale.
+
+## Participation
+
+Follow the project [contribution guide](/community/contributing) and the
+[Code of Conduct](https://github.com/Latchway/latchway/blob/main/CODE_OF_CONDUCT.md).
+Use public issues only for non-sensitive bugs and focused proposals. Send any
+suspected vulnerability through [Security reporting](/community/security-reporting).

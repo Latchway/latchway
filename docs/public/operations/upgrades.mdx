@@ -49,9 +49,11 @@ rollout.
 ## Application rollback
 
 Route traffic back to the previous digest when readiness, latency, error rate,
-or correctness regresses. Confirm that binary's declared schema range includes
-the current database before starting it. Preserve failed replica telemetry and
-let workers reclaim reservations; never edit quota tables manually.
+or correctness regresses. The binary has no declared schema range. Before
+routing production traffic, run that exact previous binary's migration status,
+doctor, and readiness checks against an isolated copy of the current database.
+Preserve failed replica telemetry and let workers reclaim reservations; never
+edit quota tables manually.
 
 ## Schema recovery
 
@@ -84,9 +86,10 @@ and matching application digest recoverable until the observation window ends.
 
 The release gate runs an authenticated distinct-ancestor candidate, the current
 candidate, and then the prior application again against one isolated database.
-The prior binary must report the current schema as supported and become ready
-after rollback. A database restore proves schema recovery, not application
-rollback compatibility.
+The prior binary must report that the database's current migration version
+equals its bundled available migration version and become ready after rollback.
+A database restore proves schema recovery, not application rollback
+compatibility.
 
 The current version 1 evidence includes a supplemental local drill, not a
 protected released-image receipt. Repeat the drill against the exact candidate

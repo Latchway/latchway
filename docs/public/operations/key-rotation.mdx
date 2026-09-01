@@ -31,8 +31,18 @@ public keys remain in JWKS long enough for issued access tokens and verifier
 caches to expire. Monitor rotation jobs, JWKS publication, readiness, and clock
 skew across replicas.
 
-Emergency shortening of overlap invalidates live sessions and requires an
-incident decision. Record key IDs and lifecycle timestamps, never private bytes.
+Version 1 exposes no Admin API or CLI operation to force signing-key rotation,
+select a new active key, or shorten JWKS overlap. Scheduled rotation is therefore
+not emergency containment. If private signing material may be disclosed,
+isolate the affected environment from traffic and administrative mutation,
+preserve key IDs and lifecycle timestamps, and revoke known affected user,
+family, or component sessions where scope is established. Do not hand-edit
+signing-key rows, delete JWKS state, or change the master key during containment.
+
+Keep the affected environment offline until a reviewed, deployment-specific
+recovery procedure or supported software change establishes a clean signing
+state. Do not return traffic merely because the scheduled worker created a later
+key; version 1 provides no documented live emergency-rotation guarantee.
 
 ## Identity-provider keys
 

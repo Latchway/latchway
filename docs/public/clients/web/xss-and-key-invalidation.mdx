@@ -1,0 +1,108 @@
+---
+title: "Respond to XSS and invalidate browser keys"
+description: "Contain same-origin script compromise, revoke affected browser components, rotate exposed credentials, and re-establish trust safely."
+icon: "shield-alert"
+audience: "client-web"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "security"
+---
+
+A non-exportable WebCrypto key prevents ordinary raw-key export. It does not
+prevent malicious same-origin JavaScript from asking that key to sign, reading
+IndexedDB tokens, or making feature-authorized requests. Treat confirmed or
+credible XSS as a browser credential incident.
+
+## What can be affected
+
+| Asset | XSS consequence | Server-side containment |
+| --- | --- | --- |
+| Browser component key | Same-origin code can invoke the key while it is available | Revoke the component or its Installation Family |
+| Access and refresh credentials | Script can read and use origin storage with the component key | Revocation invalidates server state; do not rely on storage clearing alone |
+| Identity session | Script may call the application's identity SDK | Require reauthentication and follow the identity provider's incident controls |
+| Feature allowance | Attacker can exercise features permitted to that user/component | Narrow or disable the affected feature through a reviewed configuration revision |
+| Upstream credential | Latchway does not send it to the browser | Rotate only if another exposure path reached the server-held value |
+
+## Contain from a trusted context
+
+Do not use the suspected page to perform containment. Use a clean operator
+workstation and the Console, CLI, or Admin API.
+
+1. Record the affected application, environment, origin, deployment version,
+   first and last observed times, safe request IDs, user ID, component ID, and
+   Installation Family ID.
+2. Remove the vulnerable release from service or block the compromised script
+   source at the trusted edge.
+3. Revoke the narrowest complete scope. Revoke one component when attribution
+   is certain; revoke the family when sibling state or delivery is uncertain.
+4. Require user reauthentication when the identity session may also have been
+   used. Blocking the user is appropriate when future access must stop.
+5. Rotate any administrative or upstream credential that the incident could
+   actually reach. Do not rotate unrelated keys as a substitute for scoped
+   revocation.
+
+```bash
+latchway components inspect cmp_...
+latchway components revoke cmp_... \
+  --reason 'browser origin compromise'
+
+latchway installation-families inspect fam_...
+latchway installation-families revoke fam_... \
+  --reason 'browser family compromise'
+```
+
+For a user-wide identity incident, preview the application-wide impact before
+mutation:
+
+```bash
+latchway users impact usr_... \
+  --environment env_... \
+  --action require_reauthentication
+```
+
+Review the returned counts and pass its current impact token through the
+[user-management workflow](/administration/users). A changed token produces a
+conflict and requires a new review.
+
+## Remove the cause
+
+- remove or patch the injection path and every affected build;
+- review template escaping, DOM sinks, dependency integrity, and third-party
+  script authority;
+- enforce a reviewed CSP after evaluating it in report-only mode;
+- keep the exact gateway in `connect-src` and avoid broad script execution;
+- invalidate application identity sessions through the identity provider when
+  their use cannot be excluded.
+
+Clearing browser storage before these controls does not contain a copied token
+or a still-valid server component. It can also erase the local identifiers
+needed to find the affected record.
+
+## Reset and re-enroll
+
+After server-side revocation and deployment of the repaired client, close
+affected tabs and workers, clear the application's site data, and start a new
+session. Follow [Reset browser storage](/clients/web/browser-storage-reset).
+The new enrollment must have a different browser component key and cannot
+restore a revoked refresh chain.
+
+## Verify containment
+
+- The old component or family is `revoked` in the Console.
+- Requests using the old credentials fail with a revocation error and do not
+  create an upstream attempt.
+- The repaired release has the intended CSP and dependency set.
+- A new browser enrollment receives a new component ID and passes only the
+  configured browser trust policy.
+- Audit events identify the operator, action, target, outcome, and safe reason
+  marker without recording tokens or exploit payloads.
+
+## Evidence boundary
+
+Preserve request IDs, audit event IDs, image and client build coordinates, CSP
+reports after redaction, and a timeline. Never attach access or refresh tokens,
+DPoP proofs, CryptoKey/IndexedDB exports, identity tokens, raw provider
+evidence, exploit-bearing production pages, prompts, or upstream credentials
+to a public issue.

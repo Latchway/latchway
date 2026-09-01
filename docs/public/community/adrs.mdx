@@ -1,0 +1,84 @@
+---
+title: "Architecture decisions"
+description: "Find and propose durable Latchway architecture decision records without duplicating their canonical repository history."
+icon: "file-clock"
+audience: "community"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-09-01"
+owner: "core-architecture"
+---
+
+Architecture Decision Records (ADRs) preserve the context, alternatives,
+consequences, security effects, migration effects, documentation effects, and
+status of durable technical choices.
+
+The canonical records live in the core repository's
+[`docs/adr/` directory](https://github.com/Latchway/latchway/tree/main/docs/adr).
+This public page is an index and contribution guide, not a copied second
+history.
+
+## Decision index
+
+| Range | Decisions |
+| --- | --- |
+| 0001–0003 | Product boundary, Go core, PostgreSQL-only version 1 |
+| 0004–0008 | DPoP sessions, authentication/attestation separation, feature-first routing, reserve-execute-settle, integer cost |
+| 0009–0016 | Immutable revisions, protocol/upstream separation, SDK transport boundary, privacy default, one image, contract bundles, static extensions, Web trust |
+| 0017–0024 | Framework-transparent transport, feature binding, no static-header full support, Installation Families, independent component sessions, delegated trust, Keychain groups, refresh idempotency |
+| 0025–0028 | Mintlify source, tested snippets, diagram grammar, generated compatibility |
+| 0029–0033 | Trusted input preflight, deterministic attempt lifecycle, restricted opaque HTTP, refresh-only credential rotation, sealed quota scopes/request guards |
+| 0034 | Corrected version 1 gateway-overhead targets without weakening synchronous correctness |
+
+Representative records:
+
+- [ADR 0001: Product boundary](https://github.com/Latchway/latchway/blob/main/docs/adr/0001-product-boundary.md)
+- [ADR 0004: DPoP-bound sessions](https://github.com/Latchway/latchway/blob/main/docs/adr/0004-dpop-bound-sessions.md)
+- [ADR 0007: Reserve-execute-settle quotas](https://github.com/Latchway/latchway/blob/main/docs/adr/0007-reserve-execute-settle-quotas.md)
+- [ADR 0009: Immutable configuration revisions](https://github.com/Latchway/latchway/blob/main/docs/adr/0009-immutable-config-revisions.md)
+- [ADR 0016: Web trust is weaker than native](https://github.com/Latchway/latchway/blob/main/docs/adr/0016-web-trust-is-weaker-than-native.md)
+- [ADR 0020: Installation Family model](https://github.com/Latchway/latchway/blob/main/docs/adr/0020-installation-family-model.md)
+- [ADR 0025: Mintlify public documentation](https://github.com/Latchway/latchway/blob/main/docs/adr/0025-mintlify-public-documentation.md)
+- [ADR 0029: Trusted input-token preflight](https://github.com/Latchway/latchway/blob/main/docs/adr/0029-trusted-input-token-preflight.md)
+- [ADR 0031: Restricted opaque HTTP](https://github.com/Latchway/latchway/blob/main/docs/adr/0031-restrict-opaque-http-by-feature-and-route.md)
+- [ADR 0034: Version 1 overhead targets](https://github.com/Latchway/latchway/blob/main/docs/adr/0034-correct-v1-gateway-overhead-targets.md)
+
+## When an ADR is required
+
+Write or amend an ADR for a change that alters a security boundary, normative
+contract, durable data model, compatibility promise, release gate, extension
+model, operational dependency, or accepted residual risk. Routine refactoring
+that preserves those decisions normally belongs in a pull request only.
+
+## Proposal structure
+
+Use the next available four-digit number and include:
+
+```text
+Title
+Context
+Decision
+Alternatives
+Consequences
+Security implications
+Migration implications
+Documentation implications
+Status
+```
+
+Link the implementation and tests from the pull request. Do not place secret,
+private incident, credential, exploit, or production-derived evidence in a
+public ADR.
+
+Accepted history is not silently rewritten. A later decision supersedes an
+older record and links both directions. Renumbering requires an explicit note
+that preserves historical identity and rationale.
+
+## Review
+
+Maintainers seek consensus. Security-sensitive records require security
+review, compatibility changes require every affected repository owner, and
+release-boundary changes require release-maintainer review. Acceptance of an
+ADR records a decision; it does not itself prove implementation, deployment,
+or release readiness.

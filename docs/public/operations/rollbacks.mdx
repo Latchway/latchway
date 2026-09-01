@@ -1,0 +1,92 @@
+---
+title: "Choose and execute a rollback"
+description: "Reverse configuration or application changes safely, and use isolated database recovery when forward-only schema state cannot be retained."
+icon: "undo-2"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Latchway has three distinct reversal paths. Select the path by the state that
+must change; do not use database edits to imitate a configuration or
+application rollback.
+
+| Path | Reverses | Preserves | Required proof |
+| --- | --- | --- | --- |
+| Configuration rollback | Active environment behavior | Immutable revision history and database schema | Target revision remains valid and activation ETag is current |
+| Application rollback | Running OCI digest | Current PostgreSQL schema and durable state | Exact previous binary passes migration status, diagnostics, and readiness against an isolated copy of the current database |
+| Schema recovery | Database state after a migration or destructive incident | Only the chosen backup/PITR point | Isolated restore with matching image and master key passes verification |
+
+## Configuration rollback
+
+Inspect history and the structural diff before changing the active pointer:
+
+```bash
+latchway config diff rev_...
+latchway config rollback rev_... --environment env_...
+```
+
+The Console enables rollback only for a previously activated, non-current
+revision. It reloads the active revision and submits its fresh strong ETag with
+the exact target ID. The server atomically reactivates that immutable revision;
+it never edits history.
+
+Verify the active revision, run route simulations for critical features, make
+one bounded client request, and inspect
+`admin.configuration_rollback`. The process metric
+`latchway_config_revision_activations_total` records the bounded outcome
+`rolled_back` without revision or administrator IDs.
+
+## Application rollback
+
+The binary does not publish a schema-compatibility range. Prove compatibility
+with the exact previous digest and current schema before routing any production
+traffic to it.
+
+1. stop traffic growth and preserve the failed digest's logs, traces, metrics,
+   and safe request IDs;
+2. restore or clone the current database into an isolated environment with the
+   matching master key and no production traffic;
+3. run the previous binary's `latchway migrate status` and `latchway doctor`
+   against that copy, then start the previous digest with
+   `LATCHWAY_MIGRATE_ON_START=false` and require `/healthz` and `/readyz` to
+   pass;
+4. in that isolated environment, verify identity/session refresh, one
+   non-streaming request, one stream, quota settlement, fallback, and worker
+   recovery;
+5. only after that proof, route a small production slice to the previous digest
+   against the authoritative database and repeat the bounded checks;
+6. complete traffic rollback and drain the failed replicas for at least
+   `LATCHWAY_SHUTDOWN_TIMEOUT`.
+
+Do not delete migration records or run down migrations. Let workers reclaim
+expired reservations and leases; manual quota-table repair is unsupported.
+
+## Schema recovery
+
+If the previous binary cannot read the current schema, application rollback is
+not available. Remove traffic and follow [Disaster recovery](/operations/disaster-recovery):
+restore the pre-upgrade backup or PITR point into a new database, install the
+matching master key, start the matching previous image, verify it in isolation,
+then shift traffic.
+
+A successful restore proves schema recovery. It does not prove that the
+previous application can run against the upgraded schema.
+
+## Failure boundaries
+
+- A stale configuration ETag returns a conflict; reload and review the new
+  active state.
+- A missing worker heartbeat keeps production readiness failed even if API
+  liveness passes.
+- A wrong master key must stop recovery. Never overwrite it until decryption
+  appears to work.
+- Public-origin changes affect DPoP URI binding and require a planned client
+  transition, not an emergency DNS alias.
+
+Review [Upgrades and rollback](/operations/upgrades) before every release
+change and retain the previous image plus verified backup through the complete
+observation window.
