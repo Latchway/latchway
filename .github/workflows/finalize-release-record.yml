@@ -1273,7 +1273,7 @@ jobs:
           max_json = 32 * 1024 * 1024
           max_total = 2 * 1024 * 1024 * 1024
           max_files = 8192
-          metadata_sha256 = "83e27abd447146714e62cf4e194430cb9c9a327f2632c7ea2ff5d0023ffdf7d0"
+          metadata_sha256 = "1dcbd161dac9e936ba584d34e443c1c2c139b0ebfa1150a10e9528a37272bf9a"
 
           class Rejected(Exception):
               pass

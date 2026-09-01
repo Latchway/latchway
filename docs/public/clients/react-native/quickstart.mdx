@@ -45,11 +45,14 @@ own component keys, DPoP, session rotation, and platform attestation.
   the prepublication integration path. Current evidence covers React Native
   commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` on a real iPad running
   iPadOS 26.5 in Debug configuration with automatic Apple Development signing.
-  Current source `2d78f588671d35512c6d0d244c89ec61e6a48cfa` passes the full
-  local suite plus generic iOS and isolated Debug/Release App Intent build gates
-  and adds a Debug native delegated-request path, but that intent has not yet
-  been physically invoked. Android physical, protected extension-matrix, and
-  protected distribution evidence remain release gates.
+  Current source `d538752772d2d22ad16e0219c4f87dc014ef9c92` passes the full
+  local suite plus generic iOS and isolated Debug/Release App Intent build
+  gates. Its development-signed app and embedded extension also pass strict
+  entitlement/provisioning verification, installation, and launch on the
+  connected iPad. It adds a Debug native delegated-request path, but that
+  intent has not yet been physically invoked and no new App Attest proof was
+  collected. Android physical, protected extension-matrix, and protected
+  distribution evidence remain release gates.
 </Warning>
 
 ### Use one public coordinate set on both hosts

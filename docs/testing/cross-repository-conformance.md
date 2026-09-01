@@ -9,29 +9,23 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 
 ## Current status (2026-09-01)
 
-The last passing source report covers a historical clean six-repository tuple.
-It does not cover the current core working tree, which contains uncommitted
-Admin-session, configuration-transfer, server-capability, and Admin SSE API and
-Console changes plus lifecycle-concurrency hardening. The complete local core
-implementation gate, race detector, bounded fuzz corpus, and real PostgreSQL
-Admin/session/App Attest/configuration/lifecycle lock-order suites pass, but a
-source report cannot accept the delta until every repository is clean and the
-changed contract, locks, generated documentation, and mirror are synchronized
-at exact commits.
+The current source report covers a clean six-repository tuple. It binds core
+contract checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9`, reproducible
+bundle SHA-256
+`39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`,
+JavaScript `182ff23d8365ae37f3e85dfc84485cc762295f67`, Swift
+`31a37ab7435cb01bb0a47262e4ab92e4f016a669`, Android
+`b16b2ac668f994c3a5aed60803b22c853a95e305`, React Native
+`d538752772d2d22ad16e0219c4f87dc014ef9c92`, the final canonical core commit,
+and its generated Mintlify mirror. Contract locks, fixtures, framework pins,
+SDK documentation bundles, generated public documentation, and mirror bytes
+are synchronized at exact commits.
 
-An earlier diagnostic source-scope run correctly failed the required
-clean-worktree, documentation-mirror, and SDK contract-lock checks, with React
-Native pin validation consequently blocked. Further local implementation
-changes have landed since that diagnostic. No dirty-tree bundle hash is an
-immutable candidate coordinate, and a passing current source report is not
-possible before commit, regeneration, and synchronization.
-
-All six local implementation branches are ahead of their remote-tracking refs.
-The active GitHub CLI credential is invalid, so their exact current heads are
-not pushed or remotely verified. No local version 1 tag exists. Promotion and
-release scope have not passed, and no GitHub release, registry artifact,
-package publication, production documentation deployment, or protected
-external-domain receipt is claimed.
+Branch synchronization is tracked independently as a delivery operation and
+does not change the source report's meaning. No local version 1 tag exists.
+Promotion and release scope have not passed, and no GitHub release, registry
+artifact, package publication, production documentation deployment, or
+protected external-domain receipt is claimed.
 
 Offline/local device build, install, and launch may proceed when it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.

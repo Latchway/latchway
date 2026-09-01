@@ -18,15 +18,17 @@ master-key change means restore/migration planning, not an environment edit.
 
 ## Gateway signing keys
 
-The worker owns durable signing-key rotation. New keys become active while old
-public keys remain in JWKS long enough for issued access tokens and verifier
-caches to expire. Monitor rotation jobs, signing readiness, JWKS publication,
-and clock skew across all replicas. Never delete the previous key immediately
-after activation.
+The worker performs scheduled gateway signing-key rotation. New keys become
+active while old public keys remain in JWKS long enough for issued access
+tokens and verifier caches to expire; expired historical keys are retired
+automatically. Version 1 exposes no Admin API or CLI operation to force
+signing-key rotation, select a new active key, or shorten JWKS overlap.
+Scheduled rotation is not emergency containment.
 
-Emergency rotation requires a documented incident decision because shortening
-overlap may invalidate live sessions. Record the active/retiring key IDs and
-timestamps, never private key bytes.
+Monitor rotation jobs, signing readiness, JWKS publication, and clock skew
+across all replicas. An emergency that requires invalidating live sessions is
+an incident-response action outside the v1 Admin and CLI surface. Record the
+active/retiring key IDs and timestamps, never private key bytes.
 
 ## Identity-provider JWKS
 

@@ -4,7 +4,7 @@
     {
       "name": "@latchway/client",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "package.json",
         "region": {
           "end_line": 13,
@@ -20,7 +20,7 @@
     {
       "name": "@latchway/openai",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "packages/openai/package.json",
         "region": {
           "end_line": 4,
@@ -36,7 +36,7 @@
     {
       "name": "@latchway/vercel-ai",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "packages/vercel-ai/package.json",
         "region": {
           "end_line": 4,
@@ -52,7 +52,7 @@
     {
       "name": "@latchway/langchain",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "packages/langchain/package.json",
         "region": {
           "end_line": 4,
@@ -68,7 +68,7 @@
     {
       "name": "Node.js",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "package.json",
         "region": {
           "end_line": 14,
@@ -84,7 +84,7 @@
     {
       "name": "Web browser matrix",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "package.json",
         "region": {
           "end_line": 95,
@@ -100,7 +100,7 @@
     {
       "name": "openai minimum",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -109,14 +109,14 @@
         "region_sha256": "27ef2e204e04f6e88c2e92aacd79e7ae2976fdee6e860d504db3f8c0a9fbc18f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "7.8.0"
     },
     {
       "name": "openai latest",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -125,14 +125,14 @@
         "region_sha256": "41091321c3c0ed8f61fdd8d3207752d2d84961f876e7bd22e6fad40d35412ff3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "7.8.0"
     },
     {
       "name": "ai minimum",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -141,14 +141,14 @@
         "region_sha256": "27ef2e204e04f6e88c2e92aacd79e7ae2976fdee6e860d504db3f8c0a9fbc18f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "7.0.85"
     },
     {
       "name": "ai latest",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -157,14 +157,14 @@
         "region_sha256": "41091321c3c0ed8f61fdd8d3207752d2d84961f876e7bd22e6fad40d35412ff3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "7.0.85"
     },
     {
       "name": "@ai-sdk/openai minimum",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -173,14 +173,14 @@
         "region_sha256": "27ef2e204e04f6e88c2e92aacd79e7ae2976fdee6e860d504db3f8c0a9fbc18f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "4.0.52"
     },
     {
       "name": "@ai-sdk/openai latest",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -189,14 +189,14 @@
         "region_sha256": "41091321c3c0ed8f61fdd8d3207752d2d84961f876e7bd22e6fad40d35412ff3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "4.0.52"
     },
     {
       "name": "@langchain/openai minimum",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -205,14 +205,14 @@
         "region_sha256": "27ef2e204e04f6e88c2e92aacd79e7ae2976fdee6e860d504db3f8c0a9fbc18f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "1.5.10"
     },
     {
       "name": "@langchain/openai latest",
       "source": {
-        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "commit": "182ff23d8365ae37f3e85dfc84485cc762295f67",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -221,7 +221,7 @@
         "region_sha256": "41091321c3c0ed8f61fdd8d3207752d2d84961f876e7bd22e6fad40d35412ff3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-js",
-        "source_sha256": "567afd11f765e5ef6564c777e8c63cca2dff3a2044d438978147419109ba0170"
+        "source_sha256": "cdb8ea64e18e25aea3bd54cade54ebbe16885197817f03abcbb30dc401d85648"
       },
       "version": "1.5.10"
     }

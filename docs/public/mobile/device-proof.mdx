@@ -43,15 +43,17 @@ gate.
 
 ## Current source delta awaiting device invocation
 
-React Native source `2d78f588671d35512c6d0d244c89ec61e6a48cfa` adds
+React Native source `d538752772d2d22ad16e0219c4f87dc014ef9c92` adds
 root-owned component descriptor lifecycle and a Debug App Intent that calls the
 native extension client for one independently keyed delegated request. The
 containing app publishes a nonsecret exact-run Keychain challenge, and the
 intent writes a matching bounded receipt only after fully consuming the
 response body. Local tests plus generic iOS and isolated Debug/Release App
-Intent build gates pass. The intent has not yet been invoked on the connected
-iPad, so it is not part of the historical physical observation above. The
-Release target has no Latchway request path and fails closed.
+Intent build gates pass. The development-signed app and embedded extension also
+pass strict entitlement/provisioning verification, installation, and launch on
+the connected iPad. The intent has not yet been invoked and no new App Attest
+proof was collected, so neither is part of the historical live observation
+above. The Release target has no Latchway request path and fails closed.
 
 ## iOS and React Native iOS
 

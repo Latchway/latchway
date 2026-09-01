@@ -35,12 +35,15 @@ integration, and the named JavaScript framework rows do not automatically
 apply to React Native.
 
 Current React Native source
-`2d78f588671d35512c6d0d244c89ec61e6a48cfa` passes the full local suite plus
-generic iOS and isolated Debug/Release App Intent build gates. It materially
-adds root-owned component lifecycle and a Debug native App Intent
-delegated-request path. That intent has not yet been physically invoked, so the
-historical root-app run above does not establish extension execution for the
-current source.
+`d538752772d2d22ad16e0219c4f87dc014ef9c92` passes the full local suite plus
+generic iOS and isolated Debug/Release App Intent build gates. Its
+development-signed app and embedded extension also pass strict
+entitlement/provisioning verification, installation, and launch on the
+connected iPad. It materially adds root-owned component lifecycle and a Debug
+native App Intent delegated-request path. That intent has not yet been
+physically invoked and no new App Attest proof was collected, so the historical
+root-app run above does not establish extension execution for the current
+source.
 
 ## 3. Supported Latchway versions
 

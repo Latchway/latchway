@@ -25,7 +25,7 @@
   "schema_version": 1,
   "security_statement": {
     "attestation_limitations": "Production App Attest and Play Integrity prove the configured application and device verdicts for a bound challenge; they do not prove a human identity, and availability remains subject to the platform provider and eligible hardware.",
-    "key_rotation_behavior": "The worker rotates gateway signing keys with an overlap window, keeps previously issued sessions verifiable through the retained public keys, audits rotation, and supports operator-triggered rotation and retirement.",
+    "key_rotation_behavior": "The worker performs scheduled gateway signing-key rotation. New keys become active while old public keys remain in JWKS long enough for issued access tokens and verifier caches to expire; expired historical keys are retired automatically. Version 1 exposes no Admin API or CLI operation to force signing-key rotation, select a new active key, or shorten JWKS overlap. Scheduled rotation is not emergency containment.",
     "known_accepted_risks": [
       "Web App Check and Turnstile verdicts are intentionally treated as lower-trust risk signals than native hardware-backed attestation.",
       "An upstream provider can retain request content under its own account policy after Latchway dispatches an authorized request."

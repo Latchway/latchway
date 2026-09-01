@@ -51,11 +51,14 @@ are development-only and must not appear in a published package.
   requests, quota, typed component denial, bridge behavior, and cleanup passed
   against the current source gateway. This is development-signed iOS evidence,
   not an Apple distribution-derived protected release receipt. Current React
-  Native source `2d78f588671d35512c6d0d244c89ec61e6a48cfa` adds root-owned
+  Native source `d538752772d2d22ad16e0219c4f87dc014ef9c92` adds root-owned
   component lifecycle and the Debug native App Intent path; its full local
   check plus generic iOS and isolated Debug/Release App Intent build gates
-  pass, but that intent has not yet been physically invoked. Android and the
-  protected extension runtime matrix remain open.
+  pass. The development-signed app and embedded extension also pass strict
+  entitlement/provisioning verification, installation, and launch on the
+  connected iPad, but that intent has not yet been physically invoked and no
+  new App Attest proof was collected. Android and the protected extension
+  runtime matrix remain open.
 </Info>
 
 ## Create a client
