@@ -47,7 +47,7 @@ mirror.
 | JavaScript source | `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d` |
 | Swift source | `910e692278f05a56a5d007a18e6b82dcd2fab56b` |
 | Android source | `275b876e1beadeff4cf3e024c0207b73e7270a96` |
-| React Native source | `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` |
+| React Native source | `9227a12bdee1158277f1c12566dfe7331d2ace8f` |
 | Mintlify mirror source | Generated from the final canonical core commit; the source-conformance report records the exact mirror commit |
 | Product release state | `unpublished` and not release-qualified; local source convergence only, with no merge, version 1 tag, GitHub release, package, image, cloud deployment, or production documentation deployment |
 
@@ -264,7 +264,7 @@ to apply to supported Android application trust surfaces.
   `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`, Swift
   `910e692278f05a56a5d007a18e6b82dcd2fab56b`, Android
   `275b876e1beadeff4cf3e024c0207b73e7270a96`, and React Native
-  `fe35e04b714a38bc0df840f75bdbc37dbf8716a2`.
+  `9227a12bdee1158277f1c12566dfe7331d2ace8f`.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
