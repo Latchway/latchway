@@ -56,8 +56,9 @@ are development-only and must not appear in a published package.
   Development app and embedded extension passed strict
   entitlement/provisioning, registered-device install, and launch checks
   without new App Attest or App Intent execution. Current
-  `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and
-  transition-order hardening and passes the full local plus generic iOS
+  `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` carries the release retry-closure
+  and transition-order hardening, locks the released contract plus final
+  sibling SDK successor commits, and passes the full local plus generic iOS
   and isolated Debug/Release build gates; its physical path was not rerun.
   Android, App Intent, and the protected extension runtime matrix remain
   operator-deferred release gates.

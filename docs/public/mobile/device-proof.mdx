@@ -53,8 +53,9 @@ Intent build gates pass. That predecessor's Apple Development app and embedded
 extension also passed strict entitlement/provisioning, registered-device
 install, and launch checks. It did not invoke the intent or collect new App
 Attest proof, so neither is part of the historical live observation above.
-Current `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure
-and transition-order hardening; its physical path was not rerun. The
+Current `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` carries the release
+retry-closure and transition-order hardening and locks the released contract
+plus final sibling SDK successor commits; its physical path was not rerun. The
 Release target has no Latchway request path and fails closed. App Intent and
 physical Android/Google Play evidence are operator-deferred.
 

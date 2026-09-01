@@ -1,10 +1,12 @@
 # Version 1 completion gap ledger
 
 Status: **the version 1 implementation is locally source-converged and every SDK
-source/check gate passes; stable release preflights intentionally remain closed
-while the contract and locks say unreleased. Predecessor React Native
+source/check gate passes. The contract manifest and SDK successor locks now say
+released `1.0.0`, so stable preflights no longer reject draft metadata; tags
+and protected evidence are still required. Predecessor React Native
 coordinates have bounded development-device observations, but the current head
-was not physically rerun and no candidate is released or production-proven**.
+was not physically rerun and no candidate is product-released or
+production-proven**.
 
 This checked-in file is a source-status ledger. It is not the immutable
 candidate-bound completion report produced by the protected release workflow.
@@ -15,14 +17,14 @@ deployments, or protected evidence that does not exist.
 
 | Field | Current source truth |
 | --- | --- |
-| Contract | Draft `1.0.0`; `released_at: null` |
+| Contract | Released `1.0.0`; `released_at: 2026-09-01T20:25:00Z` |
 | Wire | Current `2`; discovery range `[1, 2]` |
-| Database | Schema `28` at contract/source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
-| Contract bundle | Reproducible SHA-256 `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` at contract source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
-| Core implementation source | Contract/runtime source `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; the final canonical-documentation commit is an API-preserving descendant of that checkpoint |
-| SDK source tuple | JavaScript `4b0626da478aa412daa07cc7bb595edfb53bf7c7`; Swift `aa182f766dc72d57f3915bd1c16678fe4f866ffe`; Android `ed1dc06134c5b7f37c03ff92405a5872a0f96457`; React Native `cc011841acc1be78022ef65a039d4aabf8a37b57` |
+| Database | Schema `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Contract bundle | Reproducible SHA-256 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6` at contract source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
+| Core implementation source | Contract/runtime source `437708fb56d45196720b5769f2f59b0ee51f521d`; the final canonical-documentation commit is an API-preserving descendant of that checkpoint |
+| SDK source tuple | JavaScript `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`; Swift `910e692278f05a56a5d007a18e6b82dcd2fab56b`; Android `275b876e1beadeff4cf3e024c0207b73e7270a96`; React Native `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` |
 | Public documentation source | The final canonical core commit and its generated Mintlify mirror; exact commits are recorded by source conformance |
-| SDK locks | All four draft locks, four vector families, copied `protocol-version.json`, framework coordinates, and reproducible documentation bundles converge on the current checkpoint. Stable successor locks and changelog headings are not created until the timed release transition begins. |
+| SDK locks | All four released successor locks, four vector families, copied `protocol-version.json`, framework coordinates, final changelog headings, and reproducible documentation bundles converge on the current checkpoint. Stable preflights still require tags and protected exact-candidate evidence. |
 | Public release | Source-branch synchronization is not release evidence; no version 1 merge, tag, GitHub release, package, image, or production-docs publication is verified |
 
 Historical contract `0.5.1`, wire 1, schema 20, and their SDK locks remain
@@ -33,11 +35,11 @@ authorize version 1.
 
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
-| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 28, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, retry-cost treatment, physical-attempt quota accounting, and the deterministic draft contract bundle at the exact checkpoint above | Protected exact-candidate evidence |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 28, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, retry-cost treatment, physical-attempt quota accounting, and the deterministic released contract bundle at the exact checkpoint above | Protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter plus local load/failure checks pass against the current source gateway | Protected immutable-image provider, load, and destructive-failure evidence |
 | Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. Complete local core gates pass. | Deployment operator acceptance on the final image |
-| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, draft locks, reproducible package/documentation bundles, clean consumers, and cross-repository source conformance pass. Stable release preflights correctly reject the draft locks and candidate changelogs until coordinated successor commits exist. React Native `cc011841acc1be78022ef65a039d4aabf8a37b57` includes root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution; the physical path was not rerun after the current head's release and development-runner hardening. | Coordinated stable contract/lock/changelog successor commits; operator-deferred physical invocation of the Debug App Intent; protected Apple distribution/extension-matrix proof; physical Android proof; and publication |
+| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, released successor locks, reproducible package/documentation bundles, clean consumers, and cross-repository source conformance pass. Stable release preflights no longer reject draft locks or candidate changelogs; tags and protected evidence remain required. React Native `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` includes root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution; the physical path was not rerun at the current successor. | Operator-deferred physical invocation of the Debug App Intent; protected Apple distribution/extension-matrix proof; physical Android proof; tags, protected evidence, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
@@ -108,12 +110,12 @@ independently keyed delegated request with exact-run challenge/receipt binding.
 Its Apple Development build passed strict root/extension signing, provisioning,
 App Attest and Keychain entitlement, team, registered-device, install, and
 launch checks. It did not collect new App Attest proof or invoke the App Intent.
-Current source `cc011841acc1be78022ef65a039d4aabf8a37b57` is a descendant
-that adds release retry-closure, transition-order, wording, and
-development-runner hardening and passes the full local plus generic iOS and
-isolated Debug/Release App Intent build gates; the physical path was not rerun
-at that head. The Release target deliberately contains no executable Latchway
-request path.
+Current successor `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` is a descendant
+that adds release retry-closure, transition-order, wording,
+development-runner hardening, and the released-contract/source-tuple lock. It
+passes the full local plus generic iOS and isolated Debug/Release App Intent
+build gates; the physical path was not rerun at that head. The Release target
+deliberately contains no executable Latchway request path.
 
 Those results establish implementation confidence; they are not release
 receipts. The current convergence run:
@@ -187,7 +189,7 @@ Apple Development signing for predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4
 That predecessor passed strict signed root/extension verification, installation,
 and launch; the earlier `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`
 root-app observation remains the only live App Attest/provider proof. The
-physical path was not rerun for current `cc011841acc1be78022ef65a039d4aabf8a37b57`.
+physical path was not rerun for current `fe35e04b714a38bc0df840f75bdbc37dbf8716a2`.
 No physical result closes the release gate until the protected collector and
 finalizer bind an Apple distribution-derived candidate to the exact repository,
 contract, application identity, signing, entitlement, package, and image
@@ -215,8 +217,9 @@ to their stated commits.
 The user authorized a scoped non-force push of the six audited source-branch
 histories and separately requested GHCR and npm publication work. That current
 request permits reviewed namespace-bootstrap or explicitly non-stable preview
-artifacts; it does not make the draft/RC tuple eligible for a stable version 1
-tag, merge, protected promotion, release-qualified production documentation,
-or a production-readiness claim. Only the protected finalizer may produce the
+artifacts; it does not make the locally released-contract successor tuple
+eligible for a stable version 1 tag, merge, protected promotion,
+release-qualified production documentation, or a production-readiness claim.
+Only the protected finalizer may produce the
 immutable completion report after every required domain closes without skips,
 stale evidence, or coordinate drift.

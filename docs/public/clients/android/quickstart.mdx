@@ -1,6 +1,6 @@
 ---
 title: "Send a protected request from Android"
-description: "Build the Kotlin source candidate, bind an OkHttp request to a feature, and verify Play Integrity-aware policy."
+description: "Compile the Android source candidate, stream a Firebase-authenticated request through OkHttp, and verify Play Integrity-aware policy."
 icon: "smartphone"
 audience: "client-android"
 pageType: "tutorial"
@@ -10,13 +10,13 @@ lastVerified: "2026-09-01"
 owner: "android-sdk"
 ---
 
-import AndroidBasicClient from "/snippets/generated/android/quickstart/basic-client.kt.mdx";
+import AndroidFirebaseGoldenJourney from "/snippets/generated/android/quickstart/firebase-auth.kt.mdx";
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 import { SetupCoordinates } from "/components/SetupPath.jsx";
 
 <Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Android API 23+</Badge>
 
-**Expected time:** 15 minutes after the mandatory gateway, identity, Android
+**Expected time:** 15 minutes after the mandatory gateway, Firebase, Android
 application, and Play prerequisites below are available.
 
 **Mode:** Source evaluation; a real integrity verdict requires a Play-installed
@@ -26,14 +26,18 @@ signed application and remains separate from local compilation.
 
 ## Outcome
 
-Send an OkHttp request for `habit-assistant` through Android Keystore-backed
-DPoP and correlate the request with its Play Integrity result and usage.
+Send and incrementally consume an OkHttp request for `habit-assistant` through
+Android Keystore-backed DPoP, then correlate its safe request ID with the Play
+Integrity result and metered usage.
 
 ## Before you start
 
-- a configured gateway that passed the [operator quickstart](/operate/quickstart)
+- a configured HTTPS gateway, reachable from the device, that passed the
+  [operator quickstart](/operate/quickstart)
 - an Android application resource ID, environment, feature, identity policy,
   Play cloud project, package, and certificate digest configured in Latchway
+- Firebase initialized in the application and an existing Firebase user signed
+  in before the example runs
 - Android Studio and authorized `latchway-android` source
 - for a real verdict, the exact signed application installed from a configured
   Google Play internal or production track
@@ -48,10 +52,12 @@ DPoP and correlate the request with its Play Integrity result and usage.
 
 <SetupCoordinates platform="android" />
 
-Use the local gateway for deterministic server verification. Treat host
-compilation and emulator tests as source checks. Only the configured signed
-application installed through the required Play track can complete the
-production Play Integrity stage.
+Use the operator quickstart for deterministic server verification. A physical
+device must use the final HTTPS gateway origin that it can reach; a host-only
+loopback URL is not a device endpoint. Treat host compilation, unit tests, and
+emulator runs as source checks. Only the configured signed application
+installed through the required Play track can complete the production Play
+Integrity stage.
 
 ## What you will build
 
@@ -63,63 +69,195 @@ Android app -> Latchway OkHttp -> configured Latchway -> selected upstream
 ## Procedure
 
 <Steps>
-  <Step title="Include the local Android build">
+  <Step title="Resolve the version-locked source modules">
     In `settings.gradle.kts`, use an included build for the authorized SDK
-    checkout. Keep the intended version coordinate in application dependencies
-    so the published transition is explicit.
+    checkout:
 
 ```kotlin
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "habit-assistant-android"
+include(":app")
 includeBuild("../latchway-android")
 ```
 
-    Expected result: the application resolves the intended local
-    `dev.latchway` modules rather than registry artifacts. Diagnostic: run
-    `./gradlew test assemble lint` in the SDK checkout if Gradle cannot resolve
-    the included build.
+    In `app/build.gradle.kts`, keep the intended Maven coordinates even though
+    the included build supplies them locally. Add Firebase and coroutines
+    because the complete example uses both directly:
+
+```kotlin
+dependencies {
+    implementation(platform("dev.latchway:latchway-bom:1.0.0"))
+    implementation("dev.latchway:latchway-okhttp")
+    implementation("dev.latchway:latchway-play-integrity")
+    implementation("dev.latchway:latchway-firebase-auth")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+}
+```
+
+    Expected result: Gradle resolves `dev.latchway` 1.0.0 from the local
+    checkout and compiles against Android API 23 or newer. Diagnostic: run
+    `./gradlew :app:dependencies --configuration debugRuntimeClasspath` and
+    confirm that all Latchway modules resolve to one version.
   </Step>
-  <Step title="Create the Latchway client">
-    In `LatchwayModule.kt`, provide the existing identity callback and the Play
-    Integrity adapter required by server policy. The generated source example
-    shows the exact constructor boundary without inventing credentials.
+  <Step title="Provide the safe deployment coordinates">
+    Put the operator-provided, non-secret values in your private user-level
+    `~/.gradle/gradle.properties`. Do not commit an identity token, integrity
+    token, provider credential, or signing material.
 
-    <AndroidBasicClient />
+```properties
+latchway.gatewayUrl=https://gateway.example.com/
+latchway.applicationId=app_01J00000000000000000000000
+latchway.environment=production
+latchway.feature=habit-assistant
+latchway.model=assistant-default
+latchway.cloudProjectNumber=123456789012
+```
 
-    Expected result: `LatchwayModule.kt` constructs a client only after the
-    application supplies both existing identity and policy-matched attestation
-    providers. Diagnostic: run `./gradlew :app:compileDebugKotlin` in the
-    application checkout.
+    The gateway must be HTTPS with a trailing slash. `applicationId` is the
+    exact `app_...` resource ID, and `cloudProjectNumber` is the numeric Google
+    Cloud project configured on both sides. `model` is the request value
+    accepted by the feature; the server still owns the physical upstream,
+    route, model mapping, pricing, and limits.
+
+    In the `defaultConfig` block of `app/build.gradle.kts`, expose only those
+    values as manifest placeholders:
+
+```kotlin
+manifestPlaceholders["latchwayGatewayUrl"] =
+    providers.gradleProperty("latchway.gatewayUrl").get()
+manifestPlaceholders["latchwayApplicationId"] =
+    providers.gradleProperty("latchway.applicationId").get()
+manifestPlaceholders["latchwayEnvironment"] =
+    providers.gradleProperty("latchway.environment").get()
+manifestPlaceholders["latchwayFeature"] =
+    providers.gradleProperty("latchway.feature").get()
+manifestPlaceholders["latchwayModel"] =
+    providers.gradleProperty("latchway.model").get()
+manifestPlaceholders["latchwayCloudProjectNumber"] =
+    providers.gradleProperty("latchway.cloudProjectNumber").get()
+```
+
+    Expected result: the app build has six non-secret, environment-specific
+    coordinates without embedding any authentication or attestation evidence.
+    Diagnostic: `FAIL configuration` means the example rejected a missing or
+    malformed coordinate; do not weaken its HTTPS, resource-ID, identifier, or
+    positive-project-number checks.
   </Step>
-  <Step title="Install both OkHttp guards">
-    In `NetworkModule.kt`, place the application interceptor before dispatch
-    and the origin guard in the network-interceptor chain. The current SDK
-    documentation bundle does not export a standalone application-owned
-    `NetworkModule.kt` region, so this step is an integration boundary rather
-    than a copy-ready generated snippet.
+  <Step title="Declare the application metadata">
+    In `app/src/main/AndroidManifest.xml`, keep the Internet permission and map
+    the placeholders to the names read by the compiled example. If your
+    activity uses another package, replace its class name explicitly.
 
-    Expected result: DPoP and Latchway headers cannot follow a cross-origin
-    redirect or be added later by another application interceptor. Diagnostic:
-    run `./gradlew :app:testDebugUnitTest` and inspect the interceptor ordering
-    in the failing application test.
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application>
+    <meta-data android:name="dev.latchway.gatewayUrl"
+      android:value="${latchwayGatewayUrl}" />
+    <meta-data android:name="dev.latchway.applicationId"
+      android:value="${latchwayApplicationId}" />
+    <meta-data android:name="dev.latchway.environment"
+      android:value="${latchwayEnvironment}" />
+    <meta-data android:name="dev.latchway.feature"
+      android:value="${latchwayFeature}" />
+    <meta-data android:name="dev.latchway.model"
+      android:value="${latchwayModel}" />
+    <meta-data android:name="dev.latchway.cloudProjectNumber"
+      android:value="${latchwayCloudProjectNumber}" />
+
+    <activity
+      android:name="dev.latchway.sample.firebase.MainActivity"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
+```
+
+    Expected result: the merged manifest contains the six expected values and
+    the launcher activity. Diagnostic: run
+    `./gradlew :app:processDebugMainManifest` to distinguish manifest merging
+    from Kotlin, Firebase, signing, or runtime policy failures.
   </Step>
-  <Step title="Bind and send the request">
-    In `HabitAssistantRepository.kt`, tag the request with the stable feature,
-    retain the returned `Call` for cancellation, and consume the response body
-    incrementally. The generated 1.0.0 bundle currently owns the client factory
-    shown above but not a complete application send-and-stream region; do not
-    treat prose or a partial request as compiled example evidence.
+  <Step title="Add the compiled client and streaming flow">
+    Put the following complete source in
+    `app/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt`, or
+    change its first `package` declaration and the manifest activity name to
+    match your application. This region is generated from the SDK's compiled
+    `sample-firebase` application rather than transcribed pseudocode.
 
-    Expected result: OkHttp returns the protected response. Preserve the call
-    for cancellation and stream the response body rather than buffering it.
-    Diagnostic: run `./gradlew :app:assembleDebug`; if dispatch still fails,
-    correlate the safe request ID rather than logging identity or integrity
-    tokens.
+    <AndroidFirebaseGoldenJourney />
+
+    The example uses only public SDK APIs. It constructs
+    `FirebaseIdentityTokenProvider`, `PlayIntegrityAttestationProvider`, and
+    `LatchwayClient`; installs the application interceptor, network origin
+    guard, and bounded authenticator; disables redirect and connection replay;
+    binds `habit-assistant` with `latchwayFeature`; retains the OkHttp `Call`;
+    cancels it with the owning coroutine; reads the response incrementally with
+    a one MiB example bound; and reports only typed errors and safe request IDs.
+
+    Expected result: `./gradlew :app:compileDebugKotlin` compiles the complete
+    send, streaming, cancellation, diagnostics, quota, and cleanup flow.
+    Diagnostic: run
+    `../latchway-android/gradlew -p ../latchway-android :sample-firebase:compileDebugKotlin`
+    to separate SDK/source drift from application build configuration.
+  </Step>
+  <Step title="Run the one-shot golden journey">
+    Sign in through the application's normal Firebase flow. For a real Play
+    verdict, install the exact signed build from the configured internal or
+    production Play track, open it, and tap **Run golden journey**.
+
+    The harness consumes stream bytes as they arrive; it does not call
+    `string()` or buffer an unbounded success body. Destroying the activity
+    cancels its coroutine and the retained OkHttp call. A successful evidence
+    run intentionally revokes the test installation and signs out Firebase, so
+    move those lifecycle actions out of the ordinary request path when adapting
+    this harness for a long-lived application.
+
+```text
+PASS · response req_... · diagnostics req_... · quota 3 limits · installation revoked · Firebase signed out
+```
+
+    Expected result: the status begins with `PASS` and includes a safe response
+    request ID. Use the ID after `response`, not the later diagnostics request
+    ID, for request-row correlation. Diagnostic: a `FAIL` status contains only
+    its stage, stable Latchway code or HTTP status, documentation URL, and safe
+    request ID; follow those fields instead of logging tokens or verdicts.
+  </Step>
+  <Step title="Verify the response in the Console">
+    Open **Requests**, filter by `habit-assistant`, and correlate the response
+    request ID. The physical provider and model shown there are server-owned.
+
+    Expected result: exactly one response request row has the same request ID
+    and the fields in the Verification section below. Diagnostic: with an
+    authenticated CLI, run
+    `latchway requests list --environment env_...` if the Console cannot load.
   </Step>
 </Steps>
 
 ## Verification
 
-Confirm the response request ID matches one Console request with:
+Confirm the response request ID matches exactly one Console request with:
 
 ```text
 Request status: Success
@@ -160,21 +298,29 @@ Input and output usage: present
   <Accordion title="Play Integrity rejects the application">
     Compare the numeric cloud project, package, certificate digest, release
     track, and server environment. A locally installed build may not receive
-    the verdict required by production policy.
+    the verdict required by production policy. Continue with
+    [Play Integrity](/clients/android/play-integrity) without copying an
+    integrity token into logs or source.
   </Accordion>
-  <Accordion title="A redirect loses authorization">
-    This is intentional. Configure the exact HTTPS gateway origin and remove
-    the redirect. Never allow DPoP or authorization headers to cross origins.
+  <Accordion title="The example reports FAIL configuration or FAIL Firebase">
+    For configuration, verify all six safe properties, the HTTPS trailing
+    slash, canonical `app_...` resource ID, identifiers, and positive project
+    number. For Firebase, initialize the configured application and sign in
+    through its normal UI before running. Never paste an ID token into a
+    property or diagnostic output.
   </Accordion>
-  <Accordion title="The request receives a stable Latchway error">
-    Open [Errors](/reference/errors) for its direct diagnostic path. Correlate
-    the request ID and inspect trust, feature grant, and reserved quota.
+  <Accordion title="The request is redirected or receives a stable error">
+    A redirect failure is intentional: configure the final exact HTTPS gateway
+    origin and never allow DPoP or authorization headers to cross origins. For
+    a stable error, open [Errors](/reference/errors), correlate its safe request
+    ID, and inspect trust, feature grant, and reserved quota.
   </Accordion>
 </AccordionGroup>
 
 <Prompt title="Integrate Latchway Android source candidate 1.0.0">
 Use Latchway Android SDK 1.0.0 from an included build with server 1.0.0. Keep
 identity in the existing provider, keys in Android Keystore, and Play Integrity
-inside the native adapter. Install both OkHttp guards, preserve cancellation
-and streaming, bind requests to a feature ID, and never add provider secrets.
+inside the native adapter. Install the OkHttp interceptor, network origin guard,
+and authenticator; preserve cancellation and incremental streaming; bind
+requests to a feature ID; and never add provider secrets.
 </Prompt>

@@ -6,14 +6,14 @@ audience: "mixed"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "framework-integrations"
 ---
 
 <Warning>
-  The current pre-release client HTTP contract is documented, but a handwritten request is
-  not a substitute for a Latchway SDK. Do not call raw HTTP a supported client
-  integration without platform conformance evidence.
+  The released source client HTTP contract is documented, but the raw
+  integration remains pre-release until platform conformance. A handwritten
+  request is not a substitute for a Latchway SDK.
 </Warning>
 
 ## 1. What this integration does
@@ -28,9 +28,10 @@ Not applicable. Raw HTTP has no framework dependency.
 
 ## 3. Supported Latchway versions
 
-The current authored reference describes draft contract `1.0.0` and current
-wire protocol `2`, including Installation Family and Client Component
-endpoints. Wire `1` remains accepted on compatible legacy routes.
+The current authored reference describes released source contract `1.0.0` and
+current wire protocol `2`, including Installation Family and Client Component
+endpoints. Wire `1` remains accepted on compatible legacy routes. Package and
+protected conformance publication remain separate open gates.
 
 ## 4. Security level
 
@@ -40,10 +41,10 @@ endpoints. Wire `1` remains accepted on compatible legacy routes.
 | Private key remains native | Client responsibility; use platform secure storage where available |
 | Streaming | Protocol permits it; the client must avoid buffering |
 | Cancellation | Client responsibility |
-| App extensions | Draft component endpoints exist; correct platform key isolation remains the client's responsibility |
+| App extensions | Released source component endpoints exist; correct platform key isolation remains the client's responsibility |
 | Structured output | Passed through only when the selected upstream protocol supports it |
 | Tool calls | Passed through only when the selected upstream protocol supports them |
-| Protocol | Draft contract `1.0.0`, current wire protocol `2`; compatible legacy routes also accept wire `1` |
+| Protocol | Released source contract `1.0.0`, current wire protocol `2`; compatible legacy routes also accept wire `1` |
 
 ## 5. Install packages
 

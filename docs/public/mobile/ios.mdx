@@ -67,9 +67,10 @@ device. A simulator or fixture cannot produce release evidence.
   independently keyed delegated request. Its Apple Development app and
   embedded extension passed strict entitlement/provisioning,
   registered-device install, and launch checks without new App Attest or App
-  Intent execution. Current `cc011841acc1be78022ef65a039d4aabf8a37b57`
-  adds release retry-closure and transition-order hardening and passes the
-  local plus generic iOS and isolated Debug/Release build gates; its physical
+  Intent execution. Current `fe35e04b714a38bc0df840f75bdbc37dbf8716a2`
+  carries the release retry-closure and transition-order hardening, locks the
+  released contract plus final sibling SDK successor commits, and passes the
+  local plus generic iOS and isolated Debug/Release build gates. Its physical
   path was not rerun. The Release target has no executable Latchway request
   path and fails closed. App Intent evidence is operator-deferred.
 </Info>

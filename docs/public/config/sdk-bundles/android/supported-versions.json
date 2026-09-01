@@ -4,7 +4,7 @@
     {
       "name": "dev.latchway:latchway-core",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "docs/publishing.md",
         "region": {
           "end_line": 36,
@@ -20,7 +20,7 @@
     {
       "name": "dev.latchway:latchway-okhttp",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "docs/publishing.md",
         "region": {
           "end_line": 36,
@@ -36,7 +36,7 @@
     {
       "name": "dev.latchway:latchway-play-integrity",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "docs/publishing.md",
         "region": {
           "end_line": 36,
@@ -52,7 +52,7 @@
     {
       "name": "dev.latchway:latchway-firebase-auth",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "docs/publishing.md",
         "region": {
           "end_line": 36,
@@ -68,7 +68,7 @@
     {
       "name": "dev.latchway:latchway-bom",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "docs/publishing.md",
         "region": {
           "end_line": 36,
@@ -84,7 +84,7 @@
     {
       "name": "Android API",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "README.md",
         "region": {
           "end_line": 29,
@@ -93,14 +93,14 @@
         "region_sha256": "bb1a0b58ac2f1cb8123019bd61b66758cfe7818f5d0a146bc2da5732301a95aa",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "8a7981e775f511c435c499587e40d393906bb0030fd1061189c7a6e925f6d5c5"
+        "source_sha256": "e9d57486fb7d85aa0d1c26ec47083c2ce39d1c21ed5e81c24950cca2bb86d8fb"
       },
       "version": "23"
     },
     {
       "name": "Android compile SDK",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-core/build.gradle.kts",
         "region": {
           "end_line": 12,
@@ -116,7 +116,7 @@
     {
       "name": "Android Gradle Plugin",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 3,
@@ -132,7 +132,7 @@
     {
       "name": "Gradle",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/wrapper/gradle-wrapper.properties",
         "region": {
           "end_line": 3,
@@ -148,7 +148,7 @@
     {
       "name": "Kotlin",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "build.gradle.kts",
         "region": {
           "end_line": 16,
@@ -164,7 +164,7 @@
     {
       "name": "Java bytecode",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-core/build.gradle.kts",
         "region": {
           "end_line": 19,
@@ -180,7 +180,7 @@
     {
       "name": "OkHttp minimum",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "README.md",
         "region": {
           "end_line": 31,
@@ -189,14 +189,14 @@
         "region_sha256": "acbb105fc9cf54af085e3fb38b30c68cd3b60fb47e8556b2d1f77c52c0ae389b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "8a7981e775f511c435c499587e40d393906bb0030fd1061189c7a6e925f6d5c5"
+        "source_sha256": "e9d57486fb7d85aa0d1c26ec47083c2ce39d1c21ed5e81c24950cca2bb86d8fb"
       },
       "version": "4.9.2"
     },
     {
       "name": "OkHttp latest",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -212,7 +212,7 @@
     {
       "name": "Retrofit minimum",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "README.md",
         "region": {
           "end_line": 35,
@@ -221,14 +221,14 @@
         "region_sha256": "5dbec8d61656367638a8a2c9aa523742d96965f4a0b6edac77d586478c04fca8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "8a7981e775f511c435c499587e40d393906bb0030fd1061189c7a6e925f6d5c5"
+        "source_sha256": "e9d57486fb7d85aa0d1c26ec47083c2ce39d1c21ed5e81c24950cca2bb86d8fb"
       },
       "version": "2.11.0"
     },
     {
       "name": "Retrofit latest",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -244,7 +244,7 @@
     {
       "name": "OpenAI Kotlin minimum",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "README.md",
         "region": {
           "end_line": 35,
@@ -253,14 +253,14 @@
         "region_sha256": "5dbec8d61656367638a8a2c9aa523742d96965f4a0b6edac77d586478c04fca8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "8a7981e775f511c435c499587e40d393906bb0030fd1061189c7a6e925f6d5c5"
+        "source_sha256": "e9d57486fb7d85aa0d1c26ec47083c2ce39d1c21ed5e81c24950cca2bb86d8fb"
       },
       "version": "4.0.1"
     },
     {
       "name": "OpenAI Kotlin latest",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -276,7 +276,7 @@
     {
       "name": "Ktor OkHttp",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -292,7 +292,7 @@
     {
       "name": "LangChain4j",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -308,7 +308,7 @@
     {
       "name": "LangChain4j OkHttp SPI",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -324,7 +324,7 @@
     {
       "name": "Koog",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -340,7 +340,7 @@
     {
       "name": "Play Integrity",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -356,7 +356,7 @@
     {
       "name": "Firebase BOM",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "gradle/libs.versions.toml",
         "region": {
           "end_line": 15,
@@ -372,7 +372,7 @@
     {
       "name": "React Native bridge",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 66,

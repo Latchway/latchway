@@ -10,31 +10,33 @@ lastVerified: "2026-09-01"
 owner: "release-engineering"
 ---
 
-Latchway version 1 is locally source-converged. Core contract checkpoint
-`116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, all four SDK locks, reproducible
-contract and SDK-documentation bundles, canonical documentation, and the
-generated Mintlify mirror pass the clean cross-repository source gate. No
-public version 1 release should be inferred from source version strings or
-local tests. The schema-28 contract/runtime checkpoint is
-`116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; checkpoint
-`77069816dd68174052e7ebc163911883f8f07e7e` is the preceding schema-27
-performance checkpoint.
+Latchway version 1 now has a local source-level released contract checkpoint
+and a coordinated successor SDK tuple. The contract checkpoint is
+`437708fb56d45196720b5769f2f59b0ee51f521d`; its reproducible bundle SHA-256 is
+`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`.
+Contract `1.0.0` selects wire protocol `2` as current while retaining wire `1`
+for compatible legacy clients.
 
-The current core binary identifies as `1.0.0-rc.1`. The intended stable server
-and SDK versions are `1.0.0`; draft contract `1.0.0` selects wire protocol `2`
-as current while retaining wire `1` for compatible legacy clients. Those
-coordinates are release intent until protected promotion completes.
+The source locks name JavaScript
+`ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`, iOS
+`910e692278f05a56a5d007a18e6b82dcd2fab56b`, Android
+`275b876e1beadeff4cf3e024c0207b73e7270a96`, and React Native
+`fe35e04b714a38bc0df840f75bdbc37dbf8716a2`. The current core binary and SDK
+source versions identify as `1.0.0`. These commits, however, have not been
+merged, tagged, published, deployed, or observed through protected
+post-publication checks. The released contract lock is not itself a public
+stable release.
 
 | Area | Current claim |
 | --- | --- |
-| Core gateway and control plane | Current source tuple validated; complete core check/race/fuzz/PostgreSQL gates pass |
-| React Native, iOS, Android, and JavaScript SDK sources | Implemented and bound to the current draft contract; source/check gates pass, while stable release preflights correctly reject unreleased locks and candidate changelogs until coordinated successor commits exist |
-| Protocol contract | Draft `1.0.0` bundle SHA-256 `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` is reproducible and pinned across repositories |
+| Core gateway and control plane | Released-contract source checkpoint exists locally; core source gates pass, while the final protected exact-candidate run remains open |
+| React Native, iOS, Android, and JavaScript SDK sources | Coordinated `1.0.0` successor locks name the exact commits above and their local source gates pass; no package publication or post-publication conformance is claimed |
+| Protocol contract | Released source contract `1.0.0` at `437708fb56d45196720b5769f2f59b0ee51f521d` has reproducible bundle SHA-256 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6` and is pinned across the SDK tuple |
 | Admin sessions and configuration transfer | Canonical API/CLI/Console session inventory/revoke, negotiated read-only safe mode, and bounded redaction-safe YAML/JSON transfer with exact numeric preservation, immutable strong-ETag staging, and explicit activation review are implemented and locally verified |
 | Admin live refresh | Authenticated SSE refresh hints are implemented with no row data, principal revalidation, reconnect behavior, and polling/manual fallback when `admin_event_stream` is absent; complete local gates pass |
 | Public tags and immutable GitHub releases | No local version 1 tags; no remote tag or GitHub release is authenticated or verified |
 | npm, Swift/CocoaPods, and Maven publication | Not yet published |
-| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with production App Attest registration and same-key assertion. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. Current `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and transition-order hardening; its physical path was not rerun. App Intent/extension and physical Android/Google Play evidence are operator-deferred release gates. Apple distribution-derived proof remains open and is not claimed as deferred. |
+| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with production App Attest registration and same-key assertion. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. Current `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` carries the release hardening and locks the released contract plus final sibling SDK successor commits; its physical path was not rerun. App Intent/extension and physical Android/Google Play evidence are operator-deferred release gates. Apple distribution-derived proof remains open and is not claimed as deferred. |
 | Firebase Web App Check | A browser-minted reCAPTCHA Enterprise token exchange and server verifier pass against the current source gateway; protected immutable-candidate rerun remains required |
 | Cloudflare Turnstile | No configured observation exists; protected exact-candidate evidence remains required |
 | Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
@@ -49,14 +51,14 @@ restore, upgrade, load, vulnerability, SBOM, signature, provenance, registry,
 and cross-repository conformance gates. Local tests cannot manufacture those
 receipts.
 
-For the current source, `make check` passed all Go tests and vet, 343
-script tests, 164 Console Vitest tests, the production Console build, and 34
-Playwright tests; one live-stack case remains explicitly opt-in and skipped.
-The race detector, bounded fuzz corpus, and real PostgreSQL Admin/session/App
-Attest/configuration/lifecycle lock-order suites also pass. Independent review
-closed root-challenge and App Attest post-disable insertion races,
-configuration and family/component lock-order deadlocks, exact JSON/YAML
-numeric preservation, and explicit `READ COMMITTED` lifecycle behavior.
+Local source testing covers the Go check, race, fuzz, and real PostgreSQL
+suites; Console unit, build, and browser suites; and each SDK's release and
+consumer gates. Independent review closed root-challenge and App Attest
+post-disable insertion races, configuration and family/component lock-order
+deadlocks, exact JSON/YAML numeric preservation, and explicit `READ COMMITTED`
+lifecycle behavior. Those local results do not replace the final clean
+cross-repository run or protected artifact evidence for the exact publication
+candidate.
 
 Image publication, release promotion, public-state observation, deployment
 capture, and release-record finalization enforce a source/credential split:
@@ -92,13 +94,13 @@ the native extension client for one exact-run delegated request. Its Apple
 Development root app and embedded App Intents extension passed strict
 entitlement/provisioning, registered-device install, and launch checks. It did
 not invoke the intent or collect new App Attest proof. Current
-`cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure,
-transition-order, wording, and development-runner hardening and passes the full
-local plus generic iOS and isolated Debug/Release App Intent build gates; the
-physical path was not rerun at that head. The Release App Intent target contains
-no Latchway request path
-and fails closed. None of these results extends the historical live proof or
-authorizes release promotion.
+`fe35e04b714a38bc0df840f75bdbc37dbf8716a2` carries the release retry-closure,
+transition-order, wording, and development-runner hardening, then locks the
+released contract and final JavaScript, iOS, and Android successor commits. Its
+local plus generic iOS and isolated Debug/Release App Intent build gates pass;
+the physical path was not rerun at that head. The Release App Intent target
+contains no Latchway request path and fails closed. None of these results
+extends the historical live proof or authorizes release promotion.
 
 ## Current source and authorization boundary
 
@@ -128,6 +130,7 @@ open gate, never a synthetic pass.
 
 <Info>
   Until promotion completes, evaluate Latchway from repository-local tested
-  source checkouts. This is not an independent security audit. Do not assume
-  that `1.0.0` exists on a public package registry.
+  source checkouts. The contract is released in source, but this is not an
+  independent security audit and no `1.0.0` package or image should be assumed
+  to exist on a public registry.
 </Info>

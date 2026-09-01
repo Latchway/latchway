@@ -6,7 +6,7 @@ audience: "mixed"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "framework-integrations"
 ---
 
@@ -30,9 +30,10 @@ published supported integration yet.
 
 ## 3. Supported Latchway versions
 
-The source candidate targets draft contract `1.0.0` and current protocol `2`;
-protocol `1` remains accepted for compatible legacy routes. Installation
-Family component support is implemented locally but remains pre-release.
+The source candidate targets released contract `1.0.0` and current protocol
+`2`; protocol `1` remains accepted for compatible legacy routes. Installation
+Family component support is part of the released source contract, while Maven
+publication and protected compatibility evidence remain open.
 
 ## 4. Security level
 
@@ -42,10 +43,10 @@ Family component support is implemented locally but remains pre-release.
 | Private key remains native | Android Keystore target; release evidence pending |
 | Streaming | Transport must preserve response bodies; ecosystem evidence pending |
 | Cancellation | OkHttp call cancellation target; ecosystem evidence pending |
-| App extensions | Not applicable to Android app extensions; the component model remains pre-release |
+| App extensions | Not applicable to Android app extensions; component operations are released in the source contract but artifact and physical evidence remain open |
 | Structured output | Passed through for compatible protocols; ecosystem evidence pending |
 | Tool calls | Passed through for compatible protocols; ecosystem evidence pending |
-| Protocol | Draft contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
+| Protocol | Released source contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
 
 ## 5. Install packages
 

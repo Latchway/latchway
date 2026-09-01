@@ -1,14 +1,14 @@
 # Latchway version 1 master plan
 
-This is the canonical merged implementation plan as of 2026-09-01. It combines
+This is the canonical merged implementation plan as of 2026-09-02. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
 Admin Console, and Mintlify addenda. The version 1 API contract is frozen at
 the contract checkpoint below; the runtime and control-plane implementation is
-the named contract-preserving descendant. Every SDK is bound to the frozen
-draft contract and its source/check gates pass. Stable release preflights remain
-closed until coordinated released locks and changelogs replace the draft
-coordinates. Canonical SDK documentation
-bundles are imported into this source tree; the generated
+the named contract-preserving descendant. The protocol manifest is released,
+and every SDK successor is bound to that frozen contract with a final `1.0.0`
+changelog. Source/check gates pass; stable release preflights no longer reject
+draft metadata, but still require tags and protected evidence. Canonical SDK
+documentation bundles are imported into this source tree; the generated
 Mintlify mirror and the final clean source-conformance report bind the commit
 containing this ledger. Release promotion remains blocked on protected
 exact-candidate evidence and publication authorization.
@@ -36,20 +36,20 @@ mirror.
 
 | Field | Version 1 source coordinate |
 | --- | --- |
-| Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract source checkpoint | Core checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
-| Bundle SHA-256 | `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` |
+| Contract | `1.0.0`, status `released`, `released_at: 2026-09-01T20:25:00Z` |
+| Contract source checkpoint | Core checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
+| Bundle SHA-256 | `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Core implementation checkpoint | Contract/runtime checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; the final canonical-doc commit is an API-preserving descendant |
+| Core implementation checkpoint | Contract/runtime checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d`; the final canonical-doc commit is an API-preserving descendant |
 | Canonical SDK-bundle/public-doc source | The core commit containing this ledger; its generated mirror manifest records the exact source commit |
-| Database | Schema `28` at `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Database | Schema `28` at `437708fb56d45196720b5769f2f59b0ee51f521d`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `4b0626da478aa412daa07cc7bb595edfb53bf7c7` |
-| Swift source | `aa182f766dc72d57f3915bd1c16678fe4f866ffe` |
-| Android source | `ed1dc06134c5b7f37c03ff92405a5872a0f96457` |
-| React Native source | `cc011841acc1be78022ef65a039d4aabf8a37b57` |
+| JavaScript source | `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d` |
+| Swift source | `910e692278f05a56a5d007a18e6b82dcd2fab56b` |
+| Android source | `275b876e1beadeff4cf3e024c0207b73e7270a96` |
+| React Native source | `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` |
 | Mintlify mirror source | Generated from the final canonical core commit; the source-conformance report records the exact mirror commit |
-| Release state | `unreleased`; local source convergence only, with no version 1 tag, release, package, image, or production deployment |
+| Product release state | `unpublished` and not release-qualified; local source convergence only, with no merge, version 1 tag, GitHub release, package, image, cloud deployment, or production documentation deployment |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
 checkpoint. It is not rewritten by this plan.
@@ -62,8 +62,9 @@ checkpoint. It is not rewritten by this plan.
   immutable coordinates.
 - **External required** means hardware, protected credentials, hosted services,
   registries, or publication are genuinely required.
-- **Released** is reserved for protected promotion after every applicable
-  external domain binds to one candidate.
+- **Release-qualified** is reserved for protected promotion after every
+  applicable external domain binds to one candidate. A contract manifest with
+  status `released` does not by itself publish or qualify the product.
 
 ## Execution status
 
@@ -106,17 +107,17 @@ generation from iOS app extensions.
   provenance without relabeling delegated ancestry.
 - [x] Update Client/Admin OpenAPI, configuration JSON Schema, error registry,
   examples, compatibility registry, and deterministic bundle inputs.
-- [x] Keep draft contract `1.0.0`, wire 2, and all four canonical fixture
-  families deterministic.
+- [x] Freeze released contract `1.0.0`, wire 2, and all four canonical fixture
+  families deterministically.
 - [x] Make cross-repository conformance reject fixture, lock, coordinate, or
   post-freeze `api/**` drift.
-- [x] Regenerate the final draft bundle after contract convergence and bind its
-  exact checksum and core commit into every SDK lock.
-- [x] Regenerate the draft bundle twice after the Admin-session,
+- [x] Regenerate the final released bundle after contract convergence and bind
+  its exact checksum and core commit into every SDK successor lock.
+- [x] Regenerate the released bundle twice after the Admin-session,
   configuration-transfer, server-capability, and Admin event-stream API delta;
   bind byte-identical SHA-256
-  `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`
-  and checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` into every SDK lock.
+  `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`
+  and checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` into every SDK successor lock.
 
 ### Phase 3: Server runtime — source complete
 
@@ -260,10 +261,10 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the local 228-page Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `4b0626da478aa412daa07cc7bb595edfb53bf7c7`, Swift
-  `aa182f766dc72d57f3915bd1c16678fe4f866ffe`, Android
-  `ed1dc06134c5b7f37c03ff92405a5872a0f96457`, and React Native
-  `cc011841acc1be78022ef65a039d4aabf8a37b57`.
+  `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`, Swift
+  `910e692278f05a56a5d007a18e6b82dcd2fab56b`, Android
+  `275b876e1beadeff4cf3e024c0207b73e7270a96`, and React Native
+  `fe35e04b714a38bc0df840f75bdbc37dbf8716a2`.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
@@ -296,14 +297,15 @@ complete; protected execution open
 - [x] Prepare the six authorized branch histories for audited non-force
   delivery; record synchronization outside this source plan and do not infer a
   merge, tag, release, deployment, or publication from a branch push.
-- [ ] Prepare the stable successor source tuple before candidate production:
+- [x] Prepare the stable successor source tuple before candidate production:
   create the released contract checkpoint with a fresh `released_at`, promote
   the core binary metadata and changelog to `1.0.0`, regenerate the contract
   bundle, update the JavaScript/iOS/Android locks and final changelogs, update
   the React Native dependency pins and final changelog, rebuild and import all
   SDK documentation bundles, synchronize the Mintlify mirror, and rerun clean
-  cross-repository source conformance. The current draft/RC tuple cannot enter
-  the protected release-candidate workflow.
+  cross-repository source conformance. The resulting local successor tuple is
+  contract-released and internally converged; it has not been merged, tagged,
+  published, or admitted by protected exact-candidate evidence.
 - [ ] Build and observe one final immutable multi-architecture image in the
   protected registry and run all external domains against its exact digests.
 - [ ] Produce the protected prepublication promotion record, then publish the

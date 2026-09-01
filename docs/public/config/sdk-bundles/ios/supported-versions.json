@@ -4,7 +4,7 @@
     {
       "name": "Latchway",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -20,7 +20,7 @@
     {
       "name": "SwiftPM product Latchway",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -36,7 +36,7 @@
     {
       "name": "SwiftPM product LatchwayAppAttest",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -52,7 +52,7 @@
     {
       "name": "SwiftPM product LatchwayAppExtensions",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -68,7 +68,7 @@
     {
       "name": "SwiftPM product LatchwayFirebaseAuth",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -84,7 +84,7 @@
     {
       "name": "SwiftPM product LatchwaySwiftOpenAI",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -100,7 +100,7 @@
     {
       "name": "SwiftPM product LatchwayFoundationModels",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -116,7 +116,7 @@
     {
       "name": "SwiftPM product LatchwayTesting",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -132,7 +132,7 @@
     {
       "name": "CocoaPods Latchway/Core",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -148,7 +148,7 @@
     {
       "name": "CocoaPods Latchway/AppAttest",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -164,7 +164,7 @@
     {
       "name": "CocoaPods Latchway/AppExtensions",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -180,7 +180,7 @@
     {
       "name": "CocoaPods Latchway/FirebaseAuth",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "README.md",
         "region": {
           "end_line": 58,
@@ -196,7 +196,7 @@
     {
       "name": "iOS",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -212,7 +212,7 @@
     {
       "name": "macOS minimum (Swift Package)",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Package.swift",
         "region": {
           "end_line": 10,
@@ -228,7 +228,7 @@
     {
       "name": "Swift language",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -244,7 +244,7 @@
     {
       "name": "Swift tools",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Package.swift",
         "region": {
           "end_line": 1,
@@ -260,7 +260,7 @@
     {
       "name": "SwiftOpenAI exact",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Package.swift",
         "region": {
           "end_line": 24,
@@ -276,7 +276,7 @@
     {
       "name": "Foundation Models compiler minimum",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 1,
@@ -292,7 +292,7 @@
     {
       "name": "Foundation Models iOS availability",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -308,7 +308,7 @@
     {
       "name": "Foundation Models macOS availability",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -324,7 +324,7 @@
     {
       "name": "Foundation Models visionOS availability",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -340,7 +340,7 @@
     {
       "name": "Foundation Models watchOS availability",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -356,7 +356,7 @@
     {
       "name": "Foundation Models tvOS availability",
       "source": {
-        "commit": "5c9be59ccd2bc62f69e93300cf91c77646339e7d",
+        "commit": "910e692278f05a56a5d007a18e6b82dcd2fab56b",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,

@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Basic Android client",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt",
         "region": {
           "end_line": 39,
@@ -20,7 +20,7 @@
       "kind": "physical_device",
       "name": "Firebase and Play Integrity golden journey",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt",
         "region": {
           "end_line": 301,
@@ -36,7 +36,7 @@
       "kind": "framework",
       "name": "Retrofit conformance consumer",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt",
         "region": {
           "end_line": 333,
@@ -52,7 +52,7 @@
       "kind": "framework",
       "name": "OpenAI Kotlin conformance consumer",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt",
         "region": {
           "end_line": 198,
@@ -68,7 +68,7 @@
       "kind": "framework",
       "name": "LangChain4j conformance consumer",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt",
         "region": {
           "end_line": 216,
@@ -84,7 +84,7 @@
       "kind": "framework",
       "name": "Koog conformance consumer",
       "source": {
-        "commit": "ed1dc06134c5b7f37c03ff92405a5872a0f96457",
+        "commit": "275b876e1beadeff4cf3e024c0207b73e7270a96",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt",
         "region": {
           "end_line": 437,

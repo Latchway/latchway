@@ -21,9 +21,11 @@ Applications keep their identity provider and HTTP request format. Clients never
 
 ## Contract foundation
 
-Draft protocol contract `1.0.0` uses current wire protocol version `2`; the
-gateway continues to accept version `1` for compatible legacy
-installation/session clients. Normative artifacts live in [`api/`](api/):
+Protocol contract `1.0.0` is frozen in source with manifest status `released`
+and uses current wire protocol version `2`; this contract status is not a
+published product-release claim. The gateway continues to accept version `1`
+for compatible legacy installation/session clients. Normative artifacts live
+in [`api/`](api/):
 
 - client and Admin OpenAPI 3.1 descriptions;
 - the immutable environment configuration JSON Schema;

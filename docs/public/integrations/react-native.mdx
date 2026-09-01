@@ -39,18 +39,20 @@ materially adds root-owned component lifecycle and a Debug native App Intent
 delegated-request path. Its Apple Development app and embedded extension passed
 strict entitlement/provisioning, registered-device install, and launch checks
 without new App Attest or App Intent execution. Current
-`cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and
-transition-order hardening and passes the full local plus generic iOS and
-isolated Debug/Release build gates; its physical path was not rerun. The
+`fe35e04b714a38bc0df840f75bdbc37dbf8716a2` carries the release retry-closure
+and transition-order hardening, locks the released contract plus final sibling
+SDK successor commits, and passes the full local plus generic iOS and isolated
+Debug/Release build gates; its physical path was not rerun. The
 historical root-app run above does not establish extension execution for the
 current source, and the operator has deferred that evidence.
 
 ## 3. Supported Latchway versions
 
-The source candidate targets draft contract `1.0.0` and current protocol `2`;
-protocol `1` remains accepted for compatible legacy routes. Installation
-Family and Client Component operations are included in the draft wire-2
-contract.
+The source candidate targets released contract `1.0.0` and current protocol
+`2`; protocol `1` remains accepted for compatible legacy routes. Installation
+Family and Client Component operations are included in the released wire-2
+contract. The React Native package and protected compatibility evidence remain
+unpublished.
 
 ## 4. Security level
 
@@ -63,7 +65,7 @@ contract.
 | App extensions | Not provided by the React Native framework-fetch integration |
 | Structured output | Framework-specific evidence pending |
 | Tool calls | Framework-specific evidence pending |
-| Protocol | Draft contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
+| Protocol | Released source contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
 
 ## 5. Install packages
 

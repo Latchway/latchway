@@ -6,7 +6,7 @@ audience: "mixed"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "framework-integrations"
 ---
 
@@ -15,7 +15,9 @@ import SwiftOpenAISource from "/snippets/generated/ios/frameworks/swift-openai.s
 <Warning>
   `LatchwaySwiftOpenAI` is an unpublished source candidate. SwiftOpenAI `4.6.0`
   has an exact experimental compatibility row; it is not a supported release
-  range. Latchway contract `1.0.0` remains pre-release.
+  range. Latchway contract `1.0.0` is released in source, but the Swift package,
+  CocoaPods artifact, adapter tuple, and protected compatibility evidence
+  remain pre-release and unpublished.
 </Warning>
 
 ## 1. What this integration does
@@ -47,7 +49,7 @@ tuple exists yet.
 | App extensions | Conditional through an already provisioned `LatchwayExtensionClient`; physical extension proof remains pending |
 | Structured output | Conditional on the selected protocol and an explicit conformance case |
 | Tool calls | Conditional on the selected protocol and an explicit conformance case |
-| Protocol | OpenAI Responses and Chat Completions use draft contract `1.0.0` over current wire `2` |
+| Protocol | OpenAI Responses and Chat Completions use released source contract `1.0.0` over current wire `2` |
 
 ## 5. Install packages
 

@@ -5,12 +5,14 @@ Status date: 2026-09-02
 Latchway version 1 is source-complete and locally converged. The frozen core
 contract checkpoint includes Admin-session management, configuration transfer,
 authenticated Admin event-stream refresh hints, and lifecycle-concurrency
-hardening; every SDK is rebound to its deterministic contract bundle and the
-source/check gates pass. Stable release preflights correctly remain closed on
-the draft locks and candidate changelogs. React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
+hardening; the contract is marked released and every SDK successor is rebound
+to its deterministic contract bundle with final `1.0.0` changelog headings.
+Source/check gates pass, and stable release preflights no longer reject draft
+locks or candidate changelogs; tags and protected evidence are still required.
+React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
 passed bounded Apple Development root/extension signing, entitlement,
 registered-device install, and launch checks; the physical path was not rerun
-at current head. Latchway is not released or production-proven. Protected
+at current head. The product is not published or production-proven. Protected
 distribution, Android hardware, delegated runtime
 execution, live-provider exact-image, cloud, resilience, protected registry
 supply-chain, publication, and post-publication domains remain open.
@@ -22,9 +24,9 @@ supply-chain, publication, and post-publication domains remain open.
 | Current phase | Phase 9: local source convergence complete; protected exact-candidate execution remains open |
 | Current objective | Preserve the exact source tuple and execute protected release domains only with their required authority |
 | Validated implementation coordinates | The frozen contract and SDK coordinates below; the final source-conformance report records the canonical-doc and mirror commits |
-| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
-| Database schema version | `28` at contract/source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` and the current candidate descendant; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
-| Last full test time | `2026-09-02` — the schema-28 contract/source checkpoint and current candidate descendant passed the complete PostgreSQL-backed `go test -count=1 ./...` gate plus contract and canonical-public-documentation validation. The recorded source tuple separately passed core check/race/fuzz/PostgreSQL and SDK source/check gates, deterministic contract and SDK-documentation rebuilds, canonical and mirror documentation suites, predecessor physical iPad signed-bundle verification/install/launch, and clean cross-repository source conformance. Stable SDK release preflights correctly reject the current unreleased locks and candidate changelogs. Local/static evidence is not protected release evidence. |
+| Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
+| Database schema version | `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and the current candidate descendant; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
+| Last full test time | `2026-09-02` — the schema-28 contract/source checkpoint and current candidate descendant passed the complete PostgreSQL-backed `go test -count=1 ./...` gate plus contract and canonical-public-documentation validation. The recorded successor tuple separately passed core check/race/fuzz/PostgreSQL and SDK source/check gates, deterministic contract and SDK-documentation rebuilds, canonical and mirror documentation suites, predecessor physical iPad signed-bundle verification/install/launch, and clean cross-repository source conformance. Stable SDK release preflights no longer reject draft locks or candidate changelogs, but still require tags and protected exact-candidate evidence. Local/static evidence is not protected release evidence. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate; the protected delegated-extension runtime matrix; operator-deferred App Intent and physical Android/Google Play proof; Turnstile; immutable-image provider/cloud/resilience; registry supply-chain; independent-review; publication; and post-publication receipts |
 | External credentials still required | Known missing: Apple release-distribution signing and protected collector/finalizer authority. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
@@ -34,18 +36,18 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Repository | Validated coordinate or state |
 | --- | --- |
-| Core contract checkpoint `latchway` | `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
+| Core contract checkpoint `latchway` | `437708fb56d45196720b5769f2f59b0ee51f521d` |
 | Prior schema-27 performance checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Core canonical-public-doc source | The final contract-preserving core commit containing this ledger |
-| JavaScript `latchway-js` | `4b0626da478aa412daa07cc7bb595edfb53bf7c7` |
-| Swift `latchway-ios-sdk` | `aa182f766dc72d57f3915bd1c16678fe4f866ffe` |
-| Android `latchway-android` | `ed1dc06134c5b7f37c03ff92405a5872a0f96457` |
-| React Native `latchway-react-native-sdk` | `cc011841acc1be78022ef65a039d4aabf8a37b57` |
+| JavaScript `latchway-js` | `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d` |
+| Swift `latchway-ios-sdk` | `910e692278f05a56a5d007a18e6b82dcd2fab56b` |
+| Android `latchway-android` | `275b876e1beadeff4cf3e024c0207b73e7270a96` |
+| React Native `latchway-react-native-sdk` | `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` |
 | Mintlify mirror `latchway-docs` | Generated from the final canonical core commit; exact commit recorded by source conformance |
 
 These coordinates form the current clean local source-conformance tuple. The
 contract bundle SHA-256 is
-`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`.
+`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`.
 Branch synchronization is a delivery operation, not release evidence. No local
 version 1 tags exist, and no merge, GitHub release, package publication,
 production deployment, or documentation deployment is verified.
@@ -117,30 +119,30 @@ lock-order suites also pass against the frozen implementation checkpoint.
 | Field | Current value |
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
-| Contract | `1.0.0` draft, `released_at: null` |
-| Contract source checkpoint | Core checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
-| Bundle SHA-256 | `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` |
+| Contract | `1.0.0` released at `2026-09-01T20:25:00Z` |
+| Contract source checkpoint | Core checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
+| Bundle SHA-256 | `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
-| Database | Schema `28` at contract/source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` and the current candidate descendant; checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains the preceding schema-27 coordinate |
+| Database | Schema `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and the current candidate descendant; checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains the preceding schema-27 coordinate |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| Release state | `unreleased`; no local version 1 tags exist, and no package or deployment is verified |
+| Product release state | `unpublished` and not release-qualified; no local version 1 tags exist, and no package, image, cloud deployment, or production documentation deployment is verified |
 
-The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate draft
-bundle hashes are not release coordinates. All four SDK locks name the frozen
-checkpoint and reproducible draft bundle above.
+The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate bundle
+hashes are not release coordinates. All four SDK successor locks name the
+released checkpoint and reproducible bundle above.
 
 ## Workstream status
 
 | Workstream | Local source status | Remaining boundary |
 | --- | --- | --- |
-| Family/component contract and migrations | Implemented through schema 28 at contract/source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` and the current candidate descendant; exact challenge Origin and authoritative root-definition selection remain hardened, schema 26 adds redaction-safe logical-request decision stages, schema 27 adds bounded audit source/reason attribution and browse indexes, and schema 28 adds durable retry-cost treatment plus physical-attempt quota ledger support. Wear OS vocabulary remains reserved, but active Wear OS Component Definitions fail with `component_wearos_unsupported_v1` until an end-to-end SDK/runtime path exists. | Protected exact-candidate evidence and future Wear OS implementation before any support claim |
+| Family/component contract and migrations | Implemented through schema 28 at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and the current candidate descendant; exact challenge Origin and authoritative root-definition selection remain hardened, schema 26 adds redaction-safe logical-request decision stages, schema 27 adds bounded audit source/reason attribution and browse indexes, and schema 28 adds durable retry-cost treatment plus physical-attempt quota ledger support. Wear OS vocabulary remains reserved, but active Wear OS Component Definitions fail with `component_wearos_unsupported_v1` until an end-to-end SDK/runtime path exists. | Protected exact-candidate evidence and future Wear OS implementation before any support claim |
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including a generic component App Attest step-up protocol and bounded CEL request context whose feature/protocol are immutable-server bound; the CEL `request.estimated_input_tokens` fact remains untrusted, while production hard `input_tokens`/`total_tokens` and input-priced cost enforcement use a server-owned preflight bound tied to the exact post-rewrite body and selected physical model; quota snapshots fail closed when required request-size policy facts are unavailable. Calendar, token-bucket, and aggregate per-request `upstream_attempts` limits charge each physical dispatch atomically while `logical_requests` remains once per request. Cost retry treatment defaults to all actual attempts; user `initial_attempt_only` allowances require paired organization-only actual-attempt accounting. Current lifecycle transactions explicitly use `READ COMMITTED` and consistent application→environment→family/component lock order, closing root-challenge, App Attest post-disable insertion, configuration, family/component deadlock, retry replay, and excess-attempt races under real PostgreSQL tests. | Exact-candidate rerun and protected observations |
 | Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; opaque HTTP now has pairwise-disjoint exact-depth path templates while retaining the prior segment-bound `pathPrefixes` mode for existing v1 revisions; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
 | Weighted/sticky routing, fallback, retry, accounting | Complete; the clean local source load suite and all nine automated failure scenarios pass at the implementation checkpoint | Protected exact-image load and destructive-failure evidence |
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | The frozen checkpoint includes redaction-safe audit filtering/detail, a shared doctor/support-bundle contract, the exact `latchway test-upstream serve` fixture command, separate first-byte/first-token request timestamps, canonical Admin-session inventory/revoke across API, CLI, and Console, negotiated server capabilities and read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect, polling fallback, and no row data. Complete local core gates pass. | Protected deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a historical development-signed physical React Native iOS root run passed production App Attest registration and same-key assertion, the current source adds a Debug-only native App Intent delegated-request path, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical invocation of the current Debug App Intent path, protected extension matrix, physical Play Integrity, protected immutable-candidate App Check rerun, and Turnstile evidence |
-| Swift, Android, JavaScript SDKs | Implemented, source/check gates pass, and locked to the frozen draft contract checkpoint; stable release preflights remain closed until successor locks name `v1.0.0` and final changelog headings exist | Coordinated stable successor commits, physical proof where applicable, and publication |
-| React Native SDK | Commit `cc011841acc1be78022ef65a039d4aabf8a37b57` is implemented, source/check gates pass, and it is pinned to the exact three native/source commits. Its stable release preflight correctly rejects the draft core lock and candidate changelog. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. Current `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and transition-order hardening; the physical path was not rerun at that head. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Coordinated stable successor commit; operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution and extension-matrix proof; physical Android proof; and publication |
+| Swift, Android, JavaScript SDKs | Implemented; source/check gates pass and released-contract successor locks name `v1.0.0` with final changelog headings. Stable preflights no longer reject draft metadata. | Physical proof where applicable, protected exact-candidate evidence, tags, and publication |
+| React Native SDK | Successor commit `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` is implemented, source/check gates pass, and it is pinned to the exact three SDK successor commits. Its lock and changelog now satisfy the released-contract portion of stable preflight. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution and extension-matrix proof; physical Android proof; protected evidence, tags, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
@@ -181,8 +183,9 @@ checkpoint and reproducible draft bundle above.
   Attest and Keychain entitlement, registered-device, installation, and launch
   verification on the connected iPad. It did not contact a provider, collect
   App Attest evidence, or physically invoke the Debug App Intent. Current
-  `cc011841acc1be78022ef65a039d4aabf8a37b57` adds release retry-closure and
-  transition-order hardening; the physical path was not rerun at that head.
+  released successor `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` includes the
+  later release-lock and source-tuple transition; the physical path was not
+  rerun at that head.
 - The clean implementation-checkpoint load suite passed all targets: gateway
   overhead p50/p95/p99 was `13.441`/`16.554`/`20.027` ms against
   `15`/`20`/`30` ms limits, all `6000` requests completed at 100 requests per
@@ -224,17 +227,17 @@ checkpoint and reproducible draft bundle above.
 
 These are source-development results, not protected release receipts. The
 clean-tree cross-repository source gate binds core contract checkpoint
-`116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, bundle SHA-256
-`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`,
-JavaScript `4b0626da478aa412daa07cc7bb595edfb53bf7c7`, iOS
-`aa182f766dc72d57f3915bd1c16678fe4f866ffe`, Android
-`ed1dc06134c5b7f37c03ff92405a5872a0f96457`, React Native
-`cc011841acc1be78022ef65a039d4aabf8a37b57`, and the generated Mintlify
+`437708fb56d45196720b5769f2f59b0ee51f521d`, bundle SHA-256
+`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
+JavaScript `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`, iOS
+`910e692278f05a56a5d007a18e6b82dcd2fab56b`, Android
+`275b876e1beadeff4cf3e024c0207b73e7270a96`, React Native
+`fe35e04b714a38bc0df840f75bdbc37dbf8716a2`, and the generated Mintlify
 mirror. All four SDK documentation bundles record those source coordinates and
 `source_tree_clean: true`. React Native predecessor
 `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict development signing,
 entitlement, embedded-extension, registered-iPad, install, and launch
-verification. Current `cc011841acc1be78022ef65a039d4aabf8a37b57` was not
+verification. Current `fe35e04b714a38bc0df840f75bdbc37dbf8716a2` was not
 physically rerun. No successor collected new App Attest evidence or invoked the
 Debug App Intent, so the earlier live root-app
 observation remains bound to predecessor
