@@ -346,7 +346,7 @@
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "72fba2feee3e126b20348bfc7712cb1c52d467c997da5add872d5bb1abeea472"
+      "sha256": "ff73f5e17867d72468715842bcd1c832c0fb425903ac791d6c8ba1d1448e7fe8"
     },
     {
       "path": "api/client.openapi.yaml",
