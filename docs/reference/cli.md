@@ -381,8 +381,15 @@ foreground. It accepts only a canonical loopback IP listener and an exact
 loopback HTTP browser origin, then owns the sample tenant, mock identity and
 upstream, challenge-bound debug signer, gateway, Admin API, and embedded
 Console until Ctrl-C. The ready document contains copyable non-secret
-coordinates and a random Console password printed once; keep that terminal
-private. The generated schema is dropped on shutdown.
+coordinates, including the three exact helper URLs, and a random Console
+password printed once; keep that terminal private. From AI connections, the
+Console can invoke the loopback-only sample helper. That helper runs a bounded
+synthetic client through mock OIDC, challenge-bound debug attestation, DPoP,
+policy, quota, routing, the mock upstream, settlement, and durable request
+storage; the Console then reads back the exact request before reporting
+success. The helper rejects concurrent runs without queuing and bounds each run
+to 30 seconds. This is local development evidence, not production attestation or
+physical-device proof. The generated schema is dropped on shutdown.
 
 ```bash
 export LATCHWAY_DATABASE_URL='postgres://...'

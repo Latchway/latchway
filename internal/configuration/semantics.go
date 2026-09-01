@@ -98,6 +98,12 @@ func componentDefinitionSemanticIssues(
 		kind := stringValue(definition, "kind")
 		role := stringValue(definition, "familyRole")
 		identifiers := objectValue(definition, "identifiers")
+		if platform == "wearos" {
+			issues = append(issues, errorIssue(
+				"component_wearos_unsupported_v1", base+"/platform",
+				"Wear OS is reserved in the configuration vocabulary for a future release and cannot be activated by the version 1 runtime.",
+			))
+		}
 		for field, values := range map[string][]string{
 			"bundleIdentifiers": stringArray(identifiers, "bundleIdentifiers"),
 			"packageNames":      stringArray(identifiers, "packageNames"),
@@ -939,6 +945,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 		plan := plans[planID]
 		base := "/spec/limitPlans/" + pointerToken(planID) + "/limits"
 		seenIdentities := make(map[immutableLimitIdentity]int)
+		normalizedLimits := make([]Limit, 0, len(objectArray(plan, "limits")))
 		for index, limit := range objectArray(plan, "limits") {
 			path := fmt.Sprintf("%s/%d", base, index)
 			algorithm := stringValue(limit, "algorithm")
@@ -968,20 +975,21 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				refill, _ = parseJSONRefillRate(raw)
 			}
 			hard, _ := limit["hard"].(bool)
-			_, identity, executable := normalizeExecutableLimit(Limit{
+			normalized, identity, executable := normalizeExecutableLimit(Limit{
 				Metric: metric, Algorithm: algorithm, Scope: stringArray(limit, "scope"),
 				Window: stringValue(limit, "window"), Timezone: stringValue(limit, "timezone"), Maximum: maximum,
 				PerRequestMaximum: perRequestMaximum, Capacity: capacity,
-				RefillPerSecond: refill, Hard: hard,
+				RefillPerSecond: refill, CostRetryTreatment: stringValue(limit, "costRetryTreatment"), Hard: hard,
 			})
 			if !executable {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits, hard input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/input_tokens/output_tokens/total_tokens token_bucket limits, hard input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, request_bytes/image_units/tool_calls additionally require exact request measurement on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a bounded minute/hour/day/week/month window, a valid server-configured IANA timezone, and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
+					"This release can activate hard logical_requests/upstream_attempts/input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/upstream_attempts/input_tokens/output_tokens/total_tokens token_bucket limits, hard upstream_attempts/input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, request_bytes/image_units/tool_calls additionally require exact request measurement on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a bounded minute/hour/day/week/month window, a valid server-configured IANA timezone, and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, costRetryTreatment defaults to actual_attempts and initial_attempt_only is restricted to cost rules whose scope includes user, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
+			normalizedLimits = append(normalizedLimits, normalized)
 			if _, duplicate := seenIdentities[identity]; duplicate {
 				issues = append(issues, errorIssue(
 					"duplicate_limit_rule",
@@ -991,6 +999,13 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				continue
 			}
 			seenIdentities[identity] = index
+		}
+		if !validCostRetryPlan(normalizedLimits) {
+			issues = append(issues, errorIssue(
+				"cost_retry_treatment_requires_organization_accounting",
+				base,
+				"A limit plan using initial_attempt_only must also include an actual_attempts cost rule whose canonical scope includes organization and excludes user.",
+			))
 		}
 	}
 	return issues

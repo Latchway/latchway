@@ -54,12 +54,13 @@ func TestEffectiveLimitsExposeOnlyAlgorithmFieldsAndExactOutputClamp(t *testing.
 		{Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user"}, Capacity: 600, RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 2}, Hard: true},
 		{Metric: "output_tokens", Algorithm: "per_request", Scope: []string{"feature", "user"}, PerRequestMaximum: 400, Hard: true},
 		{Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user"}, Maximum: 3, Hard: true},
+		{Metric: "cost_nano_usd", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Timezone: "UTC", Maximum: 1_000, CostRetryTreatment: configuration.CostRetryTreatmentInitialAttemptOnly, Hard: true},
 	}}
 	limits := effectiveLimits(plan)
-	if len(limits) != 4 || limits[0].Maximum != 100 || limits[0].Capacity != 0 ||
+	if len(limits) != 5 || limits[0].Maximum != 100 || limits[0].Capacity != 0 ||
 		limits[1].Capacity != 600 || limits[1].RefillPerSecond != "0.5" || limits[1].Maximum != 0 ||
 		limits[2].PerRequestMaximum != 400 || limits[2].RefillPerSecond != "" ||
-		limits[3].Maximum != 3 {
+		limits[3].Maximum != 3 || limits[4].CostRetryTreatment != configuration.CostRetryTreatmentInitialAttemptOnly {
 		t.Fatalf("effectiveLimits() = %+v", limits)
 	}
 	document := effectiveConfigurationDocument{Output: &effectiveOutputDocument{

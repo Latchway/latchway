@@ -20,12 +20,15 @@ func TestForwardHeadersStripsCredentialsAndHopByHop(t *testing.T) {
 		"X-Remove-Me":        {"hop-by-hop"},
 		"Content-Type":       {"application/json"},
 		"Accept":             {"text/event-stream"},
+		"Traceparent":        {"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"},
+		"Tracestate":         {"attacker=value"},
+		"Baggage":            {"private=value"},
 	}
 	outbound, err := ForwardHeaders(incoming, []string{"Content-Type", "Accept", "X-Remove-Me"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outbound.Get("Authorization") != "" || outbound.Get("DPoP") != "" || outbound.Get("DPoP-Nonce") != "" || outbound.Get("X-Api-Key") != "" || outbound.Get("X-Latchway-Feature") != "" || outbound.Get("X-Remove-Me") != "" {
+	if outbound.Get("Authorization") != "" || outbound.Get("DPoP") != "" || outbound.Get("DPoP-Nonce") != "" || outbound.Get("X-Api-Key") != "" || outbound.Get("X-Latchway-Feature") != "" || outbound.Get("X-Remove-Me") != "" || outbound.Get("Traceparent") != "" || outbound.Get("Tracestate") != "" || outbound.Get("Baggage") != "" {
 		t.Fatalf("forbidden header forwarded: %#v", outbound)
 	}
 	if outbound.Get("Content-Type") != "application/json" || outbound.Get("Accept") != "text/event-stream" {

@@ -285,7 +285,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		Limits: []configuration.Limit{{
 			Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
 			Scope: []string{"user", "feature"}, Window: "1mo", Timezone: "UTC",
-			Maximum: dataPlaneE2ECostMaximum, Hard: true,
+			Maximum:            dataPlaneE2ECostMaximum,
+			CostRetryTreatment: configuration.CostRetryTreatmentActualAttempts, Hard: true,
 		}},
 	}
 	if !ok || !reflect.DeepEqual(costPlan, wantCostPlan) {

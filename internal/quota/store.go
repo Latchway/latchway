@@ -246,8 +246,9 @@ const insertQuotaReservationEntrySQL = `
 	INSERT INTO quota_reservation_entries (
 		quota_reservation_entry_id, organization_id, application_id,
 		environment_id, quota_reservation_id, quota_bucket_id,
-		initial_reserved_units, reserved_units, settled_units, released_units
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 0, 0)
+		initial_reserved_units, reserved_units, settled_units, released_units,
+		cost_retry_treatment
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 0, 0, $8)
 `
 
 func persistAcceptedReservation(
@@ -319,6 +320,7 @@ func persistAcceptedReservation(
 			arguments: []any{
 				plan.entryID, prepared.OrganizationID, prepared.ApplicationID,
 				prepared.EnvironmentID, reservationID, plan.locked.id, plan.reservedUnits,
+				plan.rule.CostRetryTreatment,
 			},
 			mapWrite: true,
 		})
@@ -870,6 +872,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		limitPlanKey, ruleKey, metric, scopeType     string
 		scopeDimensions                              []string
 		scopeKey, algorithm, windowKey               string
+		costRetryTreatment                           string
 		bucketUsed                                   int64
 	}
 	rows, err := tx.Query(ctx, `
@@ -881,6 +884,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		       entry.origin_attempt_number, entry.initial_reserved_units,
 		       entry.reserved_units,
 		       entry.settled_units, entry.released_units,
+		       entry.cost_retry_treatment,
 		       bucket.organization_id, bucket.application_id,
 		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
 		       bucket.scope_type, bucket.scope_dimensions, bucket.scope_key,
@@ -922,12 +926,20 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			&existing.status, &existing.expiresAt, &existing.entryID, &existing.bucketID,
 			&existing.originAttemptNumber, &existing.initialReservedUnits, &existing.reservedUnits,
 			&existing.settledUnits, &existing.releasedUnits,
+			&existing.costRetryTreatment,
 			&existing.bucketOrganizationID, &existing.bucketApplicationID,
 			&existing.limitPlanKey, &existing.ruleKey, &existing.metric,
 			&existing.scopeType, &existing.scopeDimensions, &existing.scopeKey,
 			&existing.algorithm, &existing.windowKey, &existing.bucketUsed,
 		); err != nil {
 			return Reservation{}, persistenceFailure("scan existing quota reservation", err)
+		}
+		var treatmentOK bool
+		existing.costRetryTreatment, treatmentOK = canonicalStoredCostRetryTreatment(
+			existing.metric, existing.costRetryTreatment,
+		)
+		if !treatmentOK {
+			return Reservation{}, ErrInvalidState
 		}
 		planIndex, initial := planIndexes[plannedBucketIdentity(existing.ruleKey, existing.scopeKey)]
 		plan, sourceRule := plansByRule[existing.ruleKey]
@@ -956,6 +968,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			existing.metric != plan.rule.Metric || existing.scopeType != plan.rule.scopeType ||
 			!slicesEqual(existing.scopeDimensions, plan.rule.scopeDimensions) ||
 			existing.algorithm != plan.rule.Algorithm || existing.windowKey != plan.period.key ||
+			existing.costRetryTreatment != plan.rule.CostRetryTreatment ||
 			(isConcurrencyMetric(existing.metric) && existing.bucketUsed != 0) {
 			return Reservation{}, ErrInvalidInput
 		}
@@ -985,8 +998,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			entries = append(entries, reservationEntry{
 				bucketID: existing.bucketID, entryID: existing.entryID,
 				metric: plan.rule.Metric, algorithm: plan.rule.Algorithm,
-				reservedUnits: plan.reservedUnits,
-				resetAt:       plan.period.end,
+				costRetryTreatment: plan.rule.CostRetryTreatment,
+				reservedUnits:      plan.reservedUnits,
+				resetAt:            plan.period.end,
 			})
 		}
 	}
@@ -1608,13 +1622,14 @@ func reservationEntries(plans []plannedBucket) []reservationEntry {
 	entries := make([]reservationEntry, len(plans))
 	for index := range plans {
 		entries[index] = reservationEntry{
-			bucketID:      plans[index].locked.id,
-			entryID:       plans[index].entryID,
-			leaseID:       plans[index].leaseID,
-			metric:        plans[index].rule.Metric,
-			algorithm:     plans[index].rule.Algorithm,
-			reservedUnits: plans[index].reservedUnits,
-			resetAt:       plans[index].period.end,
+			bucketID:           plans[index].locked.id,
+			entryID:            plans[index].entryID,
+			leaseID:            plans[index].leaseID,
+			metric:             plans[index].rule.Metric,
+			algorithm:          plans[index].rule.Algorithm,
+			costRetryTreatment: plans[index].rule.CostRetryTreatment,
+			reservedUnits:      plans[index].reservedUnits,
+			resetAt:            plans[index].period.end,
 		}
 	}
 	return entries
@@ -2873,6 +2888,7 @@ type lockedEntry struct {
 	ruleKey              string
 	metric               string
 	algorithm            string
+	costRetryTreatment   string
 	windowKey            string
 	scopeType            string
 	scopeDimensions      []string
@@ -2917,6 +2933,7 @@ const lockReservationEntriesSQL = `
 	       entry.origin_attempt_number,
 	       entry.initial_reserved_units, entry.reserved_units,
 	       entry.settled_units, entry.released_units,
+	       entry.cost_retry_treatment,
 	       bucket.used_units, bucket.reserved_units, bucket.hard_maximum,
 	       bucket.available_units, bucket.refill_numerator,
 	       bucket.refill_denominator, bucket.refilled_at, bucket.version
@@ -2966,13 +2983,18 @@ func scanLockedReservationEntries(rows pgx.Rows, reservation lockedReservation) 
 			&entry.metric, &entry.algorithm, &entry.windowKey, &entry.scopeType,
 			&entry.scopeDimensions, &entry.scopeKey, &entry.originAttemptNumber,
 			&entry.initialReservedUnits, &entry.reservedUnits,
-			&entry.settledUnits, &entry.releasedUnits, &entry.bucketUsed,
+			&entry.settledUnits, &entry.releasedUnits, &entry.costRetryTreatment,
+			&entry.bucketUsed,
 			&entry.bucketReserved, &entry.hardMaximum, &entry.available,
 			&entry.refillNumerator, &entry.refillDenominator, &entry.refilledAt,
 			&entry.version,
 		); err != nil {
 			return nil, persistenceFailure("scan quota reservation entry", err)
 		}
+		var treatmentOK bool
+		entry.costRetryTreatment, treatmentOK = canonicalStoredCostRetryTreatment(
+			entry.metric, entry.costRetryTreatment,
+		)
 		canonicalDimensions, dimensionsErr := canonicalScopeDimensions(entry.scopeDimensions)
 		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			dimensionsErr != nil || !slicesEqual(canonicalDimensions, entry.scopeDimensions) ||
@@ -2980,6 +3002,7 @@ func scanLockedReservationEntries(rows pgx.Rows, reservation lockedReservation) 
 			entry.ruleKey == "" || entry.scopeKey == "" ||
 			entry.originAttemptNumber < 1 || entry.originAttemptNumber > maximumAttemptsPerRequest ||
 			entry.reservedUnits < 0 ||
+			!treatmentOK ||
 			!validReservationEntryUnits(entry.metric, entry.algorithm, entry.initialReservedUnits) ||
 			entry.initialReservedUnits > entry.reservedUnits ||
 			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
@@ -3020,6 +3043,7 @@ func scanLockedReservationEntries(rows pgx.Rows, reservation lockedReservation) 
 			entry, ok := byID[expected.entryID]
 			if !ok || entry.id != expected.entryID || entry.bucketID != expected.bucketID ||
 				entry.metric != expected.metric || entry.algorithm != expected.algorithm ||
+				entry.costRetryTreatment != expected.costRetryTreatment ||
 				entry.originAttemptNumber != 1 ||
 				entry.initialReservedUnits != expected.reservedUnits {
 				return nil, ErrInvalidState

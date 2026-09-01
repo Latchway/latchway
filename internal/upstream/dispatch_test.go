@@ -11,7 +11,213 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/baggage"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func TestDispatchSynthesizesUniqueLocalW3CContextWithoutARecordingTracer(t *testing.T) {
+	t.Parallel()
+
+	parents := make([]string, 0, 2)
+	for range 2 {
+		var observed http.Header
+		target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			observed = request.Header.Clone()
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}")), Request: request,
+			}, nil
+		}))
+		incoming, err := http.NewRequest(
+			http.MethodPost, "https://gateway.example.test/v1/chat/completions", strings.NewReader("{}"),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		incoming.Header.Set("Content-Type", "application/json")
+		prepared, err := PrepareRequest(
+			incoming, target, "/v1/chat/completions", []string{"Content-Type"}, nil, TraceContextPropagationW3C,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := target.Dispatch(context.Background(), prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Close(); err != nil {
+			t.Fatal(err)
+		}
+		parent := observed.Get("Traceparent")
+		extracted := propagation.TraceContext{}.Extract(context.Background(), propagation.HeaderCarrier(observed))
+		spanContext := trace.SpanContextFromContext(extracted)
+		if parent == "" || !spanContext.IsValid() || spanContext.TraceFlags().IsSampled() ||
+			observed.Get("Tracestate") != "" || observed.Get("Baggage") != "" {
+			t.Fatalf("synthetic W3C context = parent %q span=%+v headers=%#v", parent, spanContext, observed)
+		}
+		parents = append(parents, parent)
+	}
+	if parents[0] == parents[1] {
+		t.Fatalf("separate upstream attempts reused trace context %q", parents[0])
+	}
+}
+
+func TestDispatchReplacesRemoteW3CContextAtProviderBoundary(t *testing.T) {
+	t.Parallel()
+
+	remoteTraceID, err := trace.TraceIDFromHex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteSpanID, err := trace.SpanIDFromHex("bbbbbbbbbbbbbbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteTraceState, err := trace.ParseTraceState("attacker=remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteSpan := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: remoteTraceID, SpanID: remoteSpanID, TraceFlags: trace.FlagsSampled,
+		TraceState: remoteTraceState, Remote: true,
+	})
+	dispatchContext := trace.ContextWithRemoteSpanContext(context.Background(), remoteSpan)
+
+	privateMember, err := baggage.NewMember("private", "must-not-cross")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateBaggage, err := baggage.New(privateMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchContext = baggage.ContextWithBaggage(dispatchContext, privateBaggage)
+
+	var observed http.Header
+	target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		observed = request.Header.Clone()
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}")), Request: request,
+		}, nil
+	}))
+	incoming, err := http.NewRequest(
+		http.MethodPost, "https://gateway.example.test/v1/chat/completions", strings.NewReader("{}"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming.Header.Set("Content-Type", "application/json")
+	prepared, err := PrepareRequest(
+		incoming, target, "/v1/chat/completions", []string{"Content-Type"}, nil, TraceContextPropagationW3C,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := target.Dispatch(dispatchContext, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := response.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	extracted := propagation.TraceContext{}.Extract(context.Background(), propagation.HeaderCarrier(observed))
+	providerSpan := trace.SpanContextFromContext(extracted)
+	if !providerSpan.IsValid() || providerSpan.TraceID() == remoteTraceID || providerSpan.SpanID() == remoteSpanID ||
+		providerSpan.TraceFlags().IsSampled() || observed.Get("Tracestate") != "" || observed.Get("Baggage") != "" {
+		t.Fatalf("remote context crossed provider boundary: remote=%+v provider=%+v headers=%#v", remoteSpan, providerSpan, observed)
+	}
+}
+
+func TestDispatchPropagatesOnlyServerW3CTraceContextWhenExplicitlyEnabled(t *testing.T) {
+	t.Parallel()
+
+	traceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spanID, err := trace.SpanIDFromHex("1112131415161718")
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceState, err := trace.ParseTraceState("latchway=attempt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSpan := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled, TraceState: traceState,
+	})
+	dispatchContext := trace.ContextWithSpanContext(context.Background(), serverSpan)
+	privateMember, err := baggage.NewMember("user_id", "must-not-cross")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateBaggage, err := baggage.New(privateMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchContext = baggage.ContextWithBaggage(dispatchContext, privateBaggage)
+
+	for _, test := range []struct {
+		name            string
+		mode            TraceContextPropagation
+		wantTraceparent string
+		wantTracestate  string
+	}{
+		{name: "default off", mode: TraceContextPropagationNone},
+		{
+			name: "explicit W3C", mode: TraceContextPropagationW3C,
+			wantTraceparent: "00-0102030405060708090a0b0c0d0e0f10-1112131415161718-01",
+			wantTracestate:  "latchway=attempt",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var observed http.Header
+			target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				observed = request.Header.Clone()
+				return &http.Response{
+					StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}")), Request: request,
+				}, nil
+			}))
+			incoming, err := http.NewRequest(
+				http.MethodPost, "https://gateway.example.test/v1/chat/completions", strings.NewReader("{}"),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			incoming.Header.Set("Content-Type", "application/json")
+			incoming.Header.Set("Traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")
+			incoming.Header.Set("Tracestate", "attacker=value")
+			incoming.Header.Set("Baggage", "private=value")
+			prepared, err := PrepareRequest(
+				incoming, target, "/v1/chat/completions", []string{"Content-Type"}, nil, test.mode,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := target.Dispatch(dispatchContext, prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := response.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got := observed.Get("Traceparent"); got != test.wantTraceparent {
+				t.Fatalf("traceparent = %q, want %q", got, test.wantTraceparent)
+			}
+			if got := observed.Get("Tracestate"); got != test.wantTracestate {
+				t.Fatalf("tracestate = %q, want %q", got, test.wantTracestate)
+			}
+			if got := observed.Get("Baggage"); got != "" {
+				t.Fatalf("baggage = %q, want absent", got)
+			}
+			if incoming.Header.Get("Traceparent") == "" || incoming.Header.Get("Tracestate") == "" || incoming.Header.Get("Baggage") == "" {
+				t.Fatal("incoming trace headers were mutated")
+			}
+		})
+	}
+}
 
 func TestWithBearerDispatchRetainsCredentialUntilExactBodyClose(t *testing.T) {
 	t.Parallel()

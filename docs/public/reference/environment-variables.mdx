@@ -67,6 +67,11 @@ its batch trace provider during graceful shutdown. Validate endpoint, TLS,
 authentication, sampling, shutdown grace, and retention in the target
 collector before enabling production traffic.
 
+Exporting Latchway traces does not automatically expose trace context to an AI
+provider. Upstream propagation is a separate immutable configuration choice and
+defaults to off. See [Providers and protocols](/concepts/providers-and-protocols)
+for the `traceContextPropagation` boundary and baggage restrictions.
+
 ## CLI environment
 
 | Variable | Use |

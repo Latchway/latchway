@@ -86,6 +86,7 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 	}
 	if key.upstreamID != base.ID || key.upstreamType != base.Type || key.baseURL != base.BaseURL ||
 		key.insecureHTTP != base.DangerousAllowInsecureHTTP ||
+		key.traceContextPropagation != configuration.TraceContextPropagationNone ||
 		key.allowRedirects != base.DestinationPolicy.AllowRedirects ||
 		key.allowPrivate != base.DestinationPolicy.AllowPrivateNetworks ||
 		key.dnsPinning != base.DestinationPolicy.DNSPinning || key.allowedPorts != "443,8443," ||
@@ -124,6 +125,9 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 		{name: "upstream ID", edit: func(value *configuration.Upstream) { value.ID = "secondary" }},
 		{name: "base URL path", edit: func(value *configuration.Upstream) { value.BaseURL = "https://provider.example/v2" }},
 		{name: "insecure flag", edit: func(value *configuration.Upstream) { value.DangerousAllowInsecureHTTP = true }},
+		{name: "trace context", edit: func(value *configuration.Upstream) {
+			value.TraceContextPropagation = configuration.TraceContextPropagationW3C
+		}},
 		{name: "allowed ports", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = []int{443, 9443} }},
 		{name: "allowed CIDRs", edit: func(value *configuration.Upstream) {
 			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.41/32")}
@@ -198,6 +202,9 @@ func TestValidUpstreamAuthenticationAcceptsOnlyExactScopedShapes(t *testing.T) {
 		{name: "multiple forbidden", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
 			{HeaderName: "Content-Type", SecretRef: "secret/provider"},
 		}}},
+		{name: "trace parent forbidden", value: configuration.UpstreamAuthentication{Type: "header", HeaderName: "Traceparent", SecretRef: "secret/provider"}},
+		{name: "trace state forbidden", value: configuration.UpstreamAuthentication{Type: "header", HeaderName: "Tracestate", SecretRef: "secret/provider"}},
+		{name: "baggage forbidden", value: configuration.UpstreamAuthentication{Type: "header", HeaderName: "Baggage", SecretRef: "secret/provider"}},
 		{name: "multiple missing secret", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
 			{HeaderName: "X-Provider-Key"},
 		}}},
@@ -227,6 +234,8 @@ func TestTargetCacheRejectsInvalidConfigurationBeforeLookupOrConstruction(t *tes
 	}{
 		{name: "identifier", edit: func(value *configuration.Upstream) { value.ID = "INVALID" }},
 		{name: "type", edit: func(value *configuration.Upstream) { value.Type = "unknown" }},
+		{name: "missing trace context mode", edit: func(value *configuration.Upstream) { value.TraceContextPropagation = "" }},
+		{name: "unknown trace context mode", edit: func(value *configuration.Upstream) { value.TraceContextPropagation = "future_mode" }},
 		{name: "URL query", edit: func(value *configuration.Upstream) { value.BaseURL += "?private=1" }},
 		{name: "insecure HTTP", edit: func(value *configuration.Upstream) {
 			value.BaseURL = "http://provider.example/v1"
@@ -551,7 +560,8 @@ func newTargetCacheHarness(t *testing.T, capacity int) (*TargetCache, *cacheTest
 func cacheTestUpstream(upstreamID string) configuration.Upstream {
 	return configuration.Upstream{
 		ID: upstreamID, Type: "openai_compatible", BaseURL: "https://provider.example/v1",
-		Authentication: configuration.UpstreamAuthentication{Type: "none"},
+		TraceContextPropagation: configuration.TraceContextPropagationNone,
+		Authentication:          configuration.UpstreamAuthentication{Type: "none"},
 		Timeouts: configuration.UpstreamTimeouts{
 			Connect: time.Second, ResponseHeader: 2 * time.Second, FirstByte: 2 * time.Second,
 			Idle: 3 * time.Second, Total: time.Minute,

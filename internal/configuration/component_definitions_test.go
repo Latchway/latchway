@@ -137,6 +137,60 @@ func TestComponentDefinitionSemanticFailures(t *testing.T) {
 	}
 }
 
+func TestWearOSComponentDefinitionIsReservedButCannotActivateInV1(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	definitions := validComponentDefinitions()
+	definitions = append(definitions, map[string]any{
+		"id": "wear-companion", "platform": "wearos", "kind": "wear_app",
+		"identifiers":     map[string]any{"packageNames": []any{"com.example.habits.wear"}},
+		"familyRole":      "delegated",
+		"delegation":      map[string]any{"allowedParents": []any{"ios-main"}, "maximumLifetime": "1h"},
+		"attestation":     map[string]any{"strategy": "delegated"},
+		"allowedFeatures": []any{"assistant"},
+	})
+	objectValue(document, "spec")["componentDefinitions"] = definitions
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("reserved Wear OS vocabulary failed schema validation: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil {
+		t.Fatalf("Wear OS component compiled for v1: valid=%t compiled=%t issues=%+v", report.Valid, compiled != nil, report.Issues)
+	}
+	for _, issue := range report.Issues {
+		if issue.Code == "component_wearos_unsupported_v1" {
+			if issue.Path != "/spec/componentDefinitions/wear-companion/platform" {
+				t.Fatalf("Wear OS issue path = %q", issue.Path)
+			}
+			return
+		}
+	}
+	t.Fatalf("issues = %+v, want component_wearos_unsupported_v1", report.Issues)
+}
+
+func TestRuntimeSnapshotRejectsReservedWearOSComponentPlatform(t *testing.T) {
+	t.Parallel()
+	if runtimeComponentPlatform("wearos") {
+		t.Fatal("version 1 runtime accepted reserved Wear OS component platform")
+	}
+	for _, platform := range []string{
+		"ios", "android", "web", "node", "react_native_ios", "react_native_android", "watchos",
+	} {
+		if !runtimeComponentPlatform(platform) {
+			t.Fatalf("version 1 runtime rejected supported component platform %q", platform)
+		}
+	}
+}
+
 func TestComponentDefinitionsRejectAmbiguousNativeRoots(t *testing.T) {
 	t.Parallel()
 	validator, err := NewValidator()

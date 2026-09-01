@@ -35,6 +35,7 @@ type challengeDocument struct {
 type grantDocument struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
 	Installation struct {
 		ID       string `json:"id"`
 		Platform string `json:"platform"`
@@ -214,6 +215,7 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 }
 
 func (f *fixture) exchangeSession(ctx context.Context) error {
+	operationTime := f.clock()
 	discoveryRequest, err := http.NewRequestWithContext(
 		ctx, http.MethodGet, f.oidc.issuer+"/.well-known/openid-configuration", nil,
 	)
@@ -230,7 +232,7 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	if discoveryResponse.StatusCode != http.StatusOK {
 		return errors.New("mock OIDC discovery failed")
 	}
-	identityToken, err := f.oidc.token(f.now)
+	identityToken, err := f.oidc.token(operationTime)
 	if err != nil {
 		return err
 	}
@@ -238,7 +240,7 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	challengeProof, err := signDPoP(f.dpopKey, http.MethodPost, challengeTarget, f.now, "challenge", "")
+	challengeProof, err := signDPoP(f.dpopKey, http.MethodPost, challengeTarget, operationTime, "challenge", "")
 	if err != nil {
 		return err
 	}
@@ -267,13 +269,13 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	}
 	var bindingHash [sha256.Size]byte
 	copy(bindingHash[:], bindingBytes)
-	expiresAt := f.now.Add(10 * time.Minute).Unix()
+	expiresAt := operationTime.Add(10 * time.Minute).Unix()
 	debugSignature := ed25519.Sign(f.debugKey, attestation.DebugSigningMessage(bindingHash, expiresAt))
 	exchangeTarget, err := parseURL(f.origin() + "/client/v1/sessions")
 	if err != nil {
 		return err
 	}
-	exchangeProof, err := signDPoP(f.dpopKey, http.MethodPost, exchangeTarget, f.now, "exchange", "")
+	exchangeProof, err := signDPoP(f.dpopKey, http.MethodPost, exchangeTarget, operationTime, "exchange", "")
 	if err != nil {
 		return err
 	}
@@ -298,12 +300,13 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	if err := decodeJSON(exchangeResponse, &grant); err != nil {
 		return err
 	}
-	if grant.TokenType != "DPoP" || grant.Installation.ID == "" ||
+	if grant.TokenType != "DPoP" || grant.ExpiresIn <= 0 || grant.Installation.ID == "" ||
 		grant.Installation.DPoPJKT != f.dpopJKT || grant.Installation.Platform != "react_native_ios" ||
 		grant.Trust.Provider != "debug" || grant.Trust.Level != "debug" || len(grant.AccessToken) < 64 {
 		return errors.New("session grant is not P-256 DPoP and debug-attestation bound")
 	}
 	f.accessToken = grant.AccessToken
+	f.accessExpiresAt = operationTime.Add(time.Duration(grant.ExpiresIn) * time.Second)
 	f.installationID = grant.Installation.ID
 	if err := f.pool.QueryRow(ctx, `
 		SELECT g.session_grant_id, i.application_user_id

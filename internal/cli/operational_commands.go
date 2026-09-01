@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -90,18 +91,19 @@ type effectiveInputCLI struct {
 }
 
 type effectiveLimitCLI struct {
-	Index             int      `json:"index"`
-	Metric            string   `json:"metric"`
-	Algorithm         string   `json:"algorithm"`
-	Scope             []string `json:"scope"`
-	Window            string   `json:"window,omitempty"`
-	Timezone          string   `json:"timezone,omitempty"`
-	Maximum           int64    `json:"maximum,omitempty"`
-	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
-	Capacity          int64    `json:"capacity,omitempty"`
-	RefillPerSecond   string   `json:"refill_per_second,omitempty"`
-	Hard              bool     `json:"hard"`
-	Source            string   `json:"source"`
+	Index              int      `json:"index"`
+	Metric             string   `json:"metric"`
+	Algorithm          string   `json:"algorithm"`
+	Scope              []string `json:"scope"`
+	Window             string   `json:"window,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	Maximum            int64    `json:"maximum,omitempty"`
+	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
+	Capacity           int64    `json:"capacity,omitempty"`
+	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
+	Hard               bool     `json:"hard"`
+	Source             string   `json:"source"`
 }
 
 type effectiveRouteCLI struct {
@@ -1518,6 +1520,14 @@ func validEffectiveProtocolCLI(value string) bool {
 func validEffectiveLimitCLI(limit effectiveLimitCLI, expectedIndex int) bool {
 	if limit.Index != expectedIndex || !operationalIdentifierPattern.MatchString(limit.Metric) || !limit.Hard ||
 		!validEffectiveIdentifierListCLI(limit.Scope, 1, 8) || !validEffectiveRequiredTextCLI(limit.Source, 512) {
+		return false
+	}
+	if limit.Metric == "cost_nano_usd" {
+		if limit.CostRetryTreatment != "actual_attempts" &&
+			(limit.CostRetryTreatment != "initial_attempt_only" || !slices.Contains(limit.Scope, "user")) {
+			return false
+		}
+	} else if limit.CostRetryTreatment != "" {
 		return false
 	}
 	switch limit.Algorithm {

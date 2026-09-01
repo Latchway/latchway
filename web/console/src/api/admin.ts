@@ -8,6 +8,7 @@ import {
 } from "./auth";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_DEVELOPMENT_SAMPLE_BYTES = 2048;
 const OpaqueID = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{16,128}$/);
 const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
@@ -606,6 +607,16 @@ export const RequestSchema = z
 
 export const RequestPageSchema = z
   .object({ items: z.array(RequestSchema).max(200), page: PageInfo })
+  .strict();
+
+export const DevelopmentSampleSchema = z
+  .object({
+    feature: Identifier,
+    model: z.string().min(1).max(512).refine((value) => !/[\r\n\0]/.test(value)),
+    protocol: z.literal("openai_responses"),
+    request_id: z.string().regex(/^req_[A-Za-z0-9_-]{16,128}$/),
+    status: z.literal("succeeded")
+  })
   .strict();
 
 export const ConfirmedUserOperationRequestSchema = z
@@ -1389,6 +1400,7 @@ export type RouteSimulation = z.infer<typeof RouteSimulationSchema>;
 export type ConfigurationRevision = z.infer<typeof RevisionSchema>;
 export type ConfigurationValidation = z.infer<typeof ValidationSchema>;
 export type ConfigurationPlan = z.infer<typeof ConfigurationPlanSchema>;
+export type DevelopmentSample = z.infer<typeof DevelopmentSampleSchema>;
 
 interface AdminRequestOptions {
   bearerToken?: string;
@@ -1506,6 +1518,64 @@ function invalidResponse(status: number): AdminRequestError {
     retryable: true,
     status,
     title: "Invalid server response"
+  });
+}
+
+// runDevelopmentSample talks only to the loopback helper mounted by
+// `latchway develop`. The helper owns a synthetic debug-attested client; this
+// request deliberately carries neither an administrator bearer token nor a
+// CSRF token and is unavailable on normal deployments.
+export async function runDevelopmentSample(
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<DevelopmentSample>> {
+  let response: Response;
+  try {
+    response = await fetcher("/development/v1/sample-request", {
+      body: "{}",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      method: "POST",
+      redirect: "error",
+      referrerPolicy: "same-origin"
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new AdminRequestError({
+      code: "network_error",
+      detail: "The isolated development helper could not be reached.",
+      retryable: true,
+      status: 0,
+      title: "Development sample failed"
+    });
+  }
+  const length = Number(response.headers.get("Content-Length") ?? "0");
+  if (Number.isFinite(length) && length > MAX_DEVELOPMENT_SAMPLE_BYTES) {
+    throw invalidDevelopmentResponse(response.status);
+  }
+  const payload = await parseAdminJSON(response, MAX_DEVELOPMENT_SAMPLE_BYTES);
+  if (!response.ok) {
+    throw new AdminRequestError(responseProblem(response, payload));
+  }
+  const parsed = DevelopmentSampleSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw invalidDevelopmentResponse(response.status);
+  }
+  return { data: parsed.data };
+}
+
+function invalidDevelopmentResponse(status: number): AdminRequestError {
+  return new AdminRequestError({
+    code: "invalid_response",
+    detail: "The isolated development helper returned non-conforming sample metadata.",
+    retryable: true,
+    status,
+    title: "Invalid development response"
   });
 }
 

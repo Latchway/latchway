@@ -51,18 +51,19 @@ type effectiveInputProvenance struct {
 }
 
 type effectiveLimitDocument struct {
-	Index             int      `json:"index"`
-	Metric            string   `json:"metric"`
-	Algorithm         string   `json:"algorithm"`
-	Scope             []string `json:"scope"`
-	Window            string   `json:"window,omitempty"`
-	Timezone          string   `json:"timezone,omitempty"`
-	Maximum           int64    `json:"maximum,omitempty"`
-	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
-	Capacity          int64    `json:"capacity,omitempty"`
-	RefillPerSecond   string   `json:"refill_per_second,omitempty"`
-	Hard              bool     `json:"hard"`
-	Source            string   `json:"source"`
+	Index              int      `json:"index"`
+	Metric             string   `json:"metric"`
+	Algorithm          string   `json:"algorithm"`
+	Scope              []string `json:"scope"`
+	Window             string   `json:"window,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	Maximum            int64    `json:"maximum,omitempty"`
+	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
+	Capacity           int64    `json:"capacity,omitempty"`
+	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
+	Hard               bool     `json:"hard"`
+	Source             string   `json:"source"`
 }
 
 type effectiveRouteDocument struct {
@@ -700,7 +701,8 @@ func effectiveLimits(plan configuration.LimitPlan) []effectiveLimitDocument {
 		document := effectiveLimitDocument{
 			Index: index, Metric: limit.Metric, Algorithm: limit.Algorithm,
 			Scope: cloneEffectiveStrings(limit.Scope), Hard: limit.Hard,
-			Source: fmt.Sprintf("limitPlans.%s.limits.%d", plan.ID, index),
+			CostRetryTreatment: limit.CostRetryTreatment,
+			Source:             fmt.Sprintf("limitPlans.%s.limits.%d", plan.ID, index),
 		}
 		switch limit.Algorithm {
 		case "calendar":

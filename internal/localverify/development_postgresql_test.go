@@ -81,6 +81,7 @@ func TestRunDevelopmentServesConsoleHelpersAndCleansPostgreSQL(t *testing.T) {
 	if id.Validate(info.ApplicationID, id.Application) != nil || info.GatewayURL == "" ||
 		info.IdentityTokenURL != info.GatewayURL+"/development/v1/identity-token" ||
 		info.AttestationEvidenceURL != info.GatewayURL+"/development/v1/attestation-evidence" ||
+		info.SampleRequestURL != info.GatewayURL+"/development/v1/sample-request" ||
 		info.ConsoleURL != info.GatewayURL || info.BrowserOrigin != "http://localhost:5173" ||
 		info.ConsoleEmail != developmentConsoleEmail || len(info.ConsolePassword) < 32 ||
 		info.Environment != "development" || info.Feature != developmentFeature || info.Model != developmentModel {
@@ -212,6 +213,44 @@ func TestRunDevelopmentServesConsoleHelpersAndCleansPostgreSQL(t *testing.T) {
 		len(environments.Items) != 1 || environments.Items[0].Slug != "development" {
 		stop()
 		t.Fatal("authenticated local environment view is unavailable")
+	}
+	sampleRequest, err := http.NewRequestWithContext(
+		testContext, http.MethodPost, info.SampleRequestURL, strings.NewReader(`{}`),
+	)
+	if err != nil {
+		stop()
+		t.Fatal("construct local development sample request")
+	}
+	sampleRequest.Header.Set("Content-Type", "application/json")
+	sampleRequest.Header.Set("Origin", info.GatewayURL)
+	sampleResponse, err := client.Do(sampleRequest)
+	if err != nil {
+		stop()
+		t.Fatal("perform local development sample request")
+	}
+	var sample developmentSampleResult
+	decodeErr = json.NewDecoder(sampleResponse.Body).Decode(&sample)
+	closeErr = sampleResponse.Body.Close()
+	if sampleResponse.StatusCode != http.StatusCreated || decodeErr != nil || closeErr != nil ||
+		id.Validate(sample.RequestID, id.LogicalRequest) != nil || sample.Feature != info.Feature ||
+		sample.Protocol != "openai_responses" || sample.Status != "succeeded" || sample.Model != providerModel {
+		stop()
+		t.Fatalf("local development sample failed: status=%d result=%+v", sampleResponse.StatusCode, sample)
+	}
+	requestResponse := authenticatedGET(info.GatewayURL + "/admin/v1/requests/" + sample.RequestID)
+	var durableSample struct {
+		ID       string `json:"id"`
+		Feature  string `json:"feature"`
+		Protocol string `json:"protocol"`
+		Status   string `json:"status"`
+	}
+	decodeErr = json.NewDecoder(requestResponse.Body).Decode(&durableSample)
+	closeErr = requestResponse.Body.Close()
+	if requestResponse.StatusCode != http.StatusOK || decodeErr != nil || closeErr != nil ||
+		durableSample.ID != sample.RequestID || durableSample.Feature != sample.Feature ||
+		durableSample.Protocol != sample.Protocol || durableSample.Status != sample.Status {
+		stop()
+		t.Fatalf("durable development sample mismatch: status=%d result=%+v", requestResponse.StatusCode, durableSample)
 	}
 	requestsResponse := authenticatedGET(
 		info.GatewayURL + "/admin/v1/requests?environment_id=" + environments.Items[0].ID,

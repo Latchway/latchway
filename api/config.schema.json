@@ -830,6 +830,11 @@
         "type": { "enum": ["openai_compatible", "anthropic", "generic"] },
         "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
         "dangerousAllowInsecureHttp": { "type": "boolean", "default": false },
+        "traceContextPropagation": {
+          "description": "Server-selected upstream trace propagation. W3C propagation injects only the current server-created attempt context and never forwards client trace headers or internal baggage.",
+          "enum": ["none", "w3c"],
+          "default": "none"
+        },
         "authentication": { "$ref": "#/$defs/UpstreamAuthentication" },
         "timeouts": { "$ref": "#/$defs/Timeouts" },
         "destinationPolicy": { "$ref": "#/$defs/DestinationPolicy" },
@@ -1130,8 +1135,29 @@
         "perRequestMaximum": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
         "capacity": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
         "refillPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+		"costRetryTreatment": {
+		  "enum": ["actual_attempts", "initial_attempt_only"],
+		  "default": "actual_attempts",
+		  "description": "Cost quota retry treatment. actual_attempts charges every physical dispatch. initial_attempt_only is allowed only when the canonical scope includes user; organization infrastructure cost remains charged for every attempt."
+		},
         "hard": { "type": "boolean", "default": true }
       },
+	  "allOf": [
+		{
+		  "if": { "required": ["costRetryTreatment"] },
+		  "then": { "properties": { "metric": { "const": "cost_nano_usd" } } }
+		},
+		{
+		  "if": {
+			"properties": { "costRetryTreatment": { "const": "initial_attempt_only" } },
+			"required": ["costRetryTreatment"]
+		  },
+		  "then": {
+			"properties": { "scope": { "contains": { "const": "user" } } },
+			"required": ["scope"]
+		  }
+		}
+	  ],
       "anyOf": [
         { "required": ["maximum"] },
         { "required": ["perRequestMaximum"] },

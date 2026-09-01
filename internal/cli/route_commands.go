@@ -16,16 +16,17 @@ import (
 const maxSimulationClaimsBytes = 64 << 10
 
 type routeSimulationLimitCLI struct {
-	Metric            string   `json:"metric"`
-	Algorithm         string   `json:"algorithm"`
-	Scope             []string `json:"scope"`
-	Window            string   `json:"window,omitempty"`
-	Timezone          string   `json:"timezone,omitempty"`
-	Maximum           int64    `json:"maximum,omitempty"`
-	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
-	Capacity          int64    `json:"capacity,omitempty"`
-	RefillPerSecond   string   `json:"refill_per_second,omitempty"`
-	Hard              bool     `json:"hard"`
+	Metric             string   `json:"metric"`
+	Algorithm          string   `json:"algorithm"`
+	Scope              []string `json:"scope"`
+	Window             string   `json:"window,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	Maximum            int64    `json:"maximum,omitempty"`
+	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
+	Capacity           int64    `json:"capacity,omitempty"`
+	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
+	Hard               bool     `json:"hard"`
 }
 
 type routeSimulationFactUseCLI struct {
@@ -259,9 +260,12 @@ func printRouteSimulation(opts *options, result routeSimulationResultCLI) error 
 			} else if limit.Capacity != 0 {
 				bound = strconv.FormatInt(limit.Capacity, 10)
 			}
-			rows = append(rows, []string{limit.Metric, limit.Algorithm, strings.Join(limit.Scope, ","), bound, boolLabel(limit.Hard)})
+			rows = append(rows, []string{
+				limit.Metric, limit.Algorithm, strings.Join(limit.Scope, ","), bound,
+				limit.CostRetryTreatment, boolLabel(limit.Hard),
+			})
 		}
-		if err := printControlTable(opts, []string{"METRIC", "ALGORITHM", "SCOPE", "BOUND", "HARD"}, rows); err != nil {
+		if err := printControlTable(opts, []string{"METRIC", "ALGORITHM", "SCOPE", "BOUND", "RETRY COST", "HARD"}, rows); err != nil {
 			return err
 		}
 	}

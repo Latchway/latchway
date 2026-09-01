@@ -263,6 +263,7 @@ Shape: object. Definition constraints: unknown properties rejected; 2 combined r
 | `type` | enum `"openai_compatible"`, `"anthropic"`, `"generic"` | Yes | — | — |
 | `baseUrl` | string | Yes | format: `"uri"`; pattern: `"^https?://"` | — |
 | `dangerousAllowInsecureHttp` | boolean | No | default: `false` | — |
+| `traceContextPropagation` | enum `"none"`, `"w3c"` | No | default: `"none"` | Server-selected upstream trace propagation. W3C propagation injects only the current server-created attempt context and never forwards client trace headers or internal baggage. |
 | `authentication` | `UpstreamAuthentication` | Yes | — | — |
 | `timeouts` | `Timeouts` | No | — | — |
 | `destinationPolicy` | `DestinationPolicy` | No | — | — |
@@ -383,7 +384,7 @@ Shape: object. Definition constraints: unknown properties rejected.
 
 ### Limit
 
-Shape: any of any JSON value / any JSON value / any JSON value. Definition constraints: unknown properties rejected.
+Shape: any of any JSON value / any JSON value / any JSON value. Definition constraints: unknown properties rejected; 2 combined rule(s).
 
 | Property | Shape | Required | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -396,7 +397,11 @@ Shape: any of any JSON value / any JSON value / any JSON value. Definition const
 | `perRequestMaximum` | integer | No | minimum: `1`; maximum: `9223372036854775807` | — |
 | `capacity` | integer | No | minimum: `1`; maximum: `9223372036854775807` | — |
 | `refillPerSecond` | number | No | exclusive minimum: `0` | — |
+| `costRetryTreatment` | enum `"actual_attempts"`, `"initial_attempt_only"` | No | default: `"actual_attempts"` | Cost quota retry treatment. actual_attempts charges every physical dispatch. initial_attempt_only is allowed only when the canonical scope includes user; organization infrastructure cost remains charged for every attempt. |
 | `hard` | boolean | No | default: `true` | — |
+
+This definition also has 2 canonical conditional rule(s).
+They are enforced in addition to the property summary above.
 
 ### Feature
 

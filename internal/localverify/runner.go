@@ -172,7 +172,7 @@ func (f *fixture) sendFeature(feature, clientRequestID, prompt string, streaming
 	if err != nil {
 		return nil, "", err
 	}
-	proof, err := signDPoP(f.dpopKey, http.MethodPost, target, f.now, label, f.accessToken)
+	proof, err := signDPoP(f.dpopKey, http.MethodPost, target, f.clock(), label, f.accessToken)
 	if err != nil {
 		return nil, "", err
 	}

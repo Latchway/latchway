@@ -227,6 +227,161 @@ func TestDevelopmentHelpersEnforceBoundedPreflight(t *testing.T) {
 	}
 }
 
+func TestDevelopmentSampleHelperEnforcesExactOriginAndBoundedPreflight(t *testing.T) {
+	t.Parallel()
+
+	fixture := &fixture{
+		publicOrigin:  "http://127.0.0.1:38080",
+		browserOrigin: "http://localhost:5173",
+	}
+	for _, origin := range []string{fixture.publicOrigin, fixture.browserOrigin} {
+		request := httptest.NewRequest(http.MethodOptions, "/development/v1/sample-request", nil)
+		request.Header.Set("Origin", origin)
+		request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		request.Header.Set("Access-Control-Request-Headers", "Content-Type")
+		response := httptest.NewRecorder()
+		if fixture.developmentConsoleRequestAllowed(response, request) || response.Code != http.StatusNoContent ||
+			response.Header().Get("Access-Control-Allow-Origin") != origin ||
+			response.Header().Get("Access-Control-Allow-Methods") != http.MethodPost ||
+			response.Header().Get("Access-Control-Allow-Headers") != "content-type" {
+			t.Fatalf("allowed sample preflight for %q: status=%d headers=%v body=%s", origin, response.Code, response.Header(), response.Body.String())
+		}
+	}
+
+	for _, test := range []struct {
+		name             string
+		origin           string
+		requestedMethod  string
+		requestedHeaders string
+		duplicateOrigin  bool
+		duplicateHeaders bool
+		wantCORS         bool
+	}{
+		{name: "missing origin", requestedMethod: http.MethodPost, requestedHeaders: "content-type"},
+		{name: "different origin", origin: "http://127.0.0.2:5173", requestedMethod: http.MethodPost, requestedHeaders: "content-type"},
+		{name: "duplicate origin", origin: fixture.browserOrigin, requestedMethod: http.MethodPost, requestedHeaders: "content-type", duplicateOrigin: true},
+		{name: "wrong method", origin: fixture.browserOrigin, requestedMethod: http.MethodGet, requestedHeaders: "content-type", wantCORS: true},
+		{name: "missing headers", origin: fixture.browserOrigin, requestedMethod: http.MethodPost, wantCORS: true},
+		{name: "extra header", origin: fixture.browserOrigin, requestedMethod: http.MethodPost, requestedHeaders: "content-type, x-csrf-token", wantCORS: true},
+		{name: "duplicate header field", origin: fixture.browserOrigin, requestedMethod: http.MethodPost, requestedHeaders: "content-type", duplicateHeaders: true, wantCORS: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodOptions, "/development/v1/sample-request", nil)
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+				if test.duplicateOrigin {
+					request.Header.Add("Origin", test.origin)
+				}
+			}
+			if test.requestedMethod != "" {
+				request.Header.Set("Access-Control-Request-Method", test.requestedMethod)
+			}
+			if test.requestedHeaders != "" {
+				request.Header.Set("Access-Control-Request-Headers", test.requestedHeaders)
+				if test.duplicateHeaders {
+					request.Header.Add("Access-Control-Request-Headers", test.requestedHeaders)
+				}
+			}
+			response := httptest.NewRecorder()
+			if fixture.developmentConsoleRequestAllowed(response, request) ||
+				(response.Code != http.StatusBadRequest && response.Code != http.StatusForbidden) ||
+				(response.Header().Get("Access-Control-Allow-Origin") == fixture.browserOrigin) != test.wantCORS {
+				t.Fatalf("rejected sample preflight: status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+			}
+		})
+	}
+}
+
+func TestDevelopmentSampleHelperRejectsInvalidRequestsBeforeRuntime(t *testing.T) {
+	t.Parallel()
+
+	fixture := &fixture{
+		publicOrigin:  "http://127.0.0.1:38080",
+		browserOrigin: "http://localhost:5173",
+	}
+	for _, test := range []struct {
+		name         string
+		method       string
+		origin       string
+		body         string
+		contentTypes []string
+		wantStatus   int
+		wantCode     string
+	}{
+		{name: "missing origin", method: http.MethodPost, body: `{}`, contentTypes: []string{"application/json"}, wantStatus: http.StatusForbidden, wantCode: "development_origin_not_allowed"},
+		{name: "different origin", method: http.MethodPost, origin: "http://127.0.0.2:5173", body: `{}`, contentTypes: []string{"application/json"}, wantStatus: http.StatusForbidden, wantCode: "development_origin_not_allowed"},
+		{name: "wrong method", method: http.MethodGet, origin: fixture.publicOrigin, wantStatus: http.StatusMethodNotAllowed, wantCode: "development_method_not_allowed"},
+		{name: "missing content type", method: http.MethodPost, origin: fixture.publicOrigin, body: `{}`, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "media type parameters", method: http.MethodPost, origin: fixture.publicOrigin, body: `{}`, contentTypes: []string{"application/json; charset=utf-8"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "duplicate content type", method: http.MethodPost, origin: fixture.publicOrigin, body: `{}`, contentTypes: []string{"application/json", "application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "empty body", method: http.MethodPost, origin: fixture.publicOrigin, contentTypes: []string{"application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "JSON null", method: http.MethodPost, origin: fixture.publicOrigin, body: `null`, contentTypes: []string{"application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "unknown field", method: http.MethodPost, origin: fixture.publicOrigin, body: `{"secret":"forbidden"}`, contentTypes: []string{"application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "trailing JSON", method: http.MethodPost, origin: fixture.publicOrigin, body: `{}{}`, contentTypes: []string{"application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+		{name: "oversized", method: http.MethodPost, origin: fixture.publicOrigin, body: `{"padding":"` + strings.Repeat("x", 256) + `"}`, contentTypes: []string{"application/json"}, wantStatus: http.StatusBadRequest, wantCode: "development_sample_request_invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "/development/v1/sample-request", strings.NewReader(test.body))
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			for _, value := range test.contentTypes {
+				request.Header.Add("Content-Type", value)
+			}
+			response := httptest.NewRecorder()
+			fixture.developmentSampleRequest(response, request)
+			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), test.wantCode) {
+				t.Fatalf("invalid sample request: status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+			}
+		})
+	}
+
+	validRequest := httptest.NewRequest(http.MethodPost, "/development/v1/sample-request", strings.NewReader(`{}`))
+	validRequest.Header.Set("Content-Type", "application/json")
+	validRequest.Header.Set("Origin", fixture.publicOrigin)
+	validResponse := httptest.NewRecorder()
+	fixture.serveDevelopment(validResponse, validRequest)
+	if validResponse.Code != http.StatusBadGateway ||
+		!strings.Contains(validResponse.Body.String(), "development_sample_failed") {
+		t.Fatalf("valid sample shape did not reach the isolated runtime: status=%d body=%s", validResponse.Code, validResponse.Body.String())
+	}
+
+	for _, target := range []string{
+		"/sample-request",
+		"/development/v1/sample-request/",
+		"/development/v1/sample-request?unexpected=true",
+		"/development/v1/%73ample-request",
+	} {
+		request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", fixture.publicOrigin)
+		response := httptest.NewRecorder()
+		fixture.serveDevelopment(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("non-canonical sample target %q status = %d, want %d", target, response.Code, http.StatusNotFound)
+		}
+	}
+}
+
+func TestDevelopmentSampleGateRejectsConcurrentWorkWithoutQueuing(t *testing.T) {
+	t.Parallel()
+
+	fixture := &fixture{}
+	release, acquired := fixture.tryAcquireDevelopmentSample()
+	if !acquired || release == nil {
+		t.Fatal("first development sample did not acquire the gate")
+	}
+	if queuedRelease, queued := fixture.tryAcquireDevelopmentSample(); queued || queuedRelease != nil {
+		t.Fatal("concurrent development sample was queued or admitted")
+	}
+	release()
+	secondRelease, acquired := fixture.tryAcquireDevelopmentSample()
+	if !acquired || secondRelease == nil {
+		t.Fatal("development sample gate was not released")
+	}
+	secondRelease()
+}
+
 func TestDevelopmentHelperMethodsFailClosed(t *testing.T) {
 	t.Parallel()
 

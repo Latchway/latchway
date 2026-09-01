@@ -36,6 +36,7 @@ import (
 
 const (
 	LogicalRequestsMetric     = "logical_requests"
+	UpstreamAttemptsMetric    = "upstream_attempts"
 	InputTokensMetric         = "input_tokens"
 	OutputTokensMetric        = "output_tokens"
 	TotalTokensMetric         = "total_tokens"
@@ -53,13 +54,15 @@ const (
 	maximumAttemptsPerRequest = 32
 	maximumReservationEntries = maximumRulesPerRequest * maximumAttemptsPerRequest
 
-	ProviderReportedProvenance     = "provider_reported"
-	UnknownUsageProvenance         = "unknown"
-	USDCurrency                    = "USD"
-	CalculatedCostConfidence       = "calculated"
-	ProviderReportedCostConfidence = "reported"
-	ProviderReportedCostSource     = "openrouter_usage_cost"
-	UnknownCostConfidence          = "unknown"
+	ProviderReportedProvenance           = "provider_reported"
+	UnknownUsageProvenance               = "unknown"
+	USDCurrency                          = "USD"
+	CalculatedCostConfidence             = "calculated"
+	ProviderReportedCostConfidence       = "reported"
+	ProviderReportedCostSource           = "openrouter_usage_cost"
+	UnknownCostConfidence                = "unknown"
+	ActualAttemptsCostRetryTreatment     = "actual_attempts"
+	InitialAttemptOnlyCostRetryTreatment = "initial_attempt_only"
 
 	AttemptSucceeded = "succeeded"
 	AttemptFailed    = "failed"
@@ -130,7 +133,11 @@ type Rule struct {
 	Capacity          int64
 	RefillNumerator   int64
 	RefillDenominator int64
-	Hard              bool
+	// CostRetryTreatment controls which physical attempts consume a user-scoped
+	// cost quota. It is valid only for cost_nano_usd. Empty is accepted as the
+	// backward-compatible actual_attempts default at the input boundary.
+	CostRetryTreatment string
+	Hard               bool
 }
 
 // PricingSelection is the trusted configured catalog selected for one
@@ -313,13 +320,14 @@ type selectedPricing struct {
 // reservationEntry is sorted by bucketID. resetAt is derived from the trusted
 // rule window and is never loaded from or supplied to PostgreSQL.
 type reservationEntry struct {
-	bucketID      string
-	entryID       string
-	leaseID       string
-	metric        string
-	algorithm     string
-	reservedUnits int64
-	resetAt       time.Time
+	bucketID           string
+	entryID            string
+	leaseID            string
+	metric             string
+	algorithm          string
+	costRetryTreatment string
+	reservedUnits      int64
+	resetAt            time.Time
 }
 
 func (reservation Reservation) LogicalRequestID() string { return reservation.logicalRequestID }
@@ -680,6 +688,8 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 	requestReservations := make(map[string]int64, 3)
 	var costReservation int64
 	costReservationSet := false
+	requiresOrganizationCostAccounting := false
+	hasOrganizationCostAccounting := false
 	for _, rule := range input {
 		dimensions, err := canonicalScopeDimensions(rule.Scope)
 		if err != nil || !rule.Hard {
@@ -696,13 +706,15 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		}
 		stateful := false
 		switch {
-		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == CalendarAlgorithm:
+		case (rule.Metric == LogicalRequestsMetric || rule.Metric == UpstreamAttemptsMetric) &&
+			rule.Algorithm == CalendarAlgorithm:
 			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
 			stateful = true
-		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == TokenBucketAlgorithm:
+		case (rule.Metric == LogicalRequestsMetric || rule.Metric == UpstreamAttemptsMetric) &&
+			rule.Algorithm == TokenBucketAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
 				rule.ReservedUnits != 0 || validateTokenBucketPolicy(
 				rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
@@ -710,6 +722,12 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 			stateful = true
+		case rule.Metric == UpstreamAttemptsMetric && rule.Algorithm == PerRequestAlgorithm:
+			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
+				rule.ReservedUnits != 0 || rule.Capacity != 0 || rule.RefillNumerator != 0 ||
+				rule.RefillDenominator != 0 {
+				return nil, ErrInvalidInput
+			}
 		case (rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
 			rule.Metric == TotalTokensMetric) && rule.Algorithm == TokenBucketAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
@@ -752,13 +770,26 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			}
 			stateful = true
 		case rule.Metric == CostNanoUSDMetric && rule.Algorithm == CalendarAlgorithm:
+			treatment := rule.CostRetryTreatment
+			if treatment == "" {
+				treatment = ActualAttemptsCostRetryTreatment
+			}
 			costReserved := rule.ReservedUnits >= 0
 			if mode == snapshotRulePreparation {
 				costReserved = rule.ReservedUnits == 0
 			}
 			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !costReserved ||
-				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 ||
+				(treatment != ActualAttemptsCostRetryTreatment &&
+					treatment != InitialAttemptOnlyCostRetryTreatment) ||
+				(treatment == InitialAttemptOnlyCostRetryTreatment && !slices.Contains(dimensions, "user")) {
 				return nil, ErrInvalidInput
+			}
+			rule.CostRetryTreatment = treatment
+			if treatment == InitialAttemptOnlyCostRetryTreatment {
+				requiresOrganizationCostAccounting = true
+			} else if slices.Contains(dimensions, "organization") && !slices.Contains(dimensions, "user") {
+				hasOrganizationCostAccounting = true
 			}
 			stateful = true
 		case (rule.Metric == ConcurrentRequestsMetric || rule.Metric == ConcurrentStreamsMetric) &&
@@ -770,6 +801,9 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			}
 			stateful = true
 		default:
+			return nil, ErrInvalidInput
+		}
+		if rule.Metric != CostNanoUSDMetric && rule.CostRetryTreatment != "" {
 			return nil, ErrInvalidInput
 		}
 		if mode == reserveRulePreparation &&
@@ -829,8 +863,9 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				Scope: append([]string(nil), dimensions...), Window: rule.Window, Timezone: timezone,
 				Maximum: rule.Maximum, PerRequestMaximum: rule.PerRequestMaximum,
 				ReservedUnits: rule.ReservedUnits, Capacity: rule.Capacity,
-				RefillNumerator:   rule.RefillNumerator,
-				RefillDenominator: rule.RefillDenominator, Hard: rule.Hard,
+				RefillNumerator:    rule.RefillNumerator,
+				RefillDenominator:  rule.RefillDenominator,
+				CostRetryTreatment: rule.CostRetryTreatment, Hard: rule.Hard,
 			},
 			scopeDimensions: dimensions,
 			scopeType:       scopeType,
@@ -840,6 +875,9 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		})
 	}
 	if !validTokenReservationRelationship(tokenReservations) {
+		return nil, ErrInvalidInput
+	}
+	if requiresOrganizationCostAccounting && !hasOrganizationCostAccounting {
 		return nil, ErrInvalidInput
 	}
 	sort.Slice(preparedRules, func(left, right int) bool {
@@ -885,15 +923,24 @@ func validTokenReservationRelationship(reservations map[string]int64) bool {
 // admissible through refill. Treat both as quota decisions rather than
 // malformed input so the store can durably deny the initial logical request.
 func requestBoundExceededRules(rules []preparedRule) []preparedRule {
+	return requestBoundExceededRulesAtAttempt(rules, 1)
+}
+
+func requestBoundExceededRulesAtAttempt(rules []preparedRule, attemptNumber int64) []preparedRule {
 	exceeded := make([]preparedRule, 0, len(rules))
 	for _, rule := range rules {
 		switch rule.Algorithm {
 		case PerRequestAlgorithm:
-			if rule.ReservedUnits > rule.PerRequestMaximum {
+			units := rule.ReservedUnits
+			if rule.Metric == UpstreamAttemptsMetric {
+				units = attemptNumber
+			}
+			if units > rule.PerRequestMaximum {
 				exceeded = append(exceeded, rule)
 			}
 		case TokenBucketAlgorithm:
-			if rule.Metric != LogicalRequestsMetric && rule.ReservedUnits > rule.Capacity {
+			units, _ := ProjectedReservationUnits(rule.Rule, false)
+			if rule.Metric != LogicalRequestsMetric && units > rule.Capacity {
 				exceeded = append(exceeded, rule)
 			}
 		}
@@ -1068,6 +1115,12 @@ func requestFingerprint(prepared preparedRequest) string {
 	}
 	for _, rule := range prepared.rules {
 		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))
+		// Preserve historical request fingerprints for omitted/default cost
+		// treatment. The opt-in treatment binds replay without changing the
+		// quota bucket identity (and therefore cannot reset window usage).
+		if rule.CostRetryTreatment == InitialAttemptOnlyCostRetryTreatment {
+			parts = append(parts, "cost_retry_treatment", rule.CostRetryTreatment)
+		}
 		if rule.Algorithm == TokenBucketAlgorithm {
 			parts = append(parts,
 				strconv.FormatInt(rule.Capacity, 10),
@@ -1078,7 +1131,7 @@ func requestFingerprint(prepared preparedRequest) string {
 		// Preserve the exact historical logical_requests/calendar serialization.
 		// Token and cost reservation shapes bind both their configured per-request
 		// maximum and the exact reservation applied to this provider request.
-		if rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
+		if rule.Metric == UpstreamAttemptsMetric || rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
 			rule.Metric == TotalTokensMetric || rule.Metric == CostNanoUSDMetric ||
 			rule.Metric == RequestBytesMetric || rule.Metric == ImageUnitsMetric ||
 			rule.Metric == ToolCallsMetric {
@@ -1283,7 +1336,8 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 	})
 	byMetric := make(map[string]int64, len(result.Allocations))
 	for index, allocation := range result.Allocations {
-		if attemptAllocationOrder(allocation.Metric) == math.MaxInt ||
+		if allocation.Metric == UpstreamAttemptsMetric ||
+			attemptAllocationOrder(allocation.Metric) == math.MaxInt ||
 			(allocation.Metric == CostNanoUSDMetric && allocation.Units < 0) ||
 			(isRequestMeasurementMetric(allocation.Metric) && allocation.Units < 0) ||
 			(allocation.Metric != CostNanoUSDMetric && !isRequestMeasurementMetric(allocation.Metric) && allocation.Units <= 0) ||
@@ -1371,9 +1425,12 @@ func attemptAllocationOrder(metric string) int {
 	if metric == CostNanoUSDMetric {
 		return len(reservedTokenMetricOrder)
 	}
+	if metric == UpstreamAttemptsMetric {
+		return len(reservedTokenMetricOrder) + 1
+	}
 	for index, candidate := range requestMeasurementMetricOrder {
 		if metric == candidate {
-			return len(reservedTokenMetricOrder) + 1 + index
+			return len(reservedTokenMetricOrder) + 2 + index
 		}
 	}
 	return math.MaxInt
@@ -1387,6 +1444,17 @@ var requestMeasurementMetricOrder = [...]string{
 
 func isRequestMeasurementMetric(metric string) bool {
 	return slices.Contains(requestMeasurementMetricOrder[:], metric)
+}
+
+func canonicalStoredCostRetryTreatment(metric, treatment string) (string, bool) {
+	if metric != CostNanoUSDMetric {
+		return "", treatment == ""
+	}
+	if treatment == "" {
+		return ActualAttemptsCostRetryTreatment, true
+	}
+	return treatment, treatment == ActualAttemptsCostRetryTreatment ||
+		treatment == InitialAttemptOnlyCostRetryTreatment
 }
 
 func pricingForRequest(prepared preparedRequest) selectedPricing {
@@ -1457,11 +1525,11 @@ func (reservation Reservation) validate() error {
 	for index, entry := range reservation.entries {
 		concurrency := entry.algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(entry.metric)
 		calendar := entry.algorithm == CalendarAlgorithm &&
-			(entry.metric == LogicalRequestsMetric || entry.metric == InputTokensMetric ||
+			(entry.metric == LogicalRequestsMetric || entry.metric == UpstreamAttemptsMetric || entry.metric == InputTokensMetric ||
 				entry.metric == OutputTokensMetric || entry.metric == TotalTokensMetric ||
 				entry.metric == CostNanoUSDMetric)
 		tokenBucket := entry.algorithm == TokenBucketAlgorithm &&
-			(entry.metric == LogicalRequestsMetric || entry.metric == InputTokensMetric ||
+			(entry.metric == LogicalRequestsMetric || entry.metric == UpstreamAttemptsMetric || entry.metric == InputTokensMetric ||
 				entry.metric == OutputTokensMetric || entry.metric == TotalTokensMetric)
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			id.Validate(entry.entryID, id.QuotaEntry) != nil ||
@@ -1471,6 +1539,14 @@ func (reservation Reservation) validate() error {
 			(concurrency && id.Validate(entry.leaseID, id.ConcurrencyLease) != nil) ||
 			(!concurrency && entry.leaseID != "") ||
 			(index > 0 && reservation.entries[index-1].bucketID >= entry.bucketID) {
+			return ErrInvalidInput
+		}
+		if entry.metric == CostNanoUSDMetric {
+			if entry.costRetryTreatment != ActualAttemptsCostRetryTreatment &&
+				entry.costRetryTreatment != InitialAttemptOnlyCostRetryTreatment {
+				return ErrInvalidInput
+			}
+		} else if entry.costRetryTreatment != "" {
 			return ErrInvalidInput
 		}
 		if _, duplicate := entryIDs[entry.entryID]; duplicate {
@@ -1536,18 +1612,18 @@ func isConcurrencyMetric(metric string) bool {
 }
 
 func isStatefulMetric(metric string) bool {
-	return metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+	return metric == LogicalRequestsMetric || metric == UpstreamAttemptsMetric || metric == InputTokensMetric ||
 		metric == OutputTokensMetric || metric == TotalTokensMetric ||
 		metric == CostNanoUSDMetric || isConcurrencyMetric(metric)
 }
 
 func isStatefulRule(metric, algorithm string) bool {
 	return algorithm == CalendarAlgorithm &&
-		(metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+		(metric == LogicalRequestsMetric || metric == UpstreamAttemptsMetric || metric == InputTokensMetric ||
 			metric == OutputTokensMetric || metric == TotalTokensMetric ||
 			metric == CostNanoUSDMetric) ||
 		algorithm == TokenBucketAlgorithm &&
-			(metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+			(metric == LogicalRequestsMetric || metric == UpstreamAttemptsMetric || metric == InputTokensMetric ||
 				metric == OutputTokensMetric || metric == TotalTokensMetric) ||
 		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)
 }
@@ -1562,7 +1638,7 @@ func validReservationEntryUnits(metric, algorithm string, units int64) bool {
 	if units == 0 {
 		return false
 	}
-	if metric == LogicalRequestsMetric || isConcurrencyMetric(metric) {
+	if metric == LogicalRequestsMetric || metric == UpstreamAttemptsMetric || isConcurrencyMetric(metric) {
 		return units == 1
 	}
 	if algorithm == TokenBucketAlgorithm {

@@ -40,6 +40,7 @@ func newDevelopCommand(opts *options) *cobra.Command {
 						"feature": info.Feature, "model": info.Model, "browser_origin": info.BrowserOrigin,
 						"identity_token_url":       info.IdentityTokenURL,
 						"attestation_evidence_url": info.AttestationEvidenceURL,
+						"sample_request_url":       info.SampleRequestURL,
 						"console_url":              info.ConsoleURL, "console_email": info.ConsoleEmail,
 						"console_password":               info.ConsolePassword,
 						"ios_bundle_identifier":          info.IOSBundleIdentifier,

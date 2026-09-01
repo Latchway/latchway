@@ -2065,6 +2065,8 @@ func validateFeatureLimitPlan(
 	}
 	rules := make([]quota.Rule, 0, len(limitPlan.Limits))
 	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(limitPlan.Limits))
+	requiresOrganizationCostAccounting := false
+	hasOrganizationCostAccounting := false
 	effectiveMaximum := int64(0)
 	if requiresOutput {
 		effectiveMaximum = feature.Output.AbsoluteMaximumTokens
@@ -2091,12 +2093,20 @@ func validateFeatureLimitPlan(
 			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		seenIdentities[identity] = struct{}{}
+		if limit.Metric == quota.CostNanoUSDMetric {
+			if limit.CostRetryTreatment == quota.InitialAttemptOnlyCostRetryTreatment {
+				requiresOrganizationCostAccounting = true
+			} else if slices.Contains(scope, "organization") && !slices.Contains(scope, "user") {
+				hasOrganizationCostAccounting = true
+			}
+		}
 		rules = append(rules, quota.Rule{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: scope,
 			Window: limit.Window, Timezone: timezone, Maximum: limit.Maximum,
 			PerRequestMaximum: limit.PerRequestMaximum, Capacity: limit.Capacity,
-			RefillNumerator:   limit.RefillPerSecond.Numerator,
-			RefillDenominator: limit.RefillPerSecond.Denominator, Hard: limit.Hard,
+			RefillNumerator:    limit.RefillPerSecond.Numerator,
+			RefillDenominator:  limit.RefillPerSecond.Denominator,
+			CostRetryTreatment: limit.CostRetryTreatment, Hard: limit.Hard,
 		})
 		if limit.Metric == quota.OutputTokensMetric {
 			switch limit.Algorithm {
@@ -2106,6 +2116,9 @@ func validateFeatureLimitPlan(
 				effectiveMaximum = min(effectiveMaximum, limit.Capacity)
 			}
 		}
+	}
+	if requiresOrganizationCostAccounting && !hasOrganizationCostAccounting {
+		return validatedDecision{}, errUnsupportedLimitPlan
 	}
 	effectiveDefault := int64(0)
 	if requiresOutput {
@@ -2221,11 +2234,16 @@ func protocolSupportsTrustedInputPreflight(protocolID string) bool {
 func supportedDecisionLimit(limit configuration.Limit) bool {
 	noRefill := limit.RefillPerSecond == (configuration.RefillRate{})
 	_, validTimezone := canonicalDecisionCalendarTimezone(limit.Timezone)
+	if limit.Metric != quota.CostNanoUSDMetric && limit.CostRetryTreatment != "" {
+		return false
+	}
 	switch {
-	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
+	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.UpstreamAttemptsMetric) &&
+		limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && validTimezone && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
-	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.InputTokensMetric ||
+	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.UpstreamAttemptsMetric ||
+		limit.Metric == quota.InputTokensMetric ||
 		limit.Metric == quota.OutputTokensMetric || limit.Metric == quota.TotalTokensMetric) &&
 		limit.Algorithm == quota.TokenBucketAlgorithm:
 		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
@@ -2237,7 +2255,14 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case limit.Metric == quota.CostNanoUSDMetric && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && validTimezone && limit.Maximum > 0 &&
-			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
+			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill &&
+			(limit.CostRetryTreatment == "" ||
+				limit.CostRetryTreatment == quota.ActualAttemptsCostRetryTreatment ||
+				limit.CostRetryTreatment == quota.InitialAttemptOnlyCostRetryTreatment &&
+					slices.Contains(limit.Scope, "user"))
+	case limit.Metric == quota.UpstreamAttemptsMetric && limit.Algorithm == quota.PerRequestAlgorithm:
+		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 &&
+			limit.PerRequestMaximum > 0 && limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.InputTokensMetric || limit.Metric == quota.OutputTokensMetric ||
 		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.PerRequestAlgorithm:
 		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&

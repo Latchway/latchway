@@ -79,6 +79,7 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	registry.RecordQuotaDenial(ctx, Labels{Feature: "assistant", Outcome: "denied"}, false)
 	registry.RecordWorkerJob(ctx, "enforce_retention", "succeeded", 20*time.Millisecond)
 	registry.RecordWorkerJob(ctx, "release_expired_concurrency_leases", "succeeded", 10*time.Millisecond)
+	registry.RecordWorkerJob(ctx, "run_scheduled_self_test", "succeeded", 5*time.Millisecond)
 	registry.RecordScheduledSelfTest(ctx, Labels{Application: "app_mobile", Environment: "production", Outcome: "passed"})
 
 	recorder := httptest.NewRecorder()
@@ -112,6 +113,9 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	}
 	if !strings.Contains(text, `job="release_expired_concurrency_leases"`) {
 		t.Fatalf("worker metric omitted the closed concurrency job label:\n%s", text)
+	}
+	if !strings.Contains(text, `job="run_scheduled_self_test"`) {
+		t.Fatalf("worker metric omitted the scheduled self-test job label:\n%s", text)
 	}
 }
 

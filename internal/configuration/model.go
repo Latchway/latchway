@@ -27,6 +27,9 @@ const (
 	StateActive     = "active"
 	StateSuperseded = "superseded"
 	StateInvalid    = "invalid"
+
+	CostRetryTreatmentActualAttempts     = "actual_attempts"
+	CostRetryTreatmentInitialAttemptOnly = "initial_attempt_only"
 )
 
 // TenantScope selects one application environment without relying on values
@@ -374,6 +377,11 @@ func (policy UpstreamDestinationPolicy) clone() UpstreamDestinationPolicy {
 
 const ProviderReportedCostSourceOpenRouterUsage = "openrouter_usage_cost"
 
+const (
+	TraceContextPropagationNone = "none"
+	TraceContextPropagationW3C  = "w3c"
+)
+
 // ProviderReportedCostPolicy is an explicit operator opt-in for one bounded
 // final-response cost format. Presence is never defaulted. The first supported
 // source is OpenRouter's OpenAI-compatible usage.cost USD decimal.
@@ -394,6 +402,7 @@ type Upstream struct {
 	Type                       string
 	BaseURL                    string
 	DangerousAllowInsecureHTTP bool
+	TraceContextPropagation    string
 	Authentication             UpstreamAuthentication
 	Timeouts                   UpstreamTimeouts
 	DestinationPolicy          UpstreamDestinationPolicy
@@ -548,16 +557,17 @@ func (rate RefillRate) String() string {
 // are retained as integers or exact rationals so enforced budgets never depend
 // on binary floating-point arithmetic.
 type Limit struct {
-	Metric            string
-	Algorithm         string
-	Scope             []string
-	Window            string
-	Timezone          string
-	Maximum           int64
-	PerRequestMaximum int64
-	Capacity          int64
-	RefillPerSecond   RefillRate
-	Hard              bool
+	Metric             string
+	Algorithm          string
+	Scope              []string
+	Window             string
+	Timezone           string
+	Maximum            int64
+	PerRequestMaximum  int64
+	Capacity           int64
+	RefillPerSecond    RefillRate
+	CostRetryTreatment string
+	Hard               bool
 }
 
 func (limit Limit) clone() Limit {

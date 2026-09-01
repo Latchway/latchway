@@ -647,7 +647,7 @@ func safeBoundedJob(job string) string {
 	case "release_expired_reservations", "prune_dpop_replays", "prune_challenges",
 		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
 		"enforce_retention", "reconcile_pending_usage", "release_expired_concurrency_leases",
-		"recover_stale_authenticated_requests",
+		"recover_stale_authenticated_requests", "run_scheduled_self_test",
 		"worker_heartbeat":
 		return job
 	default:

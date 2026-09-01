@@ -247,6 +247,15 @@ func canonicalInitialFinalSettlement(
 			logicalEntries = append(logicalEntries, entry)
 			continue
 		}
+		if entry.metric == UpstreamAttemptsMetric {
+			if entry.reservedUnits != 1 || entry.hardMaximum == nil ||
+				entry.bucketReserved < 1 || entry.bucketUsed > *entry.hardMaximum ||
+				1 > *entry.hardMaximum-entry.bucketUsed {
+				return initialFinalSettlementState{}, false
+			}
+			tokenEntries = append(tokenEntries, initialFinalCalendarEntry{entry: entry, charged: 1})
+			continue
+		}
 		actual, tokenMetric := tokenMetricUsageUnits(normalized.Usage, entry.metric)
 		if !tokenMetric || actual < 0 || actual > entry.reservedUnits ||
 			entry.hardMaximum == nil || entry.bucketReserved < entry.reservedUnits ||

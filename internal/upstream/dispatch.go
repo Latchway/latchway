@@ -2,12 +2,16 @@ package upstream
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // DispatchedResponse owns the response body and dedicated cancellation
@@ -283,11 +287,59 @@ func (target *Target) outboundRequest(
 		cancelRoundTrip()
 	}
 	outbound := prepared.request.Clone(roundTripContext)
-	if err := target.validatePreparedRequest(PreparedRequest{target: target, request: outbound, state: prepared.state}); err != nil {
+	if err := target.validatePreparedRequest(PreparedRequest{
+		target: target, request: outbound, state: prepared.state,
+		traceContextPropagation: prepared.traceContextPropagation,
+	}); err != nil {
 		cancelOnce()
 		return nil, nil, err
 	}
+	if prepared.traceContextPropagation == TraceContextPropagationW3C {
+		// Prefer the server-created upstream-attempt span. When tracing is
+		// disabled, synthesize one local unsampled context. Incoming trace headers
+		// were removed during reconstruction, so neither path forwards an
+		// untrusted client value.
+		propagationContext, err := serverPropagationContext(ctx)
+		if err != nil {
+			cancelOnce()
+			return nil, nil, err
+		}
+		propagation.TraceContext{}.Inject(propagationContext, propagation.HeaderCarrier(outbound.Header))
+		if err := validateInjectedTraceContext(outbound.Header); err != nil {
+			cancelOnce()
+			return nil, nil, err
+		}
+	}
 	return outbound, cancelOnce, nil
+}
+
+// serverPropagationContext returns a local, valid W3C context even when trace
+// export is disabled and the configured tracer is intentionally a no-op. A
+// remote context is never reused here: the provider boundary may receive only
+// a context created inside this dispatch operation.
+func serverPropagationContext(ctx context.Context) (context.Context, error) {
+	if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() && !spanContext.IsRemote() {
+		return ctx, nil
+	}
+	var traceID trace.TraceID
+	var spanID trace.SpanID
+	for attempt := 0; attempt < 4 && !traceID.IsValid(); attempt++ {
+		if _, err := rand.Read(traceID[:]); err != nil {
+			return nil, errors.New("create upstream trace context")
+		}
+	}
+	for attempt := 0; attempt < 4 && !spanID.IsValid(); attempt++ {
+		if _, err := rand.Read(spanID[:]); err != nil {
+			return nil, errors.New("create upstream trace context")
+		}
+	}
+	if !traceID.IsValid() || !spanID.IsValid() {
+		return nil, errors.New("create upstream trace context")
+	}
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID, TraceFlags: 0, Remote: false,
+	})
+	return trace.ContextWithSpanContext(ctx, spanContext), nil
 }
 
 // dispatchValueContext keeps values attached while a request is prepared (for

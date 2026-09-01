@@ -72,6 +72,31 @@ ranges, rejects redirects, strips client credentials, applies route bounds,
 rewrites the selected physical model and output limit, and only then injects
 the managed credential.
 
+## Propagate an upstream trace only when intended
+
+Every upstream defaults to `traceContextPropagation: none`. Set it to `w3c`
+only when that exact provider endpoint may receive the current server-created
+upstream-attempt context:
+
+```yaml
+upstreams:
+  - id: primary
+    type: openai_compatible
+    baseUrl: https://api.example.test/v1
+    traceContextPropagation: w3c
+    authentication:
+      type: bearer
+      secretRef: secret/provider_key
+```
+
+Latchway injects W3C `traceparent` and, when an active server span supplies it,
+`tracestate` at dispatch. With trace export disabled, Latchway creates a unique
+unsampled local context so the explicit setting still produces a traceparent.
+It never forwards client-supplied trace headers or OpenTelemetry baggage.
+`traceparent`, `tracestate`, and `baggage` are forbidden in opaque request-header
+allowlists, static headers, and credential headers so internal identity-bearing
+baggage cannot cross the upstream boundary.
+
 ## Timeouts and fallback
 
 Default upstream stages are:

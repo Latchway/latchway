@@ -16,6 +16,7 @@ import {
   InstallationFamilySchema,
   RequestSchema,
   RevisionSchema,
+  runDevelopmentSample,
   SelfTestScheduleSchema,
   SupportBundleSchema,
   UsageSummarySchema,
@@ -34,6 +35,53 @@ const session = {
 };
 
 describe("canonical Admin API browser client", () => {
+  it("runs only the bounded loopback development helper without administrator credentials", async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    fetcher.mockResolvedValue(new Response(JSON.stringify({
+      feature: "habit-assistant",
+      model: "fixture-model",
+      protocol: "openai_responses",
+      request_id: "req_0123456789abcdef",
+      status: "succeeded"
+    }), { headers: { "Content-Type": "application/json" }, status: 201 }));
+
+    await expect(runDevelopmentSample(fetcher)).resolves.toEqual({
+      data: {
+        feature: "habit-assistant",
+        model: "fixture-model",
+        protocol: "openai_responses",
+        request_id: "req_0123456789abcdef",
+        status: "succeeded"
+      }
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "/development/v1/sample-request",
+      expect.objectContaining({
+        body: "{}",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        method: "POST",
+        redirect: "error"
+      })
+    );
+    const options = fetcher.mock.calls[0]?.[1] as RequestInit;
+    expect(options.headers).not.toHaveProperty("Authorization");
+    expect(options.headers).not.toHaveProperty("X-CSRF-Token");
+  });
+
+  it("rejects nonconforming development sample metadata", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      credential: "must-not-cross",
+      feature: "habit-assistant",
+      model: "fixture-model",
+      protocol: "openai_responses",
+      request_id: "req_0123456789abcdef",
+      status: "succeeded"
+    }), { headers: { "Content-Type": "application/json" }, status: 201 })) as unknown as typeof fetch;
+
+    await expect(runDevelopmentSample(fetcher)).rejects.toThrow("Invalid development response");
+  });
+
   it("sends cookie mutations only through the Admin API with recovered CSRF", async () => {
     await loginAdministrator(
       { email: "owner@example.test", password: "test-only-owner-password" },

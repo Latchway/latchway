@@ -42,20 +42,21 @@ type TargetCache struct {
 }
 
 type targetCacheKey struct {
-	upstreamID            string
-	upstreamType          string
-	baseURL               string
-	insecureHTTP          bool
-	allowRedirects        bool
-	allowPrivate          bool
-	dnsPinning            bool
-	allowedPorts          string
-	allowedCIDRs          string
-	connectTimeout        time.Duration
-	responseHeaderTimeout time.Duration
-	firstByteTimeout      time.Duration
-	idleTimeout           time.Duration
-	totalTimeout          time.Duration
+	upstreamID              string
+	upstreamType            string
+	baseURL                 string
+	insecureHTTP            bool
+	traceContextPropagation string
+	allowRedirects          bool
+	allowPrivate            bool
+	dnsPinning              bool
+	allowedPorts            string
+	allowedCIDRs            string
+	connectTimeout          time.Duration
+	responseHeaderTimeout   time.Duration
+	firstByteTimeout        time.Duration
+	idleTimeout             time.Duration
+	totalTimeout            time.Duration
 }
 
 type targetCacheEntry struct {
@@ -336,6 +337,9 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 		!config.DestinationPolicy.DNSPinning || len(config.DestinationPolicy.AllowedPorts) == 0 {
 		return targetCacheKey{}, errTargetConfiguration
 	}
+	if _, err := configuredTraceContextPropagation(config.TraceContextPropagation); err != nil {
+		return targetCacheKey{}, errTargetConfiguration
+	}
 	destinationPolicy := upstream.DestinationPolicy{
 		AllowPrivate: config.DestinationPolicy.AllowPrivateNetworks,
 		AllowedCIDRs: append([]netip.Prefix(nil), config.DestinationPolicy.AllowedCIDRs...),
@@ -388,13 +392,14 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 
 	return targetCacheKey{
 		upstreamID: config.ID, upstreamType: config.Type, baseURL: config.BaseURL,
-		insecureHTTP:   config.DangerousAllowInsecureHTTP,
-		allowRedirects: config.DestinationPolicy.AllowRedirects,
-		allowPrivate:   config.DestinationPolicy.AllowPrivateNetworks,
-		dnsPinning:     config.DestinationPolicy.DNSPinning,
-		allowedPorts:   encodedPorts.String(),
-		allowedCIDRs:   encodedCIDRs.String(),
-		connectTimeout: config.Timeouts.Connect, responseHeaderTimeout: config.Timeouts.ResponseHeader,
+		insecureHTTP:            config.DangerousAllowInsecureHTTP,
+		traceContextPropagation: config.TraceContextPropagation,
+		allowRedirects:          config.DestinationPolicy.AllowRedirects,
+		allowPrivate:            config.DestinationPolicy.AllowPrivateNetworks,
+		dnsPinning:              config.DestinationPolicy.DNSPinning,
+		allowedPorts:            encodedPorts.String(),
+		allowedCIDRs:            encodedCIDRs.String(),
+		connectTimeout:          config.Timeouts.Connect, responseHeaderTimeout: config.Timeouts.ResponseHeader,
 		firstByteTimeout: config.Timeouts.FirstByte,
 		idleTimeout:      config.Timeouts.Idle, totalTimeout: config.Timeouts.Total,
 	}, nil

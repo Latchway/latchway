@@ -47,10 +47,92 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	if destination["allowPrivateNetworks"] != false || len(stringArray(destination, "allowedCidrs")) != 0 {
 		t.Fatalf("default private destination policy = %#v", destination)
 	}
+	if got := stringValue(objectArray(spec, "upstreams")[0], "traceContextPropagation"); got != TraceContextPropagationNone {
+		t.Fatalf("default trace-context propagation = %q", got)
+	}
 	limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
 	if stringValue(limit, "algorithm") != "calendar" || stringValue(limit, "timezone") != "UTC" || limit["hard"] != true ||
 		!slices.Equal(stringArray(limit, "scope"), []string{"user", "feature"}) {
 		t.Fatalf("normalized executable limit = %#v", limit)
+	}
+}
+
+func TestValidatorCompilesOnlyExplicitW3CTraceContextPropagation(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	upstreamObject := objectArray(objectValue(document, "spec"), "upstreams")[0]
+	upstreamObject["traceContextPropagation"] = TraceContextPropagationW3C
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("explicit W3C propagation rejected: %+v", report.Issues)
+	}
+	snapshot, err := newActiveSnapshot("revision", "environment", encoded, compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, ok := snapshot.Upstream("primary")
+	if !ok || configured.TraceContextPropagation != TraceContextPropagationW3C {
+		t.Fatalf("runtime trace-context propagation = %+v ok=%t", configured, ok)
+	}
+
+	upstreamObject["traceContextPropagation"] = "baggage"
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) == 0 {
+		t.Fatal("unknown trace-context propagation mode passed the schema")
+	}
+}
+
+func TestActiveSnapshotDefaultsLegacyTraceContextPropagationOffAndRejectsCorruption(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := validConfigurationDocument(t)
+	report, compiled := validator.Validate(document, testEnvironment(), time.Now())
+	if !report.Valid {
+		t.Fatalf("valid configuration rejected: %+v", report.Issues)
+	}
+	decoded, err := jsonsafe.Decode(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiledDocument := decoded.(map[string]any)
+	compiledUpstream := objectArray(objectValue(compiledDocument, "spec"), "upstreams")[0]
+	delete(compiledUpstream, "traceContextPropagation")
+	legacy, err := json.Marshal(compiledDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := newActiveSnapshot("legacy", "environment", document, legacy)
+	if err != nil {
+		t.Fatalf("legacy compiled snapshot rejected: %v", err)
+	}
+	configured, ok := snapshot.Upstream("primary")
+	if !ok || configured.TraceContextPropagation != TraceContextPropagationNone {
+		t.Fatalf("legacy trace-context propagation = %+v ok=%t", configured, ok)
+	}
+
+	compiledUpstream["traceContextPropagation"] = "future_mode"
+	corrupt, err := json.Marshal(compiledDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newActiveSnapshot("corrupt", "environment", document, corrupt); err == nil {
+		t.Fatal("corrupt compiled trace-context policy was accepted")
 	}
 }
 
@@ -601,11 +683,11 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			}
 			for _, issue := range report.Issues {
 				if issue.Code == "limit_capability_unsupported" &&
-					(!strings.Contains(issue.Message, "logical_requests/input_tokens/output_tokens/total_tokens token_bucket") ||
+					(!strings.Contains(issue.Message, "logical_requests/upstream_attempts/input_tokens/output_tokens/total_tokens token_bucket") ||
 						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
 						!strings.Contains(issue.Message, "through 1000000") ||
-						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens calendar") ||
-						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request") ||
+						!strings.Contains(issue.Message, "logical_requests/upstream_attempts/input_tokens/output_tokens/total_tokens calendar") ||
+						!strings.Contains(issue.Message, "upstream_attempts/input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request") ||
 						!strings.Contains(issue.Message, "request_bytes/image_units/tool_calls additionally require exact request measurement") ||
 						!strings.Contains(issue.Message, "cost_nano_usd calendar") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {

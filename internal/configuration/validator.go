@@ -12,6 +12,7 @@ import (
 	"cel.dev/cel-go/cel"
 	contractapi "github.com/latchway/latchway/api"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/limitmetric"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -366,6 +367,7 @@ func applyDefaults(root map[string]any) {
 	}
 	for _, upstream := range objectArray(spec, "upstreams") {
 		setDefault(upstream, "dangerousAllowInsecureHttp", false)
+		setDefault(upstream, "traceContextPropagation", TraceContextPropagationNone)
 		timeouts := ensureObject(upstream, "timeouts")
 		setDefault(timeouts, "connect", "5s")
 		setDefault(timeouts, "responseHeader", "30s")
@@ -396,6 +398,9 @@ func applyDefaults(root map[string]any) {
 	for _, plan := range objectArray(spec, "limitPlans") {
 		for _, limit := range objectArray(plan, "limits") {
 			setDefault(limit, "algorithm", inferredLimitAlgorithm(limit))
+			if stringValue(limit, "metric") == limitmetric.CostNanoUSD {
+				setDefault(limit, "costRetryTreatment", CostRetryTreatmentActualAttempts)
+			}
 			if stringValue(limit, "algorithm") == "calendar" {
 				setDefault(limit, "timezone", "UTC")
 			}

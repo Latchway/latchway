@@ -18,6 +18,10 @@ func buildProtectedTarget(config configuration.Upstream) (cachedDispatchTarget, 
 	if _, err := protectedTargetKey(config); err != nil {
 		return nil, err
 	}
+	traceContextPropagation, err := configuredTraceContextPropagation(config.TraceContextPropagation)
+	if err != nil {
+		return nil, err
+	}
 	target, err := upstream.NewTarget(
 		config.BaseURL,
 		upstream.DestinationPolicy{
@@ -33,7 +37,7 @@ func buildProtectedTarget(config configuration.Upstream) (cachedDispatchTarget, 
 	if err != nil {
 		return nil, errTargetConfiguration
 	}
-	return &protectedDispatchTarget{target: target}, nil
+	return &protectedDispatchTarget{target: target, traceContextPropagation: traceContextPropagation}, nil
 }
 
 func validTargetTimeouts(value configuration.UpstreamTimeouts) bool {
@@ -93,8 +97,9 @@ func validCredentialHeaderName(name string) bool {
 		return false
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Anthropic-Version", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Baggage", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Traceparent", "Tracestate",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return false
 	default:
@@ -116,7 +121,19 @@ func validBasicAuthenticationUsername(username string) bool {
 }
 
 type protectedDispatchTarget struct {
-	target *upstream.Target
+	target                  *upstream.Target
+	traceContextPropagation upstream.TraceContextPropagation
+}
+
+func configuredTraceContextPropagation(value string) (upstream.TraceContextPropagation, error) {
+	switch value {
+	case configuration.TraceContextPropagationNone:
+		return upstream.TraceContextPropagationNone, nil
+	case configuration.TraceContextPropagationW3C:
+		return upstream.TraceContextPropagationW3C, nil
+	default:
+		return upstream.TraceContextPropagationNone, errTargetConfiguration
+	}
 }
 
 func (target *protectedDispatchTarget) Prepare(
@@ -128,7 +145,9 @@ func (target *protectedDispatchTarget) Prepare(
 	if target == nil || target.target == nil {
 		return ProviderRequest{}, errTargetConfiguration
 	}
-	prepared, err := upstream.PrepareRequest(incoming, target.target, requestPath, forwardedHeaders, staticHeaders)
+	prepared, err := upstream.PrepareRequest(
+		incoming, target.target, requestPath, forwardedHeaders, staticHeaders, target.traceContextPropagation,
+	)
 	if err != nil {
 		return ProviderRequest{}, err
 	}

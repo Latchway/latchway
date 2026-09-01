@@ -26,6 +26,9 @@ func TestPrepareRequestReconstructsTrustBoundary(t *testing.T) {
 		"Accept-Encoding":        {"gzip"},
 		"Content-Type":           {"application/json"},
 		"Accept":                 {"text/event-stream"},
+		"Traceparent":            {"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"},
+		"Tracestate":             {"attacker=value"},
+		"Baggage":                {"private=value"},
 		"X-Provider-Tenant":      {"client"},
 		"X-Unlisted-Application": {"drop"},
 	}
@@ -61,7 +64,7 @@ func TestPrepareRequestReconstructsTrustBoundary(t *testing.T) {
 	if got := outbound.Header.Get("Accept-Encoding"); got != "identity" {
 		t.Fatalf("accept encoding = %q", got)
 	}
-	for _, name := range []string{"Authorization", "Dpop", "X-Latchway-Feature", "X-Forwarded-For", "X-Unlisted-Application"} {
+	for _, name := range []string{"Authorization", "Dpop", "X-Latchway-Feature", "X-Forwarded-For", "X-Unlisted-Application", "Traceparent", "Tracestate", "Baggage"} {
 		if got := outbound.Header.Get(name); got != "" {
 			t.Fatalf("unsafe header %s = %q", name, got)
 		}
@@ -84,6 +87,25 @@ func TestPrepareRequestRejectsUnsafeConfiguredHeaders(t *testing.T) {
 	incoming, _ := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader("{}"))
 	if _, err := PrepareRequest(incoming, target, "/v1/chat/completions", nil, map[string]string{"Accept-Encoding": "gzip"}); err == nil {
 		t.Fatal("configured response-obscuring compression accepted")
+	}
+	for _, name := range []string{"Traceparent", "Tracestate", "Baggage"} {
+		if _, err := PrepareRequest(incoming, target, "/v1/chat/completions", nil, map[string]string{name: "attacker-controlled"}); err == nil {
+			t.Fatalf("configured %s override accepted", name)
+		}
+		if _, err := PrepareRequest(incoming, target, "/v1/chat/completions", []string{name}, nil); err == nil {
+			t.Fatalf("client %s forwarding accepted", name)
+		}
+	}
+	if _, err := PrepareRequest(
+		incoming, target, "/v1/chat/completions", nil, nil,
+		TraceContextPropagationW3C, TraceContextPropagationNone,
+	); err == nil {
+		t.Fatal("multiple trace-context propagation modes accepted")
+	}
+	if _, err := PrepareRequest(
+		incoming, target, "/v1/chat/completions", nil, nil, TraceContextPropagation(255),
+	); err == nil {
+		t.Fatal("unknown trace-context propagation mode accepted")
 	}
 }
 

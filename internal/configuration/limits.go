@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -95,10 +96,43 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 		return Limit{}, immutableLimitIdentity{}, false
 	}
 	limit.Scope = scope
+	if limit.Metric == limitmetric.CostNanoUSD {
+		if limit.CostRetryTreatment == "" {
+			limit.CostRetryTreatment = CostRetryTreatmentActualAttempts
+		}
+		if limit.CostRetryTreatment != CostRetryTreatmentActualAttempts &&
+			(limit.CostRetryTreatment != CostRetryTreatmentInitialAttemptOnly ||
+				!slices.Contains(scope, "user")) {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	} else if limit.CostRetryTreatment != "" {
+		return Limit{}, immutableLimitIdentity{}, false
+	}
 	return limit, immutableLimitIdentity{
 		metric: limit.Metric, algorithm: limit.Algorithm,
 		window: limit.Window, timezone: limit.Timezone, scope: strings.Join(scope, "\x00"),
 	}, true
+}
+
+// validCostRetryPlan prevents product-level retry forgiveness from removing
+// the durable bound and accounting record for real infrastructure spend.
+func validCostRetryPlan(limits []Limit) bool {
+	requiresOrganizationAccounting := false
+	hasOrganizationAccounting := false
+	for _, limit := range limits {
+		if limit.Metric != limitmetric.CostNanoUSD {
+			continue
+		}
+		switch limit.CostRetryTreatment {
+		case CostRetryTreatmentInitialAttemptOnly:
+			requiresOrganizationAccounting = true
+		case CostRetryTreatmentActualAttempts:
+			if slices.Contains(limit.Scope, "organization") && !slices.Contains(limit.Scope, "user") {
+				hasOrganizationAccounting = true
+			}
+		}
+	}
+	return !requiresOrganizationAccounting || hasOrganizationAccounting
 }
 
 func canonicalExecutableCalendarTimezone(raw string) (string, bool) {

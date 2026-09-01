@@ -54,6 +54,16 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway version` | Print build, contract, and protocol metadata |
 | `latchway status` | Read authenticated remote system status |
 
+`latchway develop` prints exact loopback URLs for identity tokens,
+challenge-bound debug evidence, and the bounded sample request helper. In AI
+connections, the embedded Console can run that synthetic client through DPoP,
+policy, quota, routing, the deterministic mock upstream, settlement, and
+durable storage, then read back the exact request before reporting success.
+One sample may run at a time, a second invocation fails without queuing, and
+every run has a 30-second server deadline. This verifies the isolated
+development path only; it is not production
+attestation or physical-device proof.
+
 ## Configuration, secrets, and routes
 
 ```bash

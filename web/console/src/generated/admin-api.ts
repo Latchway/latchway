@@ -1910,6 +1910,12 @@ export interface components {
                         [key: string]: string;
                     };
                     timeouts?: components["schemas"]["Timeouts"];
+                    /**
+                     * @description Server-selected upstream trace propagation. W3C propagation injects only the current server-created attempt context and never forwards client trace headers or internal baggage.
+                     * @default none
+                     * @enum {unknown}
+                     */
+                    traceContextPropagation: "none" | "w3c";
                     /** @enum {unknown} */
                     type: "openai_compatible" | "anthropic" | "generic";
                 } & (unknown & unknown);
@@ -2007,10 +2013,16 @@ export interface components {
                     id: components["schemas"]["Identifier"];
                     limits: components["schemas"]["Limit"][];
                 };
-                Limit: {
+                Limit: ({
                     /** @enum {unknown} */
                     algorithm?: "calendar" | "token_bucket" | "concurrency" | "per_request";
                     capacity?: number;
+                    /**
+                     * @description Cost quota retry treatment. actual_attempts charges every physical dispatch. initial_attempt_only is allowed only when the canonical scope includes user; organization infrastructure cost remains charged for every attempt.
+                     * @default actual_attempts
+                     * @enum {unknown}
+                     */
+                    costRetryTreatment: "actual_attempts" | "initial_attempt_only";
                     /** @default true */
                     hard: boolean;
                     maximum?: number;
@@ -2027,7 +2039,7 @@ export interface components {
                     timezone: string;
                     /** @description Server-owned calendar window: minute, hour, day, week, or month. Week windows begin Monday in the configured timezone. */
                     window?: string;
-                } | unknown | unknown | unknown;
+                } & (unknown & unknown)) | unknown | unknown | unknown;
                 Feature: {
                     access: {
                         expression: components["schemas"]["CELExpression"];
@@ -2454,6 +2466,8 @@ export interface components {
             /** @enum {string} */
             algorithm: "calendar" | "token_bucket" | "per_request" | "concurrency";
             capacity?: number;
+            /** @enum {string} */
+            cost_retry_treatment?: "actual_attempts" | "initial_attempt_only";
             /** @constant */
             hard: true;
             index: number;
@@ -2619,10 +2633,16 @@ export interface components {
             items: components["schemas"]["Installation"][];
             page: components["schemas"]["PageInfo"];
         };
-        Limit: {
+        Limit: ({
             /** @enum {unknown} */
             algorithm?: "calendar" | "token_bucket" | "concurrency" | "per_request";
             capacity?: number;
+            /**
+             * @description Cost quota retry treatment. actual_attempts charges every physical dispatch. initial_attempt_only is allowed only when the canonical scope includes user; organization infrastructure cost remains charged for every attempt.
+             * @default actual_attempts
+             * @enum {unknown}
+             */
+            costRetryTreatment: "actual_attempts" | "initial_attempt_only";
             /** @default true */
             hard: boolean;
             maximum?: number;
@@ -2639,7 +2659,7 @@ export interface components {
             timezone: string;
             /** @description Server-owned calendar window: minute, hour, day, week, or month. Week windows begin Monday in the configured timezone. */
             window?: string;
-        } | unknown | unknown | unknown;
+        } & (unknown & unknown)) | unknown | unknown | unknown;
         LimitPlan: {
             id: components["schemas"]["Identifier"];
             limits: components["schemas"]["Limit"][];
@@ -2993,6 +3013,8 @@ export interface components {
                 /** @enum {string} */
                 algorithm: "calendar" | "token_bucket" | "concurrency" | "per_request";
                 capacity?: number;
+                /** @enum {string} */
+                cost_retry_treatment?: "actual_attempts" | "initial_attempt_only";
                 hard: boolean;
                 maximum?: number;
                 metric: string;
@@ -3249,6 +3271,12 @@ export interface components {
                 [key: string]: string;
             };
             timeouts?: components["schemas"]["Timeouts"];
+            /**
+             * @description Server-selected upstream trace propagation. W3C propagation injects only the current server-created attempt context and never forwards client trace headers or internal baggage.
+             * @default none
+             * @enum {unknown}
+             */
+            traceContextPropagation: "none" | "w3c";
             /** @enum {unknown} */
             type: "openai_compatible" | "anthropic" | "generic";
         } & (unknown & unknown);

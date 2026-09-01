@@ -79,6 +79,12 @@ An upstream attempt may retry or fall back only when the route policy permits
 it and no response bytes have been committed. The logical request is counted
 once even when it has multiple upstream attempts.
 
+An `upstream_attempts` limit controls those physical dispatches directly. It
+can use a calendar window, a token bucket, or a per-request maximum. Latchway
+reserves each stateful attempt unit before dispatch and evaluates a
+per-request rule against the next contiguous attempt number, so a denied retry
+never creates an attempt row or sends upstream bytes.
+
 ## Trusted input preflight
 
 When a hard input, total-token, or input-priced cost limit applies, Latchway
@@ -135,6 +141,14 @@ expire or are replaced according to their own policy.
 This design prevents concurrent overspend and avoids refunding unknown usage as
 zero. Quotas can compose across environment, feature, plan, user override, and
 abuse-control scopes.
+
+Cost rules default to `costRetryTreatment: actual_attempts`, which charges each
+physical dispatch. A rule whose scope includes `user` may opt into
+`initial_attempt_only` when a product allowance should absorb retry overhead.
+The same plan must pair that rule with an `actual_attempts` cost rule whose
+scope includes `organization` and excludes `user`. This option does not erase
+physical attempt usage; organization cost accounting continues to include
+every attempt and supplies the durable bound for retry cost.
 
 <QuotaPreview />
 

@@ -51,6 +51,7 @@ type compiledUpstream struct {
 	Type                       string                         `json:"type"`
 	BaseURL                    string                         `json:"baseUrl"`
 	DangerousAllowInsecureHTTP bool                           `json:"dangerousAllowInsecureHttp"`
+	TraceContextPropagation    string                         `json:"traceContextPropagation"`
 	Authentication             compiledUpstreamAuthentication `json:"authentication"`
 	Timeouts                   compiledUpstreamTimeouts       `json:"timeouts"`
 	DestinationPolicy          struct {
@@ -332,12 +333,13 @@ type compiledLimitPlan struct {
 // or null in compiled JSON.
 type compiledLimit struct {
 	Limit
-	hasWindow            bool
-	hasTimezone          bool
-	hasMaximum           bool
-	hasPerRequestMaximum bool
-	hasCapacity          bool
-	hasRefillPerSecond   bool
+	hasWindow             bool
+	hasTimezone           bool
+	hasMaximum            bool
+	hasPerRequestMaximum  bool
+	hasCapacity           bool
+	hasRefillPerSecond    bool
+	hasCostRetryTreatment bool
 }
 
 func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
@@ -355,18 +357,19 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 	}
 	for field := range fields {
 		switch field {
-		case "metric", "algorithm", "scope", "window", "timezone", "maximum", "perRequestMaximum", "capacity", "refillPerSecond", "hard":
+		case "metric", "algorithm", "scope", "window", "timezone", "maximum", "perRequestMaximum", "capacity", "refillPerSecond", "costRetryTreatment", "hard":
 		default:
 			return ErrInvalid
 		}
 	}
 	var decoded struct {
-		Metric    string   `json:"metric"`
-		Algorithm string   `json:"algorithm"`
-		Scope     []string `json:"scope"`
-		Window    string   `json:"window"`
-		Timezone  string   `json:"timezone"`
-		Hard      bool     `json:"hard"`
+		Metric             string   `json:"metric"`
+		Algorithm          string   `json:"algorithm"`
+		Scope              []string `json:"scope"`
+		Window             string   `json:"window"`
+		Timezone           string   `json:"timezone"`
+		Hard               bool     `json:"hard"`
+		CostRetryTreatment string   `json:"costRetryTreatment"`
 	}
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		return err
@@ -377,6 +380,12 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 	_, limit.hasPerRequestMaximum = fields["perRequestMaximum"]
 	_, limit.hasCapacity = fields["capacity"]
 	_, limit.hasRefillPerSecond = fields["refillPerSecond"]
+	_, limit.hasCostRetryTreatment = fields["costRetryTreatment"]
+	if limit.hasCostRetryTreatment {
+		if decoded.CostRetryTreatment, err = compiledJSONString(fields["costRetryTreatment"]); err != nil {
+			return err
+		}
+	}
 	maximum, ok := compiledLimitInteger(fields["maximum"], limit.hasMaximum)
 	if !ok {
 		return ErrInvalid
@@ -398,7 +407,8 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 		Scope: append([]string(nil), decoded.Scope...), Window: decoded.Window, Timezone: decoded.Timezone,
 		Maximum: maximum, PerRequestMaximum: perRequestMaximum,
 		Capacity: capacity, RefillPerSecond: refillPerSecond,
-		Hard: decoded.Hard,
+		CostRetryTreatment: decoded.CostRetryTreatment,
+		Hard:               decoded.Hard,
 	}
 	return nil
 }
@@ -430,6 +440,9 @@ func compiledLimitRefillRate(raw json.RawMessage, present bool) (RefillRate, boo
 }
 
 func (limit compiledLimit) normalizeExecutable() (Limit, immutableLimitIdentity, bool) {
+	if limit.hasCostRetryTreatment && limit.CostRetryTreatment == "" {
+		return Limit{}, immutableLimitIdentity{}, false
+	}
 	switch limit.Algorithm {
 	case "calendar":
 		if !limit.hasWindow || !limit.hasMaximum || limit.hasPerRequestMaximum ||
@@ -807,6 +820,16 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		(parsedURL.Scheme == "http" && !raw.DangerousAllowInsecureHTTP) {
 		return Upstream{}, ErrInvalid
 	}
+	traceContextPropagation := raw.TraceContextPropagation
+	if traceContextPropagation == "" {
+		// Compiled revisions created before this field existed did not propagate
+		// trace context. Preserve that fail-closed behavior when loading them.
+		traceContextPropagation = TraceContextPropagationNone
+	}
+	if traceContextPropagation != TraceContextPropagationNone &&
+		traceContextPropagation != TraceContextPropagationW3C {
+		return Upstream{}, ErrInvalid
+	}
 	authentication := UpstreamAuthentication{
 		Type: raw.Authentication.Type, SecretRef: raw.Authentication.SecretRef,
 		HeaderName: raw.Authentication.HeaderName, Username: raw.Authentication.Username,
@@ -927,6 +950,7 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 	return Upstream{
 		ID: raw.ID, Type: raw.Type, BaseURL: raw.BaseURL,
 		DangerousAllowInsecureHTTP: raw.DangerousAllowInsecureHTTP,
+		TraceContextPropagation:    traceContextPropagation,
 		Authentication:             authentication, Timeouts: timeouts,
 		DestinationPolicy: policy, StaticHeaders: staticHeaders,
 		ProviderReportedCost: reportedCost,
@@ -1052,6 +1076,9 @@ func runtimeLimitPlan(raw compiledLimitPlan) (LimitPlan, error) {
 		}
 		seenIdentities[identity] = struct{}{}
 		plan.Limits = append(plan.Limits, limit)
+	}
+	if !validCostRetryPlan(plan.Limits) {
+		return LimitPlan{}, ErrInvalid
 	}
 	return plan, nil
 }
@@ -1283,8 +1310,9 @@ func runtimeForwardHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept-Encoding", "Anthropic-Version", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept-Encoding", "Anthropic-Version", "Authorization", "Baggage", "Connection", "Content-Encoding", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Traceparent", "Tracestate",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return true
@@ -1299,8 +1327,9 @@ func runtimeStaticHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Anthropic-Version", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Authorization", "Baggage", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host",
 		"Keep-Alive", "Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Traceparent", "Tracestate",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return true
@@ -1362,8 +1391,9 @@ func runtimeCredentialHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Anthropic-Version", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Baggage", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Traceparent", "Tracestate",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return true
 	default:

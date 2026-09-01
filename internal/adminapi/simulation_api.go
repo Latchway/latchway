@@ -52,16 +52,17 @@ type routeSimulationRequestFacts struct {
 }
 
 type routeSimulationLimit struct {
-	Metric            string   `json:"metric"`
-	Algorithm         string   `json:"algorithm"`
-	Scope             []string `json:"scope"`
-	Window            string   `json:"window,omitempty"`
-	Timezone          string   `json:"timezone,omitempty"`
-	Maximum           int64    `json:"maximum,omitempty"`
-	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
-	Capacity          int64    `json:"capacity,omitempty"`
-	RefillPerSecond   string   `json:"refill_per_second,omitempty"`
-	Hard              bool     `json:"hard"`
+	Metric             string   `json:"metric"`
+	Algorithm          string   `json:"algorithm"`
+	Scope              []string `json:"scope"`
+	Window             string   `json:"window,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	Maximum            int64    `json:"maximum,omitempty"`
+	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
+	Capacity           int64    `json:"capacity,omitempty"`
+	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
+	Hard               bool     `json:"hard"`
 }
 
 type routeSimulationCandidate struct {
@@ -260,7 +261,8 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		limits = append(limits, routeSimulationLimit{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: append([]string(nil), limit.Scope...),
 			Window: limit.Window, Timezone: limit.Timezone, Maximum: limit.Maximum, PerRequestMaximum: limit.PerRequestMaximum,
-			Capacity: limit.Capacity, RefillPerSecond: limit.RefillPerSecond.String(), Hard: limit.Hard,
+			Capacity: limit.Capacity, RefillPerSecond: limit.RefillPerSecond.String(),
+			CostRetryTreatment: limit.CostRetryTreatment, Hard: limit.Hard,
 		})
 	}
 	candidates := make([]routeSimulationCandidate, 0, len(plan.Candidates))

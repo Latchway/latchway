@@ -88,10 +88,17 @@ are excluded.
 For the isolated Development workspace, `latchway develop` owns the mock
 identity, debug proof material, loopback upstream, seeded configuration, and
 one-run Console access. The console detects that active loopback fixture and
-guides the operator to run the official `habit-assistant` client sample. Its
-verification button only reads the bounded durable request list; it cannot
-provision the mock or submit a client request through the Admin API. The normal
-connection wizard remains HTTPS-only.
+offers a one-click, bounded synthetic `habit-assistant` client. The helper is
+mounted only by the loopback development process and exercises mock OIDC,
+challenge-bound debug attestation, DPoP, policy, quota, routing, mock upstream,
+settlement, and durable request storage. The Console separately fetches that
+exact request record and verifies its environment, feature, protocol, status,
+and physical model before reporting success. One sample may run at a time; a
+second invocation fails immediately instead of queuing, and every run has a
+30-second server deadline. Operators can still run an
+official SDK client and inspect its record. The helper is not production
+attestation or physical-device proof, and the normal connection wizard remains
+HTTPS-only.
 
 Cost, latency, errors, and attestation failures are separate focused pages over
 the canonical bounded analytics endpoints. They deliberately render only the

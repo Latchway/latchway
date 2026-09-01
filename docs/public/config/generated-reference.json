@@ -336,7 +336,7 @@
     },
     {
       "path": "reference/config-schema.mdx",
-      "sha256": "996b8471ebcc94bb8357fe6e7c093ce90e3f61efafad04721f45af88589b29fa"
+      "sha256": "8a2db70a0de8008b83e2aba8e96fd84192f8f5adcd77c471d3e321d547f6f77b"
     },
     {
       "path": "reference/errors.mdx",
@@ -346,7 +346,7 @@
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "701967b455680c1c2b48b68633fa965cfa2353f27a6d1236c8ba9b21c7490318"
+      "sha256": "72fba2feee3e126b20348bfc7712cb1c52d467c997da5add872d5bb1abeea472"
     },
     {
       "path": "api/client.openapi.yaml",
@@ -354,7 +354,7 @@
     },
     {
       "path": "api/config.schema.json",
-      "sha256": "65c7c56c918efdbac4d53f884a06e17d83ac740ca9c777eb46206623ecfd785d"
+      "sha256": "ae76e0745676a123895adced5b969e51726a92f70b087c69f323aa5ae5e84040"
     },
     {
       "path": "api/error-codes.yaml",

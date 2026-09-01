@@ -2162,6 +2162,7 @@ components:
               per_request_maximum: { type: integer, minimum: 0 }
               capacity: { type: integer, minimum: 0 }
               refill_per_second: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+              cost_retry_treatment: { type: string, enum: [actual_attempts, initial_attempt_only] }
               hard: { type: boolean }
         route: { $ref: '#/components/schemas/Identifier' }
         model: { $ref: '#/components/schemas/Identifier' }
@@ -2503,6 +2504,7 @@ components:
         per_request_maximum: { type: integer, minimum: 1 }
         capacity: { type: integer, minimum: 1 }
         refill_per_second: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        cost_retry_treatment: { type: string, enum: [actual_attempts, initial_attempt_only] }
         hard: { type: boolean, const: true }
         source: { type: string, minLength: 1, maxLength: 512 }
     EffectiveRoute:

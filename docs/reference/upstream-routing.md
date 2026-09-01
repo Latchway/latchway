@@ -28,6 +28,23 @@ read APIs, logs, or asynchronous work. Authentication headers cannot collide
 with static headers, Latchway control fields, protocol-owned fields, forwarding
 fields, or hop-by-hop fields.
 
+## Trace-context propagation
+
+Upstream trace propagation is disabled by default. Set the upstream's
+`traceContextPropagation` to `w3c` only when the provider endpoint is authorized
+to receive the current server-created attempt context. Latchway then injects
+W3C `traceparent` and, when present on an active server span, `tracestate`
+immediately before dispatch. When trace export is disabled, it creates a unique
+unsampled local context so the explicit propagation setting remains effective
+without enabling an exporter.
+
+Client-supplied `traceparent`, `tracestate`, and `baggage` values are always
+removed at the provider trust boundary. They cannot be selected through opaque
+request-header forwarding, static headers, or credential headers. Internal
+OpenTelemetry baggage is never propagated, including baggage that could contain
+a user or installation identifier. Existing compiled revisions that predate the
+setting retain the default `none` behavior.
+
 ## Request bounds
 
 `maxRequestHeaderBytes` is an optional route-level limit up to 32 KiB. It is

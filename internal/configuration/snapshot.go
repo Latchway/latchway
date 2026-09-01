@@ -335,7 +335,7 @@ func runtimeIdentifierStrings(values []string) bool {
 
 func runtimeComponentPlatform(platform string) bool {
 	switch platform {
-	case "ios", "android", "web", "node", "react_native_ios", "react_native_android", "watchos", "wearos":
+	case "ios", "android", "web", "node", "react_native_ios", "react_native_android", "watchos":
 		return true
 	default:
 		return false

@@ -70,12 +70,31 @@ func prepareRetryRuleSet(
 		allocations[allocation.Metric] = allocation.Units
 	}
 	rules := cloneLimitRules(plan.rules)
+	for _, rule := range rules {
+		if rule.Metric == UpstreamAttemptsMetric {
+			allocations[UpstreamAttemptsMetric] = 1
+			break
+		}
+	}
 	expectedMetrics := make(map[string]struct{}, len(allocations))
 	for index := range rules {
 		if attemptAllocationOrder(rules[index].Metric) == math.MaxInt {
 			continue
 		}
+		if rules[index].Metric == UpstreamAttemptsMetric {
+			expectedMetrics[UpstreamAttemptsMetric] = struct{}{}
+			continue
+		}
 		units, ok := allocations[rules[index].Metric]
+		if rules[index].Metric == CostNanoUSDMetric &&
+			rules[index].CostRetryTreatment == InitialAttemptOnlyCostRetryTreatment {
+			if !ok {
+				return preparedRequest{}, nil, ErrInvalidInput
+			}
+			rules[index].ReservedUnits = units
+			expectedMetrics[rules[index].Metric] = struct{}{}
+			continue
+		}
 		if !ok {
 			return preparedRequest{}, nil, ErrInvalidInput
 		}
@@ -161,7 +180,9 @@ func retryTargetPlansAt(prepared preparedRequest, at time.Time) ([]plannedBucket
 	for _, plan := range plans {
 		// A logical request is charged exactly once. Candidate-target materialization
 		// applies only to per-dispatch token/cost capacity and target concurrency.
-		if plan.rule.Metric != LogicalRequestsMetric {
+		if plan.rule.Metric != LogicalRequestsMetric &&
+			!(plan.rule.Metric == CostNanoUSDMetric &&
+				plan.rule.CostRetryTreatment == InitialAttemptOnlyCostRetryTreatment) {
 			result = append(result, plan)
 		}
 	}
@@ -313,11 +334,11 @@ func (store *Store) materializeRetryTarget(
 				quota_reservation_entry_id, organization_id, application_id,
 				environment_id, quota_reservation_id, quota_bucket_id,
 				origin_attempt_number, initial_reserved_units, reserved_units,
-				settled_units, released_units
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 0, 0)
+				settled_units, released_units, cost_retry_treatment
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 0, 0, $9)
 		`, entryID, reservation.organizationID, reservation.applicationID,
 			reservation.environmentID, reservation.reservationID, plan.bucketID,
-			originAttempt, plan.reservedUnits); err != nil {
+			originAttempt, plan.reservedUnits, plan.rule.CostRetryTreatment); err != nil {
 			return retryMaterialization{}, mapWriteError("insert retry reservation entry", err)
 		}
 		newEntries[entryID] = struct{}{}
@@ -484,7 +505,9 @@ func (store *Store) BeginRetryAttempt(
 			number:      nextNumber,
 		}, false, nil
 	}
-	if requestBoundsExceeded := requestBoundExceededRules(prepared.rules); len(requestBoundsExceeded) != 0 {
+	if requestBoundsExceeded := requestBoundExceededRulesAtAttempt(
+		prepared.rules, int64(nextNumber),
+	); len(requestBoundsExceeded) != 0 {
 		return Attempt{}, false, requestBoundExceededError(
 			reservation.logicalRequestID, requestBoundsExceeded,
 		)
@@ -1286,6 +1309,9 @@ func retryTargetEntries(
 			entry.scopeKey != plan.rule.scopeKey || entry.originAttemptNumber > attemptNumber {
 			return nil, ErrInvalidState
 		}
+		if entry.costRetryTreatment != plan.rule.CostRetryTreatment {
+			return nil, ErrInvalidState
+		}
 		result = append(result, entry)
 	}
 	return result, nil
@@ -1906,6 +1932,10 @@ func applicableAttemptQuotaEntries(
 			attemptAllocationOrder(entry.metric) == math.MaxInt {
 			continue
 		}
+		if attempt.number > 1 && entry.metric == CostNanoUSDMetric &&
+			entry.costRetryTreatment == InitialAttemptOnlyCostRetryTreatment {
+			continue
+		}
 		parts := make([]string, 0, len(entry.scopeDimensions)*2)
 		for _, dimension := range entry.scopeDimensions {
 			value := values[dimension]
@@ -2007,6 +2037,10 @@ func attemptInputAccountingMatchesQuota(
 			if !pricing.present() {
 				return false
 			}
+		case UpstreamAttemptsMetric:
+			if quotaEntry.allocated != 1 {
+				return false
+			}
 		default:
 			return false
 		}
@@ -2017,7 +2051,7 @@ func attemptInputAccountingMatchesQuota(
 func attemptTokenReservationUnits(entries []lockedAttemptQuotaEntry) ([]reservedTokenMetric, error) {
 	byMetric := make(map[string]int64, len(reservedTokenMetricOrder))
 	for _, entry := range entries {
-		if entry.metric == CostNanoUSDMetric {
+		if entry.metric == CostNanoUSDMetric || entry.metric == UpstreamAttemptsMetric {
 			continue
 		}
 		if existing, ok := byMetric[entry.metric]; ok && existing != entry.allocated {
@@ -2185,6 +2219,12 @@ func settleRetryAttemptLocked(
 }
 
 func retryAttemptChargedUnits(entry lockedAttemptQuotaEntry, outcome Outcome) (int64, error) {
+	if entry.metric == UpstreamAttemptsMetric {
+		if entry.allocated != 1 {
+			return 0, ErrInvalidState
+		}
+		return 1, nil
+	}
 	if entry.metric == CostNanoUSDMetric {
 		if !outcome.Cost.Known {
 			return entry.allocated, nil
@@ -2414,7 +2454,7 @@ func storedRetryAttemptAccountingMatches(
 ) (bool, error) {
 	tokenAllocations := make(map[string]int64, len(reservedTokenMetricOrder))
 	for _, entry := range quotaEntries {
-		if entry.metric != CostNanoUSDMetric {
+		if entry.metric != CostNanoUSDMetric && entry.metric != UpstreamAttemptsMetric {
 			tokenAllocations[entry.metric] = entry.allocated
 		}
 	}

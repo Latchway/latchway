@@ -73,10 +73,17 @@ disabled for them.
   attempt's conservative allocation.
 - Keep logical concurrency leases open across the bounded attempt sequence and
   release them only when the logical request reaches a terminal state.
-- Charge `logical_requests` once, `upstream_attempts` once per dispatch, and
-  organization/user token and cost budgets for every actual or conservative
-  billed attempt. Never reuse unused allocation from a different physical
-  model without a new trusted preflight and reservation.
+- Charge `logical_requests` once and `upstream_attempts` once per physical
+  dispatch. Calendar and token-bucket attempt limits reserve one unit before
+  each dispatch; per-request attempt limits compare the next contiguous
+  attempt ordinal and deny atomically before creating an excess attempt.
+- Charge token and cost budgets for every actual or conservative billed
+  attempt by default. A user-scoped cost rule may explicitly select
+  `initial_attempt_only` for product allowance, but the same plan must include
+  an `actual_attempts` infrastructure-cost rule whose scope includes
+  `organization` and excludes `user`. The physical usage ledger still records
+  every attempt's cost under either policy. Never reuse unused allocation from
+  a different physical model without a new trusted preflight and reservation.
 - If capacity for another attempt cannot be reserved, do not dispatch it. The
   logical request terminates with a safe quota or upstream error while all
   earlier attempt charges remain durable.

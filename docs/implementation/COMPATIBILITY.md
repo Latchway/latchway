@@ -10,7 +10,7 @@ packages, live providers, physical devices, or production support.
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `draft`, `released_at: null` |
 | Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
-| Database | Historical schema `20` | Schema `27`, including family/component state, component-scoped quota state, direct component-attestation linkage, protocol-aware first-token timing, hardened challenge Origin binding, logical-request decision stages, and bounded audit attribution/browse indexes |
+| Database | Historical schema `20` | Schema `28` in the current audited working-tree descendant, including family/component state, component-scoped quota state, direct component-attestation linkage, protocol-aware first-token timing, hardened challenge Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, durable cost retry treatment, and physical-attempt quota ledger support |
 | Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
 | Sessions | One installation key/session family | Independent component keys/session families |
 | Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
@@ -33,6 +33,15 @@ the contract or its separate durable forensic transaction boundary. The final
 canonical-documentation commit is a contract-preserving descendant and its
 generated Mintlify mirror is bound by clean source conformance. None of these
 coordinates is a released package or production documentation deployment.
+
+The current uncommitted schema-28 descendant adds enforceable calendar,
+token-bucket, and aggregate per-request `upstream_attempts` limits plus
+configurable cost retry treatment. `actual_attempts` remains the default. A
+user-scoped `initial_attempt_only` rule is valid only when the same plan retains
+an organization-scoped, non-user `actual_attempts` rule, so product forgiveness
+cannot remove the durable infrastructure-cost bound. This configuration and
+Admin-schema delta requires a new deterministic contract coordinate and SDK
+lock rebinding before it can replace the recorded clean source tuple above.
 
 ## Admin capability negotiation
 

@@ -652,6 +652,8 @@ type QuotaReservationEntry struct {
 	InitialReservedUnits int64 `db:"initial_reserved_units" json:"initial_reserved_units"`
 	// Contiguous upstream attempt that first materialized this reservation entry; schema-11 and initial schema-12 entries are attempt 1.
 	OriginAttemptNumber int32 `db:"origin_attempt_number" json:"origin_attempt_number"`
+	// Canonical cost quota retry treatment. Empty is accepted only as the schema-27 rolling-writer compatibility encoding of actual_attempts.
+	CostRetryTreatment string `db:"cost_retry_treatment" json:"cost_retry_treatment"`
 }
 
 type RefreshRotationResult struct {
@@ -883,7 +885,7 @@ type UpstreamAttempt struct {
 	FirstTokenAt pgtype.Timestamptz `db:"first_token_at" json:"first_token_at"`
 }
 
-// Per-dispatch token and cost allocations and their conservative settlement under one logical quota reservation.
+// Per-dispatch attempt, token, and selected cost allocations and their conservative settlement under one logical quota reservation.
 type UpstreamAttemptQuotaEntry struct {
 	OrganizationID          string             `db:"organization_id" json:"organization_id"`
 	ApplicationID           string             `db:"application_id" json:"application_id"`

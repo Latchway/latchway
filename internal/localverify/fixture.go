@@ -79,15 +79,18 @@ type fixture struct {
 	quotaRevisionID    string
 	quotaRevisionETag  string
 
-	oidc              *mockOIDC
-	debugKey          ed25519.PrivateKey
-	dpopKey           *ecdsa.PrivateKey
-	dpopJKT           string
-	accessToken       string
-	nonStreamingProof string
-	installationID    string
-	applicationUserID string
-	sessionGrantID    string
+	oidc                      *mockOIDC
+	debugKey                  ed25519.PrivateKey
+	dpopKey                   *ecdsa.PrivateKey
+	dpopJKT                   string
+	accessToken               string
+	accessExpiresAt           time.Time
+	nonStreamingProof         string
+	installationID            string
+	applicationUserID         string
+	sessionGrantID            string
+	developmentSampleGateOnce sync.Once
+	developmentSampleGate     chan struct{}
 
 	providerCredential []byte
 	providerCapture    *captureHandler

@@ -40,7 +40,7 @@ type Definition struct {
 
 var definitions = []Definition{
 	{Name: LogicalRequests, Algorithms: []string{CalendarAlgorithm, TokenBucketAlgorithm}},
-	{Name: UpstreamAttempts},
+	{Name: UpstreamAttempts, Algorithms: []string{CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm}},
 	{Name: InputTokens, Algorithms: []string{CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm}},
 	{Name: OutputTokens, Algorithms: []string{CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm}},
 	{Name: TotalTokens, Algorithms: []string{CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm}},

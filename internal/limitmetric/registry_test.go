@@ -37,7 +37,7 @@ func TestRegistryDeclaresExactEnforcementCapabilitiesAndDefensiveCopies(t *testi
 
 	want := map[string][]string{
 		LogicalRequests:    {CalendarAlgorithm, TokenBucketAlgorithm},
-		UpstreamAttempts:   nil,
+		UpstreamAttempts:   {CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm},
 		InputTokens:        {CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm},
 		OutputTokens:       {CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm},
 		TotalTokens:        {CalendarAlgorithm, TokenBucketAlgorithm, PerRequestAlgorithm},

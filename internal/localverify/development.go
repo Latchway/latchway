@@ -55,6 +55,7 @@ type DevelopmentInfo struct {
 	BrowserOrigin          string `json:"browser_origin"`
 	IdentityTokenURL       string `json:"identity_token_url"`
 	AttestationEvidenceURL string `json:"attestation_evidence_url"`
+	SampleRequestURL       string `json:"sample_request_url"`
 	ConsoleURL             string `json:"console_url"`
 	ConsoleEmail           string `json:"console_email"`
 	ConsolePassword        string `json:"console_password"`
@@ -150,6 +151,7 @@ func RunDevelopment(parent context.Context, development DevelopmentConfig) (runE
 		BrowserOrigin:          development.BrowserOrigin,
 		IdentityTokenURL:       publicOrigin + "/development/v1/identity-token",
 		AttestationEvidenceURL: publicOrigin + "/development/v1/attestation-evidence",
+		SampleRequestURL:       publicOrigin + "/development/v1/sample-request",
 		ConsoleURL:             publicOrigin, ConsoleEmail: developmentConsoleEmail,
 		ConsolePassword:     consolePassword,
 		IOSBundleIdentifier: "dev.latchway.quickstart.ios", AndroidPackageName: "dev.latchway.quickstart.android",
@@ -281,6 +283,8 @@ func (f *fixture) serveDevelopment(writer http.ResponseWriter, request *http.Req
 		f.developmentIdentityToken(writer, request)
 	case "/development/v1/attestation-evidence":
 		f.developmentEvidence(writer, request)
+	case "/development/v1/sample-request":
+		f.developmentSampleRequest(writer, request)
 	default:
 		http.NotFound(writer, request)
 	}

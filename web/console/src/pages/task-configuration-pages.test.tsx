@@ -3,11 +3,15 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { adminRequestMock } = vi.hoisted(() => ({ adminRequestMock: vi.fn() }));
+const { adminRequestMock, runDevelopmentSampleMock } = vi.hoisted(() => ({
+  adminRequestMock: vi.fn(),
+  runDevelopmentSampleMock: vi.fn()
+}));
 
 vi.mock("../api/admin", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/admin")>()),
-  adminRequest: adminRequestMock
+  adminRequest: adminRequestMock,
+  runDevelopmentSample: runDevelopmentSampleMock
 }));
 
 vi.mock("../api/session", () => ({
@@ -42,13 +46,18 @@ const activeDocument = {
   }
 };
 
-beforeEach(() => { adminRequestMock.mockReset(); });
+beforeEach(() => {
+  adminRequestMock.mockReset();
+  runDevelopmentSampleMock.mockReset();
+});
 
 describe("development-first connection path", () => {
-  it("recognizes the gateway-owned mock and verifies a durable sample request instead of impersonating a client", async () => {
+  it("runs the gateway-owned synthetic client and verifies its exact durable request", async () => {
     const user = userEvent.setup();
+    runDevelopmentSampleMock.mockResolvedValue({ data: { feature: "habit-assistant", model: "fixture-model", protocol: "openai_responses", request_id: "req_0123456789abcdef", status: "succeeded" } });
     adminRequestMock.mockImplementation((path: string) => {
       if (path.endsWith("/config")) return Promise.resolve({ data: { activated_at: instant, created_at: instant, created_by: "adm_0123456789abcdef", document: activeDocument, environment_id: workspace.environment.id, id: "rev_0123456789abcdef", state: "active", version: 1 }, etag: '"active-etag"' });
+      if (path === "/admin/v1/requests/req_0123456789abcdef") return Promise.resolve({ data: { attempts: [{ attempt_number: 1, id: "atm_0123456789abcdef", model: "fixture_model", route: "primary", started_at: instant, status: "succeeded", upstream: "development_mock" }], environment_id: workspace.environment.id, feature: "habit-assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_responses", selected_physical_model: "fixture-model", started_at: instant, status: "succeeded", user_id: "usr_0123456789abcdef" } });
       if (path.startsWith("/admin/v1/requests?")) return Promise.resolve({ data: { items: [{ attempts: [{ attempt_number: 1, id: "atm_0123456789abcdef", model: "fixture_model", route: "primary", started_at: instant, status: "succeeded", upstream: "development_mock" }], environment_id: workspace.environment.id, feature: "habit-assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_responses", started_at: instant, status: "succeeded", user_id: "usr_0123456789abcdef" }], page: { has_more: false } } });
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -56,9 +65,10 @@ describe("development-first connection path", () => {
     render(<QueryClientProvider client={queryClient}><ConnectionWorkspacePage /></QueryClientProvider>);
 
     expect(await screen.findByRole("heading", { name: "Local mock connection is ready." })).toBeInTheDocument();
-    expect(screen.getByText(/does not impersonate an application user/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Check for verified sample request" }));
+    expect(screen.getByText(/not production attestation or physical-device proof/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run and verify development sample" }));
     expect(await screen.findByText(/Observed/)).toHaveTextContent("req_0123456789abcdef");
-    expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/requests?environment_id=${workspace.environment.id}&page_size=50`, expect.anything());
+    expect(runDevelopmentSampleMock).toHaveBeenCalledOnce();
+    expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
   });
 });

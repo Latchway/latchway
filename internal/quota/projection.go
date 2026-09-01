@@ -11,7 +11,8 @@ func ProjectedReservationUnits(rule Rule, streaming bool) (int64, bool) {
 	if rule.Metric == ConcurrentStreamsMetric && !streaming {
 		return 0, false
 	}
-	if rule.Metric == LogicalRequestsMetric || isConcurrencyMetric(rule.Metric) {
+	if rule.Metric == LogicalRequestsMetric || rule.Metric == UpstreamAttemptsMetric ||
+		isConcurrencyMetric(rule.Metric) {
 		return 1, true
 	}
 	return rule.ReservedUnits, true

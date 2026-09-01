@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
@@ -198,6 +198,13 @@ Latchway v1 accepts only one delegation edge: a root component provisions a
 delegated component. Although the schema retains `allowChildDelegation` as a
 forward-compatible field, semantic validation rejects `true`; a delegated
 component cannot provision another child.
+
+The schema also reserves `wearos` and `wear_app` for a future Wear OS
+integration. Latchway v1 supports the Android application as the Android-family
+root, but it does not expose an end-to-end Wear OS client/runtime path. An
+active Wear OS Component Definition therefore fails semantic validation with
+`component_wearos_unsupported_v1` instead of producing a component whose
+session cannot be used.
 
 The CEL activation is built from the sealed session and durable component, not
 from application headers. Missing fields, unknown values, type errors, cost
