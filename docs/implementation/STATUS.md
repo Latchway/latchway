@@ -16,26 +16,26 @@ domains remain open.
 | --- | --- |
 | Current phase | Phase 9: source-converged candidate with supplemental physical iOS development evidence |
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
-| Validated implementation coordinates | Exact coordinates and pending mirror state are listed below |
+| Validated implementation coordinates | Exact source and documentation-mirror coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
 | Database schema version | `24` at the recorded passing source coordinate |
-| Last full test time | `2026-09-01` — the final contract/SDK tuple passes clean cross-repository source conformance, the React Native full check passes, four byte-reproducible clean SDK documentation bundles are imported at the exact recorded commits, and the authored canonical Mintlify suite passes; final mirror synchronization and its Mintlify rerun remain pending |
+| Last full test time | `2026-09-01` — the final contract/SDK tuple passes clean cross-repository source conformance, the React Native full check and GitHub policy check pass, four byte-reproducible clean SDK documentation bundles are imported at the exact recorded commits, and both the canonical and synchronized Mintlify suites pass |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical invocation of the current Debug App Intent path, the protected delegated-extension runtime matrix, physical Android/Play proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
 | External credentials still required | Known missing: Apple release-distribution signing and protected collector/finalizer authority. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
-| Next executable task | Invoke the exact current Debug App Intent path on the connected iPad, then produce a protected Apple distribution-derived immutable candidate and run the remaining Android, extension, web, cloud, resilience, supply-chain, and publication gates |
+| Next executable task | Reconnect the provisioned iPad and invoke the exact current Debug App Intent path, then produce a protected Apple distribution-derived immutable candidate and run the remaining Android, extension, web, cloud, resilience, supply-chain, and publication gates |
 
 ### Validated implementation coordinates
 
 | Repository | Validated coordinate or state |
 | --- | --- |
 | Core contract freeze checkpoint `latchway` | `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
-| Core final SDK-bundle import checkpoint `latchway` | `4a39adfef2207aac05d09fae4bfaf36c1381ab5c` |
+| Core final SDK-bundle and canonical-doc checkpoint `latchway` | `18be09e7b1e053f969f03e289c461ef1f294ee6a` |
 | JavaScript `latchway-js` | `379a6d20bed9cbda9af6210f5511250fbbe9b571` |
 | Swift `latchway-ios-sdk` | `ab38ae00838a81be071f53740c624dc4f0558dcb` |
 | Android `latchway-android` | `17c108706998f2c30fe511fd92ed049c024c8e85` |
 | React Native `latchway-react-native-sdk` | `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
-| Mintlify mirror `latchway-docs` | Pending final authored-doc synchronization and commit |
+| Mintlify mirror `latchway-docs` | `a0c3559b11353a8196bde800d4b7484726e9f76a` |
 
 ### Passing test commands
 
@@ -116,7 +116,7 @@ checkpoint and reproducible draft bundle above.
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware and leaves lifecycle-only, opaque, and historical attempts without an inferred token timestamp | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
-| Mintlify public docs | The authored canonical source and exact SDK bundles pass the complete local suite | Final mirror synchronization and local mirror suite, then merge and production deploy validation |
+| Mintlify public docs | The canonical source, exact SDK bundles, and synchronized mirror commit `a0c3559b11353a8196bde800d4b7484726e9f76a` pass the complete local suite | Merge and production deploy/post-deploy validation |
 
 ## Local source evidence
 

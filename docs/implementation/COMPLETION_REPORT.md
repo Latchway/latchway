@@ -37,7 +37,7 @@ authorize version 1.
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
-| Documentation | Canonical Mintlify source, exact SDK bundles, tested snippets, validation, and credential-free checkpoint workflow pass locally | Final authored mirror synchronization and local mirror suite, then merge, production deployment, and post-deploy validation |
+| Documentation | Canonical Mintlify source, exact SDK bundles, tested snippets, validation, and synchronized mirror commit `a0c3559b11353a8196bde800d4b7484726e9f76a` pass locally | Merge, production deployment, and post-deploy validation |
 
 ## Schema-23 direct component App Attest step-up
 
