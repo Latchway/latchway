@@ -14,6 +14,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 from typing import Any, Callable, Mapping, Sequence
 
@@ -134,6 +136,9 @@ CLAIM_REQUIREMENTS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
         ),
     },
     "public_registries": {
+        "documentation_production_verified": (
+            "registry.documentation-production",
+        ),
         "oci_digest_verified": ("registry.oci",),
         "npm_javascript_verified": ("registry.npm.javascript",),
         "npm_react_native_verified": ("registry.npm.react-native",),
@@ -177,6 +182,7 @@ OBSERVATION_TOOLS: Mapping[str, str] = {
         for observation in requirements
     },
     "registry.oci": "cosign",
+    "registry.documentation-production": "latchway-mintlify-production-validator",
     "registry.npm.javascript": "npm",
     "registry.npm.react-native": "npm",
     "registry.swift": "swift",
@@ -187,7 +193,10 @@ OBSERVATION_TOOLS: Mapping[str, str] = {
 SENSITIVE_TEXT = (
     re.compile(r"(?i)(authorization|proxy-authorization|cookie|set-cookie|password|api[_-]?key)\s*[:=]"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}"),
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})\b"),
+    re.compile(
+        r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
+        r"lwa_[A-Za-z0-9_-]{43}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})\b"
+    ),
 )
 FORBIDDEN_ASSERTION_KEYS = frozenset(("claims", "claim", "passed", "success", "verdict"))
 
@@ -237,6 +246,49 @@ def scan_safe(payload: bytes) -> None:
         raise EvidenceError("raw_result_not_utf8") from None
     if any(pattern.search(text) for pattern in SENSITIVE_TEXT):
         raise EvidenceError("raw_result_contains_secret")
+
+
+def scan_npm_tarball_safe(payload: bytes) -> None:
+    """Scan bounded public npm archive contents without treating gzip as UTF-8."""
+    total = 0
+    seen: set[str] = set()
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+            members = archive.getmembers()
+            if not 1 <= len(members) <= 512:
+                raise EvidenceError("raw_result_archive_invalid")
+            for member in members:
+                name = member.name
+                relative = PurePosixPath(name)
+                if (
+                    not name
+                    or name.startswith("/")
+                    or "\\" in name
+                    or relative.as_posix() != name
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                    or name in seen
+                    or not member.isfile()
+                    or member.size < 0
+                    or member.size > 8 * 1024 * 1024
+                ):
+                    raise EvidenceError("raw_result_archive_invalid")
+                seen.add(name)
+                total += member.size
+                if total > MAXIMUM_RAW_BYTES:
+                    raise EvidenceError("raw_result_archive_invalid")
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise EvidenceError("raw_result_archive_invalid")
+                member_payload = extracted.read(member.size + 1)
+                if len(member_payload) != member.size:
+                    raise EvidenceError("raw_result_archive_invalid")
+                text = member_payload.decode("utf-8", errors="ignore")
+                if any(pattern.search(text) for pattern in SENSITIVE_TEXT):
+                    raise EvidenceError("raw_result_contains_secret")
+    except EvidenceError:
+        raise
+    except (tarfile.TarError, EOFError, OSError):
+        raise EvidenceError("raw_result_archive_invalid") from None
 
 
 def read_json(path: Path, maximum: int = MAXIMUM_RESULT_BYTES) -> dict[str, Any]:
@@ -427,7 +479,18 @@ def validate_result(
         seen.add(relative)
         artifact = resolve_inside(raw_root, relative)
         payload = read_bytes(artifact)
-        scan_safe(payload)
+        if (
+            observation == "registry.npm.javascript"
+            and re.fullmatch(
+                r"artifacts/registry-npm-javascript/"
+                r"latchway-(?:client|openai|vercel-ai|langchain)-"
+                r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.tgz",
+                relative,
+            )
+        ):
+            scan_npm_tarball_safe(payload)
+        else:
+            scan_safe(payload)
         if sha256_bytes(payload) != expected:
             raise EvidenceError("result_artifact_hash_mismatch")
         normalized.append({"path": relative, "sha256": expected})

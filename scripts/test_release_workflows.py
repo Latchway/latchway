@@ -923,6 +923,36 @@ class ReleaseWorkflowTests(unittest.TestCase):
             ),
             1,
         )
+        self.assertIn("(( file_count <= 535 ))", producer_text)
+        self.assertIn(
+            "MAXIMUM_AUTHORITY_FILES = 534",
+            (ROOT / "scripts" / "release-domain-observer.py").read_text(
+                encoding="utf-8"
+            ),
+        )
+        for marker in (
+            "documentation_production_run_id",
+            "documentation_production_run_attempt",
+            "Latchway/latchway-docs",
+            ".github/workflows/mintlify-production-evidence.yml",
+            "latchway-mintlify-production-${documentation_commit}",
+            "latchway-mintlify-production-evidence.SHA256SUMS",
+            "latchway-mintlify-production-evidence.attestation.sigstore.json",
+            "--signer-workflow Latchway/latchway-docs/.github/workflows/mintlify-production-evidence.yml",
+            "--deny-self-hosted-runners",
+            "for package_id in client openai vercel-ai langchain",
+            "npm-$package_id-attestations.json",
+            "npm-release-adoption-${package_id}",
+        ):
+            self.assertIn(marker, producer_text)
+        observer_text = (ROOT / "scripts/release-domain-observer.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("registry.documentation-production", observer_text)
+        self.assertIn("latchway_retained_mintlify_production_evidence", observer_text)
+        self.assertIn("raw_artifacts={", observer_text)
+        self.assertIn("MAXIMUM_RETAINED_NPM_TARBALL_BYTES", observer_text)
+        self.assertNotIn("GH_TOKEN", other_step["env"])
         self.assertEqual(
             producer_text.count(
                 "${{ secrets.LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT }}"

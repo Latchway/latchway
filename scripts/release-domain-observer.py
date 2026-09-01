@@ -14,6 +14,7 @@ import binascii
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urlsplit
@@ -47,10 +49,22 @@ if RELEASE_ATTESTATION_SPEC is None or RELEASE_ATTESTATION_SPEC.loader is None:
 RELEASE_ATTESTATION = importlib.util.module_from_spec(RELEASE_ATTESTATION_SPEC)
 RELEASE_ATTESTATION_SPEC.loader.exec_module(RELEASE_ATTESTATION)
 
+MINTLIFY_PROOF_SCRIPT = Path(__file__).with_name("mintlify-production-proof.py")
+MINTLIFY_PROOF_SPEC = importlib.util.spec_from_file_location(
+    "latchway_mintlify_production_proof", MINTLIFY_PROOF_SCRIPT
+)
+if MINTLIFY_PROOF_SPEC is None or MINTLIFY_PROOF_SPEC.loader is None:
+    raise RuntimeError("Mintlify production-proof validator cannot be loaded")
+MINTLIFY_PROOF = importlib.util.module_from_spec(MINTLIFY_PROOF_SPEC)
+MINTLIFY_PROOF_SPEC.loader.exec_module(MINTLIFY_PROOF)
+
 GITHUB_AUTHORITY_DOMAINS = frozenset(
     {"supply_chain", "public_tags", "public_registries"}
 )
-MAXIMUM_AUTHORITY_FILES = 256
+# Exact public-registry closure at GitHub's 64-asset release bound:
+# JavaScript 230 + React Native 245 + iOS 21 + Android 31 + documentation 7.
+# This counts manifest rows; the authority manifest itself is the 535th file.
+MAXIMUM_AUTHORITY_FILES = 534
 MAXIMUM_AUTHORITY_BYTES = 128 * 1024 * 1024
 MAXIMUM_AUTHORITY_WINDOW = EVIDENCE.timedelta(hours=2)
 FORBIDDEN_CANDIDATE_CREDENTIAL_ENV = frozenset(
@@ -79,12 +93,62 @@ REPOSITORY_NAMES = {
 NPM_ADOPTION_ASSET = re.compile(
     r"^npm-release-adoption-[1-9][0-9]*-[1-9][0-9]*\.json$"
 )
+JAVASCRIPT_NPM_PACKAGES: tuple[tuple[str, str], ...] = (
+    ("client", "@latchway/client"),
+    ("openai", "@latchway/openai"),
+    ("vercel-ai", "@latchway/vercel-ai"),
+    ("langchain", "@latchway/langchain"),
+)
+JAVASCRIPT_NPM_ADOPTION_ASSET = re.compile(
+    r"^npm-release-adoption-(client|openai|vercel-ai|langchain)-"
+    r"([1-9][0-9]*)-([1-9][0-9]*)\.json$"
+)
+JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS = (
+    "package-evidence.json",
+    "release-candidate-evidence.json",
+    "publish-input-evidence.json",
+    "post-publish-evidence.json",
+    "npm-registry-evidence-manifest.json",
+    "build-reproducibility.json",
+    "contract-evidence.json",
+    "dependency-vulnerability-scan.json",
+    "tag-evidence.json",
+)
+JAVASCRIPT_NPM_AGGREGATE_ASSETS = (
+    *JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS,
+    "SHA256SUMS",
+)
+JAVASCRIPT_RETAINED_TARBALL = re.compile(
+    r"^latchway-(client|openai|vercel-ai|langchain)-"
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.tgz$"
+)
+MAXIMUM_RETAINED_NPM_TARBALL_BYTES = 10 * 1024 * 1024
+JAVASCRIPT_OSV_SCANNER_COMMIT = "b56b5191101d5f27d4787d5583d8d01e9518a7af"
+CONTRACT_LOCK_LINE = re.compile(
+    r"([a-z][a-z0-9_]*):[ \t]*(?:\"([^\"\r\n]*)\"|([^\s#][^\r\n]*?))[ \t]*"
+)
 IOS_COCOAPODS_SUBSPECS = frozenset(
     {"AppAttest", "AppExtensions", "Core", "FirebaseAuth"}
 )
 COCOAPODS_FORBIDDEN_HOOKS = frozenset(
     {"prepare_command", "script_phase", "script_phases"}
 )
+
+
+def expected_source_attested_release_assets(
+    repository_id: str, version: str, release_names: Sequence[str]
+) -> set[str]:
+    """Return the exact released subjects the production observer must verify."""
+    names = set(release_names)
+    if repository_id in {"javascript", "android"}:
+        return names
+    if repository_id == "react_native":
+        return names - {f"latchway-react-native-{version}.tgz.sha256"}
+    if repository_id == "ios":
+        return names - {f"latchway-ios-sdk-{version}.tar.gz.sha256"}
+    raise ObservationError("release_asset_attestation_repository_invalid")
+
+
 PROVIDER_CHECKS = {
     "provider.openrouter.non-streaming": "non_streaming",
     "provider.openrouter.streaming": "streaming",
@@ -92,6 +156,161 @@ PROVIDER_CHECKS = {
     "provider.openrouter.output-clamp": "output_clamp",
     "provider.openrouter.error-normalization": "error_normalization",
 }
+
+
+def valid_npm_adoption_mode(
+    mode: Any,
+    adoption_run_id: Any,
+    adoption_run_attempt: Any,
+    provenance_run_id: Any,
+    provenance_run_attempt: Any,
+) -> bool:
+    """Require retry adoption records to identify whether they did the publish."""
+    return (
+        isinstance(mode, str)
+        and mode in {"published", "adopted_existing"}
+        and (mode == "published")
+        == (
+            adoption_run_id == provenance_run_id
+            and adoption_run_attempt == provenance_run_attempt
+        )
+    )
+
+
+def javascript_npm_tarball_digest(payload: bytes) -> dict[str, Any]:
+    sha512_digest = hashlib.sha512(payload).digest()
+    return {
+        "bytes": len(payload),
+        "sha1": hashlib.sha1(payload).hexdigest(),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha512": sha512_digest.hex(),
+        "integrity": "sha512-" + base64.b64encode(sha512_digest).decode("ascii"),
+    }
+
+
+def validate_javascript_sha256sums(
+    payload: bytes, package_items: Any, version: str
+) -> dict[str, Any]:
+    if not isinstance(package_items, list) or len(package_items) != 4:
+        raise ObservationError("registry_npm_checksums_invalid")
+    entries: list[dict[str, str]] = []
+    lines: list[str] = []
+    for index, (package_id, package) in enumerate(JAVASCRIPT_NPM_PACKAGES):
+        item = package_items[index]
+        name = f"latchway-{package_id}-{version}.tgz"
+        sha256 = item.get("sha256") if isinstance(item, dict) else None
+        if (
+            not isinstance(item, dict)
+            or item.get("id") != package_id
+            or item.get("package") != package
+            or not isinstance(sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", sha256) is None
+        ):
+            raise ObservationError("registry_npm_checksums_invalid")
+        entries.append({"name": name, "sha256": sha256})
+        lines.append(f"{sha256}  {name}")
+    expected = ("\n".join(sorted(lines)) + "\n").encode("ascii")
+    if payload != expected:
+        raise ObservationError("registry_npm_checksums_invalid")
+    return {
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "file": "SHA256SUMS",
+        "file_sha256": hashlib.sha256(payload).hexdigest(),
+        "entries": sorted(entries, key=lambda item: item["name"]),
+    }
+
+
+def validate_javascript_supporting_evidence(
+    documents: Mapping[str, Any], coordinate: Mapping[str, str]
+) -> None:
+    tag = documents.get("tag-evidence.json")
+    vulnerability = documents.get("dependency-vulnerability-scan.json")
+    scanner = vulnerability.get("scanner") if isinstance(vulnerability, dict) else None
+    if (
+        not isinstance(tag, dict)
+        or set(tag) != {"schema_version", "tag", "version", "commit", "annotated"}
+        or tag.get("schema_version") != 1
+        or tag.get("tag") != coordinate.get("tag")
+        or tag.get("version") != coordinate.get("version")
+        or tag.get("commit") != coordinate.get("commit")
+        or tag.get("annotated") is not True
+    ):
+        raise ObservationError("registry_npm_tag_evidence_invalid")
+    if (
+        not isinstance(vulnerability, dict)
+        or set(vulnerability)
+        != {
+            "schema_version", "scanner", "source_commit", "inventory_sha256",
+            "database_sha256", "package_count", "vulnerability_count",
+            "blocking_vulnerability_count", "policy", "status",
+        }
+        or vulnerability.get("schema_version")
+        != "latchway.dependency-vulnerability-scan.v1"
+        or not isinstance(scanner, dict)
+        or set(scanner) != {"name", "version", "commit", "mode"}
+        or scanner
+        != {
+            "name": "OSV-Scanner",
+            "version": "2.4.0",
+            "commit": JAVASCRIPT_OSV_SCANNER_COMMIT,
+            "mode": "offline",
+        }
+        or vulnerability.get("source_commit") != coordinate.get("commit")
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(vulnerability.get("inventory_sha256"))
+        )
+        is None
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(vulnerability.get("database_sha256"))
+        )
+        is None
+        or not isinstance(vulnerability.get("package_count"), int)
+        or isinstance(vulnerability.get("package_count"), bool)
+        or vulnerability["package_count"] < 1
+        or not isinstance(vulnerability.get("vulnerability_count"), int)
+        or isinstance(vulnerability.get("vulnerability_count"), bool)
+        or vulnerability["vulnerability_count"] < 0
+        or vulnerability.get("blocking_vulnerability_count") != 0
+        or vulnerability.get("policy")
+        != "block-critical-high-and-unknown-severity"
+        or vulnerability.get("status") != "passed"
+    ):
+        raise ObservationError("registry_npm_vulnerability_evidence_invalid")
+
+
+def parse_contract_lock_payload(payload: bytes) -> dict[str, str]:
+    try:
+        contents = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ObservationError("registry_npm_contract_source_invalid") from None
+    values: dict[str, str] = {}
+    for line in contents.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = CONTRACT_LOCK_LINE.fullmatch(line)
+        if match is None or match.group(1) in values:
+            raise ObservationError("registry_npm_contract_source_invalid")
+        values[match.group(1)] = (
+            match.group(2) if match.group(2) is not None else match.group(3)
+        )
+    wire_fields = {"wire_protocol", "wire_protocol_version"} & values.keys()
+    required = {
+        "contract_version", "core_release", "core_commit", "bundle_sha256",
+        "minimum_server_version", "maximum_tested_server_version",
+    }
+    if (
+        set(values) - (required | {"wire_protocol", "wire_protocol_version"})
+        or not required.issubset(values)
+        or len(wire_fields) != 1
+        or not valid_commit(values.get("core_commit"))
+        or re.fullmatch(r"[0-9a-f]{64}", values.get("bundle_sha256", "")) is None
+    ):
+        raise ObservationError("registry_npm_contract_source_invalid")
+    values["wire_protocol"] = values.pop(next(iter(wire_fields)))
+    return values
+
+
 SDK_BEHAVIOR_KEYS = {
     "sdk.behavior.dpop-vectors": "dpop_vectors",
     "sdk.behavior.error-mapping": "error_mapping",
@@ -182,6 +401,10 @@ RETAINED_INPUT_CONTAINERS: Mapping[str, tuple[str, str]] = {
     "live_provider_collector_isolation": (
         "latchway_retained_live_provider_collector_isolation",
         "live-provider-isolation.json",
+    ),
+    "mintlify_production_evidence": (
+        "latchway_retained_mintlify_production_evidence",
+        "mintlify-production-evidence.json",
     ),
 }
 LIVE_SDK_JAVASCRIPT_TESTS = (
@@ -458,6 +681,259 @@ def nested(value: Any, *keys: str) -> Any:
     return current
 
 
+def verify_javascript_reproducibility_archive_inputs(
+    reproducibility: Any,
+    release_assets: Mapping[str, Mapping[str, Any]],
+    version: str,
+    package_evidence: Any | None = None,
+    javascript_root: Path | None = None,
+) -> dict[str, Any]:
+    """Recompute the producer aggregate over exact dist bytes in npm archives."""
+    rows = reproducibility.get("files") if isinstance(reproducibility, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise ObservationError("registry_npm_reproducibility_invalid")
+    row_paths = [item.get("path") for item in rows if isinstance(item, dict)]
+    if len(row_paths) != len(rows) or any(
+        not isinstance(path, str) for path in row_paths
+    ):
+        raise ObservationError("registry_npm_reproducibility_invalid")
+
+    payloads: dict[str, bytes] = {}
+    maximum_dist_bytes = EVIDENCE.MAXIMUM_RAW_BYTES
+    total_bytes = 0
+    evidence_packages = (
+        package_evidence.get("packages")
+        if isinstance(package_evidence, dict)
+        else None
+    )
+    if package_evidence is not None and (
+        not isinstance(evidence_packages, list) or len(evidence_packages) != 4
+    ):
+        raise ObservationError("registry_npm_reproducibility_invalid")
+    source_lock: bytes | None = None
+    if javascript_root is not None:
+        try:
+            source_lock = EVIDENCE.read_bytes(
+                javascript_root / "contract.lock", EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("registry_npm_reproducibility_invalid") from None
+    for package_index, (package_id, package) in enumerate(JAVASCRIPT_NPM_PACKAGES):
+        tarball_name = f"latchway-{package_id}-{version}.tgz"
+        entry = release_assets.get(tarball_name)
+        archive_payload = entry.get("bytes") if isinstance(entry, Mapping) else None
+        if not isinstance(archive_payload, bytes):
+            raise ObservationError("registry_npm_reproducibility_invalid")
+        archive_entries: list[str] = []
+        archive_payloads: dict[str, bytes] = {}
+        unpacked_bytes = 0
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive_payload), mode="r:gz") as archive:
+                for member in archive.getmembers():
+                    raw_name = member.name
+                    relative = PurePosixPath(raw_name)
+                    if (
+                        not raw_name
+                        or raw_name.startswith("/")
+                        or "\\" in raw_name
+                        or relative.as_posix() != raw_name
+                        or any(part in ("", ".", "..") for part in relative.parts)
+                    ):
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    if (
+                        raw_name in archive_payloads
+                        or not member.isfile()
+                        or member.size < 0
+                        or member.size > 8 * 1024 * 1024
+                    ):
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    archive_entries.append(raw_name)
+                    if len(archive_entries) > 512:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    unpacked_bytes += member.size
+                    if unpacked_bytes > 25 * 1024 * 1024:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    extracted = archive.extractfile(member)
+                    if extracted is None:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    payload = extracted.read(member.size + 1)
+                    if len(payload) != member.size:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    archive_payloads[raw_name] = payload
+                    if raw_name.startswith("package/dist/"):
+                        repository_path = raw_name.removeprefix("package/")
+                        if package_id != "client":
+                            repository_path = (
+                                f"packages/{package_id}/{repository_path}"
+                            )
+                        if repository_path in payloads or member.size < 1:
+                            raise ObservationError(
+                                "registry_npm_reproducibility_invalid"
+                            )
+                        total_bytes += member.size
+                        if total_bytes > maximum_dist_bytes:
+                            raise ObservationError(
+                                "registry_npm_reproducibility_invalid"
+                            )
+                        payloads[repository_path] = payload
+        except ObservationError:
+            raise
+        except (tarfile.TarError, EOFError, OSError):
+            raise ObservationError("registry_npm_reproducibility_invalid") from None
+
+        if len(set(archive_entries)) != len(archive_entries):
+            raise ObservationError("registry_npm_reproducibility_invalid")
+        if evidence_packages is not None:
+            reviewed = evidence_packages[package_index]
+            if (
+                not isinstance(reviewed, dict)
+                or reviewed.get("id") != package_id
+                or reviewed.get("package") != package
+                or reviewed.get("entries") != sorted(archive_entries)
+                or reviewed.get("unpacked_bytes") != unpacked_bytes
+            ):
+                raise ObservationError("registry_npm_reproducibility_invalid")
+            manifest_payload = archive_payloads.get("package/package.json")
+            try:
+                manifest = json.loads(
+                    manifest_payload.decode("utf-8")
+                    if isinstance(manifest_payload, bytes)
+                    else "",
+                    object_pairs_hook=EVIDENCE.strict_object,
+                    parse_constant=EVIDENCE.reject_nonfinite,
+                )
+            except (
+                EVIDENCE.EvidenceError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+            ):
+                raise ObservationError(
+                    "registry_npm_reproducibility_invalid"
+                ) from None
+            published_peers = reviewed.get("published_peer_dependencies")
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("name") != package
+                or manifest.get("version") != version
+                or not isinstance(published_peers, dict)
+                or (manifest.get("peerDependencies") or {}) != published_peers
+                or (
+                    package_id != "client"
+                    and published_peers.get("@latchway/client") != f"^{version}"
+                )
+                or (
+                    package_id == "client"
+                    and source_lock is not None
+                    and archive_payloads.get("package/contract.lock") != source_lock
+                )
+            ):
+                raise ObservationError("registry_npm_reproducibility_invalid")
+            if javascript_root is not None:
+                source_manifest_path = (
+                    javascript_root / "package.json"
+                    if package_id == "client"
+                    else javascript_root / "packages" / package_id / "package.json"
+                )
+                try:
+                    source_manifest = EVIDENCE.read_json(
+                        source_manifest_path, EVIDENCE.MAXIMUM_RESULT_BYTES
+                    )
+                except EVIDENCE.EvidenceError:
+                    raise ObservationError(
+                        "registry_npm_reproducibility_invalid"
+                    ) from None
+                source_peers = source_manifest.get("peerDependencies") or {}
+                if (
+                    source_manifest.get("name") != package
+                    or source_manifest.get("version") != version
+                    or not isinstance(source_peers, dict)
+                ):
+                    raise ObservationError("registry_npm_reproducibility_invalid")
+                expected_published_peers: dict[str, str] = {}
+                release_names = {item[1] for item in JAVASCRIPT_NPM_PACKAGES}
+                for name, requirement in source_peers.items():
+                    if not isinstance(name, str) or not isinstance(requirement, str):
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    if not requirement.startswith("workspace:"):
+                        expected_published_peers[name] = requirement
+                        continue
+                    if name not in release_names:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    selector = requirement.removeprefix("workspace:")
+                    replacements = {
+                        "^": f"^{version}",
+                        "~": f"~{version}",
+                        "*": version,
+                    }
+                    if selector not in replacements:
+                        raise ObservationError(
+                            "registry_npm_reproducibility_invalid"
+                        )
+                    expected_published_peers[name] = replacements[selector]
+                if expected_published_peers != published_peers:
+                    raise ObservationError("registry_npm_reproducibility_invalid")
+
+        expected = {
+            str(item.get("path"))
+            for item in rows
+            if isinstance(item, dict) and item.get("package") == package
+        }
+        prefix = (
+            "dist/"
+            if package_id == "client"
+            else f"packages/{package_id}/dist/"
+        )
+        observed = {path for path in payloads if path.startswith(prefix)}
+        if observed != expected:
+            raise ObservationError("registry_npm_reproducibility_invalid")
+
+    aggregate = hashlib.sha256()
+    for item in rows:
+        path = item.get("path") if isinstance(item, dict) else None
+        payload = payloads.get(str(path))
+        if (
+            payload is None
+            or item.get("bytes") != len(payload)
+            or item.get("sha256") != hashlib.sha256(payload).hexdigest()
+        ):
+            raise ObservationError("registry_npm_reproducibility_invalid")
+        aggregate.update(str(path).encode("utf-8"))
+        aggregate.update(b"\0")
+        aggregate.update(payload)
+        aggregate.update(b"\0")
+    aggregate_sha256 = aggregate.hexdigest()
+    if reproducibility.get("sha256") != aggregate_sha256:
+        raise ObservationError("registry_npm_reproducibility_invalid")
+    return {
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "inputs": "ordered-release-tarball-dist-file-bytes",
+        "archive_regular_file_closure_verified": package_evidence is not None,
+        "source_manifests_and_peer_translation_verified": javascript_root
+        is not None,
+        "independent_source_rebuild_performed": False,
+        "file_count": len(rows),
+        "bytes": total_bytes,
+        "sha256": aggregate_sha256,
+    }
+
+
 def valid_sha512_integrity(value: Any) -> bool:
     if not isinstance(value, str) or not value.startswith("sha512-"):
         return False
@@ -582,6 +1058,13 @@ class Observer:
         self.identity, self.candidate, self.candidate_created = EVIDENCE.identity_from_inputs(
             source, candidate, now
         )
+        try:
+            source_document = EVIDENCE.read_json(source)
+            self.documentation = MINTLIFY_PROOF.validate_documentation_coordinate(
+                source_document.get("documentation"), self.identity["core_commit"]
+            )
+        except (EVIDENCE.EvidenceError, MINTLIFY_PROOF.ProofError):
+            raise ObservationError("documentation_source_coordinate_invalid") from None
         self.input_hashes = {
             "source": EVIDENCE.sha256_file(source, EVIDENCE.MAXIMUM_RESULT_BYTES),
             "candidate": EVIDENCE.sha256_file(
@@ -892,6 +1375,7 @@ class Observer:
         cwd: Path | None = None,
         retained_inputs: Mapping[str, bytes] | None = None,
         retained_input_kind: str = "physical_device_receipt",
+        raw_artifacts: Mapping[str, bytes] | None = None,
     ) -> None:
         if observation not in EVIDENCE.expected_observations(self.domain):
             raise ObservationError("observation_invalid")
@@ -949,12 +1433,35 @@ class Observer:
                     "sha256": hashlib.sha256(retained_payload).hexdigest(),
                 }
             )
+        raw = raw_artifacts or {}
+        if len(raw) > 4:
+            raise ObservationError("observation_raw_artifact_set_invalid")
+        raw_files: list[tuple[str, str, bytes]] = []
+        for name, raw_payload in sorted(raw.items()):
+            if (
+                observation != "registry.npm.javascript"
+                or not isinstance(name, str)
+                or JAVASCRIPT_RETAINED_TARBALL.fullmatch(name) is None
+                or not isinstance(raw_payload, bytes)
+                or not 1 <= len(raw_payload) <= MAXIMUM_RETAINED_NPM_TARBALL_BYTES
+            ):
+                raise ObservationError("observation_raw_artifact_set_invalid")
+            raw_relative = f"artifacts/{slug}/{name}"
+            raw_files.append((name, raw_relative, raw_payload))
+            artifacts.append(
+                {
+                    "path": raw_relative,
+                    "sha256": hashlib.sha256(raw_payload).hexdigest(),
+                }
+            )
         # Validate and construct every output before the first filesystem
         # mutation so an invalid retained receipt cannot leave a partial
         # machine-result directory behind.
         write_bytes(self.output / relative, payload)
         if retained_files:
             write_bytes(self.output / retained_relative, retained_payload)
+        for _, raw_relative, raw_payload in raw_files:
+            write_bytes(self.output / raw_relative, raw_payload)
         descriptor = {
             "tool": EVIDENCE.OBSERVATION_TOOLS[observation],
             "argv": [Path(invocation[0]).name, *invocation[1:]],
@@ -1966,7 +2473,7 @@ class Observer:
     @staticmethod
     def _expected_release_assets(
         repository_id: str, version: str
-    ) -> tuple[set[str], bool]:
+    ) -> tuple[set[str], frozenset[str]]:
         if repository_id == "core":
             return {
                 "latchway-cross-repository-promotion.json",
@@ -1983,25 +2490,34 @@ class Observer:
                 "security-summary.json",
                 "security-summary.attestation.sigstore.json",
                 "oci-alias-promotion.json",
-            }, False
+            }, frozenset()
         if repository_id == "javascript":
-            return {
-                f"latchway-client-{version}.tgz",
+            fixed = {
+                *(f"latchway-{package_id}-{version}.tgz" for package_id, _ in JAVASCRIPT_NPM_PACKAGES),
                 f"docs-bundle-{version}.tar.gz",
                 "SHA256SUMS",
                 "build-reproducibility.json",
                 "contract-evidence.json",
+                "dependency-vulnerability-scan.json",
                 "package-evidence.json",
                 "post-publish-evidence.json",
                 "publish-input-evidence.json",
                 "release-candidate-evidence.json",
                 "tag-evidence.json",
-                "npm-registry-version.json",
-                "npm-registry-view.json",
-                "npm-attestations.json",
-                "npm-audit-signatures.json",
                 "npm-registry-evidence-manifest.json",
-            }, True
+            }
+            for package_id, _ in JAVASCRIPT_NPM_PACKAGES:
+                fixed.update(
+                    {
+                        f"npm-{package_id}-registry-version.json",
+                        f"npm-{package_id}-registry-view.json",
+                        f"npm-{package_id}-attestations.json",
+                        f"npm-{package_id}-audit-signatures.json",
+                    }
+                )
+            if len(fixed) != 31:
+                raise ObservationError("github_release_asset_set_invalid")
+            return fixed, frozenset(package_id for package_id, _ in JAVASCRIPT_NPM_PACKAGES)
         if repository_id == "react_native":
             return {
                 f"latchway-react-native-{version}.tgz",
@@ -2016,7 +2532,7 @@ class Observer:
                 "npm-audit-signatures.json",
                 "npm-registry-evidence-manifest.json",
                 "post-publish-evidence.json",
-            }, True
+            }, frozenset({""})
         if repository_id == "ios":
             archive = f"latchway-ios-sdk-{version}.tar.gz"
             return {
@@ -2027,7 +2543,7 @@ class Observer:
                 "cocoapods-reviewed-podspec.json",
                 "cocoapods-release-evidence.json",
                 "cocoapods-release-evidence.SHA256SUMS",
-            }, False
+            }, frozenset()
         if repository_id == "android":
             return {
                 f"latchway-android-{version}-maven-repository.zip",
@@ -2040,7 +2556,7 @@ class Observer:
                 "maven-central-deployment.json",
                 "maven-central-deployment-status.json",
                 "maven-central-release-evidence.json",
-            }, False
+            }, frozenset()
         raise ObservationError("github_release_repository_invalid")
 
     @staticmethod
@@ -2049,7 +2565,7 @@ class Observer:
         tag: str,
         *,
         expected_assets: set[str] | None = None,
-        adoption_required: bool = False,
+        adoption_required: frozenset[str] = frozenset(),
         expected_name: str | None = None,
         expected_body: str | None = None,
     ) -> dict[str, Any]:
@@ -2072,7 +2588,7 @@ class Observer:
             if not isinstance(assets, list):
                 raise ObservationError("github_release_asset_set_invalid")
             names: set[str] = set()
-            adoptions: set[str] = set()
+            adoptions: dict[str, set[str]] = {}
             for asset in assets:
                 name = asset.get("name") if isinstance(asset, dict) else None
                 digest = asset.get("digest") if isinstance(asset, dict) else None
@@ -2092,13 +2608,18 @@ class Observer:
                 ):
                     raise ObservationError("github_release_asset_set_invalid")
                 names.add(name)
-                if NPM_ADOPTION_ASSET.fullmatch(name):
-                    adoptions.add(name)
+                package_adoption = JAVASCRIPT_NPM_ADOPTION_ASSET.fullmatch(name)
+                if package_adoption is not None:
+                    adoptions.setdefault(package_adoption.group(1), set()).add(name)
+                elif NPM_ADOPTION_ASSET.fullmatch(name):
+                    adoptions.setdefault("", set()).add(name)
                 elif name not in expected_assets:
                     raise ObservationError("github_release_asset_set_invalid")
-            if not expected_assets.issubset(names) or (
-                adoption_required and not adoptions
-            ) or (not adoption_required and adoptions):
+            if (
+                not expected_assets.issubset(names)
+                or set(adoptions) != set(adoption_required)
+                or any(not values for values in adoptions.values())
+            ):
                 raise ObservationError("github_release_asset_set_invalid")
         return value
 
@@ -2127,6 +2648,7 @@ class Observer:
         return canonical_json(normalized), started, finished
 
     def observe_public_registries(self) -> None:
+        self._observe_documentation_production()
         image = self.identity["oci_image_digest"]
         cosign_command = (
             "cosign", "verify", "--output", "json",
@@ -2180,12 +2702,15 @@ class Observer:
             version="system",
             invocation=cosign_command,
         )
-        for observation, package, repository_id in (
-            ("registry.npm.javascript", "@latchway/client", "javascript"),
-            ("registry.npm.react-native", "@latchway/react-native", "react_native"),
-        ):
-            coordinate = self.identity["repositories"][repository_id]
-            self._observe_npm_bytes(observation, package, repository_id, coordinate)
+        javascript = self.identity["repositories"]["javascript"]
+        self._observe_javascript_npm_set(javascript)
+        react_native = self.identity["repositories"]["react_native"]
+        self._observe_npm_bytes(
+            "registry.npm.react-native",
+            "@latchway/react-native",
+            "react_native",
+            react_native,
+        )
         ios = self.identity["repositories"]["ios"]
         self._observe_swift_registry(ios)
         _, ios_assets = self._release_asset_set("ios")
@@ -2214,6 +2739,10 @@ class Observer:
             ios_source_attestations[name] = self._verify_release_asset_attestation(
                 path, "ios", ios
             )
+        if set(ios_source_attestations) != expected_source_attested_release_assets(
+            "ios", ios["version"], ios_assets
+        ):
+            raise ObservationError("release_asset_attestation_set_invalid")
         self._validate_exact_checksum_file(
             ios_assets["cocoapods-release-evidence.SHA256SUMS"]["bytes"],
             {
@@ -2318,6 +2847,10 @@ class Observer:
             android_source_attestations[name] = self._verify_release_asset_attestation(
                 path, "android", android
             )
+        if set(android_source_attestations) != expected_source_attested_release_assets(
+            "android", android["version"], android_assets
+        ):
+            raise ObservationError("release_asset_attestation_set_invalid")
         self._extract_reviewed_zip(android_archive, android_root)
         android_public_key_path = android_root / "latchway-maven-signing-public-key.asc"
         android_public_key_path.write_bytes(android_public_key)
@@ -2390,6 +2923,71 @@ class Observer:
             cwd=self.repositories["android"],
         )
 
+    def _observe_documentation_production(self) -> None:
+        root = "public-registries/documentation"
+        limits = {
+            MINTLIFY_PROOF.EVIDENCE_FILE: 8 * 1024 * 1024,
+            MINTLIFY_PROOF.CHECKSUM_FILE: 512,
+            MINTLIFY_PROOF.ATTESTATION_FILE: 2 * 1024 * 1024,
+            "run.json": EVIDENCE.MAXIMUM_RESULT_BYTES,
+            "workflow.json": EVIDENCE.MAXIMUM_RESULT_BYTES,
+            "artifact.json": EVIDENCE.MAXIMUM_RESULT_BYTES,
+            "attestation-verification.json": EVIDENCE.MAXIMUM_RESULT_BYTES,
+        }
+        payloads: dict[str, bytes] = {}
+        intervals: list[tuple[datetime, datetime]] = []
+        for name in sorted(MINTLIFY_PROOF.RETAINED_FILES):
+            payload, started, finished = self._github_authority_file(
+                f"{root}/{name}", maximum=limits[name]
+            )
+            payloads[name] = payload
+            intervals.append((started, finished))
+        try:
+            evidence = MINTLIFY_PROOF.load_json(
+                payloads[MINTLIFY_PROOF.EVIDENCE_FILE],
+                "mintlify_evidence_json_invalid",
+            )
+            workflow = evidence.get("workflow")
+            if not isinstance(workflow, dict):
+                raise MINTLIFY_PROOF.ProofError("mintlify_workflow_identity_invalid")
+            run_id = MINTLIFY_PROOF.positive_integer(
+                workflow.get("run_id"), "mintlify_workflow_identity_invalid"
+            )
+            run_attempt = MINTLIFY_PROOF.positive_integer(
+                workflow.get("run_attempt"), "mintlify_workflow_identity_invalid"
+            )
+            proof = MINTLIFY_PROOF.build_proof(
+                documentation=self.documentation,
+                evidence_payload=payloads[MINTLIFY_PROOF.EVIDENCE_FILE],
+                checksum_payload=payloads[MINTLIFY_PROOF.CHECKSUM_FILE],
+                attestation_bundle_payload=payloads[MINTLIFY_PROOF.ATTESTATION_FILE],
+                run_payload=payloads["run.json"],
+                workflow_payload=payloads["workflow.json"],
+                artifact_payload=payloads["artifact.json"],
+                attestation_verification_payload=payloads[
+                    "attestation-verification.json"
+                ],
+                expected_run_id=run_id,
+                expected_run_attempt=run_attempt,
+                now=self.now,
+            )
+        except MINTLIFY_PROOF.ProofError as error:
+            raise ObservationError(str(error)) from None
+        self.emit(
+            "registry.documentation-production",
+            canonical_json(proof),
+            started=min(started for started, _ in intervals),
+            finished=max(finished for _, finished in intervals),
+            version="core-v1",
+            invocation=(
+                "latchway-mintlify-production-validator",
+                "verify",
+                MINTLIFY_PROOF.EVIDENCE_FILE,
+            ),
+            retained_inputs=payloads,
+            retained_input_kind="mintlify_production_evidence",
+        )
+
     @staticmethod
     def _oci_release_tags(version: str) -> tuple[str, ...]:
         match = re.fullmatch(
@@ -2418,6 +3016,615 @@ class Observer:
         if not isinstance(value, list) or not value:
             raise ObservationError("release_asset_attestation_invalid")
         return value
+
+    @staticmethod
+    def _javascript_npm_evidence_names(package_id: str) -> tuple[str, ...]:
+        if package_id not in {item[0] for item in JAVASCRIPT_NPM_PACKAGES}:
+            raise ObservationError("registry_npm_package_set_invalid")
+        return tuple(
+            f"npm-{package_id}-{suffix}.json"
+            for suffix in (
+                "registry-version",
+                "registry-view",
+                "attestations",
+                "audit-signatures",
+            )
+        )
+
+    def _verify_javascript_contract_source(
+        self, contract_evidence: Any, coordinate: Mapping[str, str]
+    ) -> dict[str, Any]:
+        javascript_root = self.repositories.get("javascript")
+        if (
+            not isinstance(javascript_root, Path)
+            or not javascript_root.is_absolute()
+            or not javascript_root.is_dir()
+            or javascript_root.is_symlink()
+        ):
+            raise ObservationError("registry_npm_contract_source_invalid")
+        try:
+            lock_payload = EVIDENCE.read_bytes(
+                javascript_root / "contract.lock", EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("registry_npm_contract_source_invalid") from None
+        lock = parse_contract_lock_payload(lock_payload)
+        fixture_root = javascript_root / "test" / "fixtures" / "contract"
+        if (
+            not fixture_root.is_dir()
+            or fixture_root.is_symlink()
+            or any(path.is_symlink() or not path.is_file() for path in fixture_root.iterdir())
+        ):
+            raise ObservationError("registry_npm_contract_source_invalid")
+        fixture_paths = sorted(fixture_root.iterdir(), key=lambda path: path.name)
+        if not 1 <= len(fixture_paths) <= 64 or any(
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path.name) is None
+            for path in fixture_paths
+        ):
+            raise ObservationError("registry_npm_contract_source_invalid")
+        fixtures: list[dict[str, str]] = []
+        try:
+            for path in fixture_paths:
+                payload = EVIDENCE.read_bytes(path, EVIDENCE.MAXIMUM_RESULT_BYTES)
+                fixtures.append(
+                    {"name": path.name, "sha256": hashlib.sha256(payload).hexdigest()}
+                )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("registry_npm_contract_source_invalid") from None
+        wire = lock.get("wire_protocol")
+        if (
+            not isinstance(contract_evidence, dict)
+            or set(contract_evidence)
+            != {
+                "schema_version", "contract_version", "core_release",
+                "core_commit", "bundle_sha256", "wire_protocol_version",
+                "contract_lock_sha256", "fixtures",
+            }
+            or contract_evidence.get("schema_version") != 1
+            or contract_evidence.get("contract_version")
+            != self.identity.get("contract_version")
+            or contract_evidence.get("contract_version")
+            != lock.get("contract_version")
+            or contract_evidence.get("core_release") != self.identity.get("core_release")
+            or contract_evidence.get("core_release") != lock.get("core_release")
+            or contract_evidence.get("core_commit") != lock.get("core_commit")
+            or contract_evidence.get("bundle_sha256") != self.identity.get("bundle_sha256")
+            or contract_evidence.get("bundle_sha256") != lock.get("bundle_sha256")
+            or not isinstance(contract_evidence.get("wire_protocol_version"), int)
+            or isinstance(contract_evidence.get("wire_protocol_version"), bool)
+            or str(contract_evidence["wire_protocol_version"]) != wire
+            or contract_evidence.get("contract_lock_sha256")
+            != hashlib.sha256(lock_payload).hexdigest()
+            or contract_evidence.get("fixtures") != fixtures
+            or coordinate.get("commit")
+            != self.identity.get("repositories", {}).get("javascript", {}).get("commit")
+        ):
+            raise ObservationError("registry_npm_contract_source_invalid")
+        return {
+            "schema_version": 1,
+            "source_repository_commit": coordinate["commit"],
+            "contract_version": contract_evidence["contract_version"],
+            "core_release": contract_evidence["core_release"],
+            "core_commit": contract_evidence["core_commit"],
+            "bundle_sha256": contract_evidence["bundle_sha256"],
+            "wire_protocol_version": contract_evidence["wire_protocol_version"],
+            "contract_lock_sha256": contract_evidence["contract_lock_sha256"],
+            "fixture_count": len(fixtures),
+            "fixture_set_sha256": hashlib.sha256(canonical_json(fixtures)).hexdigest(),
+        }
+
+    def _validate_javascript_npm_aggregate(
+        self,
+        coordinate: Mapping[str, str],
+        release_assets: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        names = [package for _, package in JAVASCRIPT_NPM_PACKAGES]
+        version = coordinate["version"]
+        documents = {
+            name: load_output(
+                release_assets[name]["bytes"], "registry_npm_package_set_invalid"
+            )
+            for name in JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS
+        }
+        package_evidence = documents["package-evidence.json"]
+        candidate = documents["release-candidate-evidence.json"]
+        publish_input = documents["publish-input-evidence.json"]
+        post_publish = documents["post-publish-evidence.json"]
+        manifest = documents["npm-registry-evidence-manifest.json"]
+        reproducibility = documents["build-reproducibility.json"]
+        validate_javascript_supporting_evidence(documents, coordinate)
+        repository_url = "https://github.com/Latchway/latchway-js"
+        source = {
+            "repository": repository_url,
+            "commit": coordinate["commit"],
+            "workflow": ".github/workflows/release.yml",
+            "ref": "refs/heads/main",
+        }
+        gates = [
+            "workflow-policy",
+            "contract-lock",
+            "release-policy",
+            "lint",
+            "typecheck",
+            "clean-build",
+            "unit-tests",
+            "offline-release-tests",
+            "examples",
+            "exports",
+            "web-browser-and-bundler-conformance",
+            "build-reproducibility",
+            "package-conformance",
+        ]
+        package_items = (
+            package_evidence.get("packages")
+            if isinstance(package_evidence, dict)
+            else None
+        )
+        consumer = package_evidence.get("consumer") if isinstance(package_evidence, dict) else None
+        if (
+            not isinstance(package_evidence, dict)
+            or set(package_evidence)
+            != {"schema_version", "kind", "version", "package_count", "publish_order", "packages", "consumer"}
+            or package_evidence.get("schema_version") != 2
+            or package_evidence.get("kind") != "latchway_npm_package_set_evidence"
+            or package_evidence.get("version") != version
+            or package_evidence.get("package_count") != 4
+            or package_evidence.get("publish_order") != names
+            or not isinstance(package_items, list)
+            or len(package_items) != 4
+            or not isinstance(consumer, dict)
+            or set(consumer) != {"package_count", "packages", "node_esm", "typescript", "peer_source"}
+            or consumer.get("package_count") != 4
+            or consumer.get("node_esm") is not True
+            or consumer.get("typescript") is not True
+            or consumer.get("peer_source") != "reviewed"
+            or not isinstance(consumer.get("packages"), list)
+            or len(consumer["packages"]) != 4
+            or any(not isinstance(item, dict) or set(item) != {"name", "version"} for item in consumer["packages"])
+            or [item["name"] for item in consumer["packages"]] != names
+            or any(item["version"] != version for item in consumer["packages"])
+        ):
+            raise ObservationError("registry_npm_package_set_invalid")
+        candidate_gates = candidate.get("gates") if isinstance(candidate, dict) else None
+        if (
+            not isinstance(candidate, dict)
+            or set(candidate)
+            != {"schema_version", "package_count", "packages", "version", "source_commit", "worktree_clean", "stable_version", "node", "pnpm", "gates"}
+            or candidate.get("schema_version") != 2
+            or candidate.get("package_count") != 4
+            or candidate.get("packages") != names
+            or candidate.get("version") != version
+            or candidate.get("source_commit") != coordinate["commit"]
+            or candidate.get("worktree_clean") is not True
+            or candidate.get("stable_version") is not True
+            or candidate.get("node") != "v24.19.0"
+            or candidate.get("pnpm") != "10.15.0"
+            or not isinstance(candidate_gates, list)
+            or [item.get("name") for item in candidate_gates if isinstance(item, dict)] != gates
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"name", "status", "duration_ms"}
+                or item.get("status") != "passed"
+                or not isinstance(item.get("duration_ms"), int)
+                or isinstance(item.get("duration_ms"), bool)
+                or item["duration_ms"] < 0
+                for item in candidate_gates
+            )
+        ):
+            raise ObservationError("registry_npm_release_candidate_invalid")
+        publish_packages = publish_input.get("packages") if isinstance(publish_input, dict) else None
+        publish_consumer = publish_input.get("consumer") if isinstance(publish_input, dict) else None
+        if (
+            not isinstance(publish_input, dict)
+            or set(publish_input)
+            != {"schema_version", "kind", "version", "source_commit", "release_tag", "package_count", "publish_order", "packages", "verified_job_evidence", "package_evidence", "checksums", "consumer"}
+            or publish_input.get("schema_version") != 2
+            or publish_input.get("kind") != "latchway_npm_publish_input_evidence"
+            or publish_input.get("version") != version
+            or publish_input.get("source_commit") != coordinate["commit"]
+            or publish_input.get("release_tag") != coordinate["tag"]
+            or publish_input.get("package_count") != 4
+            or publish_input.get("publish_order") != names
+            or publish_input.get("verified_job_evidence") is not True
+            or not isinstance(publish_packages, list)
+            or len(publish_packages) != 4
+            or not isinstance(publish_consumer, dict)
+            or set(publish_consumer) != {"package_count", "packages", "node_esm", "typescript", "peer_source"}
+            or publish_consumer.get("package_count") != 4
+            or publish_consumer.get("node_esm") is not True
+            or publish_consumer.get("typescript") is not False
+            or publish_consumer.get("peer_source") != "registry"
+            or not isinstance(publish_consumer.get("packages"), list)
+            or len(publish_consumer["packages"]) != 4
+            or any(not isinstance(item, dict) or set(item) != {"name", "version"} for item in publish_consumer["packages"])
+            or [item["name"] for item in publish_consumer["packages"]] != names
+            or any(item["version"] != version for item in publish_consumer["packages"])
+            or not isinstance(publish_input.get("package_evidence"), dict)
+            or set(publish_input["package_evidence"]) != {"file", "sha256"}
+            or nested(publish_input, "package_evidence", "file") != "package-evidence.json"
+            or nested(publish_input, "package_evidence", "sha256")
+            != hashlib.sha256(release_assets["package-evidence.json"]["bytes"]).hexdigest()
+            or not isinstance(publish_input.get("checksums"), dict)
+            or set(publish_input["checksums"]) != {"file", "sha256"}
+            or nested(publish_input, "checksums", "file") != "SHA256SUMS"
+            or nested(publish_input, "checksums", "sha256")
+            != hashlib.sha256(release_assets["SHA256SUMS"]["bytes"]).hexdigest()
+        ):
+            raise ObservationError("registry_npm_publish_input_invalid")
+        manifest_packages = manifest.get("packages") if isinstance(manifest, dict) else None
+        if (
+            not isinstance(manifest, dict)
+            or set(manifest)
+            != {"schema_version", "kind", "version", "package_count", "publish_order", "packages"}
+            or manifest.get("schema_version") != 2
+            or manifest.get("kind")
+            != "latchway_npm_registry_package_set_evidence_manifest"
+            or manifest.get("version") != version
+            or manifest.get("package_count") != 4
+            or manifest.get("publish_order") != names
+            or not isinstance(manifest_packages, list)
+            or len(manifest_packages) != 4
+        ):
+            raise ObservationError("registry_npm_registry_manifest_invalid")
+        post_packages = post_publish.get("packages") if isinstance(post_publish, dict) else None
+        reproducibility_files = (
+            reproducibility.get("files")
+            if isinstance(reproducibility, dict)
+            else None
+        )
+        reproducibility_prefixes = {
+            package: ("dist/" if package_id == "client" else f"packages/{package_id}/dist/")
+            for package_id, package in JAVASCRIPT_NPM_PACKAGES
+        }
+        manifest_bytes = release_assets["npm-registry-evidence-manifest.json"]["bytes"]
+        if (
+            not isinstance(post_publish, dict)
+            or set(post_publish)
+            != {"schema_version", "kind", "version", "package_count", "publish_order", "source", "release_tag", "registry", "packages", "evidence_manifest"}
+            or post_publish.get("schema_version") != 3
+            or post_publish.get("kind")
+            != "latchway_npm_package_set_publication_evidence"
+            or post_publish.get("version") != version
+            or post_publish.get("package_count") != 4
+            or post_publish.get("publish_order") != names
+            or post_publish.get("source") != source
+            or post_publish.get("release_tag") != coordinate["tag"]
+            or post_publish.get("registry") != "https://registry.npmjs.org/"
+            or not isinstance(post_packages, list)
+            or len(post_packages) != 4
+            or post_publish.get("evidence_manifest")
+            != {
+                "file": "npm-registry-evidence-manifest.json",
+                "bytes": len(manifest_bytes),
+                "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            }
+        ):
+            raise ObservationError("registry_npm_post_publish_invalid")
+        if (
+            not isinstance(reproducibility, dict)
+            or set(reproducibility) != {"schema_version", "identical", "package_count", "sha256", "files"}
+            or reproducibility.get("schema_version") != 1
+            or reproducibility.get("identical") is not True
+            or reproducibility.get("package_count") != 4
+            or re.fullmatch(r"[0-9a-f]{64}", str(reproducibility.get("sha256"))) is None
+            or not isinstance(reproducibility_files, list)
+            or not reproducibility_files
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"package", "path", "bytes", "sha256"}
+                or item.get("package") not in names
+                or not isinstance(item.get("path"), str)
+                or not item["path"].startswith(
+                    reproducibility_prefixes.get(item.get("package"), "\0")
+                )
+                or "\\" in item["path"]
+                or ".." in item["path"].split("/")
+                or not isinstance(item.get("bytes"), int)
+                or isinstance(item.get("bytes"), bool)
+                or item["bytes"] < 1
+                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256"))) is None
+                for item in reproducibility_files
+            )
+            or len({item["path"] for item in reproducibility_files})
+            != len(reproducibility_files)
+            or {item["package"] for item in reproducibility_files} != set(names)
+            or [
+                (item["package"], item["path"])
+                for item in reproducibility_files
+            ]
+            != sorted(
+                (
+                    (item["package"], item["path"])
+                    for item in reproducibility_files
+                ),
+                key=lambda item: (names.index(item[0]), item[1]),
+            )
+        ):
+            raise ObservationError("registry_npm_reproducibility_invalid")
+
+        normalized: list[dict[str, Any]] = []
+        for index, (package_id, package) in enumerate(JAVASCRIPT_NPM_PACKAGES):
+            item = package_items[index]
+            published = publish_packages[index]
+            manifest_item = manifest_packages[index]
+            post_item = post_packages[index]
+            tarball_name = f"latchway-{package_id}-{version}.tgz"
+            if (
+                not isinstance(item, dict)
+                or set(item)
+                != {"id", "package", "version", "tarball", "bytes", "sha1", "sha256", "sha512", "integrity", "double_pack_byte_identical", "archive_allowlist_verified", "archive_regular_files_only", "credential_scan", "entries", "unpacked_bytes", "published_peer_dependencies"}
+                or item.get("id") != package_id
+                or item.get("package") != package
+                or item.get("version") != version
+                or item.get("tarball") != tarball_name
+                or not isinstance(item.get("bytes"), int)
+                or isinstance(item.get("bytes"), bool)
+                or item["bytes"] < 1
+                or re.fullmatch(r"[0-9a-f]{40}", str(item.get("sha1"))) is None
+                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256"))) is None
+                or re.fullmatch(r"[0-9a-f]{128}", str(item.get("sha512"))) is None
+                or not valid_sha512_integrity(item.get("integrity"))
+                or item.get("double_pack_byte_identical") is not True
+                or item.get("archive_allowlist_verified") is not True
+                or item.get("archive_regular_files_only") is not True
+                or item.get("credential_scan") != "passed"
+                or not isinstance(item.get("entries"), list)
+                or not item["entries"]
+                or item["entries"] != sorted(set(item["entries"]))
+                or any(
+                    not isinstance(entry, str)
+                    or re.fullmatch(
+                        r"package/(?:[A-Za-z0-9@._+-]+/)*[A-Za-z0-9@._+-]+",
+                        entry,
+                    )
+                    is None
+                    for entry in item["entries"]
+                )
+                or not isinstance(item.get("unpacked_bytes"), int)
+                or isinstance(item.get("unpacked_bytes"), bool)
+                or not 1 <= item["unpacked_bytes"] <= 25 * 1024 * 1024
+                or not isinstance(item.get("published_peer_dependencies"), dict)
+                or any(
+                    not isinstance(name, str)
+                    or not name
+                    or not isinstance(requirement, str)
+                    or not requirement
+                    for name, requirement in item[
+                        "published_peer_dependencies"
+                    ].items()
+                )
+            ):
+                raise ObservationError("registry_npm_package_set_invalid")
+            tarball = {
+                "name": tarball_name,
+                "bytes": item["bytes"],
+                "sha256": item["sha256"],
+                "sha512": item["sha512"],
+                "integrity": item["integrity"],
+            }
+            if (
+                not isinstance(published, dict)
+                or set(published) != {"id", "package", "version", "tarball", "bytes", "sha1", "sha256", "sha512", "integrity"}
+                or published.get("id") != package_id
+                or published.get("package") != package
+                or published.get("version") != version
+                or published.get("tarball") != tarball_name
+                or any(published.get(field) != item.get(field) for field in ("bytes", "sha1", "sha256", "sha512", "integrity"))
+                or not isinstance(manifest_item, dict)
+                or set(manifest_item) != {"id", "package", "version", "tarball", "evidence"}
+                or manifest_item.get("id") != package_id
+                or manifest_item.get("package") != package
+                or manifest_item.get("version") != version
+                or manifest_item.get("tarball") != tarball
+                or not isinstance(manifest_item.get("evidence"), list)
+                or not isinstance(post_item, dict)
+                or set(post_item) != {"id", "package", "version", "publication_mode", "tarball", "trusted_publisher", "registry_signature_verification", "clean_consumer", "retained_outputs"}
+                or post_item.get("id") != package_id
+                or post_item.get("package") != package
+                or post_item.get("version") != version
+                or post_item.get("publication_mode") != "published"
+                or nested(post_item, "tarball", "name") != tarball_name
+                or any(nested(post_item, "tarball", field) != tarball[field] for field in ("bytes", "sha256", "sha512", "integrity"))
+                or nested(post_item, "tarball", "registry_bytes_sha256") != item["sha256"]
+            ):
+                raise ObservationError("registry_npm_package_set_invalid")
+            evidence_names = set(self._javascript_npm_evidence_names(package_id))
+            evidence_by_name = {
+                entry.get("name"): entry
+                for entry in manifest_item["evidence"]
+                if isinstance(entry, dict)
+            }
+            retained_outputs = post_item.get("retained_outputs")
+            if (
+                len(evidence_by_name) != 4
+                or set(evidence_by_name) != evidence_names
+                or not isinstance(retained_outputs, dict)
+                or set(retained_outputs) != evidence_names
+            ):
+                raise ObservationError("registry_npm_registry_manifest_invalid")
+            for evidence_name in evidence_names:
+                payload = release_assets[evidence_name]["bytes"]
+                reference = {
+                    "name": evidence_name,
+                    "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+                if evidence_by_name[evidence_name] != reference or retained_outputs[evidence_name] != {
+                    "bytes": reference["bytes"],
+                    "sha256": reference["sha256"],
+                }:
+                    raise ObservationError("registry_npm_registry_manifest_invalid")
+            normalized.append(
+                {
+                    "id": package_id,
+                    "package": package,
+                    "evidence": item,
+                    "manifest": manifest_item,
+                    "post_publish": post_item,
+                }
+            )
+        checksum_verification = validate_javascript_sha256sums(
+            release_assets["SHA256SUMS"]["bytes"], package_items, version
+        )
+        return {
+            "documents": documents,
+            "packages": normalized,
+            "checksum_verification": checksum_verification,
+        }
+
+    def _observe_javascript_npm_set(
+        self, coordinate: Mapping[str, str]
+    ) -> None:
+        _, release_assets = self._release_asset_set("javascript")
+        aggregate = self._validate_javascript_npm_aggregate(coordinate, release_assets)
+        aggregate_documents = aggregate["documents"]
+        contract_source_verification = self._verify_javascript_contract_source(
+            aggregate_documents["contract-evidence.json"], coordinate
+        )
+        reproducibility_verification = (
+            verify_javascript_reproducibility_archive_inputs(
+                aggregate_documents["build-reproducibility.json"],
+                release_assets,
+                coordinate["version"],
+                aggregate_documents["package-evidence.json"],
+                self.repositories["javascript"],
+            )
+        )
+        source_attestations: dict[str, Any] = {}
+        attestation_root = Path(
+            tempfile.mkdtemp(prefix="latchway-javascript-release-attestations-")
+        )
+        for name in sorted(release_assets):
+            path = attestation_root / name
+            path.write_bytes(release_assets[name]["bytes"])
+            source_attestations[name] = self._verify_release_asset_attestation(
+                path, "javascript", coordinate
+            )
+        if set(source_attestations) != expected_source_attested_release_assets(
+            "javascript", coordinate["version"], release_assets
+        ):
+            raise ObservationError("release_asset_attestation_set_invalid")
+        package_proofs: list[dict[str, Any]] = []
+        starts: list[datetime] = []
+        for package_item in aggregate["packages"]:
+            package_id = package_item["id"]
+            package = package_item["package"]
+            evidence = package_item["evidence"]
+            metadata_payload, started, _ = self._execute_command(
+                (
+                    "npm", "view", f"{package}@{coordinate['version']}", "--json",
+                    "--include-attestations", "--registry=https://registry.npmjs.org/",
+                ),
+                environment={
+                    "NPM_CONFIG_USERCONFIG": os.devnull,
+                    "NPM_CONFIG_PROVENANCE": "false",
+                },
+            )
+            starts.append(started)
+            self._validate_npm(metadata_payload, package, coordinate)
+            metadata = load_output(metadata_payload, "registry_npm_invalid")
+            tarball_name = evidence["tarball"]
+            reviewed_bytes = release_assets[tarball_name]["bytes"]
+            digests = javascript_npm_tarball_digest(reviewed_bytes)
+            sha1 = digests["sha1"]
+            sha256 = digests["sha256"]
+            sha512 = digests["sha512"]
+            integrity = digests["integrity"]
+            registry_bytes = self._download_https(
+                nested(metadata, "dist", "tarball"),
+                allowed_hosts={"registry.npmjs.org"},
+                maximum=10 * 1024 * 1024,
+            )
+            if (
+                registry_bytes != reviewed_bytes
+                or nested(metadata, "dist", "integrity") != integrity
+                or evidence.get("bytes") != digests["bytes"]
+                or evidence.get("sha1") != sha1
+                or evidence.get("sha256") != sha256
+                or evidence.get("sha512") != sha512
+                or evidence.get("integrity") != integrity
+            ):
+                raise ObservationError("registry_npm_byte_proof_invalid")
+            registry_evidence = self._validate_javascript_npm_package_evidence(
+                package_id,
+                package,
+                coordinate,
+                evidence,
+                package_item["manifest"],
+                package_item["post_publish"],
+                metadata,
+                metadata_payload,
+                release_assets,
+            )
+            package_proofs.append(
+                {
+                    "id": package_id,
+                    "package": package,
+                    "version": coordinate["version"],
+                    "registry_tarball_url": nested(metadata, "dist", "tarball"),
+                    "registry_integrity": nested(metadata, "dist", "integrity"),
+                    "tarball": tarball_name,
+                    "bytes": len(reviewed_bytes),
+                    "sha1": sha1,
+                    "sha256": sha256,
+                    "sha512": sha512,
+                    "integrity": integrity,
+                    "registry_tarball_byte_identical": True,
+                    "provenance": registry_evidence["provenance"],
+                    "registry_evidence": registry_evidence["retained"],
+                    "independent_live_registry_evidence": registry_evidence["live"],
+                    "adoptions": registry_evidence["adoptions"],
+                }
+            )
+        retained_aggregates = {
+            name: self._retained_asset_envelope(name, release_assets[name])
+            for name in JAVASCRIPT_NPM_AGGREGATE_ASSETS
+        }
+        proof = {
+            "schema_version": 2,
+            "kind": "latchway_npm_package_set_registry_proof",
+            "registry": "npm",
+            "version": coordinate["version"],
+            "source_commit": coordinate["commit"],
+            "release_tag": coordinate["tag"],
+            "package_count": 4,
+            "publish_order": [package for _, package in JAVASCRIPT_NPM_PACKAGES],
+            "packages": package_proofs,
+            "reviewed_aggregate_evidence": aggregate_documents,
+            "checksum_verification": aggregate["checksum_verification"],
+            "contract_source_verification": contract_source_verification,
+            "reproducibility_archive_verification": reproducibility_verification,
+            "retained_aggregate_evidence": retained_aggregates,
+            "release_asset_set": {
+                name: release_assets[name]["metadata"] for name in sorted(release_assets)
+            },
+            "immutable_release_asset_verifications": {
+                name: release_assets[name]["immutable_release_verification"]
+                for name in sorted(release_assets)
+            },
+            "release_asset_attestation_verifications": source_attestations,
+            "compatibility": self._derive_npm_compatibility("javascript"),
+        }
+        finished = datetime.now(timezone.utc).replace(microsecond=0)
+        started = min(starts)
+        if finished <= started:
+            finished = started + EVIDENCE.timedelta(seconds=1)
+        self.emit(
+            "registry.npm.javascript",
+            canonical_json(proof),
+            started=started,
+            finished=finished,
+            version="core-v2",
+            invocation=("npm", "view", "@latchway/{client,openai,vercel-ai,langchain}", "--json", "--include-attestations", "and-download"),
+            cwd=self.repositories["javascript"],
+            raw_artifacts={
+                f"latchway-{package_id}-{coordinate['version']}.tgz":
+                    release_assets[
+                        f"latchway-{package_id}-{coordinate['version']}.tgz"
+                    ]["bytes"]
+                for package_id, _ in JAVASCRIPT_NPM_PACKAGES
+            },
+        )
 
     def _observe_npm_bytes(
         self,
@@ -2522,6 +3729,17 @@ class Observer:
             metadata_payload,
             release_assets,
         )
+        retained_source_attestations = registry_evidence["retained"].get(
+            "source_attestation_verifications"
+        )
+        if (
+            not isinstance(retained_source_attestations, dict)
+            or set(asset_attestations) | set(retained_source_attestations)
+            != expected_source_attested_release_assets(
+                repository_id, coordinate["version"], release_assets
+            )
+        ):
+            raise ObservationError("release_asset_attestation_set_invalid")
         provenance = registry_evidence["provenance"]
         proof = {
             "schema_version": 1,
@@ -2623,7 +3841,21 @@ class Observer:
         assets = value.get("release_assets")
         registry = value.get("public_registry")
         names = set(assets) if isinstance(assets, dict) else set()
-        adoptions = {name for name in names if NPM_ADOPTION_ASSET.fullmatch(name)}
+        if repository_id == "javascript":
+            adoptions = {
+                name
+                for name in names
+                if JAVASCRIPT_NPM_ADOPTION_ASSET.fullmatch(name)
+            }
+            adoption_ids = {
+                match.group(1)
+                for name in adoptions
+                if (match := JAVASCRIPT_NPM_ADOPTION_ASSET.fullmatch(name))
+                is not None
+            }
+        else:
+            adoptions = {name for name in names if NPM_ADOPTION_ASSET.fullmatch(name)}
+            adoption_ids = {""} if adoptions else set()
         if (
             value.get("repository")
             != f"https://github.com/Latchway/{REPOSITORY_NAMES[repository_id]}"
@@ -2634,7 +3866,7 @@ class Observer:
             or not isinstance(assets, dict)
             or not expected_assets.issubset(names)
             or names - expected_assets != adoptions
-            or adoption_required != bool(adoptions)
+            or set(adoption_required) != adoption_ids
             or not isinstance(registry, dict)
         ):
             raise ObservationError("registry_npm_dependency_evidence_invalid")
@@ -2870,7 +4102,13 @@ class Observer:
                 or adoption.get("commit") != coordinate["commit"]
                 or adoption.get("workflow") != ".github/workflows/release.yml"
                 or adoption.get("ref") != "refs/heads/main"
-                or adoption.get("mode") not in {"published", "adopted_existing"}
+                or not valid_npm_adoption_mode(
+                    adoption.get("mode"),
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    provenance["run_id"],
+                    provenance["run_attempt"],
+                )
                 or record.get("registry_evidence_manifest") != {
                     "file": "npm-registry-evidence-manifest.json",
                     "sha256": manifest_sha256,
@@ -2902,6 +4140,242 @@ class Observer:
                 "npm_view": {
                     "sha256": hashlib.sha256(live_view_payload).hexdigest(),
                     "content_base64": base64.b64encode(live_view_payload).decode("ascii"),
+                },
+            },
+            "adoptions": adoptions,
+        }
+
+    def _validate_javascript_npm_package_evidence(
+        self,
+        package_id: str,
+        package: str,
+        coordinate: Mapping[str, str],
+        package_evidence: Mapping[str, Any],
+        manifest_entry: Mapping[str, Any],
+        post_entry: Mapping[str, Any],
+        metadata: Mapping[str, Any],
+        live_view_payload: bytes,
+        release_assets: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        raw_names = set(self._javascript_npm_evidence_names(package_id))
+        adoption_names = sorted(
+            name
+            for name in release_assets
+            if (
+                (match := JAVASCRIPT_NPM_ADOPTION_ASSET.fullmatch(name))
+                is not None
+                and match.group(1) == package_id
+            )
+        )
+        if not raw_names.issubset(release_assets) or not adoption_names:
+            raise ObservationError("registry_npm_release_evidence_invalid")
+        retained = {
+            name: self._retained_asset_envelope(name, release_assets[name])
+            for name in sorted(raw_names)
+        }
+        values = {
+            name: load_output(
+                release_assets[name]["bytes"],
+                "registry_npm_release_evidence_invalid",
+            )
+            for name in raw_names
+        }
+        registry_version_name = f"npm-{package_id}-registry-version.json"
+        registry_view_name = f"npm-{package_id}-registry-view.json"
+        attestations_name = f"npm-{package_id}-attestations.json"
+        audit_name = f"npm-{package_id}-audit-signatures.json"
+        for document in (values[registry_version_name], values[registry_view_name], metadata):
+            self._validate_npm(canonical_json(document), package, coordinate)
+            if (
+                nested(document, "dist", "integrity")
+                != package_evidence.get("integrity")
+            ):
+                raise ObservationError("registry_npm_release_evidence_invalid")
+        if values[registry_view_name] != metadata:
+            raise ObservationError("registry_npm_registry_view_changed")
+        retained_audit = values[audit_name]
+        if not isinstance(retained_audit, dict) or "error" in retained_audit:
+            raise ObservationError("registry_npm_release_evidence_invalid")
+        provenance, live = self._validate_npm_provenance(
+            package,
+            "javascript",
+            coordinate,
+            package_evidence,
+            metadata,
+            release_assets[attestations_name]["bytes"],
+            release_assets[audit_name]["bytes"],
+        )
+        evidence_references = {
+            name: {
+                "bytes": len(release_assets[name]["bytes"]),
+                "sha256": hashlib.sha256(release_assets[name]["bytes"]).hexdigest(),
+            }
+            for name in raw_names
+        }
+        clean_consumer = post_entry.get("clean_consumer")
+        if (
+            post_entry.get("trusted_publisher")
+            != {
+                "provider": "github",
+                "provenance_predicate_type": "https://slsa.dev/provenance/v1",
+                "provenance_origin": {
+                    "invocation_id": provenance["invocation_id"],
+                    "run_id": provenance["run_id"],
+                    "run_attempt": provenance["run_attempt"],
+                },
+                "sigstore_bundle": {
+                    "file": attestations_name,
+                    **evidence_references[attestations_name],
+                },
+            }
+            or post_entry.get("registry_signature_verification")
+            != {
+                "command": "npm audit signatures --json --registry=https://registry.npmjs.org/",
+                "output": {
+                    "file": audit_name,
+                    **evidence_references[audit_name],
+                },
+            }
+            or post_entry.get("retained_outputs") != evidence_references
+            or not isinstance(clean_consumer, dict)
+            or set(clean_consumer)
+            != {
+                "isolated_directory",
+                "install_scripts",
+                "exact_package_version",
+                "matching_client_version",
+                "external_peer_dependencies",
+                "node_esm",
+                "registry_signatures",
+            }
+            or clean_consumer.get("isolated_directory") is not True
+            or clean_consumer.get("install_scripts") != "disabled"
+            or clean_consumer.get("exact_package_version") != coordinate["version"]
+            or clean_consumer.get("matching_client_version")
+            != (None if package_id == "client" else coordinate["version"])
+            or clean_consumer.get("node_esm") is not True
+            or clean_consumer.get("registry_signatures") is not True
+            or not isinstance(clean_consumer.get("external_peer_dependencies"), dict)
+            or any(
+                not isinstance(name, str)
+                or not name
+                or not isinstance(requirement, str)
+                or not requirement
+                for name, requirement in clean_consumer[
+                    "external_peer_dependencies"
+                ].items()
+            )
+        ):
+            raise ObservationError("registry_npm_post_publish_invalid")
+        repository = "Latchway/latchway-js"
+        repository_url = f"https://github.com/{repository}"
+        source_binding = {
+            "repository": repository_url,
+            "commit": coordinate["commit"],
+            "workflow": ".github/workflows/release.yml",
+            "ref": "refs/heads/main",
+        }
+        manifest_sha256 = hashlib.sha256(
+            release_assets["npm-registry-evidence-manifest.json"]["bytes"]
+        ).hexdigest()
+        adoptions: list[dict[str, Any]] = []
+        for name in adoption_names:
+            record = load_output(
+                release_assets[name]["bytes"], "registry_npm_adoption_invalid"
+            )
+            match = JAVASCRIPT_NPM_ADOPTION_ASSET.fullmatch(name)
+            adoption = record.get("adoption") if isinstance(record, dict) else None
+            expected_tarball = {
+                "name": package_evidence.get("tarball"),
+                "bytes": package_evidence.get("bytes"),
+                "sha256": package_evidence.get("sha256"),
+                "sha512": package_evidence.get("sha512"),
+                "integrity": package_evidence.get("integrity"),
+            }
+            expected_origin = {
+                **source_binding,
+                "predicate_type": "https://slsa.dev/provenance/v1",
+                "run_id": provenance["run_id"],
+                "run_attempt": provenance["run_attempt"],
+                "invocation_id": provenance["invocation_id"],
+            }
+            if (
+                match is None
+                or not isinstance(record, dict)
+                or set(record)
+                != {
+                    "schema_version",
+                    "kind",
+                    "package",
+                    "version",
+                    "release_tag",
+                    "tarball",
+                    "source",
+                    "provenance",
+                    "adoption",
+                    "registry_evidence_manifest",
+                }
+                or record.get("schema_version") != 1
+                or record.get("kind") != "latchway_npm_release_adoption"
+                or record.get("package") != package
+                or record.get("version") != coordinate["version"]
+                or record.get("release_tag") != coordinate["tag"]
+                or record.get("tarball") != expected_tarball
+                or record.get("source") != source_binding
+                or record.get("provenance") != expected_origin
+                or not isinstance(adoption, dict)
+                or not valid_npm_adoption_mode(
+                    adoption.get("mode"),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                    provenance["run_id"],
+                    provenance["run_attempt"],
+                )
+                or adoption
+                != {
+                    **source_binding,
+                    "run_id": int(match.group(2)),
+                    "run_attempt": int(match.group(3)),
+                    "mode": adoption.get("mode"),
+                }
+                or record.get("registry_evidence_manifest")
+                != {
+                    "file": "npm-registry-evidence-manifest.json",
+                    "sha256": manifest_sha256,
+                }
+            ):
+                raise ObservationError("registry_npm_adoption_invalid")
+            run_id, run_attempt = adoption["run_id"], adoption["run_attempt"]
+            run = self._github_run_from_authority(
+                "javascript", run_id, run_attempt
+            )
+            self._validate_npm_workflow_run(
+                run,
+                repository,
+                coordinate["commit"],
+                run_id,
+                run_attempt,
+                conclusions={"success"},
+            )
+            adoptions.append(
+                {
+                    "asset": self._retained_asset_envelope(
+                        name, release_assets[name]
+                    ),
+                    "record": record,
+                    "authenticated_run": run,
+                }
+            )
+        return {
+            "provenance": provenance,
+            "retained": retained,
+            "live": {
+                **live,
+                "npm_view": {
+                    "sha256": hashlib.sha256(live_view_payload).hexdigest(),
+                    "content_base64": base64.b64encode(live_view_payload).decode(
+                        "ascii"
+                    ),
                 },
             },
             "adoptions": adoptions,
@@ -3876,8 +5350,14 @@ class Observer:
             for pin in pins or []
             if isinstance(pin, dict)
             and pin.get("identity") == "latchway-ios-sdk"
-            and nested(pin, "state", "version") == coordinate["version"]
-            and nested(pin, "state", "revision") == coordinate["commit"]
+            and pin.get("kind") == "remoteSourceControl"
+            and pin.get("location")
+            == "https://github.com/Latchway/latchway-ios-sdk.git"
+            and pin.get("state")
+            == {
+                "revision": coordinate["commit"],
+                "version": coordinate["version"],
+            }
         ]
         if not isinstance(pins, list) or len(matches) != 1:
             raise ObservationError("swift_registry_resolution_invalid")

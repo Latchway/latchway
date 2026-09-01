@@ -46,8 +46,18 @@ The finalizer additionally performs fresh checks for:
 - the immutable OCI index plus the exact version, `X.Y`, `X`, and `latest` tag
   digests;
 - the OCI Cosign identity and GitHub provenance; and
-- both npm package versions, SHA-512 integrity, registry signatures, trusted
-  publisher identity, and source-bound SLSA provenance. npm does not inject
+- all four ordered JavaScript package versions plus React Native, SHA-512
+  integrity, registry signatures, trusted publisher identity, and source-bound
+  SLSA provenance. The sealed core observation also binds JavaScript SHA-1,
+  exact `SHA256SUMS`, the pinned offline vulnerability scan, annotated tag,
+  source contract lock/fixtures, package manifests and peers, regular-file
+  archive closures, and the reproducibility digest recomputed over the exact
+  released `dist` bytes. The aggregate retains the four exact bounded
+  JavaScript release tarballs as raw authority files, and the fresh
+  credentialed finalizer independently reopens them, binds their sizes and
+  digests to the release set and source coordinates, and recomputes each
+  ordered `dist` row before accepting the unprivileged verifier's result. npm
+  does not inject
   `gitHead` into these reviewed prebuilt tarballs, so commit identity comes
   from the authenticated provenance and retained registry/adoption evidence.
 
@@ -65,8 +75,10 @@ finalizer impossible to resume.
 Registry coordinates accepted by the finalizer are derived from the five exact
 repository coordinates in the attested conformance report. They are not
 workflow inputs. The finalizer independently reconstructs the public-registry
-proof's exact five paths and hashes from the authenticated aggregate and
-requires the unprivileged prepared proof to be byte-identical. The canonical
+proof's exact eight paths and hashes: seven claim observations plus the retained
+Mintlify authority closure. It reconstructs the source-bound Mintlify production
+proof from the authenticated aggregate and requires the unprivileged prepared
+proof to be byte-identical. The canonical
 report binds the resulting proof and durable archive hashes, so the immutable
 record identifies the retained package metadata, integrity/checksum,
 signature, and OCI proof bytes rather than recording only a boolean claim.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 import hashlib
 import io
@@ -349,7 +350,12 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             'releases/tags/$RELEASE_TAG',
             'docker buildx imagetools inspect --raw "$image"',
             'gh attestation verify "oci://$image"',
-            'npm --userconfig=/dev/null view "@latchway/client@$javascript_version"',
+            "javascript_packages=('@latchway/client' '@latchway/openai' '@latchway/vercel-ai' '@latchway/langchain')",
+            'npm --userconfig=/dev/null view "${javascript_packages[$index]}@$javascript_version"',
+            'npm_javascript_client: $js_client',
+            'npm_javascript_openai: $js_openai',
+            'npm_javascript_vercel_ai: $js_vercel_ai',
+            'npm_javascript_langchain: $js_langchain',
             '._npmUser.trustedPublisher.id == "github"',
             '.dist.signatures | type == "array" and length > 0',
             '.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"',
@@ -375,6 +381,9 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             "Generate the canonical completion report without candidate tooling",
             "independently-recomputed-public-registry-proof.json",
             "candidate-produced registry proof differs from independent recomputation",
+            "javascript retained tarball closure mismatch",
+            "javascript reproducibility aggregate mismatch",
+            "maximum=10 * 1024 * 1024",
             "durable archive entry closure mismatch",
             "No checked-out candidate source or candidate-owned helper executed",
         ):
@@ -514,7 +523,7 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         self.assertIn("install -m 0600", canonical)
         self.assertNotIn("scripts/", canonical)
 
-    def test_fixed_inline_validator_accepts_exact_fixture_and_rejects_tampering(self) -> None:
+    def test_fixed_inline_validator_rejects_fully_rebound_javascript_aggregate(self) -> None:
         independent = self.steps[
             self.names.index(
                 "Independently recompute registry proof and verify the durable archive"
@@ -555,17 +564,169 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             )
             external = payload / "conformance/latchway-external-evidence"
             external.mkdir(parents=True)
+            javascript_version = "1.0.0"
+            javascript_coordinate = {
+                "commit": "b" * 40,
+                "tag": tag,
+                "version": javascript_version,
+            }
+            javascript_packages = (
+                ("client", "@latchway/client"),
+                ("openai", "@latchway/openai"),
+                ("vercel-ai", "@latchway/vercel-ai"),
+                ("langchain", "@latchway/langchain"),
+            )
+            contract_lock = b'contract_version: "1.0.0"\n'
+            contract_lock_sha256 = hashlib.sha256(contract_lock).hexdigest()
+            retained_tarballs: dict[str, bytes] = {}
+            reviewed_packages = []
+            javascript_package_proofs = []
+            release_asset_set = {}
+            reproducibility_rows = []
+            reproducibility_digest = hashlib.sha256()
+            for package_id, package in javascript_packages:
+                peers = (
+                    {}
+                    if package_id == "client"
+                    else {"@latchway/client": f"^{javascript_version}"}
+                )
+                archive_payloads = {
+                    "package/package.json": (
+                        json.dumps(
+                            {
+                                "name": package,
+                                "version": javascript_version,
+                                "peerDependencies": peers,
+                            },
+                            indent=2,
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    ).encode(),
+                    "package/dist/index.js": f"export const id = {package_id!r};\n".encode(),
+                }
+                if package_id == "client":
+                    archive_payloads["package/contract.lock"] = contract_lock
+                tar_buffer = io.BytesIO()
+                with tarfile.open(
+                    fileobj=tar_buffer, mode="w:gz", format=tarfile.USTAR_FORMAT
+                ) as npm_archive:
+                    for archive_name, archive_payload in sorted(
+                        archive_payloads.items()
+                    ):
+                        member = tarfile.TarInfo(archive_name)
+                        member.mode = 0o644
+                        member.uid = member.gid = member.mtime = 0
+                        member.size = len(archive_payload)
+                        npm_archive.addfile(member, io.BytesIO(archive_payload))
+                tarball_name = f"latchway-{package_id}-{javascript_version}.tgz"
+                tarball_payload = tar_buffer.getvalue()
+                retained_tarballs[tarball_name] = tarball_payload
+                sha1 = hashlib.sha1(tarball_payload).hexdigest()
+                sha256 = hashlib.sha256(tarball_payload).hexdigest()
+                sha512 = hashlib.sha512(tarball_payload).hexdigest()
+                integrity = "sha512-" + base64.b64encode(
+                    hashlib.sha512(tarball_payload).digest()
+                ).decode()
+                reviewed_packages.append(
+                    {
+                        "id": package_id,
+                        "package": package,
+                        "version": javascript_version,
+                        "tarball": tarball_name,
+                        "bytes": len(tarball_payload),
+                        "sha1": sha1,
+                        "sha256": sha256,
+                        "sha512": sha512,
+                        "integrity": integrity,
+                        "entries": sorted(archive_payloads),
+                        "unpacked_bytes": sum(map(len, archive_payloads.values())),
+                        "published_peer_dependencies": peers,
+                    }
+                )
+                javascript_package_proofs.append(
+                    {
+                        "id": package_id,
+                        "package": package,
+                        "version": javascript_version,
+                        "tarball": tarball_name,
+                        "bytes": len(tarball_payload),
+                        "sha1": sha1,
+                        "sha256": sha256,
+                        "sha512": sha512,
+                        "integrity": integrity,
+                    }
+                )
+                release_asset_set[tarball_name] = {
+                    "name": tarball_name,
+                    "size": len(tarball_payload),
+                    "digest": f"sha256:{sha256}",
+                }
+                repository_path = (
+                    "dist/index.js"
+                    if package_id == "client"
+                    else f"packages/{package_id}/dist/index.js"
+                )
+                dist_payload = archive_payloads["package/dist/index.js"]
+                reproducibility_rows.append(
+                    {
+                        "package": package,
+                        "path": repository_path,
+                        "bytes": len(dist_payload),
+                        "sha256": hashlib.sha256(dist_payload).hexdigest(),
+                    }
+                )
+                reproducibility_digest.update(repository_path.encode())
+                reproducibility_digest.update(b"\0")
+                reproducibility_digest.update(dist_payload)
+                reproducibility_digest.update(b"\0")
+            reproducibility = {
+                "schema_version": 1,
+                "identical": True,
+                "package_count": 4,
+                "sha256": reproducibility_digest.hexdigest(),
+                "files": reproducibility_rows,
+            }
+            javascript_proof = {
+                "version": javascript_version,
+                "source_commit": javascript_coordinate["commit"],
+                "release_tag": javascript_coordinate["tag"],
+                "packages": javascript_package_proofs,
+                "reviewed_aggregate_evidence": {
+                    "build-reproducibility.json": reproducibility,
+                    "package-evidence.json": {"packages": reviewed_packages},
+                    "contract-evidence.json": {
+                        "contract_lock_sha256": contract_lock_sha256
+                    },
+                },
+                "release_asset_set": release_asset_set,
+                "reproducibility_archive_verification": {
+                    "schema_version": 1,
+                    "algorithm": "sha256",
+                    "inputs": "ordered-release-tarball-dist-file-bytes",
+                    "archive_regular_file_closure_verified": True,
+                    "source_manifests_and_peer_translation_verified": True,
+                    "independent_source_rebuild_performed": False,
+                    "file_count": len(reproducibility_rows),
+                    "bytes": sum(item["bytes"] for item in reproducibility_rows),
+                    "sha256": reproducibility_digest.hexdigest(),
+                },
+            }
             suffixes = {
                 "oci": "artifacts--registry-oci--tool-output.json",
                 "javascript": "artifacts--registry-npm-javascript--tool-output.json",
                 "react_native": "artifacts--registry-npm-react-native--tool-output.json",
+                "swift": "artifacts--registry-swift--tool-output.json",
                 "ios": "artifacts--registry-cocoapods--tool-output.json",
                 "android": "artifacts--registry-maven-central--tool-output.json",
+                "documentation": "artifacts--registry-documentation-production--tool-output.json",
+                "documentation_inputs": "artifacts--registry-documentation-production--mintlify-production-evidence.json",
             }
             artifacts = []
             for name, suffix in suffixes.items():
                 relative = f"retained/{name}-{suffix}"
-                data = (json.dumps({"proof": name}, sort_keys=True) + "\n").encode()
+                value = javascript_proof if name == "javascript" else {"proof": name}
+                data = (json.dumps(value, sort_keys=True) + "\n").encode()
                 path = external / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
@@ -575,6 +736,18 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
                         "sha256": hashlib.sha256(data).hexdigest(),
                     }
                 )
+            for tarball_name, tarball_payload in sorted(retained_tarballs.items()):
+                relative = (
+                    "retained/artifacts--registry-npm-javascript--"
+                    + tarball_name
+                )
+                (external / relative).write_bytes(tarball_payload)
+                artifacts.append(
+                    {
+                        "path": relative,
+                        "sha256": hashlib.sha256(tarball_payload).hexdigest(),
+                    }
+                )
             registry = {
                 "schema_version": 1,
                 "kind": "latchway_cross_repository_external_evidence",
@@ -582,8 +755,16 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
                 "status": "passed",
                 "core_commit": commit,
                 "core_release": tag,
-                "repositories": {},
-                "claims": {"public_registry_bytes_verified": True},
+                "repositories": {"javascript": javascript_coordinate},
+                "claims": {
+                    "cocoapods_verified": True,
+                    "documentation_production_verified": True,
+                    "maven_central_verified": True,
+                    "npm_javascript_verified": True,
+                    "npm_react_native_verified": True,
+                    "oci_digest_verified": True,
+                    "swift_package_verified": True,
+                },
                 "artifacts": artifacts,
             }
             registry_bytes = (
@@ -645,7 +826,9 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
                 "status": "passed",
                 "proofs": {
                     name: {"path": item["path"], "sha256": item["sha256"]}
-                    for name, item in zip(suffixes, artifacts, strict=True)
+                    for name, item in zip(
+                        suffixes, artifacts[: len(suffixes)], strict=True
+                    )
                 },
             }
             prepared = root / "prepared-proof.json"
@@ -735,6 +918,185 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
                 "candidate-produced registry proof differs",
                 rejected.stderr,
             )
+
+            # Rebind every mutable JSON/hash layer around an arbitrary producer
+            # aggregate. The credentialed finalizer must still reject because
+            # the retained tarball dist bytes independently determine it.
+            arbitrary_aggregate = "f" * 64
+            javascript_proof["reviewed_aggregate_evidence"][
+                "build-reproducibility.json"
+            ]["sha256"] = arbitrary_aggregate
+            javascript_proof["reproducibility_archive_verification"][
+                "sha256"
+            ] = arbitrary_aggregate
+            javascript_artifact = next(
+                item
+                for item in artifacts
+                if item["path"].endswith(
+                    suffixes["javascript"]
+                )
+            )
+            javascript_path = external / javascript_artifact["path"]
+            javascript_path.write_text(
+                json.dumps(javascript_proof, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            javascript_artifact["sha256"] = hashlib.sha256(
+                javascript_path.read_bytes()
+            ).hexdigest()
+            registry_bytes = (
+                json.dumps(registry, indent=2, sort_keys=True) + "\n"
+            ).encode()
+            (external / "public_registries.json").write_bytes(registry_bytes)
+            for item in aggregate["files"]:
+                item["sha256"] = hashlib.sha256(
+                    (external / item["path"]).read_bytes()
+                ).hexdigest()
+            (external / "aggregate-manifest.json").write_text(
+                json.dumps(aggregate, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            proof["proofs"]["javascript"]["sha256"] = javascript_artifact[
+                "sha256"
+            ]
+            prepared.write_text(
+                json.dumps(proof, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            payload_files = sorted(
+                path for path in payload.rglob("*") if path.is_file()
+            )
+            manifest_files = [
+                {
+                    "path": path.relative_to(payload).as_posix(),
+                    "size": path.stat().st_size,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for path in payload_files
+            ]
+            manifest["file_count"] = len(manifest_files)
+            manifest["total_size"] = sum(item["size"] for item in manifest_files)
+            manifest["files"] = manifest_files
+            manifest_bytes = (
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+            ).encode()
+            (authority / "manifest.json").write_bytes(manifest_bytes)
+            for path in payload_files:
+                relative = path.relative_to(payload).as_posix()
+                if relative.startswith(
+                    "conformance/latchway-external-evidence/"
+                ):
+                    archive_files[
+                        "external/latchway-external-evidence/"
+                        + relative.removeprefix(
+                            "conformance/latchway-external-evidence/"
+                        )
+                    ] = path.read_bytes()
+            with tarfile.open(
+                archive, "w:gz", format=tarfile.USTAR_FORMAT
+            ) as bundle:
+                for directory in sorted(directories):
+                    item = tarfile.TarInfo(f"{directory}/")
+                    item.type = tarfile.DIRTYPE
+                    item.mode = 0o700
+                    item.uid = item.gid = item.mtime = 0
+                    bundle.addfile(item)
+                for relative, data in sorted(archive_files.items()):
+                    item = tarfile.TarInfo(f"{prefix}/{relative}")
+                    item.mode = 0o600
+                    item.uid = item.gid = item.mtime = 0
+                    item.size = len(data)
+                    bundle.addfile(item, io.BytesIO(data))
+            rebound_command = [
+                *command[:-1],
+                hashlib.sha256(manifest_bytes).hexdigest(),
+            ]
+            rebound = subprocess.run(
+                rebound_command, text=True, capture_output=True
+            )
+            self.assertNotEqual(rebound.returncode, 0)
+            self.assertIn(
+                "javascript reproducibility aggregate mismatch",
+                rebound.stderr,
+            )
+
+    def test_registry_proof_step_executes_exact_eight_proof_closure(self) -> None:
+        durable = self.steps[
+            self.names.index(
+                "Validate prepared bytes and exact release coordinates without candidate tooling"
+            )
+        ]["run"]
+        invocation = (
+            'jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+            '--arg tag "$RELEASE_TAG" \'\n'
+        )
+        target = (
+            '"$RUNNER_TEMP/final-release-record/'
+            'latchway-public-registry-byte-proof.json"'
+        )
+        target_start = durable.index(target)
+        invocation_start = durable.rfind(invocation, 0, target_start)
+        self.assertGreaterEqual(invocation_start, 0)
+        filter_start = invocation_start + len(invocation)
+        filter_end = durable.rfind("\n' ", filter_start, target_start)
+        self.assertGreater(filter_end, filter_start)
+        jq_filter = durable[filter_start:filter_end]
+        commit = "a" * 40
+        tag = "v1.0.0"
+        proof_names = {
+            "android",
+            "documentation",
+            "documentation_inputs",
+            "ios",
+            "javascript",
+            "oci",
+            "react_native",
+            "swift",
+        }
+
+        def document(names: set[str]) -> dict:
+            return {
+                "schema_version": 1,
+                "kind": "latchway_public_registry_byte_proof_verification",
+                "candidate_commit": commit,
+                "release_tag": tag,
+                "status": "passed",
+                "proofs": {
+                    name: {
+                        "path": f"retained/{name}.json",
+                        "sha256": "b" * 64,
+                    }
+                    for name in sorted(names)
+                },
+            }
+
+        def execute(value: dict) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    "jq",
+                    "--exit-status",
+                    "--arg",
+                    "commit",
+                    commit,
+                    "--arg",
+                    "tag",
+                    tag,
+                    jq_filter,
+                ],
+                input=json.dumps(value),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        accepted = execute(document(proof_names))
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        for mutation in (
+            proof_names - {"documentation_inputs"},
+            proof_names | {"unreviewed"},
+        ):
+            rejected = execute(document(mutation))
+            self.assertNotEqual(rejected.returncode, 0, rejected.stderr)
 
     def test_two_release_model_is_documented(self) -> None:
         document = (ROOT / "docs/release/immutable-evidence-release.md").read_text(

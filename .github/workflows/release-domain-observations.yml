@@ -50,6 +50,14 @@ on:
         description: Exact immutable-candidate run attempt
         required: true
         type: string
+      documentation_production_run_id:
+        description: Exact successful Mintlify production-evidence run ID (public registries only)
+        required: false
+        type: string
+      documentation_production_run_attempt:
+        description: Exact Mintlify production-evidence run attempt (public registries only)
+        required: false
+        type: string
       ios_physical_run_id:
         description: Exact successful Physical App Attest evidence run ID (SDK/device domains only)
         required: false
@@ -110,6 +118,8 @@ jobs:
           ANDROID_PHYSICAL_RUN_ATTEMPT: ${{ inputs.android_physical_run_attempt }}
           REACT_NATIVE_PHYSICAL_RUN_ID: ${{ inputs.react_native_physical_run_id }}
           REACT_NATIVE_PHYSICAL_RUN_ATTEMPT: ${{ inputs.react_native_physical_run_attempt }}
+          DOCUMENTATION_PRODUCTION_RUN_ID: ${{ inputs.documentation_production_run_id }}
+          DOCUMENTATION_PRODUCTION_RUN_ATTEMPT: ${{ inputs.documentation_production_run_attempt }}
         run: |
           set -Eeuo pipefail
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
@@ -126,6 +136,13 @@ jobs:
             for value in "$IOS_PHYSICAL_RUN_ATTEMPT" "$ANDROID_PHYSICAL_RUN_ATTEMPT" "$REACT_NATIVE_PHYSICAL_RUN_ATTEMPT"; do
               [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]]
             done
+          fi
+          if [[ "$EVIDENCE_DOMAIN" == public_registries ]]; then
+            [[ "$DOCUMENTATION_PRODUCTION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+            [[ "$DOCUMENTATION_PRODUCTION_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
+          else
+            test -z "$DOCUMENTATION_PRODUCTION_RUN_ID"
+            test -z "$DOCUMENTATION_PRODUCTION_RUN_ATTEMPT"
           fi
       - name: Require a fixed GitHub CLI verifier without candidate code
         shell: bash
@@ -602,6 +619,8 @@ jobs:
           IOS_COMMIT: ${{ inputs.ios_commit }}
           ANDROID_COMMIT: ${{ inputs.android_commit }}
           REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
+          DOCUMENTATION_RUN_ID: ${{ inputs.documentation_production_run_id }}
+          DOCUMENTATION_RUN_ATTEMPT: ${{ inputs.documentation_production_run_attempt }}
         run: |
           set -Eeuo pipefail
           umask 077
@@ -631,6 +650,20 @@ jobs:
             mkdir -p "$(dirname "$capture/$relative")"
             started=$(date -u +%s)
             "$@" > "$capture/$relative"
+            finished=$(date -u +%s)
+            while (( finished <= started )); do
+              sleep 1
+              finished=$(date -u +%s)
+            done
+            (( finished <= last_finished )) || last_finished=$finished
+            record_file "$relative" "$started" "$finished" "$maximum"
+          }
+          capture_existing() {
+            local source="$1" relative="$2" maximum="$3" started finished
+            test -f "$source" && test ! -L "$source"
+            mkdir -p "$(dirname "$capture/$relative")"
+            started=$(date -u +%s)
+            install -m 0600 -- "$source" "$capture/$relative"
             finished=$(date -u +%s)
             while (( finished <= started )); do
               sleep 1
@@ -697,6 +730,123 @@ jobs:
                 gh release verify "$tag" --repo "$repository" --format json
             done
           elif [[ "$EVIDENCE_DOMAIN" == public_registries ]]; then
+            repository=Latchway/latchway-docs
+            workflow_path=.github/workflows/mintlify-production-evidence.yml
+            documentation_authority="$RUNNER_TEMP/documentation-authority"
+            documentation_evidence="$RUNNER_TEMP/documentation-production"
+            mkdir -m 0700 "$documentation_authority" "$documentation_evidence"
+            documentation_commit=$(jq --raw-output '.documentation.commit' \
+              "$RUNNER_TEMP/authority/source/latchway-cross-repository.json")
+            [[ "$documentation_commit" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$DOCUMENTATION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+            [[ "$DOCUMENTATION_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
+            gh api --method GET \
+              "repos/$repository/actions/runs/$DOCUMENTATION_RUN_ID/attempts/$DOCUMENTATION_RUN_ATTEMPT" \
+              > "$documentation_authority/run.json"
+            jq --exit-status --arg repository "$repository" --arg workflow "$workflow_path" \
+              --arg commit "$documentation_commit" --argjson run "$DOCUMENTATION_RUN_ID" \
+              --argjson attempt "$DOCUMENTATION_RUN_ATTEMPT" '
+                .id == $run and .run_attempt == $attempt and
+                (.event == "deployment_status" or .event == "workflow_dispatch") and
+                .status == "completed" and .conclusion == "success" and
+                .head_sha == $commit and .head_branch == "main" and .path == $workflow and
+                .html_url == ("https://github.com/" + $repository + "/actions/runs/" + ($run|tostring)) and
+                .repository.full_name == $repository and .head_repository.full_name == $repository
+              ' "$documentation_authority/run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' \
+              "$documentation_authority/run.json")
+            test -n "$workflow_id"
+            gh api --method GET "repos/$repository/actions/workflows/$workflow_id" \
+              > "$documentation_authority/workflow.json"
+            jq --exit-status --arg path "$workflow_path" --argjson id "$workflow_id" \
+              '.id == $id and .path == $path and .state == "active"' \
+              "$documentation_authority/workflow.json" >/dev/null
+            documentation_artifacts_all="$RUNNER_TEMP/documentation-artifacts-all.json"
+            gh api --method GET \
+              "repos/$repository/actions/runs/$DOCUMENTATION_RUN_ID/artifacts?per_page=100" \
+              > "$documentation_artifacts_all"
+            jq --exit-status '.total_count <= 100 and (.artifacts | length) == .total_count' \
+              "$documentation_artifacts_all" >/dev/null
+            mapfile -t documentation_matches < <(jq --raw-output --arg commit "$documentation_commit" \
+              --arg run "$DOCUMENTATION_RUN_ID" --arg attempt "$DOCUMENTATION_RUN_ATTEMPT" '
+                .artifacts[].name |
+                select(test("^latchway-mintlify-production-" + $commit + "-[1-9][0-9]*-" + $run + "-" + $attempt + "$"))
+              ' "$documentation_artifacts_all")
+            test "${#documentation_matches[@]}" = 1
+            documentation_artifact_name=${documentation_matches[0]}
+            [[ "$documentation_artifact_name" =~ ^latchway-mintlify-production-${documentation_commit}-([1-9][0-9]*)-${DOCUMENTATION_RUN_ID}-${DOCUMENTATION_RUN_ATTEMPT}$ ]]
+            documentation_deployment_id=${BASH_REMATCH[1]}
+            gh api --method GET \
+              "repos/$repository/actions/runs/$DOCUMENTATION_RUN_ID/artifacts?name=$documentation_artifact_name&per_page=100" \
+              > "$documentation_authority/artifact.json"
+            jq --exit-status --arg repository "$repository" --arg name "$documentation_artifact_name" \
+              --arg commit "$documentation_commit" --argjson run "$DOCUMENTATION_RUN_ID" '
+                .total_count == 1 and (.artifacts | length) == 1 and
+                .artifacts[0].name == $name and .artifacts[0].expired == false and
+                (.artifacts[0].id | type == "number" and . > 0) and
+                (.artifacts[0].size_in_bytes | type == "number" and . >= 1 and . <= 16777216) and
+                .artifacts[0].workflow_run.id == $run and
+                .artifacts[0].workflow_run.head_sha == $commit and
+                .artifacts[0].archive_download_url ==
+                  ("https://api.github.com/repos/" + $repository + "/actions/artifacts/" +
+                   (.artifacts[0].id|tostring) + "/zip")
+              ' "$documentation_authority/artifact.json" >/dev/null
+            documentation_artifact_id=$(jq --raw-output '.artifacts[0].id' \
+              "$documentation_authority/artifact.json")
+            documentation_zip="$RUNNER_TEMP/documentation-production.zip"
+            gh api --method GET -H 'Accept: application/vnd.github+json' \
+              "repos/$repository/actions/artifacts/$documentation_artifact_id/zip" > "$documentation_zip"
+            documentation_entries=$(unzip -Z1 "$documentation_zip" | LC_ALL=C sort)
+            expected_documentation_entries=$(printf '%s\n' \
+              latchway-mintlify-production-evidence.SHA256SUMS \
+              latchway-mintlify-production-evidence.attestation.sigstore.json \
+              latchway-mintlify-production-evidence.json | LC_ALL=C sort)
+            test "$documentation_entries" = "$expected_documentation_entries"
+            unzip -q "$documentation_zip" -d "$documentation_evidence"
+            subject="$documentation_evidence/latchway-mintlify-production-evidence.json"
+            checksums="$documentation_evidence/latchway-mintlify-production-evidence.SHA256SUMS"
+            bundle="$documentation_evidence/latchway-mintlify-production-evidence.attestation.sigstore.json"
+            test -z "$(find "$documentation_evidence" -type l -print -quit)"
+            test "$(find "$documentation_evidence" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+            (( $(stat --format=%s "$subject") >= 1 && $(stat --format=%s "$subject") <= 8388608 ))
+            (( $(stat --format=%s "$checksums") >= 1 && $(stat --format=%s "$checksums") <= 512 ))
+            (( $(stat --format=%s "$bundle") >= 1 && $(stat --format=%s "$bundle") <= 2097152 ))
+            expected_sha=$(sha256sum "$subject" | awk '{print $1}')
+            test "$(cat "$checksums")" = "$expected_sha  latchway-mintlify-production-evidence.json"
+            (cd "$documentation_evidence" && sha256sum --check latchway-mintlify-production-evidence.SHA256SUMS)
+            jq --exit-status --arg commit "$documentation_commit" \
+              --argjson run "$DOCUMENTATION_RUN_ID" --argjson attempt "$DOCUMENTATION_RUN_ATTEMPT" \
+              --argjson deployment "$documentation_deployment_id" '
+                .schema_version == 1 and
+                .kind == "latchway_mintlify_production_deployment_evidence" and
+                .status == "passed" and .source_checkpoint.documentation_commit == $commit and
+                .deployment.id == $deployment and .workflow.repository == "Latchway/latchway-docs" and
+                .workflow.path == ".github/workflows/mintlify-production-evidence.yml" and
+                .workflow.ref == "refs/heads/main" and .workflow.head_sha == $commit and
+                .workflow.run_id == $run and .workflow.run_attempt == $attempt and
+                .workflow.expected_conclusion == "success"
+              ' "$subject" >/dev/null
+            gh attestation verify "$subject" --bundle "$bundle" \
+              --repo Latchway/latchway-docs \
+              --signer-workflow Latchway/latchway-docs/.github/workflows/mintlify-production-evidence.yml \
+              --source-digest "$documentation_commit" --signer-digest "$documentation_commit" \
+              --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+              > "$documentation_authority/attestation-verification.json"
+            jq --exit-status '((type == "array" and length > 0) or (type == "object" and length > 0))' \
+              "$documentation_authority/attestation-verification.json" >/dev/null
+            for name in run.json workflow.json artifact.json attestation-verification.json; do
+              capture_existing "$RUNNER_TEMP/documentation-authority/$name" \
+                "public-registries/documentation/$name" 2097152
+            done
+            capture_existing \
+              "$RUNNER_TEMP/documentation-production/latchway-mintlify-production-evidence.json" \
+              "public-registries/documentation/latchway-mintlify-production-evidence.json" 8388608
+            capture_existing \
+              "$RUNNER_TEMP/documentation-production/latchway-mintlify-production-evidence.SHA256SUMS" \
+              "public-registries/documentation/latchway-mintlify-production-evidence.SHA256SUMS" 512
+            capture_existing \
+              "$RUNNER_TEMP/documentation-production/latchway-mintlify-production-evidence.attestation.sigstore.json" \
+              "public-registries/documentation/latchway-mintlify-production-evidence.attestation.sigstore.json" 2097152
             capture_run() {
               local id="$1" repository="$2" run_id="$3" attempt="$4" relative
               [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$attempt" =~ ^[1-9][0-9]{0,5}$ ]]
@@ -708,9 +858,9 @@ jobs:
             requires_subject_attestation() {
               local id="$1" name="$2"
               case "$id:$name" in
-                javascript:latchway-client-*.tgz|javascript:package-evidence.json|javascript:build-reproducibility.json|javascript:npm-registry-version.json|javascript:npm-registry-view.json|javascript:npm-attestations.json|javascript:npm-audit-signatures.json|javascript:npm-registry-evidence-manifest.json|javascript:post-publish-evidence.json|javascript:npm-release-adoption-*.json) return 0 ;;
-                react_native:latchway-react-native-*.tgz|react_native:package-evidence.json|react_native:build-reproducibility.json|react_native:published-dependency-evidence.json|react_native:npm-registry-version.json|react_native:npm-registry-view.json|react_native:npm-attestations.json|react_native:npm-audit-signatures.json|react_native:npm-registry-evidence-manifest.json|react_native:post-publish-evidence.json|react_native:npm-release-adoption-*.json) return 0 ;;
-                ios:latchway-ios-sdk-*.tar.gz|ios:cocoapods-published-podspec.json|ios:cocoapods-reviewed-podspec.json|ios:cocoapods-release-evidence.json|ios:cocoapods-release-evidence.SHA256SUMS) return 0 ;;
+                javascript:*) return 0 ;;
+                react_native:latchway-react-native-*.tgz|react_native:docs-bundle-*.tar.gz|react_native:package-evidence.json|react_native:build-reproducibility.json|react_native:published-dependency-evidence.json|react_native:npm-registry-version.json|react_native:npm-registry-view.json|react_native:npm-attestations.json|react_native:npm-audit-signatures.json|react_native:npm-registry-evidence-manifest.json|react_native:post-publish-evidence.json|react_native:npm-release-adoption-*.json) return 0 ;;
+                ios:latchway-ios-sdk-*.tar.gz|ios:docs-bundle-*.tar.gz|ios:cocoapods-published-podspec.json|ios:cocoapods-reviewed-podspec.json|ios:cocoapods-release-evidence.json|ios:cocoapods-release-evidence.SHA256SUMS) return 0 ;;
                 android:*) return 0 ;;
                 *) return 1 ;;
               esac
@@ -746,7 +896,32 @@ jobs:
                     --deny-self-hosted-runners --format json
                 fi
               done < <(jq --compact-output '.assets[]' "$capture/$root/release.json")
-              if [[ "$id" == javascript || "$id" == react_native ]]; then
+              if [[ "$id" == javascript ]]; then
+                for package_id in client openai vercel-ai langchain; do
+                  attestation="$capture/$root/assets/npm-$package_id-attestations.json"
+                  test -f "$attestation"
+                  provenance_count=$(jq '[.attestations[] | select(.predicateType == "https://slsa.dev/provenance/v1")] | length' "$attestation")
+                  test "$provenance_count" = 1
+                  invocation=$(jq --raw-output '.attestations[] | select(.predicateType == "https://slsa.dev/provenance/v1") | .bundle.dsseEnvelope.payload' "$attestation" \
+                    | base64 --decode | jq --raw-output '.predicate.runDetails.metadata.invocationId')
+                  [[ "$invocation" =~ ^https://github.com/$repository/actions/runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)$ ]]
+                  capture_run "$id" "$repository" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+                  shopt -s nullglob
+                  adoptions=("$capture/$root/assets"/npm-release-adoption-"$package_id"-*.json)
+                  (( ${#adoptions[@]} >= 1 ))
+                  for adoption in "${adoptions[@]}"; do
+                    name=$(basename "$adoption")
+                    [[ "$name" =~ ^npm-release-adoption-${package_id}-([1-9][0-9]*)-([1-9][0-9]*)\.json$ ]]
+                    asset_run_id=${BASH_REMATCH[1]}
+                    asset_run_attempt=${BASH_REMATCH[2]}
+                    run_id=$(jq --raw-output '.adoption.run_id' "$adoption")
+                    attempt=$(jq --raw-output '.adoption.run_attempt' "$adoption")
+                    test "$run_id" = "$asset_run_id" && test "$attempt" = "$asset_run_attempt"
+                    capture_run "$id" "$repository" "$run_id" "$attempt"
+                  done
+                  shopt -u nullglob
+                done
+              elif [[ "$id" == react_native ]]; then
                 attestation="$capture/$root/assets/npm-attestations.json"
                 test -f "$attestation"
                 provenance_count=$(jq '[.attestations[] | select(.predicateType == "https://slsa.dev/provenance/v1")] | length' "$attestation")
@@ -754,20 +929,16 @@ jobs:
                 invocation=$(jq --raw-output '.attestations[] | select(.predicateType == "https://slsa.dev/provenance/v1") | .bundle.dsseEnvelope.payload' "$attestation" \
                   | base64 --decode | jq --raw-output '.predicate.runDetails.metadata.invocationId')
                 [[ "$invocation" =~ ^https://github.com/$repository/actions/runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)$ ]]
-                provenance_run_id=${BASH_REMATCH[1]}
-                provenance_run_attempt=${BASH_REMATCH[2]}
-                capture_run "$id" "$repository" "$provenance_run_id" "$provenance_run_attempt"
+                capture_run "$id" "$repository" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
                 shopt -s nullglob
                 adoptions=("$capture/$root/assets"/npm-release-adoption-*.json)
                 (( ${#adoptions[@]} >= 1 ))
                 for adoption in "${adoptions[@]}"; do
                   name=$(basename "$adoption")
                   [[ "$name" =~ ^npm-release-adoption-([1-9][0-9]*)-([1-9][0-9]*)\.json$ ]]
-                  asset_run_id=${BASH_REMATCH[1]}
-                  asset_run_attempt=${BASH_REMATCH[2]}
                   run_id=$(jq --raw-output '.adoption.run_id' "$adoption")
                   attempt=$(jq --raw-output '.adoption.run_attempt' "$adoption")
-                  test "$run_id" = "$asset_run_id" && test "$attempt" = "$asset_run_attempt"
+                  test "$run_id" = "${BASH_REMATCH[1]}" && test "$attempt" = "${BASH_REMATCH[2]}"
                   capture_run "$id" "$repository" "$run_id" "$attempt"
                 done
                 shopt -u nullglob
@@ -795,7 +966,10 @@ jobs:
           file_count=$(find "$capture" -type f | wc -l | tr -d ' ')
           manifest_count=$(jq '.files | length' "$capture/manifest.json")
           test "$file_count" = "$((manifest_count + 1))"
-          (( file_count <= 257 ))
+          # Exact worst-case GitHub authority closure at the 64-asset release cap:
+          # JS 230 + RN 245 + iOS 21 + Android 31 + docs 7 = 534 rows;
+          # manifest.json is the 535th file in the uploaded authority artifact.
+          (( file_count <= 535 ))
           total=$(du -sk "$capture" | cut -f1)
           (( total <= 131072 ))
       - name: Retain only the exact authenticated GitHub authority manifest

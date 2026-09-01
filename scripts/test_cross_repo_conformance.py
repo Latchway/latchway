@@ -543,6 +543,7 @@ EXTERNAL_CLAIMS = {
     ),
     "public_tags": ("remote_annotated_tags_verified", "github_releases_verified"),
     "public_registries": (
+        "documentation_production_verified",
         "oci_digest_verified",
         "npm_javascript_verified",
         "npm_react_native_verified",

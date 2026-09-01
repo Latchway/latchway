@@ -346,15 +346,28 @@ class ReleaseDomainEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.EvidenceError, "raw_directory_file_set_invalid"):
             fixture.produce()
 
-        fixture = EvidenceFixture(self.root / "secret", "live_provider")
-        result_path = fixture.raw / MODULE.result_name(MODULE.expected_observations(fixture.domain)[0])
-        result = json.loads(result_path.read_text())
-        artifact = fixture.raw / result["artifacts"][0]["path"]
-        artifact.write_text('{"authorization":"Bearer abcdefghijklmnopqrstuvwxyz"}\n', encoding="utf-8")
-        result["artifacts"][0]["sha256"] = fixture.digest(artifact)
-        fixture.write(result_path, result)
-        with self.assertRaisesRegex(MODULE.EvidenceError, "raw_result_contains_secret"):
-            fixture.produce()
+        secret_shapes = (
+            '{"authorization":"Bearer abcdefghijklmnopqrstuvwxyz"}\n',
+            '{"value":"github_pat_' + "A" * 82 + '"}\n',
+            '{"value":"lwa_' + "A" * 43 + '"}\n',
+        )
+        for index, payload in enumerate(secret_shapes):
+            with self.subTest(secret_shape=index):
+                fixture = EvidenceFixture(
+                    self.root / f"secret-{index}", "live_provider"
+                )
+                result_path = fixture.raw / MODULE.result_name(
+                    MODULE.expected_observations(fixture.domain)[0]
+                )
+                result = json.loads(result_path.read_text())
+                artifact = fixture.raw / result["artifacts"][0]["path"]
+                artifact.write_text(payload, encoding="utf-8")
+                result["artifacts"][0]["sha256"] = fixture.digest(artifact)
+                fixture.write(result_path, result)
+                with self.assertRaisesRegex(
+                    MODULE.EvidenceError, "raw_result_contains_secret"
+                ):
+                    fixture.produce()
 
     def test_rejects_wrong_candidate_and_tampered_receipt(self) -> None:
         fixture = self.fixture()

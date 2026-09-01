@@ -172,6 +172,7 @@ REQUIRED_EXTERNAL_CLAIMS = {
     ),
     "public_registries": frozenset(
         {
+            "documentation_production_verified",
             "oci_digest_verified",
             "npm_javascript_verified",
             "npm_react_native_verified",
@@ -593,7 +594,15 @@ def derive_compatibility_from_registry_proofs(external: Path) -> dict[str, str]:
     android_facts = android.get("compatibility")
     if (
         javascript.get("registry") != "npm"
-        or javascript.get("package") != "@latchway/client"
+        or javascript.get("kind") != "latchway_npm_package_set_registry_proof"
+        or javascript.get("package_count") != 4
+        or javascript.get("publish_order")
+        != [
+            "@latchway/client",
+            "@latchway/openai",
+            "@latchway/vercel-ai",
+            "@latchway/langchain",
+        ]
         or react_native.get("registry") != "npm"
         or react_native.get("package") != "@latchway/react-native"
         or ios.get("registry") != "cocoapods"
@@ -1678,7 +1687,10 @@ def canonical_registries(repositories: list[Mapping[str, Any]], oci: str) -> dic
     android_version = by_id["android"]["version"]
     return {
         "oci": oci,
-        "npm_javascript": f"@latchway/client@{by_id['javascript']['version']}",
+        "npm_javascript_client": f"@latchway/client@{by_id['javascript']['version']}",
+        "npm_javascript_openai": f"@latchway/openai@{by_id['javascript']['version']}",
+        "npm_javascript_vercel_ai": f"@latchway/vercel-ai@{by_id['javascript']['version']}",
+        "npm_javascript_langchain": f"@latchway/langchain@{by_id['javascript']['version']}",
         "npm_react_native": f"@latchway/react-native@{by_id['react_native']['version']}",
         "swift_package": (
             "https://github.com/Latchway/latchway-ios-sdk.git@"
@@ -2042,7 +2054,10 @@ def render(
             "### Published package coordinates",
             "",
             f"- OCI: `{escape(registries['oci'])}`",
-            f"- JavaScript: `{escape(registries['npm_javascript'])}`",
+            f"- JavaScript client: `{escape(registries['npm_javascript_client'])}`",
+            f"- JavaScript OpenAI adapter: `{escape(registries['npm_javascript_openai'])}`",
+            f"- JavaScript Vercel AI adapter: `{escape(registries['npm_javascript_vercel_ai'])}`",
+            f"- JavaScript LangChain adapter: `{escape(registries['npm_javascript_langchain'])}`",
             f"- React Native: `{escape(registries['npm_react_native'])}`",
             f"- Swift Package: `{escape(registries['swift_package'])}`",
             f"- CocoaPods: `{escape(registries['cocoapods'])}`",

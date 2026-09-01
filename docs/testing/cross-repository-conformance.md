@@ -176,7 +176,9 @@ the orchestrator and cover:
   image, including DPoP, errors, refresh, revocation, streaming, quota, and
   protocol rejection;
 - remote annotated tags and GitHub releases;
-- the OCI digest, both npm packages, Swift/CocoaPods, and Maven Central;
+- the OCI digest, the ordered four-package JavaScript npm set, React Native npm,
+  Swift/CocoaPods, Maven Central, and the source-bound production documentation
+  deployment;
 - production App Attest, Play-distributed Play Integrity, and both React Native
   device paths;
 - bounded OpenRouter non-streaming/streaming, usage, clamping, and error proof;

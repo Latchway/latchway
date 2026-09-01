@@ -112,6 +112,7 @@ EXTERNAL_DOMAINS: Mapping[str, tuple[str, ...]] = {
         "github_releases_verified",
     ),
     "public_registries": (
+        "documentation_production_verified",
         "oci_digest_verified",
         "npm_javascript_verified",
         "npm_react_native_verified",

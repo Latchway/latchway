@@ -578,7 +578,14 @@ class RenderCompletionReportTests(unittest.TestCase):
                 compatibility_proofs = {
                     "artifacts--registry-npm-javascript--tool-output.json": {
                         "registry": "npm",
-                        "package": "@latchway/client",
+                        "kind": "latchway_npm_package_set_registry_proof",
+                        "package_count": 4,
+                        "publish_order": [
+                            "@latchway/client",
+                            "@latchway/openai",
+                            "@latchway/vercel-ai",
+                            "@latchway/langchain",
+                        ],
                         "compatibility": {"minimum_node": "24.19.0"},
                     },
                     "artifacts--registry-npm-react-native--tool-output.json": {
@@ -745,6 +752,9 @@ class RenderCompletionReportTests(unittest.TestCase):
             OCI,
             "Database schema version | `2`",
             "@latchway/client@1.0.0",
+            "@latchway/openai@1.0.0",
+            "@latchway/vercel-ai@1.0.0",
+            "@latchway/langchain@1.0.0",
             "dev.latchway:latchway-bom:1.0.0",
             "`operational_resilience` | `passed`",
             "`physical_devices` | `passed`",
@@ -952,7 +962,7 @@ class RenderCompletionReportTests(unittest.TestCase):
 
     def test_rejects_sdk_coordinate_substitution(self) -> None:
         document = copy.deepcopy(self.publication)
-        document["registries"]["npm_javascript"] = "@latchway/client@9.9.9"
+        document["registries"]["npm_javascript_client"] = "@latchway/client@9.9.9"
         self.rewrite("publication", document)
         with self.assertRaisesRegex(MODULE.ReportError, "registry_coordinates_mismatch"):
             self.render()

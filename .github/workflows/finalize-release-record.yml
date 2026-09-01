@@ -620,14 +620,23 @@ jobs:
             --format json > "$RUNNER_TEMP/oci-attestation-verification.json"
           javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
           react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
-          npm --userconfig=/dev/null view "@latchway/client@$javascript_version" --json > "$RUNNER_TEMP/npm-javascript.json"
+          javascript_packages=('@latchway/client' '@latchway/openai' '@latchway/vercel-ai' '@latchway/langchain')
+          javascript_outputs=()
+          for index in "${!javascript_packages[@]}"; do
+            output="$RUNNER_TEMP/npm-javascript-$index.json"
+            npm --userconfig=/dev/null view "${javascript_packages[$index]}@$javascript_version" --json > "$output"
+            javascript_outputs+=("$output")
+          done
+          jq --slurp '.' "${javascript_outputs[@]}" > "$RUNNER_TEMP/npm-javascript.json"
           npm --userconfig=/dev/null view "@latchway/react-native@$react_native_version" --json > "$RUNNER_TEMP/npm-react-native.json"
           jq --exit-status --arg version "$javascript_version" \
-            '.name == "@latchway/client" and .version == $version and
-             (.dist.integrity | startswith("sha512-")) and
-             (._npmUser.trustedPublisher.id == "github") and
-             (.dist.signatures | type == "array" and length > 0) and
-             (.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
+            --argjson names '["@latchway/client","@latchway/openai","@latchway/vercel-ai","@latchway/langchain"]' '
+             (type == "array" and length == 4) and (map(.name) == $names) and
+             all(.[];
+               .version == $version and (.dist.integrity | startswith("sha512-")) and
+               ._npmUser.trustedPublisher.id == "github" and
+               (.dist.signatures | type == "array" and length > 0) and
+               .dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
             "$RUNNER_TEMP/npm-javascript.json" >/dev/null
           jq --exit-status --arg version "$react_native_version" \
             '.name == "@latchway/react-native" and .version == $version and
@@ -932,11 +941,13 @@ jobs:
           javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
           react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
           jq --exit-status --arg version "$javascript_version" \
-            '.name == "@latchway/client" and .version == $version and
-             (.dist.integrity | startswith("sha512-")) and
-             ._npmUser.trustedPublisher.id == "github" and
-             (.dist.signatures | type == "array" and length > 0) and
-             .dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' \
+            --argjson names '["@latchway/client","@latchway/openai","@latchway/vercel-ai","@latchway/langchain"]' '
+             (type == "array" and length == 4) and (map(.name) == $names) and
+             all(.[];
+               .version == $version and (.dist.integrity | startswith("sha512-")) and
+               ._npmUser.trustedPublisher.id == "github" and
+               (.dist.signatures | type == "array" and length > 0) and
+               .dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
             "$public/npm-javascript.json" >/dev/null
           jq --exit-status --arg version "$react_native_version" \
             '.name == "@latchway/react-native" and .version == $version and
@@ -983,7 +994,10 @@ jobs:
             --argjson release_assets "$(jq --compact-output '[.assets[] | {id, name, size, digest}] | sort_by(.name)' "$RUNNER_TEMP/release.json")" \
             --arg image "$image" \
             --argjson oci_aliases "$(cat "$RUNNER_TEMP/oci-alias-state.json")" \
-            --arg js "@latchway/client@$javascript_version" \
+            --arg js_client "@latchway/client@$javascript_version" \
+            --arg js_openai "@latchway/openai@$javascript_version" \
+            --arg js_vercel_ai "@latchway/vercel-ai@$javascript_version" \
+            --arg js_langchain "@latchway/langchain@$javascript_version" \
             --arg rn "@latchway/react-native@$react_native_version" \
             --arg swift "https://github.com/Latchway/latchway-ios-sdk.git@$ios_tag" \
             --arg pod "Latchway/$ios_version" \
@@ -1001,7 +1015,12 @@ jobs:
               oci_image_digest: $image,
               oci_aliases: $oci_aliases,
               registries: {
-                oci: $image, npm_javascript: $js, npm_react_native: $rn,
+                oci: $image,
+                npm_javascript_client: $js_client,
+                npm_javascript_openai: $js_openai,
+                npm_javascript_vercel_ai: $js_vercel_ai,
+                npm_javascript_langchain: $js_langchain,
+                npm_react_native: $rn,
                 swift_package: $swift, cocoapods: $pod,
                 maven_central: [
                   "dev.latchway:latchway-core:" + $android,
@@ -1191,7 +1210,9 @@ jobs:
             .schema_version == 1 and
             .kind == "latchway_public_registry_byte_proof_verification" and
             .candidate_commit == $commit and .release_tag == $tag and .status == "passed" and
-            (.proofs | keys | sort) == ["android", "ios", "javascript", "oci", "react_native"] and
+            (.proofs | keys | sort) ==
+              ["android", "documentation", "documentation_inputs", "ios",
+               "javascript", "oci", "react_native", "swift"] and
             all(.proofs[];
               type == "object" and (keys | sort) == ["path", "sha256"] and
               (.path | type == "string" and length > 0) and
@@ -1226,7 +1247,9 @@ jobs:
             "$RUNNER_TEMP/independently-recomputed-public-registry-proof.json" \
             "$CANDIDATE_COMMIT" "$RELEASE_TAG" \
             "$EXPECTED_AUTHORITY_MANIFEST_SHA256" <<'PY'
+          import base64
           import hashlib
+          import io
           import json
           import os
           from pathlib import Path, PurePosixPath
@@ -1448,9 +1471,15 @@ jobs:
               or registry.get("core_commit") != candidate_commit
               or registry.get("core_release") != release_tag
               or not isinstance(registry.get("repositories"), dict)
-              or not isinstance(registry.get("claims"), dict)
-              or not registry["claims"]
-              or any(value is not True for value in registry["claims"].values())
+              or registry.get("claims") != {
+                  "cocoapods_verified": True,
+                  "documentation_production_verified": True,
+                  "maven_central_verified": True,
+                  "npm_javascript_verified": True,
+                  "npm_react_native_verified": True,
+                  "oci_digest_verified": True,
+                  "swift_package_verified": True,
+              }
               or not isinstance(registry.get("artifacts"), list)
           ):
               reject("registry domain identity mismatch")
@@ -1458,8 +1487,11 @@ jobs:
               "oci": "artifacts--registry-oci--tool-output.json",
               "javascript": "artifacts--registry-npm-javascript--tool-output.json",
               "react_native": "artifacts--registry-npm-react-native--tool-output.json",
+              "swift": "artifacts--registry-swift--tool-output.json",
               "ios": "artifacts--registry-cocoapods--tool-output.json",
               "android": "artifacts--registry-maven-central--tool-output.json",
+              "documentation": "artifacts--registry-documentation-production--tool-output.json",
+              "documentation_inputs": "artifacts--registry-documentation-production--mintlify-production-evidence.json",
           }
           proofs = {}
           for name, suffix in suffixes.items():
@@ -1480,6 +1512,273 @@ jobs:
               ):
                   reject(f"{name} registry artifact hash mismatch")
               proofs[name] = {"path": relative, "sha256": expected}
+
+          # The candidate-owned verifier cannot be the authority for the JS
+          # reproducibility aggregate. Reopen the four exact retained release
+          # tarballs and recompute every ordered dist row from raw bytes here.
+          javascript_coordinate = registry["repositories"].get("javascript")
+          javascript_proof = read_json(external / proofs["javascript"]["path"])
+          javascript_packages = (
+              ("client", "@latchway/client"),
+              ("openai", "@latchway/openai"),
+              ("vercel-ai", "@latchway/vercel-ai"),
+              ("langchain", "@latchway/langchain"),
+          )
+          if (
+              not isinstance(javascript_coordinate, dict)
+              or set(javascript_coordinate) != {"commit", "tag", "version"}
+              or not commit_re.fullmatch(str(javascript_coordinate.get("commit")))
+              or not tag_re.fullmatch(str(javascript_coordinate.get("tag")))
+              or not isinstance(javascript_coordinate.get("version"), str)
+              or javascript_proof.get("version") != javascript_coordinate["version"]
+              or javascript_proof.get("source_commit") != javascript_coordinate["commit"]
+              or javascript_proof.get("release_tag") != javascript_coordinate["tag"]
+          ):
+              reject("javascript retained tarball identity mismatch")
+          javascript_version = javascript_coordinate["version"]
+          expected_tarball_suffixes = {
+              f"artifacts--registry-npm-javascript--latchway-{package_id}-{javascript_version}.tgz"
+              for package_id, _ in javascript_packages
+          }
+          observed_tarball_suffixes = {
+              str(item.get("path", "")).rsplit("/", 1)[-1]
+              for item in registry["artifacts"]
+              if isinstance(item, dict)
+              and "artifacts--registry-npm-javascript--latchway-" in str(item.get("path", ""))
+              and str(item.get("path", "")).endswith(".tgz")
+          }
+          if observed_tarball_suffixes != expected_tarball_suffixes:
+              reject("javascript retained tarball closure mismatch")
+          retained_tarballs = {}
+          for package_id, _ in javascript_packages:
+              tarball_name = f"latchway-{package_id}-{javascript_version}.tgz"
+              suffix = f"artifacts--registry-npm-javascript--{tarball_name}"
+              matches = [
+                  item for item in registry["artifacts"]
+                  if isinstance(item, dict) and str(item.get("path", "")).endswith(suffix)
+              ]
+              if len(matches) != 1 or set(matches[0]) != {"path", "sha256"}:
+                  reject("javascript retained tarball closure mismatch")
+              relative = safe_relative(matches[0]["path"]).as_posix()
+              expected = matches[0]["sha256"]
+              if (
+                  not isinstance(expected, str)
+                  or not sha256_re.fullmatch(expected)
+                  or aggregate_hashes.get(relative) != expected
+                  or relative not in aggregate_tree
+                  or sha256_file(aggregate_tree[relative]) != expected
+              ):
+                  reject("javascript retained tarball hash mismatch")
+              retained_tarballs[tarball_name] = read_regular(
+                  aggregate_tree[relative], maximum=10 * 1024 * 1024
+              )
+
+          reviewed_aggregate = javascript_proof.get("reviewed_aggregate_evidence")
+          reproducibility = (
+              reviewed_aggregate.get("build-reproducibility.json")
+              if isinstance(reviewed_aggregate, dict) else None
+          )
+          package_evidence = (
+              reviewed_aggregate.get("package-evidence.json")
+              if isinstance(reviewed_aggregate, dict) else None
+          )
+          contract_evidence = (
+              reviewed_aggregate.get("contract-evidence.json")
+              if isinstance(reviewed_aggregate, dict) else None
+          )
+          rows = reproducibility.get("files") if isinstance(reproducibility, dict) else None
+          reviewed_packages = (
+              package_evidence.get("packages")
+              if isinstance(package_evidence, dict) else None
+          )
+          package_proofs = javascript_proof.get("packages")
+          release_asset_set = javascript_proof.get("release_asset_set")
+          verification = javascript_proof.get("reproducibility_archive_verification")
+          if (
+              not isinstance(rows, list) or not rows
+              or not isinstance(reviewed_packages, list) or len(reviewed_packages) != 4
+              or not isinstance(package_proofs, list) or len(package_proofs) != 4
+              or not isinstance(release_asset_set, dict)
+              or not isinstance(contract_evidence, dict)
+              or not sha256_re.fullmatch(str(contract_evidence.get("contract_lock_sha256")))
+          ):
+              reject("javascript retained tarball proof invalid")
+          expected_order = [package for _, package in javascript_packages]
+          if (
+              any(
+                  not isinstance(row, dict)
+                  or set(row) != {"package", "path", "bytes", "sha256"}
+                  or row.get("package") not in expected_order
+                  or not isinstance(row.get("path"), str)
+                  or not isinstance(row.get("bytes"), int)
+                  or isinstance(row.get("bytes"), bool)
+                  or row["bytes"] < 1
+                  or not sha256_re.fullmatch(str(row.get("sha256")))
+                  for row in rows
+              )
+              or [(row["package"], row["path"]) for row in rows]
+              != sorted(
+                  ((row["package"], row["path"]) for row in rows),
+                  key=lambda item: (expected_order.index(item[0]), item[1]),
+              )
+              or len({row["path"] for row in rows}) != len(rows)
+          ):
+              reject("javascript reproducibility row closure invalid")
+
+          dist_payloads = {}
+          total_dist_bytes = 0
+          for index, (package_id, package) in enumerate(javascript_packages):
+              tarball_name = f"latchway-{package_id}-{javascript_version}.tgz"
+              tarball_payload = retained_tarballs[tarball_name]
+              reviewed = reviewed_packages[index]
+              package_proof = package_proofs[index]
+              sha1 = hashlib.sha1(tarball_payload).hexdigest()
+              sha256 = hashlib.sha256(tarball_payload).hexdigest()
+              sha512 = hashlib.sha512(tarball_payload).hexdigest()
+              integrity = "sha512-" + base64.b64encode(
+                  hashlib.sha512(tarball_payload).digest()
+              ).decode("ascii")
+              metadata = release_asset_set.get(tarball_name)
+              if (
+                  not isinstance(reviewed, dict)
+                  or not isinstance(package_proof, dict)
+                  or not isinstance(metadata, dict)
+                  or metadata.get("name") != tarball_name
+                  or metadata.get("size") != len(tarball_payload)
+                  or metadata.get("digest") != f"sha256:{sha256}"
+                  or reviewed.get("id") != package_id
+                  or reviewed.get("package") != package
+                  or reviewed.get("version") != javascript_version
+                  or reviewed.get("tarball") != tarball_name
+                  or reviewed.get("bytes") != len(tarball_payload)
+                  or reviewed.get("sha1") != sha1
+                  or reviewed.get("sha256") != sha256
+                  or reviewed.get("sha512") != sha512
+                  or reviewed.get("integrity") != integrity
+                  or package_proof.get("id") != package_id
+                  or package_proof.get("package") != package
+                  or package_proof.get("version") != javascript_version
+                  or package_proof.get("tarball") != tarball_name
+                  or package_proof.get("bytes") != len(tarball_payload)
+                  or package_proof.get("sha1") != sha1
+                  or package_proof.get("sha256") != sha256
+                  or package_proof.get("sha512") != sha512
+                  or package_proof.get("integrity") != integrity
+              ):
+                  reject("javascript retained tarball release binding invalid")
+              entries = []
+              archive_payloads = {}
+              unpacked_bytes = 0
+              try:
+                  with tarfile.open(fileobj=io.BytesIO(tarball_payload), mode="r:gz") as bundle:
+                      for member in bundle.getmembers():
+                          raw_name = member.name
+                          relative = PurePosixPath(raw_name)
+                          if (
+                              not raw_name or raw_name.startswith("/") or "\\" in raw_name
+                              or relative.as_posix() != raw_name
+                              or any(part in {"", ".", ".."} for part in relative.parts)
+                              or raw_name in archive_payloads or not member.isfile()
+                              or member.size < 0 or member.size > 8 * 1024 * 1024
+                          ):
+                              reject("javascript retained tarball archive invalid")
+                          entries.append(raw_name)
+                          if len(entries) > 512:
+                              reject("javascript retained tarball archive invalid")
+                          unpacked_bytes += member.size
+                          if unpacked_bytes > 25 * 1024 * 1024:
+                              reject("javascript retained tarball archive invalid")
+                          extracted = bundle.extractfile(member)
+                          if extracted is None:
+                              reject("javascript retained tarball archive invalid")
+                          member_payload = extracted.read(member.size + 1)
+                          if len(member_payload) != member.size:
+                              reject("javascript retained tarball archive invalid")
+                          archive_payloads[raw_name] = member_payload
+                          if raw_name.startswith("package/dist/"):
+                              repository_path = raw_name.removeprefix("package/")
+                              if package_id != "client":
+                                  repository_path = f"packages/{package_id}/{repository_path}"
+                              if repository_path in dist_payloads or member.size < 1:
+                                  reject("javascript retained tarball archive invalid")
+                              total_dist_bytes += member.size
+                              if total_dist_bytes > 32 * 1024 * 1024:
+                                  reject("javascript retained tarball archive invalid")
+                              dist_payloads[repository_path] = member_payload
+              except Rejected:
+                  raise
+              except (tarfile.TarError, EOFError, OSError):
+                  reject("javascript retained tarball archive invalid")
+              manifest_payload = archive_payloads.get("package/package.json")
+              try:
+                  package_manifest = json.loads(
+                      manifest_payload.decode("utf-8") if isinstance(manifest_payload, bytes) else "",
+                      object_pairs_hook=strict_object,
+                      parse_constant=lambda value: reject("non-finite package manifest"),
+                  )
+              except Rejected:
+                  raise
+              except (UnicodeDecodeError, json.JSONDecodeError):
+                  reject("javascript retained package manifest invalid")
+              published_peers = reviewed.get("published_peer_dependencies")
+              if (
+                  sorted(entries) != reviewed.get("entries")
+                  or unpacked_bytes != reviewed.get("unpacked_bytes")
+                  or not isinstance(package_manifest, dict)
+                  or package_manifest.get("name") != package
+                  or package_manifest.get("version") != javascript_version
+                  or not isinstance(published_peers, dict)
+                  or (package_manifest.get("peerDependencies") or {}) != published_peers
+                  or (
+                      package_id != "client"
+                      and published_peers.get("@latchway/client") != f"^{javascript_version}"
+                  )
+                  or (
+                      package_id == "client"
+                      and hashlib.sha256(
+                          archive_payloads.get("package/contract.lock", b"")
+                      ).hexdigest() != contract_evidence["contract_lock_sha256"]
+                  )
+              ):
+                  reject("javascript retained package manifest binding invalid")
+              prefix = "dist/" if package_id == "client" else f"packages/{package_id}/dist/"
+              expected_paths = {
+                  row.get("path") for row in rows if row.get("package") == package
+              }
+              if {path for path in dist_payloads if path.startswith(prefix)} != expected_paths:
+                  reject("javascript retained dist closure invalid")
+
+          aggregate_digest = hashlib.sha256()
+          for row in rows:
+              path = row["path"]
+              payload_bytes = dist_payloads.get(path)
+              if (
+                  payload_bytes is None
+                  or row["bytes"] != len(payload_bytes)
+                  or row["sha256"] != hashlib.sha256(payload_bytes).hexdigest()
+              ):
+                  reject("javascript retained dist row mismatch")
+              aggregate_digest.update(path.encode("utf-8"))
+              aggregate_digest.update(b"\0")
+              aggregate_digest.update(payload_bytes)
+              aggregate_digest.update(b"\0")
+          recomputed_aggregate = aggregate_digest.hexdigest()
+          expected_verification = {
+              "schema_version": 1,
+              "algorithm": "sha256",
+              "inputs": "ordered-release-tarball-dist-file-bytes",
+              "archive_regular_file_closure_verified": True,
+              "source_manifests_and_peer_translation_verified": True,
+              "independent_source_rebuild_performed": False,
+              "file_count": len(rows),
+              "bytes": total_dist_bytes,
+              "sha256": recomputed_aggregate,
+          }
+          if (
+              reproducibility.get("sha256") != recomputed_aggregate
+              or verification != expected_verification
+          ):
+              reject("javascript reproducibility aggregate mismatch")
           result = {
               "schema_version": 1,
               "kind": "latchway_public_registry_byte_proof_verification",
@@ -1656,9 +1955,14 @@ jobs:
               .github_release.url == ("https://github.com/Latchway/latchway/releases/tag/" + $tag) and
               (.github_release.published_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
               (.registries | keys | sort) ==
-                ["cocoapods", "maven_central", "npm_javascript", "npm_react_native", "oci", "swift_package"] and
+                ["cocoapods", "maven_central", "npm_javascript_client",
+                 "npm_javascript_langchain", "npm_javascript_openai",
+                 "npm_javascript_vercel_ai", "npm_react_native", "oci", "swift_package"] and
               .registries.oci == $image and
-              .registries.npm_javascript == ("@latchway/client@" + $js_version) and
+              .registries.npm_javascript_client == ("@latchway/client@" + $js_version) and
+              .registries.npm_javascript_openai == ("@latchway/openai@" + $js_version) and
+              .registries.npm_javascript_vercel_ai == ("@latchway/vercel-ai@" + $js_version) and
+              .registries.npm_javascript_langchain == ("@latchway/langchain@" + $js_version) and
               .registries.npm_react_native == ("@latchway/react-native@" + $rn_version) and
               .registries.swift_package == ("https://github.com/Latchway/latchway-ios-sdk.git@" + $ios_tag) and
               .registries.cocoapods == ("Latchway/" + $ios_version) and
@@ -1705,7 +2009,10 @@ jobs:
             printf -- '- Mirrored files: `%s`\n' "$documentation_files"
             printf '\n## Published package coordinates\n\n'
             printf -- '- OCI: `%s`\n' "$image"
-            printf -- '- JavaScript: `@latchway/client@%s`\n' "$js_version"
+            printf -- '- JavaScript client: `@latchway/client@%s`\n' "$js_version"
+            printf -- '- JavaScript OpenAI adapter: `@latchway/openai@%s`\n' "$js_version"
+            printf -- '- JavaScript Vercel AI adapter: `@latchway/vercel-ai@%s`\n' "$js_version"
+            printf -- '- JavaScript LangChain adapter: `@latchway/langchain@%s`\n' "$js_version"
             printf -- '- React Native: `@latchway/react-native@%s`\n' "$rn_version"
             printf -- '- Swift Package: `https://github.com/Latchway/latchway-ios-sdk.git@%s`\n' "$ios_tag"
             printf -- '- CocoaPods: `Latchway/%s`\n' "$ios_version"

@@ -12,7 +12,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
+import textwrap
 from typing import Mapping
 import unittest
 from unittest import mock
@@ -32,6 +34,21 @@ FIXTURE_SPEC = importlib.util.spec_from_file_location(
 assert FIXTURE_SPEC is not None and FIXTURE_SPEC.loader is not None
 FIXTURE_MODULE = importlib.util.module_from_spec(FIXTURE_SPEC)
 FIXTURE_SPEC.loader.exec_module(FIXTURE_MODULE)
+
+PUBLIC_PROOF_FIXTURE_SCRIPT = Path(__file__).with_name(
+    "test_verify_public_registry_proof.py"
+)
+PUBLIC_PROOF_FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "public_registry_proof_fixture_for_observer", PUBLIC_PROOF_FIXTURE_SCRIPT
+)
+assert (
+    PUBLIC_PROOF_FIXTURE_SPEC is not None
+    and PUBLIC_PROOF_FIXTURE_SPEC.loader is not None
+)
+PUBLIC_PROOF_FIXTURE_MODULE = importlib.util.module_from_spec(
+    PUBLIC_PROOF_FIXTURE_SPEC
+)
+PUBLIC_PROOF_FIXTURE_SPEC.loader.exec_module(PUBLIC_PROOF_FIXTURE_MODULE)
 
 
 def canonical_maven_file_rows(
@@ -706,8 +723,9 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 repository_id, coordinate["version"]
             )
             names = sorted(expected_assets)
-            if adoption_required:
-                names.append("npm-release-adoption-123-1.json")
+            for package_id in sorted(adoption_required):
+                middle = f"-{package_id}" if package_id else ""
+                names.append(f"npm-release-adoption{middle}-123-1.json")
             assets = [
                 {
                     "id": index + 1,
@@ -1712,6 +1730,147 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 observer.identity["repositories"]["javascript"],
             )
 
+    def test_github_authority_file_bound_accepts_exact_schema_maximum_only(self) -> None:
+        observer = self.bare_observer("public_registries")
+        self.assertEqual(MODULE.MAXIMUM_AUTHORITY_FILES, 534)
+        maximum_files = {
+            f"boundary/{index:03d}.json": b"{}\n"
+            for index in range(MODULE.MAXIMUM_AUTHORITY_FILES)
+        }
+        accepted = self.github_authority_fixture(
+            observer, "github-authority-boundary-accepted", maximum_files
+        )
+        observer.github_authority = accepted
+        observer._validate_github_authority_directory()
+
+        rejected = self.github_authority_fixture(
+            observer,
+            "github-authority-boundary-rejected",
+            {
+                **maximum_files,
+                f"boundary/{MODULE.MAXIMUM_AUTHORITY_FILES:03d}.json": b"{}\n",
+            },
+        )
+        observer.github_authority = rejected
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "github_authority_file_set_invalid"
+        ):
+            observer._validate_github_authority_directory()
+
+    def test_collector_observer_and_final_verifier_share_exact_attestation_sets(self) -> None:
+        version = "1.0.0"
+        javascript_fixed, _ = (
+            PUBLIC_PROOF_FIXTURE_MODULE.MODULE.expected_npm_release_assets(
+                "@latchway/client", version
+            )
+        )
+        react_native_fixed, _ = (
+            PUBLIC_PROOF_FIXTURE_MODULE.MODULE.expected_npm_release_assets(
+                "@latchway/react-native", version
+            )
+        )
+        release_names = {
+            "javascript": javascript_fixed
+            | {
+                f"npm-release-adoption-{package_id}-10-1.json"
+                for package_id, _ in MODULE.JAVASCRIPT_NPM_PACKAGES
+            },
+            "react_native": react_native_fixed
+            | {"npm-release-adoption-10-1.json"},
+            "ios": {
+                f"latchway-ios-sdk-{version}.tar.gz",
+                f"latchway-ios-sdk-{version}.tar.gz.sha256",
+                f"docs-bundle-{version}.tar.gz",
+                "cocoapods-published-podspec.json",
+                "cocoapods-reviewed-podspec.json",
+                "cocoapods-release-evidence.json",
+                "cocoapods-release-evidence.SHA256SUMS",
+            },
+            "android": {
+                f"latchway-android-{version}-maven-repository.zip",
+                f"latchway-android-{version}-central-portal.zip",
+                f"docs-bundle-{version}.tar.gz",
+                "SHA256SUMS",
+                "github-release-tag-binding.json",
+                "latchway-maven-signing-public-key.asc",
+                "maven-central-upload-intent.json",
+                "maven-central-deployment.json",
+                "maven-central-deployment-status.json",
+                "maven-central-release-evidence.json",
+            },
+        }
+        expected: dict[str, set[str]] = {}
+        verifier = PUBLIC_PROOF_FIXTURE_MODULE.MODULE
+        for repository_id, names in release_names.items():
+            observer_names = MODULE.expected_source_attested_release_assets(
+                repository_id, version, names
+            )
+            verifier_names = verifier.expected_source_attested_release_assets(
+                repository_id, version, names
+            )
+            self.assertEqual(observer_names, verifier_names)
+            expected[repository_id] = observer_names
+
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/release-domain-observations.yml"
+        ).read_text(encoding="utf-8")
+        start = workflow.index("            requires_subject_attestation() {")
+        end = workflow.index("            for id in javascript", start)
+        function = textwrap.dedent(workflow[start:end])
+        candidates = [
+            f"{repository_id}:{name}"
+            for repository_id, names in release_names.items()
+            for name in sorted(names)
+        ]
+        command = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -Eeuo pipefail\n"
+                    + function
+                    + '\nfor value in "$@"; do\n'
+                    + '  id=${value%%:*}; name=${value#*:}\n'
+                    + '  if requires_subject_attestation "$id" "$name"; then printf "%s\\n" "$value"; fi\n'
+                    + "done\n"
+                ),
+                "collector-attestations",
+                *candidates,
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        captured = set(command.stdout.splitlines())
+        self.assertEqual(
+            captured,
+            {
+                f"{repository_id}:{name}"
+                for repository_id, names in expected.items()
+                for name in names
+            },
+        )
+        self.assertIn("ios:docs-bundle-1.0.0.tar.gz", captured)
+        self.assertIn("react_native:docs-bundle-1.0.0.tar.gz", captured)
+
+    def test_github_authority_cap_matches_exact_worst_case_arithmetic(self) -> None:
+        # Per repository: release metadata + asset bytes + immutable verification
+        # + source attestation verification + distinct provenance/adoption runs.
+        javascript = 1 + 64 + 64 + 64 + (4 + (64 - 31))
+        react_native = 1 + 64 + 64 + 63 + (1 + (64 - 12))
+        ios = 1 + 7 + 7 + 6
+        android = 1 + 10 + 10 + 10
+        documentation = 7
+        self.assertEqual(
+            (javascript, react_native, ios, android, documentation),
+            (230, 245, 21, 31, 7),
+        )
+        self.assertEqual(
+            MODULE.MAXIMUM_AUTHORITY_FILES,
+            javascript + react_native + ios + android + documentation,
+        )
+
     def test_supply_chain_validators_reject_digest_scan_sbom_and_signature_tampering(self) -> None:
         platforms = {
             "linux/amd64": "sha256:" + "2" * 64,
@@ -1921,6 +2080,8 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "pins": [
                 {
                     "identity": "latchway-ios-sdk",
+                    "kind": "remoteSourceControl",
+                    "location": "https://github.com/Latchway/latchway-ios-sdk.git",
                     "state": {
                         "version": coordinate["version"],
                         "revision": coordinate["commit"],
@@ -1938,6 +2099,355 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             MODULE.Observer._validate_swift_resolution(
                 json.dumps(swift).encode(), coordinate
             )
+
+    def test_javascript_aggregate_rejects_retry_variant_and_reordered_reproducibility(self) -> None:
+        fixture = PUBLIC_PROOF_FIXTURE_MODULE.PublicRegistryProofTests(
+            methodName="runTest"
+        )
+        proof, coordinate, _ = fixture.javascript_npm_set_proof()
+        release_assets: dict[str, dict[str, bytes]] = {
+            "SHA256SUMS": {"bytes": b"checksums"}
+        }
+        for name, envelope in proof["retained_aggregate_evidence"].items():
+            release_assets[name] = {
+                "bytes": base64.b64decode(envelope["content_base64"], validate=True)
+            }
+        for package_proof in proof["packages"]:
+            for name, envelope in package_proof["registry_evidence"].items():
+                release_assets[name] = {
+                    "bytes": base64.b64decode(
+                        envelope["content_base64"], validate=True
+                    )
+                }
+        observer = self.bare_observer()
+        observer._validate_javascript_npm_aggregate(coordinate, release_assets)
+
+        for mutation in (
+            "retry-variant",
+            "reordered-reproducibility",
+            "failed-vulnerability-scan",
+            "unannotated-tag",
+            "changed-checksums",
+        ):
+            changed = copy.deepcopy(release_assets)
+            if mutation == "retry-variant":
+                document = json.loads(
+                    changed["post-publish-evidence.json"]["bytes"]
+                )
+                document["packages"][0]["publication_mode"] = "adopted_existing"
+                changed["post-publish-evidence.json"]["bytes"] = (
+                    json.dumps(document, indent=2, sort_keys=True) + "\n"
+                ).encode()
+            elif mutation == "reordered-reproducibility":
+                document = json.loads(
+                    changed["build-reproducibility.json"]["bytes"]
+                )
+                document["files"][0], document["files"][1] = (
+                    document["files"][1],
+                    document["files"][0],
+                )
+                changed["build-reproducibility.json"]["bytes"] = (
+                    json.dumps(document, indent=2, sort_keys=True) + "\n"
+                ).encode()
+            elif mutation == "failed-vulnerability-scan":
+                document = json.loads(
+                    changed["dependency-vulnerability-scan.json"]["bytes"]
+                )
+                document["status"] = "failed"
+                changed["dependency-vulnerability-scan.json"]["bytes"] = (
+                    json.dumps(document, indent=2, sort_keys=True) + "\n"
+                ).encode()
+            elif mutation == "unannotated-tag":
+                document = json.loads(changed["tag-evidence.json"]["bytes"])
+                document["annotated"] = False
+                changed["tag-evidence.json"]["bytes"] = (
+                    json.dumps(document, indent=2, sort_keys=True) + "\n"
+                ).encode()
+            else:
+                changed["SHA256SUMS"]["bytes"] = b"0" * 64 + b"  wrong.tgz\n"
+            with self.subTest(mutation=mutation), self.assertRaises(
+                MODULE.ObservationError
+            ):
+                observer._validate_javascript_npm_aggregate(
+                    coordinate, changed
+                )
+
+    def test_javascript_reproducibility_hash_is_recomputed_from_archive_bytes(self) -> None:
+        release_assets: dict[str, dict[str, bytes]] = {}
+        javascript_root = self.root / "javascript-reproducibility-source"
+        javascript_root.mkdir()
+        contract_lock = b"contract_version: 1.0.0\n"
+        (javascript_root / "contract.lock").write_bytes(contract_lock)
+        files = []
+        package_items = []
+        aggregate = hashlib.sha256()
+        for index, (package_id, package) in enumerate(
+            MODULE.JAVASCRIPT_NPM_PACKAGES, 1
+        ):
+            payload = f"export const package{index} = true;\n".encode()
+            repository_path = (
+                "dist/index.js"
+                if package_id == "client"
+                else f"packages/{package_id}/dist/index.js"
+            )
+            aggregate.update(repository_path.encode())
+            aggregate.update(b"\0")
+            aggregate.update(payload)
+            aggregate.update(b"\0")
+            files.append(
+                {
+                    "package": package,
+                    "path": repository_path,
+                    "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            )
+            package_root = (
+                javascript_root
+                if package_id == "client"
+                else javascript_root / "packages" / package_id
+            )
+            package_root.mkdir(parents=True, exist_ok=True)
+            source_peers = (
+                {} if package_id == "client" else {"@latchway/client": "workspace:^"}
+            )
+            published_peers = (
+                {} if package_id == "client" else {"@latchway/client": "^1.0.0"}
+            )
+            (package_root / "package.json").write_text(
+                json.dumps(
+                    {
+                        "name": package,
+                        "version": "1.0.0",
+                        "peerDependencies": source_peers,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            packaged_manifest = (
+                json.dumps(
+                    {
+                        "name": package,
+                        "version": "1.0.0",
+                        "peerDependencies": published_peers,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode()
+            archive_files = {
+                "package/dist/index.js": payload,
+                "package/package.json": packaged_manifest,
+            }
+            if package_id == "client":
+                archive_files["package/contract.lock"] = contract_lock
+            archive_bytes = io.BytesIO()
+            with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
+                for name, archive_payload in sorted(archive_files.items()):
+                    member = tarfile.TarInfo(name)
+                    member.size = len(archive_payload)
+                    archive.addfile(member, io.BytesIO(archive_payload))
+            release_assets[f"latchway-{package_id}-1.0.0.tgz"] = {
+                "bytes": archive_bytes.getvalue()
+            }
+            package_items.append(
+                {
+                    "id": package_id,
+                    "package": package,
+                    "entries": sorted(archive_files),
+                    "unpacked_bytes": sum(len(item) for item in archive_files.values()),
+                    "published_peer_dependencies": published_peers,
+                }
+            )
+        reproducibility = {
+            "schema_version": 1,
+            "identical": True,
+            "package_count": 4,
+            "sha256": aggregate.hexdigest(),
+            "files": files,
+        }
+        verification = MODULE.verify_javascript_reproducibility_archive_inputs(
+            reproducibility,
+            release_assets,
+            "1.0.0",
+            {"packages": package_items},
+            javascript_root,
+        )
+        self.assertEqual(verification["sha256"], aggregate.hexdigest())
+        self.assertEqual(verification["file_count"], 4)
+        self.assertEqual(
+            verification["bytes"], sum(item["bytes"] for item in files)
+        )
+
+        arbitrary_hash = copy.deepcopy(reproducibility)
+        arbitrary_hash["sha256"] = "f" * 64
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "registry_npm_reproducibility_invalid"
+        ):
+            MODULE.verify_javascript_reproducibility_archive_inputs(
+                arbitrary_hash,
+                release_assets,
+                "1.0.0",
+                {"packages": package_items},
+                javascript_root,
+            )
+
+        changed_manifest = json.loads(
+            (javascript_root / "packages" / "openai" / "package.json").read_text()
+        )
+        changed_manifest["peerDependencies"]["@latchway/client"] = "workspace:~"
+        (javascript_root / "packages" / "openai" / "package.json").write_text(
+            json.dumps(changed_manifest) + "\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "registry_npm_reproducibility_invalid"
+        ):
+            MODULE.verify_javascript_reproducibility_archive_inputs(
+                reproducibility,
+                release_assets,
+                "1.0.0",
+                {"packages": package_items},
+                javascript_root,
+            )
+
+        digest = MODULE.javascript_npm_tarball_digest(
+            release_assets["latchway-client-1.0.0.tgz"]["bytes"]
+        )
+        self.assertEqual(
+            digest["sha1"],
+            hashlib.sha1(
+                release_assets["latchway-client-1.0.0.tgz"]["bytes"]
+            ).hexdigest(),
+        )
+
+    def test_javascript_contract_evidence_is_bound_to_locked_source_files(self) -> None:
+        observer = self.bare_observer("public_registries")
+        javascript = self.root / "javascript-contract-source"
+        fixtures = javascript / "test" / "fixtures" / "contract"
+        fixtures.mkdir(parents=True)
+        fixture_payload = b'{"wire":2}\n'
+        (fixtures / "protocol-version.json").write_bytes(fixture_payload)
+        lock_payload = (
+            "contract_version: 0.5.1\n"
+            "wire_protocol: 2\n"
+            "core_release: v1.0.0\n"
+            f"core_commit: {'c' * 40}\n"
+            f'bundle_sha256: "{'b' * 64}"\n'
+            "minimum_server_version: 1.0.0\n"
+            "maximum_tested_server_version: 1.0.x\n"
+        ).encode()
+        (javascript / "contract.lock").write_bytes(lock_payload)
+        observer.repositories["javascript"] = javascript
+        coordinate = observer.identity["repositories"]["javascript"]
+        evidence = {
+            "schema_version": 1,
+            "contract_version": "0.5.1",
+            "core_release": "v1.0.0",
+            "core_commit": "c" * 40,
+            "bundle_sha256": "b" * 64,
+            "wire_protocol_version": 2,
+            "contract_lock_sha256": hashlib.sha256(lock_payload).hexdigest(),
+            "fixtures": [
+                {
+                    "name": "protocol-version.json",
+                    "sha256": hashlib.sha256(fixture_payload).hexdigest(),
+                }
+            ],
+        }
+        verification = observer._verify_javascript_contract_source(
+            evidence, coordinate
+        )
+        self.assertEqual(verification["fixture_count"], 1)
+        for mutation in ("evidence", "fixture"):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(evidence)
+                if mutation == "evidence":
+                    changed["bundle_sha256"] = "0" * 64
+                else:
+                    (fixtures / "protocol-version.json").write_bytes(b"changed\n")
+                with self.assertRaisesRegex(
+                    MODULE.ObservationError, "registry_npm_contract_source_invalid"
+                ):
+                    observer._verify_javascript_contract_source(
+                        changed, coordinate
+                    )
+                (fixtures / "protocol-version.json").write_bytes(fixture_payload)
+
+    def test_javascript_adoption_mode_is_exactly_bound_to_origin_attempt(self) -> None:
+        valid = MODULE.valid_npm_adoption_mode
+        self.assertTrue(valid("published", 101, 1, 101, 1))
+        self.assertTrue(valid("adopted_existing", 201, 2, 101, 1))
+        for mode, run_id, run_attempt, origin_id, origin_attempt in (
+            ("published", 201, 2, 101, 1),
+            ("adopted_existing", 101, 1, 101, 1),
+            ("unexpected", 201, 2, 101, 1),
+            ({"published": True}, 101, 1, 101, 1),
+        ):
+            with self.subTest(mode=mode):
+                self.assertFalse(
+                    valid(mode, run_id, run_attempt, origin_id, origin_attempt)
+                )
+
+    def test_documentation_observer_retains_exact_raw_authority_closure(self) -> None:
+        mintlify_fixture_path = Path(__file__).with_name(
+            "test_mintlify_production_proof.py"
+        )
+        mintlify_spec = importlib.util.spec_from_file_location(
+            "mintlify_fixture_for_observer", mintlify_fixture_path
+        )
+        assert mintlify_spec is not None and mintlify_spec.loader is not None
+        mintlify_module = importlib.util.module_from_spec(mintlify_spec)
+        mintlify_spec.loader.exec_module(mintlify_module)
+        fixture = mintlify_module.MintlifyProductionProofTests(
+            methodName="runTest"
+        )
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        inputs = fixture.inputs()
+        payloads = {
+            MODULE.MINTLIFY_PROOF.EVIDENCE_FILE: inputs["evidence_payload"],
+            MODULE.MINTLIFY_PROOF.CHECKSUM_FILE: inputs["checksum_payload"],
+            MODULE.MINTLIFY_PROOF.ATTESTATION_FILE: inputs[
+                "attestation_bundle_payload"
+            ],
+            "run.json": inputs["run_payload"],
+            "workflow.json": inputs["workflow_payload"],
+            "artifact.json": inputs["artifact_payload"],
+            "attestation-verification.json": inputs[
+                "attestation_verification_payload"
+            ],
+        }
+        observer = self.bare_observer("public_registries")
+        observer.documentation = fixture.documentation
+        observer.now = fixture.now
+
+        def authority(relative: str, *, maximum: int):
+            name = Path(relative).name
+            payload = payloads[name]
+            self.assertLessEqual(len(payload), maximum)
+            return payload, fixture.now, fixture.now
+
+        with (
+            mock.patch.object(
+                observer, "_github_authority_file", side_effect=authority
+            ),
+            mock.patch.object(observer, "emit") as emit,
+        ):
+            observer._observe_documentation_production()
+        emit.assert_called_once()
+        call = emit.call_args
+        self.assertEqual(call.args[0], "registry.documentation-production")
+        self.assertEqual(call.kwargs["retained_inputs"], payloads)
+        self.assertEqual(
+            call.kwargs["retained_input_kind"],
+            "mintlify_production_evidence",
+        )
+        proof = json.loads(call.args[1])
+        self.assertEqual(
+            proof["kind"], "latchway_mintlify_production_release_proof"
+        )
 
     def test_cocoapods_spec_requires_every_reviewed_subspec_and_no_hooks(self) -> None:
         coordinate = {
@@ -2072,7 +2582,24 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         expected, adoption_required = MODULE.Observer._expected_release_assets(
             "javascript", "1.0.0"
         )
-        names = sorted(expected) + ["npm-release-adoption-7-2.json"]
+        self.assertEqual(len(expected), 31)
+        self.assertEqual(
+            adoption_required, frozenset({"client", "openai", "vercel-ai", "langchain"})
+        )
+        for package_id in adoption_required:
+            self.assertTrue(
+                {
+                    f"latchway-{package_id}-1.0.0.tgz",
+                    f"npm-{package_id}-registry-version.json",
+                    f"npm-{package_id}-registry-view.json",
+                    f"npm-{package_id}-attestations.json",
+                    f"npm-{package_id}-audit-signatures.json",
+                }.issubset(expected)
+            )
+        names = sorted(expected) + [
+            f"npm-release-adoption-{package_id}-7-2.json"
+            for package_id in sorted(adoption_required)
+        ]
         release = {
             "id": 42,
             "tag_name": "v1.0.0",
@@ -2088,7 +2615,9 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             json.dumps(release).encode(), "v1.0.0",
             expected_assets=expected, adoption_required=adoption_required,
         )
-        for mutation in ("unknown", "missing", "missing-docs", "no-adoption"):
+        for mutation in (
+            "unknown", "missing", "missing-docs", "no-adoption", "missing-adoption-id"
+        ):
             changed = copy.deepcopy(release)
             if mutation == "unknown":
                 changed["assets"].append({"id": 99, "name": "evil.json", "size": 1, "digest": "sha256:" + "f" * 64})
@@ -2099,8 +2628,14 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     item for item in changed["assets"]
                     if item["name"] != "docs-bundle-1.0.0.tar.gz"
                 ]
-            else:
+            elif mutation == "no-adoption":
                 changed["assets"] = [item for item in changed["assets"] if not item["name"].startswith("npm-release-adoption-")]
+            else:
+                changed["assets"] = [
+                    item
+                    for item in changed["assets"]
+                    if not item["name"].startswith("npm-release-adoption-openai-")
+                ]
             with self.subTest(mutation=mutation), self.assertRaisesRegex(
                 MODULE.ObservationError, "github_release_asset_set_invalid"
             ):
@@ -2116,8 +2651,9 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             )
             self.assertIn("docs-bundle-1.0.0.tar.gz", expected)
             names = sorted(expected)
-            if adoption_required:
-                names.append("npm-release-adoption-8-1.json")
+            for package_id in sorted(adoption_required):
+                middle = f"-{package_id}" if package_id else ""
+                names.append(f"npm-release-adoption{middle}-8-1.json")
             release = {
                 "id": 81,
                 "tag_name": "v1.0.0",
@@ -2689,6 +3225,106 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 self.candidate_created,
                 self.now,
             )
+
+    def test_javascript_machine_result_retains_four_exact_scanned_tarballs(self) -> None:
+        observer = self.bare_observer("public_registries")
+
+        def npm_tarball(payload: bytes) -> bytes:
+            buffer = io.BytesIO()
+            with tarfile.open(
+                fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT
+            ) as archive:
+                member = tarfile.TarInfo("package/dist/index.js")
+                member.mode = 0o644
+                member.uid = member.gid = member.mtime = 0
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+            return buffer.getvalue()
+
+        tarballs = {
+            f"latchway-{package_id}-1.0.0.tgz": npm_tarball(
+                f"export const id = {package_id!r};\n".encode()
+            )
+            for package_id, _ in MODULE.JAVASCRIPT_NPM_PACKAGES
+        }
+        observer.emit(
+            "registry.npm.javascript",
+            MODULE.canonical_json({"proof": "fixture"}),
+            started=self.workflow_started,
+            finished=self.workflow_finished,
+            version="core-v2",
+            invocation=("npm", "view", "fixture"),
+            raw_artifacts=tarballs,
+        )
+        result_path = observer.output / MODULE.EVIDENCE.result_name(
+            "registry.npm.javascript"
+        )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(result["artifacts"]), 5)
+        for name, payload in tarballs.items():
+            path = observer.output / f"artifacts/registry-npm-javascript/{name}"
+            self.assertEqual(path.read_bytes(), payload)
+        MODULE.EVIDENCE.validate_result(
+            result_path,
+            observer.output,
+            "public_registries",
+            "registry.npm.javascript",
+            observer.identity,
+            self.candidate_created,
+            self.now,
+        )
+        with self.assertRaisesRegex(
+            MODULE.EVIDENCE.EvidenceError, "raw_result_contains_secret"
+        ):
+            MODULE.EVIDENCE.scan_npm_tarball_safe(
+                npm_tarball(b"authorization: Bearer definitely-secret-token\n")
+            )
+
+        boundary_payload = tarballs["latchway-client-1.0.0.tgz"]
+        accepted = self.bare_observer("public_registries")
+        accepted.output = self.root / "raw-tarball-boundary-accepted"
+        accepted.output.mkdir()
+        with mock.patch.object(
+            MODULE,
+            "MAXIMUM_RETAINED_NPM_TARBALL_BYTES",
+            len(boundary_payload),
+        ):
+            accepted.emit(
+                "registry.npm.javascript",
+                MODULE.canonical_json({"proof": "boundary"}),
+                started=self.workflow_started,
+                finished=self.workflow_finished,
+                version="core-v2",
+                invocation=("npm", "view", "fixture"),
+                raw_artifacts={
+                    "latchway-client-1.0.0.tgz": boundary_payload
+                },
+            )
+        rejected = self.bare_observer("public_registries")
+        rejected.output = self.root / "raw-tarball-boundary-rejected"
+        rejected.output.mkdir()
+        with (
+            mock.patch.object(
+                MODULE,
+                "MAXIMUM_RETAINED_NPM_TARBALL_BYTES",
+                len(boundary_payload) - 1,
+            ),
+            self.assertRaisesRegex(
+                MODULE.ObservationError, "observation_raw_artifact_set_invalid"
+            ),
+        ):
+            rejected.emit(
+                "registry.npm.javascript",
+                MODULE.canonical_json({"proof": "boundary"}),
+                started=self.workflow_started,
+                finished=self.workflow_finished,
+                version="core-v2",
+                invocation=("npm", "view", "fixture"),
+                raw_artifacts={
+                    "latchway-client-1.0.0.tgz": boundary_payload
+                },
+            )
+        self.assertEqual(list(rejected.output.rglob("*")), [])
 
     def test_invalid_retained_receipt_is_rejected_before_any_output(self) -> None:
         observer = self.bare_observer("physical_devices")

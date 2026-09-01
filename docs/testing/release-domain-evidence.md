@@ -92,7 +92,8 @@ destruction infrastructure makes the live-provider gate fail closed.
 
 The `release-evidence-github-read` environment must expose
 `LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN`, a read-only token scoped only to
-the five Latchway repositories and their released packages. It must have no
+the five product repositories, `Latchway/latchway-docs`, and their released
+packages. It must have no
 repository, package, workflow, or organization write capability.
 The fixed no-checkout capture uses it only for the selected domain: OCI
 provenance for `supply_chain`; annotated-tag, immutable-release, and release
@@ -100,6 +101,20 @@ attestation records for `public_tags`; or immutable release metadata, exact
 assets, asset attestations, and bound Actions-run records for
 `public_registries`. The offline observer rejects a missing, extra, symlinked,
 oversized, stale, hash-changed, coordinate-changed, or unused capture file.
+
+For `public_registries`, dispatch additionally requires the exact successful
+Mintlify production-evidence run ID and attempt; those inputs must be empty for
+every other domain. The authority job authenticates the exact
+`Latchway/latchway-docs` run, deployment-status or reviewed dispatch event,
+`main` ref, source commit, workflow path, and one bounded artifact named
+`latchway-mintlify-production-<docs-commit>-<deployment>-<run>-<attempt>`. It
+accepts exactly the evidence JSON, its one-line checksum, and its Sigstore
+bundle, then verifies the evidence subject against the docs production workflow
+with both signer and source digest pinned to the documentation commit. The
+credential-free core observer independently revalidates the source checkpoint,
+production deployment, 24-hour freshness window, fixed claims, page/link/
+redirect/AI observations, and every canonical result-set digest before retaining
+the raw authority closure and normalized proof.
 
 For `live_sdk_conformance` and `physical_devices`, dispatch also supplies exact
 run IDs and run attempts for iOS App Attest, Android Play Integrity, and the
@@ -311,12 +326,53 @@ not workflow input. They are defined by `CLAIM_REQUIREMENTS` and
 - Public-tag evidence requires an annotated tag, immutable GitHub release, and
   authenticated release-verification observation for every one of the five
   repositories, all consumed from the sealed GitHub authority capture.
-- Public-registry evidence requires the exact GHCR digest, both npm packages,
-  Swift package resolution, CocoaPods resolution, and Maven Central resolution.
+- Public-registry evidence requires the exact GHCR digest, the ordered
+  four-package JavaScript npm release set, the React Native npm package, Swift
+  package resolution, CocoaPods resolution, Maven Central resolution, and the
+  verified production documentation deployment. The JavaScript proof requires
+  exactly 31 fixed release assets plus at least one authenticated adoption
+  record for each of `client`, `openai`, `vercel-ai`, and `langchain`; it
+  independently validates the aggregate package, candidate, publish-input, and
+  post-publish schemas at versions 2, 2, 2, and 3 respectively. It also
+  requires a passing pinned offline OSV scan, exact annotated-tag evidence,
+  the source checkout's contract lock and complete fixture hashes, exact
+  four-tarball `SHA256SUMS`, and recomputed SHA-1/SHA-256/SHA-512/integrity.
+  Every npm archive must be an exact regular-file closure whose entries,
+  unpacked bytes, package manifest, translated workspace peers, client
+  contract lock, and `dist` bytes match the reviewed evidence.
+  The JavaScript observation also retains the four exact released npm
+  tarballs as separate raw artifacts (at most 10 MiB each). They add exactly
+  four aggregate/finalizer authority rows; the final credentialed verifier
+  reopens those bytes and recomputes every ordered `dist` row and the aggregate
+  instead of trusting a rebound normalized observer assertion.
+  The final public-registry verifier revalidates the retained source-conformance
+  document and uses its contract version, locked core checkpoint, bundle hash,
+  wire version, and generated-fixture closure as independent contract authority.
+  The core authority source archive is deliberately a clean Git checkout: it
+  contains neither `node_modules` nor generated `dist`, so this credential-free
+  core job does not install dependencies or claim a second source rebuild. It
+  instead recomputes the ordered reproducibility aggregate from the four
+  released archive `dist` closures. The separately required React Native
+  release gate performs the independent clean `pnpm` build from the same
+  locked JavaScript commit before accepting these dependencies.
   GitHub release assets, immutable-asset verification, source attestations, and
   npm provenance/adoption workflow runs are consumed only from the sealed
   GitHub authority capture; public registry resolution itself remains live and
   credential-free.
+  Source-attestation capture is an exact union with those production
+  verifier loops: all JavaScript and Android release assets; every React
+  Native asset except its derived `.tgz.sha256`; and every iOS asset except its
+  derived source-archive `.sha256`. This includes both iOS and React Native
+  `docs-bundle-<version>.tar.gz` subjects.
+  At GitHub's 64-asset release bound the exact capture-manifest maximum is
+  `230 + 245 + 21 + 31 + 7 = 534` rows: JavaScript, React Native, iOS,
+  Android, and documentation respectively. The uploaded authority artifact
+  therefore permits 535 files including `manifest.json`; max and max-plus-one
+  production-path regressions keep that boundary closed. The four retained
+  JavaScript tarballs are already among those captured release-asset bytes, so
+  they do not increase the 534-row GitHub capture maximum; they add four files
+  only when the observer carries the same bytes into the authenticated
+  aggregate/finalizer handoff.
   The Maven observation replays verification with the exact v2 upload intent,
   deployment record, and terminal deployment status. It requires the canonical
   15-field proof, six-field embedded deployment, 144-entry public manifest,

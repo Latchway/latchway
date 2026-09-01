@@ -349,8 +349,8 @@ jobs:
               expected_observations='["publication.annotated-tag.android","publication.annotated-tag.core","publication.annotated-tag.ios","publication.annotated-tag.javascript","publication.annotated-tag.react_native","publication.github-release.android","publication.github-release.core","publication.github-release.ios","publication.github-release.javascript","publication.github-release.react_native"]'
               ;;
             public_registries)
-              expected_claims='["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
-              expected_observations='["registry.cocoapods","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
+              expected_claims='["cocoapods_verified","documentation_production_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
+              expected_observations='["registry.cocoapods","registry.documentation-production","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
               ;;
             *) exit 1 ;;
           esac
@@ -480,6 +480,7 @@ jobs:
               supply.github-provenance) expected_tool=github-attestation ;;
               publication.*) expected_tool=github-api ;;
               registry.oci) expected_tool=cosign ;;
+              registry.documentation-production) expected_tool=latchway-mintlify-production-validator ;;
               registry.npm.*) expected_tool=npm ;;
               registry.swift) expected_tool=swift ;;
               registry.cocoapods) expected_tool=cocoapods ;;
