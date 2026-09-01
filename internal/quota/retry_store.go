@@ -180,11 +180,12 @@ func retryTargetPlansAt(prepared preparedRequest, at time.Time) ([]plannedBucket
 	for _, plan := range plans {
 		// A logical request is charged exactly once. Candidate-target materialization
 		// applies only to per-dispatch token/cost capacity and target concurrency.
-		if plan.rule.Metric != LogicalRequestsMetric &&
-			!(plan.rule.Metric == CostNanoUSDMetric &&
+		if plan.rule.Metric == LogicalRequestsMetric ||
+			(plan.rule.Metric == CostNanoUSDMetric &&
 				plan.rule.CostRetryTreatment == InitialAttemptOnlyCostRetryTreatment) {
-			result = append(result, plan)
+			continue
 		}
+		result = append(result, plan)
 	}
 	return result, nil
 }
