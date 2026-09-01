@@ -10,9 +10,9 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 ## Current status (2026-09-01)
 
 The current source report covers a clean six-repository tuple. It binds core
-contract checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9`, reproducible
+contract checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, reproducible
 bundle SHA-256
-`39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`,
+`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`,
 JavaScript `182ff23d8365ae37f3e85dfc84485cc762295f67`, Swift
 `31a37ab7435cb01bb0a47262e4ab92e4f016a669`, Android
 `b16b2ac668f994c3a5aed60803b22c853a95e305`, React Native

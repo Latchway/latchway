@@ -35,8 +35,8 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract source checkpoint | Core checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9` |
-| Bundle SHA-256 | `39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058` |
+| Contract source checkpoint | Core checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
+| Bundle SHA-256 | `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Core implementation checkpoint | `77069816dd68174052e7ebc163911883f8f07e7e`; the final canonical-doc commit is a contract-preserving descendant |
 | Canonical SDK-bundle/public-doc source | The core commit containing this ledger; its generated mirror manifest records the exact source commit |
@@ -113,8 +113,8 @@ generation from iOS app extensions.
 - [x] Regenerate the draft bundle twice after the Admin-session,
   configuration-transfer, server-capability, and Admin event-stream API delta;
   bind byte-identical SHA-256
-  `39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`
-  and checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9` into every SDK lock.
+  `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`
+  and checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` into every SDK lock.
 
 ### Phase 3: Server runtime — source complete
 

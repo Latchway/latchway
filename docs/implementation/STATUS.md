@@ -20,7 +20,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Current phase | Phase 9: local source convergence complete; protected exact-candidate execution remains open |
 | Current objective | Preserve the exact source tuple and execute protected release domains only with their required authority |
 | Validated implementation coordinates | The frozen contract and SDK coordinates below; the final source-conformance report records the canonical-doc and mirror commits |
-| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract source checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9` |
+| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
 | Database schema version | `28` in the current audited working-tree descendant; the last recorded core implementation checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
 | Last full test time | `2026-09-01` — the current schema-28 descendant passed the complete PostgreSQL-backed `go test -count=1 ./...` gate plus contract and canonical-public-documentation validation. The recorded source tuple separately passed core check/race/fuzz/PostgreSQL gates, every SDK release gate, deterministic contract and SDK-documentation rebuilds, canonical and mirror documentation suites, physical iPad signed-bundle verification/install/launch, and clean cross-repository source conformance. Local/static evidence is not protected release evidence. |
 | Passing test commands | Verified commands and required working directories are listed below |
@@ -32,7 +32,7 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Repository | Validated coordinate or state |
 | --- | --- |
-| Core contract checkpoint `latchway` | `ff146bce3fb265341a0d9aa9bb00fda3818139e9` |
+| Core contract checkpoint `latchway` | `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
 | Core implementation checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Core canonical-public-doc source | The final contract-preserving core commit containing this ledger |
 | JavaScript `latchway-js` | `182ff23d8365ae37f3e85dfc84485cc762295f67` |
@@ -43,7 +43,7 @@ supply-chain, publication, and post-publication domains remain open.
 
 These coordinates form the current clean local source-conformance tuple. The
 contract bundle SHA-256 is
-`39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`.
+`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`.
 Branch synchronization is a delivery operation, not release evidence. No local
 version 1 tags exist, and no merge, GitHub release, package publication,
 production deployment, or documentation deployment is verified.
@@ -116,8 +116,8 @@ lock-order suites also pass against the frozen implementation checkpoint.
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
 | Contract | `1.0.0` draft, `released_at: null` |
-| Contract source checkpoint | Core checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9` |
-| Bundle SHA-256 | `39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058` |
+| Contract source checkpoint | Core checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
+| Bundle SHA-256 | `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Schema `28` in the current audited working-tree descendant; checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains the last recorded schema-27 coordinate |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
@@ -220,8 +220,8 @@ checkpoint and reproducible draft bundle above.
 
 These are source-development results, not protected release receipts. The
 clean-tree cross-repository source gate binds core contract checkpoint
-`ff146bce3fb265341a0d9aa9bb00fda3818139e9`, bundle SHA-256
-`39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`,
+`116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, bundle SHA-256
+`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`,
 JavaScript `182ff23d8365ae37f3e85dfc84485cc762295f67`, iOS
 `31a37ab7435cb01bb0a47262e4ab92e4f016a669`, Android
 `b16b2ac668f994c3a5aed60803b22c853a95e305`, React Native

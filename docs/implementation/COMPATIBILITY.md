@@ -21,8 +21,8 @@ The released `0.5.1` bundle and SDK locks remain byte-frozen historical
 coordinates at their normative commits. Version 1 emits a distinct,
 deterministic draft `1.0.0` bundle; it does not overwrite or silently amend the
 historical coordinate. All four SDK locks converge on contract source
-`ff146bce3fb265341a0d9aa9bb00fda3818139e9` and bundle SHA-256
-`39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058`.
+`116ebe4ed31a6a86ec97dc5351e289e12b06a38e` and bundle SHA-256
+`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`.
 That contract checkpoint contains the version 1 runtime, Admin-session
 inventory/revoke, configuration import/export, stable server-capability
 negotiation, authenticated Admin SSE refresh hints, exact JSON/YAML numeric

@@ -17,7 +17,7 @@ deployments, or protected evidence that does not exist.
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `27` at core implementation checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
-| Contract bundle | Reproducible SHA-256 `39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058` at contract source checkpoint `ff146bce3fb265341a0d9aa9bb00fda3818139e9` |
+| Contract bundle | Reproducible SHA-256 `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` at contract source checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e` |
 | Core implementation source | `77069816dd68174052e7ebc163911883f8f07e7e`; the final canonical-documentation commit is a contract-preserving descendant |
 | SDK source tuple | JavaScript `182ff23d8365ae37f3e85dfc84485cc762295f67`; Swift `31a37ab7435cb01bb0a47262e4ab92e4f016a669`; Android `b16b2ac668f994c3a5aed60803b22c853a95e305`; React Native `d538752772d2d22ad16e0219c4f87dc014ef9c92` |
 | Public documentation source | The final canonical core commit and its generated Mintlify mirror; exact commits are recorded by source conformance |

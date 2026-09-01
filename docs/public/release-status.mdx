@@ -11,7 +11,7 @@ owner: "release-engineering"
 ---
 
 Latchway version 1 is locally source-converged. Core contract checkpoint
-`ff146bce3fb265341a0d9aa9bb00fda3818139e9`, all four SDK locks, reproducible
+`116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, all four SDK locks, reproducible
 contract and SDK-documentation bundles, canonical documentation, and the
 generated Mintlify mirror pass the clean cross-repository source gate. No
 public version 1 release should be inferred from source version strings or
@@ -27,7 +27,7 @@ coordinates are release intent until protected promotion completes.
 | --- | --- |
 | Core gateway and control plane | Current source tuple validated; complete core check/race/fuzz/PostgreSQL gates pass |
 | React Native, iOS, Android, and JavaScript SDK sources | Implemented, rebound to the current contract, and complete local release gates pass |
-| Protocol contract | Draft `1.0.0` bundle SHA-256 `39c111fe9d0137dfd839d1d08a07165ef92282c60535e3840d32e94d6f26e058` is reproducible and pinned across repositories |
+| Protocol contract | Draft `1.0.0` bundle SHA-256 `a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad` is reproducible and pinned across repositories |
 | Admin sessions and configuration transfer | Canonical API/CLI/Console session inventory/revoke, negotiated read-only safe mode, and bounded redaction-safe YAML/JSON transfer with exact numeric preservation, immutable strong-ETag staging, and explicit activation review are implemented and locally verified |
 | Admin live refresh | Authenticated SSE refresh hints are implemented with no row data, principal revalidation, reconnect behavior, and polling/manual fallback when `admin_event_stream` is absent; complete local gates pass |
 | Public tags and immutable GitHub releases | No local version 1 tags; no remote tag or GitHub release is authenticated or verified |
