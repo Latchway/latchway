@@ -203,7 +203,7 @@ func Run(parent context.Context, pool *pgxpool.Pool, role string, dependencies D
 		OverallState: OverallUnhealthy,
 		Facts: Facts{
 			Runtime: runtimeFacts(role), Retention: retentionPolicyFacts(),
-			Jobs: JobFacts{ByStatus: make([]JobStatusCount, 0)},
+			Jobs:     JobFacts{ByStatus: make([]JobStatusCount, 0)},
 			Replicas: ReplicaFacts{FreshByRole: make([]ReplicaRoleCount, 0)},
 		},
 	}
