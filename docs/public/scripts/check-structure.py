@@ -150,6 +150,8 @@ REQUIRED_PAGES = {
     "administration/users",
     "administration/overrides",
     "administration/audit-log",
+    "operations/choose-deployment",
+    "operations/verify-release-image",
     "operations/rollbacks",
     "operations/scaling",
     "operations/disaster-recovery",

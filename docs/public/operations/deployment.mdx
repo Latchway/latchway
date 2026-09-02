@@ -1,6 +1,6 @@
 ---
 title: "Deployment"
-description: "Deploy the single Latchway image with PostgreSQL and production secret custody."
+description: "Plan a Latchway deployment around one verified image, PostgreSQL, and production secret custody."
 icon: "server-cog"
 audience: "operator"
 pageType: "runbook"
@@ -21,6 +21,11 @@ root.
   No stable version 1 image has been published. Treat source-built images as
   evaluation candidates until release promotion and provenance checks pass.
 </Warning>
+
+Start with [Choose a deployment target](/operations/choose-deployment) to compare
+availability, registry, residency, scaling, and cost boundaries. When release
+coordinates exist, [verify the release image](/operations/verify-release-image)
+before a cloud platform, mirror, or migration job receives it.
 
 ## PostgreSQL-only deployment
 
@@ -68,7 +73,7 @@ credentials are bounded and expire or rotate independently. Configuration
 changes take effect through immutable revisions; restoring PostgreSQL requires
 the matching master key rather than an in-place key replacement.
 
-## Implemented deployment templates
+## Available source templates
 
 | Platform | Application and data shape |
 | --- | --- |
@@ -83,7 +88,7 @@ Fly, and Cloudflare assets that pass repository-local static validation. That
 is source evidence only; it is not an independent deployment review or proof
 that an operator account deployed them.
 
-Each platform in the table has a complete walkthrough. Every guide preserves
+Each platform in the table has a source-based walkthrough. Every guide preserves
 GHCR as the canonical release registry. Cloud Run and Fly.io can consume the
 public GHCR image directly. AWS mirrors the reviewed image into ECR, and
 Cloudflare mirrors the verified `linux/amd64` child into Cloudflare Registry,
@@ -135,11 +140,11 @@ longest supported stream.
 
 ## Safe rollout
 
-1. Resolve the image by immutable digest and verify its signature, provenance,
-   and SPDX attestation.
+1. Resolve the image by immutable digest and
+   [verify its signature, provenance, and SPDX attestations](/operations/verify-release-image).
 2. Back up PostgreSQL and prove a restore in isolation.
-3. Run `migrate up`, then require `migrate status` to report current equals
-   available.
+3. Run `migrate up`, then require `migrate status` to report `up_to_date=true`
+   and `current` equal to `available`.
 4. Require `/healthz` and `/readyz`; readiness includes required worker
    heartbeat state.
 5. Keep the platform request timeout longer than the maximum supported stream.

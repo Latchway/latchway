@@ -1,0 +1,189 @@
+---
+title: "Verify a Latchway release image"
+description: "Run fail-closed checks for a GHCR index, Cosign identity, provenance, platform digests, and SPDX SBOMs."
+icon: "shield-check"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "release-engineering"
+---
+
+Verify the immutable multi-architecture index before a deployment tool or mirror
+receives it. The verification binds the registry bytes to the Latchway release
+workflow, exact source commit, SLSA provenance, and SPDX 2.3 SBOMs for both
+platform children.
+
+<Warning>
+  No stable version 1 image has been published. The placeholders below are
+  deliberately rejected before any registry request. Replace them only with
+  coordinates from the immutable Latchway GitHub release and confirm that
+  [Release status](/release-status) names the image as published.
+</Warning>
+
+## Prerequisites
+
+- Bash, `jq`, `sha256sum`, and Docker Buildx;
+- Cosign 3 installed through a verified Sigstore distribution;
+- GitHub CLI 2.97.0 or newer, authenticated for public attestation retrieval;
+- one temporary GHCR read credential: a classic personal access token with only
+  `read:packages`, or a repository `GITHUB_TOKEN` with package-read access in
+  GitHub Actions.
+
+See Sigstore's [Cosign installation](https://docs.sigstore.dev/cosign/system_config/installation/),
+[identity verification](https://docs.sigstore.dev/cosign/verifying/verify/), and
+GitHub's [`gh attestation verify` reference](https://cli.github.com/manual/gh_attestation_verify)
+and [Container registry authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+## Set exact release coordinates
+
+Copy the index digest, release commit, and both platform digests from one
+immutable release record. Do not derive the expected values from a mutable tag.
+
+```bash
+set -Eeuo pipefail
+
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_INDEX_DIGEST'
+export LATCHWAY_RELEASE_COMMIT='REPLACE_WITH_40_CHARACTER_RELEASE_COMMIT'
+export LATCHWAY_AMD64_DIGEST='sha256:REPLACE_WITH_AMD64_CHILD_DIGEST'
+export LATCHWAY_ARM64_DIGEST='sha256:REPLACE_WITH_ARM64_CHILD_DIGEST'
+
+[[ "$LATCHWAY_IMAGE" =~ ^ghcr[.]io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+[[ "$LATCHWAY_RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+[[ "$LATCHWAY_AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$LATCHWAY_ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+```
+
+If any placeholder remains, Bash exits here and does not contact GHCR.
+
+## Verify the OCI index and platform children
+
+```bash
+umask 077
+latchway_verify_dir=$(mktemp -d "${TMPDIR:-/tmp}/latchway-image-verify.XXXXXX")
+trap 'rm -rf "$latchway_verify_dir"' EXIT HUP INT TERM
+install -d -m 0700 "$latchway_verify_dir/docker-config"
+export DOCKER_CONFIG="$latchway_verify_dir/docker-config"
+
+if [[ -z "${LATCHWAY_GHCR_USERNAME:-}" ]]; then
+  read -r -p 'GitHub username: ' LATCHWAY_GHCR_USERNAME
+fi
+if [[ -z "${LATCHWAY_GHCR_TOKEN:-}" ]]; then
+  read -r -s -p 'GHCR read:packages token: ' LATCHWAY_GHCR_TOKEN
+  printf '\n'
+fi
+printf '%s' "$LATCHWAY_GHCR_TOKEN" \
+  | docker login ghcr.io \
+      --username "$LATCHWAY_GHCR_USERNAME" \
+      --password-stdin
+unset LATCHWAY_GHCR_TOKEN LATCHWAY_GHCR_USERNAME
+
+docker buildx imagetools inspect --raw "$LATCHWAY_IMAGE" \
+  > "$latchway_verify_dir/index.json"
+test "$(sha256sum "$latchway_verify_dir/index.json" | awk '{print $1}')" \
+  = "${LATCHWAY_IMAGE##*@sha256:}"
+
+jq --exit-status \
+  --arg amd64 "$LATCHWAY_AMD64_DIGEST" \
+  --arg arm64 "$LATCHWAY_ARM64_DIGEST" '
+    .schemaVersion == 2 and
+    ([.manifests[] |
+      select(.platform.os == "linux" and .platform.architecture == "amd64") |
+      .digest] == [$amd64]) and
+    ([.manifests[] |
+      select(.platform.os == "linux" and .platform.architecture == "arm64") |
+      .digest] == [$arm64])
+  ' "$latchway_verify_dir/index.json" >/dev/null
+```
+
+The check fails unless the raw index hashes to the release digest and contains
+exactly the expected digest for each advertised platform.
+
+## Verify the Cosign identity
+
+The stable release policy accepts only the protected release workflow on
+`main` as the image signer.
+
+```bash
+cosign verify \
+  --certificate-identity \
+    'https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --certificate-github-workflow-sha "$LATCHWAY_RELEASE_COMMIT" \
+  "$LATCHWAY_IMAGE" \
+  > "$latchway_verify_dir/cosign.json"
+jq --exit-status 'type == "array" and length >= 1' \
+  "$latchway_verify_dir/cosign.json" >/dev/null
+```
+
+Do not broaden the certificate identity to an organization-wide regular
+expression. Repository ownership alone is not the release signer identity.
+
+## Verify SLSA provenance
+
+```bash
+gh attestation verify "oci://$LATCHWAY_IMAGE" \
+  --repo Latchway/latchway \
+  --signer-workflow Latchway/latchway/.github/workflows/release.yml \
+  --source-digest "$LATCHWAY_RELEASE_COMMIT" \
+  --signer-digest "$LATCHWAY_RELEASE_COMMIT" \
+  --source-ref refs/heads/main \
+  --deny-self-hosted-runners \
+  --bundle-from-oci \
+  --predicate-type https://slsa.dev/provenance/v1 \
+  --format json \
+  > "$latchway_verify_dir/provenance.json"
+
+jq --exit-status --arg digest "${LATCHWAY_IMAGE##*@sha256:}" '
+  type == "array" and length >= 1 and
+  all(.[].verificationResult.statement;
+    .predicateType == "https://slsa.dev/provenance/v1" and
+    any(.subject[]; .digest.sha256 == $digest))
+' "$latchway_verify_dir/provenance.json" >/dev/null
+```
+
+## Verify both SPDX SBOM attestations
+
+```bash
+for architecture in amd64 arm64; do
+  if [[ "$architecture" == amd64 ]]; then
+    child_digest="$LATCHWAY_AMD64_DIGEST"
+  else
+    child_digest="$LATCHWAY_ARM64_DIGEST"
+  fi
+  child_reference="ghcr.io/latchway/latchway@$child_digest"
+
+  gh attestation verify "oci://$child_reference" \
+    --repo Latchway/latchway \
+    --signer-workflow Latchway/latchway/.github/workflows/release.yml \
+    --source-digest "$LATCHWAY_RELEASE_COMMIT" \
+    --signer-digest "$LATCHWAY_RELEASE_COMMIT" \
+    --source-ref refs/heads/main \
+    --deny-self-hosted-runners \
+    --bundle-from-oci \
+    --predicate-type https://spdx.dev/Document/v2.3 \
+    --format json \
+    > "$latchway_verify_dir/$architecture-spdx.json"
+
+  jq --exit-status --arg digest "${child_digest#sha256:}" '
+    type == "array" and length >= 1 and
+    all(.[].verificationResult.statement;
+      .predicateType == "https://spdx.dev/Document/v2.3" and
+      any(.subject[]; .digest.sha256 == $digest)) and
+    any(.[].verificationResult.statement.predicate;
+      .spdxVersion == "SPDX-2.3" and
+      (.packages | type == "array" and length > 0))
+  ' "$latchway_verify_dir/$architecture-spdx.json" >/dev/null
+done
+
+docker logout ghcr.io >/dev/null
+unset DOCKER_CONFIG
+rm -rf "$latchway_verify_dir"
+trap - EXIT HUP INT TERM
+```
+
+All commands must exit zero. Preserve the four release coordinates and the
+verification timestamp in the deployment record. The verification does not
+replace the vulnerability policy, cloud deployment receipt, backup and restore
+proof, or [Production readiness](/operations/production-readiness).

@@ -56,7 +56,9 @@
 - [Operational observability](https://docs.latchway.dev/administration/observability.md): Inspect request, usage, cost, latency, trust, and audit metadata.
 - [Audit log](https://docs.latchway.dev/administration/audit-log.md): Investigate immutable administrative actions and reconcile indeterminate mutations.
 - [Production readiness](https://docs.latchway.dev/operations/production-readiness.md): Review the complete deployment and release checklist.
+- [Choose a deployment target](https://docs.latchway.dev/operations/choose-deployment.md): Compare registry, database, scaling, residency, cost, and evidence boundaries before selecting a platform.
 - [Deployment](https://docs.latchway.dev/operations/deployment.md): Deploy API, worker, and migration roles with PostgreSQL as the required external service.
+- [Verify a release image](https://docs.latchway.dev/operations/verify-release-image.md): Verify GHCR index and child digests, Cosign identity, SLSA provenance, and SPDX SBOM attestations.
 - [Backup and restore](https://docs.latchway.dev/operations/backup-restore.md): Capture, restore, and verify recoverable PostgreSQL state.
 - [Upgrades](https://docs.latchway.dev/operations/upgrades.md): Upgrade with compatibility checks and a documented rollback boundary.
 - [Rollbacks](https://docs.latchway.dev/operations/rollbacks.md): Choose configuration, application, or data recovery without conflating their guarantees.

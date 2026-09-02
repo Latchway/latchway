@@ -1,6 +1,6 @@
 ---
 title: "Deploy to Google Cloud Run"
-description: "Run the signed GHCR image on Cloud Run with private Cloud SQL, Secret Manager, and explicit migrations."
+description: "Prepare Cloud Run to consume a verified GHCR image when release coordinates are available."
 icon: "cloud"
 audience: "operator"
 pageType: "runbook"
@@ -10,10 +10,10 @@ lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
-The checked-in Terraform stack deploys the canonical Latchway image from GitHub
-Container Registry, a private PostgreSQL 18 Cloud SQL instance, Secret Manager
-values, a Serverless VPC Access connector, one HTTPS Cloud Run service, and a
-one-shot migration job.
+The checked-in Terraform stack is designed to consume a canonical Latchway
+image from GitHub Container Registry alongside a private PostgreSQL 18 Cloud
+SQL instance, Secret Manager values, a Serverless VPC Access connector, one
+HTTPS Cloud Run service, and a one-shot migration job.
 
 <Warning>
   The stable `1.0.0` image has not been published yet. Keep
@@ -21,6 +21,10 @@ one-shot migration job.
   placeholder until the release page supplies a signed, attested digest. Do not
   deploy an unverified local image under the stable version.
 </Warning>
+
+When a stable digest exists, complete
+[release-image verification](/operations/verify-release-image) before placing
+that digest in Terraform state or an Artifact Registry remote repository.
 
 Cloud Run accepts public GHCR images directly and imports an immutable copy at
 deployment. Google recommends an Artifact Registry remote repository in front
@@ -125,6 +129,53 @@ backups, and failover before raising either value.
   it to a support request.
 </Warning>
 
+## Capacity, cost, and platform limits
+
+The checked-in defaults are a production-oriented starting point, not a
+low-cost evaluation profile:
+
+| Resource | Checked-in default | Operating consequence |
+| --- | --- | --- |
+| Cloud Run service | 2 vCPU, 2 GiB, concurrency 100 | The combined API/worker process shares one instance budget |
+| Service scaling | Minimum 1, maximum 10 | The worker does not scale to zero; the minimum instance remains billable |
+| CPU allocation | CPU idling disabled | Background jobs and heartbeats can run without a request; use instance-based cost assumptions |
+| Cloud SQL | PostgreSQL 18, `db-custom-2-7680`, `REGIONAL`, 20 GiB SSD | Regional HA database capacity is a steady cost before application traffic |
+| VPC connector | Minimum 2, maximum 3 connector instances | The connector adds steady compute cost and its own scaling ceiling |
+| Database pool | 20 connections per service instance | The service can reserve 200 application connections at the maximum instance count |
+| Request lifecycle | 60-minute request timeout; 8-second application drain inside Cloud Run's 10-second shutdown window | SSE clients must reconnect and long shutdown work cannot be deferred |
+
+The production frontend described below adds a global external Application Load
+Balancer, managed certificate, DNS, and logging that the Terraform stack does
+not create. Secret Manager versions, the versioned Terraform backend, Cloud SQL
+backups, observability, and network egress also contribute to the bill.
+
+Review the current [Cloud Run pricing](https://cloud.google.com/run/pricing),
+[Cloud SQL pricing](https://cloud.google.com/sql/pricing),
+[Serverless VPC Access pricing](https://cloud.google.com/vpc/network-pricing#serverless-vpc),
+and [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator)
+before applying. Prices and quotas are provider state; this guide does not pin
+numeric rates.
+
+For a temporary evaluation, reducing database availability, minimum instances,
+or other resources changes the failure model. Record those changes and do not
+describe the result as the production template.
+
+## Region and data residency
+
+Cloud Run, Cloud SQL, and the VPC connector use one selected region, and the
+database has no public IP. The application still sends requests to configured
+upstreams, receives clients through a public HTTPS frontend, and can emit logs
+or traces outside that database boundary.
+
+The checked-in Secret Manager resources use automatic replication, and the GCS
+backend location is chosen when its bucket is created. The template therefore
+does not establish single-region secret or Terraform-state residency. If policy
+requires a fixed residency boundary, use reviewed user-managed secret
+replication, a compliant state-bucket location, matching log sinks, regional
+upstreams where available, and organization policy before deployment. Verify
+the resulting provider configuration; a shared region name alone is not proof
+of residency.
+
 ## Plan and apply
 
 ```bash
@@ -163,6 +214,72 @@ terraform output -raw configured_migration_image
 terraform output -raw configured_service_revision
 terraform output -raw maximum_application_database_connections
 ```
+
+## Verify initial migration status
+
+Run the dedicated job with the status command after the first apply and after
+every migration. Capture only the matching execution's stdout and require the
+three-field status object to be current:
+
+```bash
+set -Eeuo pipefail
+export LATCHWAY_GCP_PROJECT='PROJECT_ID'
+export LATCHWAY_GCP_REGION='REGION'
+export LATCHWAY_MIGRATION_JOB='latchway-migrate'
+
+latchway_migration_dir=$(mktemp -d "${TMPDIR:-/tmp}/latchway-cloud-run-migration.XXXXXX")
+trap 'rm -rf "$latchway_migration_dir"' EXIT HUP INT TERM
+latchway_migration_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+gcloud run jobs execute "$LATCHWAY_MIGRATION_JOB" \
+  --project "$LATCHWAY_GCP_PROJECT" \
+  --region "$LATCHWAY_GCP_REGION" \
+  --args=--output,json,migrate,status \
+  --wait \
+  --format=json \
+  > "$latchway_migration_dir/execution.json"
+
+latchway_execution=$(jq -er \
+  '(.metadata.name // .name) | split("/")[-1]' \
+  "$latchway_migration_dir/execution.json")
+latchway_status_found=false
+for _ in {1..12}; do
+  gcloud logging read \
+    "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$LATCHWAY_MIGRATION_JOB\" AND logName=\"projects/$LATCHWAY_GCP_PROJECT/logs/run.googleapis.com%2Fstdout\" AND timestamp>=\"$latchway_migration_started\"" \
+    --project "$LATCHWAY_GCP_PROJECT" \
+    --order=asc \
+    --limit=100 \
+    --format=json \
+    > "$latchway_migration_dir/logs.json"
+
+  if jq --exit-status --arg execution "$latchway_execution" '
+    [ .[]
+      | select((.labels.execution_name //
+                .labels["run.googleapis.com/execution_name"]) == $execution)
+      | (.jsonPayload // ((.textPayload // "") | fromjson?))
+      | select(type == "object" and
+               (keys | sort) == ["available", "current", "up_to_date"])
+    ]
+    | if length == 1 then .[0] else empty end
+  ' "$latchway_migration_dir/logs.json" \
+    > "$latchway_migration_dir/status.json"; then
+    latchway_status_found=true
+    break
+  fi
+  sleep 5
+done
+
+test "$latchway_status_found" = true
+jq --exit-status \
+  '.up_to_date == true and .current == .available' \
+  "$latchway_migration_dir/status.json" >/dev/null
+rm -rf "$latchway_migration_dir"
+trap - EXIT HUP INT TERM
+```
+
+The operator needs permission to execute the job and read its Cloud Logging
+stdout. A successful job execution without the exact status assertion is not a
+migration proof.
 
 ## Bind the public origin
 
@@ -244,10 +361,10 @@ gcloud run jobs execute latchway-migrate \
   --wait
 ```
 
-Then execute the same job with `--output,json migrate status` as its argument
-override. Accept the migration only when `current` equals `available`. Do not
-delete migration-ledger rows or run a down migration; schema recovery uses a
-tested backup.
+Then repeat [Verify initial migration status](#verify-initial-migration-status)
+against that execution. Accept the migration only when `up_to_date` is true and
+`current` equals `available`. Do not delete migration-ledger rows or run a down
+migration; schema recovery uses a tested backup.
 
 ### Phase B: create and probe a 0%-traffic revision
 
@@ -276,6 +393,41 @@ that URL.
 Set `service_traffic_percent=100`, review the plan, and apply. Terraform removes
 the previous-revision traffic allocation only in this phase. Do not combine
 Phase A, B, or C or mix unrelated infrastructure changes into their plans.
+
+### Emergency application rollback
+
+Keep `previous_service_revision_name` in `terraform.tfvars` throughout the
+observation window. To remove traffic from the new application revision without
+changing the database, leave the current `service_image`, migration image, and
+migration approval unchanged, set:
+
+```hcl
+previous_service_revision_name = "latchway-previous-release-id"
+service_traffic_percent        = 0
+```
+
+Run the protected plan/apply procedure, then prove the previous revision owns
+all traffic:
+
+```bash
+export LATCHWAY_PREVIOUS_REVISION='latchway-previous-release-id'
+gcloud run services describe latchway \
+  --project PROJECT_ID \
+  --region REGION \
+  --format=json \
+  | jq --exit-status --arg previous "$LATCHWAY_PREVIOUS_REVISION" '
+      [ .status.traffic[]
+        | select((.revisionName // .revision) == $previous and .percent == 100)
+      ] | length == 1
+    ' >/dev/null
+curl --fail --show-error https://ai.example.com/readyz
+```
+
+Exercise an authenticated request and SSE stream after the shift. This is an
+application rollback only. The previous binary has no declared schema range, so
+use it against the migrated database only after isolated current-schema proof.
+If that proof fails, remove traffic and restore the tested pre-upgrade database
+with the matching master key as described in [Rollbacks](/operations/rollbacks).
 
 ## Verify the deployment
 

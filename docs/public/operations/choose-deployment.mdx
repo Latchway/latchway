@@ -1,0 +1,71 @@
+---
+title: "Choose a deployment target"
+description: "Compare Latchway deployment shapes, registry paths, database boundaries, scaling behavior, and cost drivers."
+icon: "scale"
+audience: "operator"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+Choose a target from the constraints that cannot change: PostgreSQL network
+reachability, data residency, required CPU architecture, failure domain, and
+operator ownership. Every target runs the same non-root OCI application and
+keeps PostgreSQL as the only authoritative application state store.
+
+<Warning>
+  No stable version 1 image has been published. The registry coordinates below
+  describe the release path and intentionally contain no deployable digest.
+  Check [Release status](/release-status) before starting a cloud deployment.
+</Warning>
+
+## Deployment comparison
+
+| Target | Immutable image path | PostgreSQL boundary | Scaling and availability | Primary cost drivers | Current evidence boundary |
+| --- | --- | --- | --- | --- | --- |
+| [Docker Compose](/operations/deploy-docker-compose) | Public GHCR multi-architecture index | Private host network or operator-managed TLS endpoint | One host; operator-managed replacement and failover | Host compute, PostgreSQL storage and backups, TLS ingress | Local source-built Compose evidence only |
+| [Google Cloud Run](/operations/deploy-google-cloud-run) | Public GHCR index; Cloud Run selects `linux/amd64` | Private regional Cloud SQL through Serverless VPC Access | Managed service scaling; the checked-in stack keeps one combined API/worker instance active | Cloud SQL HA, always-allocated Cloud Run CPU, minimum instances, VPC connector, load balancer, logs | Static Terraform validation only; provider receipt open |
+| [AWS ECS](/operations/deploy-aws-ecs) | Verified GHCR index mirrored into ECR without rebuilding | Private RDS in the task VPC | ECS/Fargate service and ALB | Fargate tasks, regional RDS, ALB, NAT or egress, logs | Static Terraform validation only; provider receipt open |
+| [Fly.io](/operations/deploy-fly-io) | Public GHCR digest | Attached or operator-managed PostgreSQL | Machines and release-command migration | Running Machines, PostgreSQL, volumes, inter-region traffic | Static configuration validation only; provider receipt open |
+| [Cloudflare Containers](/operations/deploy-cloudflare-containers) | Verified GHCR `linux/amd64` child mirrored into Cloudflare Registry | Internet-reachable TLS PostgreSQL in the current template | Four application-selected container identities; no platform autoscaler in this template | Workers Paid, active Container memory/CPU/disk, Durable Objects, logs, database and egress | Static Wrangler validation only; provider receipt open |
+
+Prices, quotas, and product limits change independently of Latchway. Follow the
+provider links in each runbook and calculate the complete deployment, including
+PostgreSQL, network connectors, ingress, logging, backups, and retained rollback
+images. A low request count does not imply a zero idle cost when a worker or
+minimum instance must remain active.
+
+## Decision guide
+
+- Choose Docker Compose for a controlled evaluation or a small installation
+  whose host, TLS, monitoring, PostgreSQL, and recovery are already operated.
+- Choose Cloud Run when private Cloud SQL and managed regional service scaling
+  are more important than scale-to-zero. Review the always-on worker cost before
+  applying the checked-in defaults.
+- Choose AWS when the organization already operates private VPC, RDS, ECS, and
+  ALB boundaries.
+- Choose Fly.io when Machines and the selected PostgreSQL topology satisfy the
+  required regional and recovery boundaries.
+- Choose Cloudflare Containers only when an internet-reachable TLS PostgreSQL
+  endpoint, application-managed four-instance routing, and Cloudflare placement
+  behavior meet the latency, residency, and availability requirements.
+
+## Common production prerequisites
+
+Before any target accepts traffic:
+
+1. obtain the signed release index and exact platform digests from the immutable
+   release record;
+2. [verify the GHCR image, provenance, and SPDX SBOMs](/operations/verify-release-image);
+3. escrow the matching master key separately from PostgreSQL;
+4. prove backup and isolated restore;
+5. run migrations and require `up_to_date=true` and `current` equal to
+   `available`;
+6. prove `/healthz`, `/readyz`, an authenticated request, and an unbuffered SSE
+   response at the exact public origin; and
+7. record the provider-resolved digest and a tested application rollback.
+
+Use [Production readiness](/operations/production-readiness) for the complete
+release and operating gate.

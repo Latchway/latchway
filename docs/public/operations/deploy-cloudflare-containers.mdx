@@ -1,6 +1,6 @@
 ---
 title: "Deploy to Cloudflare Containers"
-description: "Mirror the verified GHCR amd64 image into Cloudflare Registry and deploy the streaming Worker shim."
+description: "Prepare Cloudflare to mirror a verified GHCR amd64 image when release coordinates are available."
 icon: "cloud"
 audience: "operator"
 pageType: "runbook"
@@ -21,6 +21,10 @@ request and response without buffering.
   index and `linux/amd64` child digests.
 </Warning>
 
+When release coordinates exist, complete
+[release-image verification](/operations/verify-release-image) before mirroring
+the `linux/amd64` child.
+
 ## Why the image is mirrored
 
 Cloudflare Containers supports Cloudflare Registry, Docker Hub, Amazon ECR,
@@ -40,7 +44,7 @@ for the supported registry flow.
 
 - a Cloudflare account with Containers enabled;
 - Node.js 24 and pnpm 10;
-- the repository-pinned Wrangler 4 release;
+- the repository-pinned Wrangler `4.127.1` release;
 - Docker Buildx, `jq`, and `sha256sum` for the one-time GHCR pull, mirror push,
   and manifest comparison;
 - an active Cloudflare DNS zone for the final hostname, with no existing CNAME
@@ -50,6 +54,51 @@ for the supported registry flow.
 
 Cloudflare Containers executes `linux/amd64`. Pull the child digest, not the
 multi-architecture index, before mirroring.
+
+## Capacity, cost, and scaling limits
+
+The checked-in deployment is application-scaled rather than a general-purpose
+platform autoscaler:
+
+| Setting | Checked-in behavior | Operating consequence |
+| --- | --- | --- |
+| Container type | `standard-1`: 0.5 vCPU, 4 GiB memory, 8 GB ephemeral disk | The image must fit the instance disk; larger types change the cost and capacity model |
+| Application ceiling | Four named container-backed Durable Objects | The Worker rejects a configured count above four; increasing it requires a reviewed source and test change |
+| Request routing | Random selection among the four fixed identities | Routing is not locality-aware or load-aware, and each selected stopped instance can cold-start |
+| Idle lifecycle | Ten-minute sleep timer for each container | Instances 1–3 can sleep after inactivity and restart in another location |
+| Required worker | A one-minute Cron Trigger calls `instance-0` | Each successful trigger reactivates or keeps one combined API/worker container warm; the platform does not guarantee uninterrupted runtime |
+| Database pool | Five connections per identity | The four-identity application ceiling reserves up to 20 application connections |
+
+Cloudflare bills Containers for provisioned memory and disk while an instance
+is active, active CPU time, and network egress. Workers, Durable Objects, and
+observability have separate usage. The deployment requires a Workers Paid plan;
+continual reactivation by the one-minute trigger normally creates an idle-cost
+floor even when no client request arrives. Cloudflare does not guarantee that
+an instance runs for any fixed duration; review the [Containers FAQ](https://developers.cloudflare.com/containers/faq/)
+and current [Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/),
+[instance and image limits](https://developers.cloudflare.com/containers/platform/limits/),
+and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+before deployment. Provider rates and account quotas are not pinned here.
+
+## Placement, residency, and database exposure
+
+The release configuration has no placement constraint. Cloudflare can start a
+container near available capacity, and a restarted identity can run in a
+different location. The current random router does not choose the identity
+nearest PostgreSQL. Measure database latency and cross-region egress under the
+expected client distribution.
+
+The current template connects directly from the container to an
+internet-reachable PostgreSQL endpoint. Require a provider-trusted CA and
+`sslmode=verify-full`, use a database role limited to the Latchway database, and
+apply the strongest network controls compatible with Cloudflare Container
+egress. TLS does not make an unrestricted public database endpoint private.
+
+If policy requires a jurisdiction or regional boundary, add reviewed Container
+[placement constraints](https://developers.cloudflare.com/containers/concepts/placement/)
+near the selected database and validate the complete data path, including logs,
+upstreams, and backups. An ad hoc edit to the generated release config is
+rejected and is not a residency control.
 
 ## Validate the deployment source
 
@@ -207,14 +256,31 @@ Run migrations from the canonical signed image in a controlled job with the
 database secret injected by the execution environment:
 
 ```bash
-docker run --rm \
+set -Eeuo pipefail
+latchway_migration_status=$(mktemp "${TMPDIR:-/tmp}/latchway-migration-status.XXXXXX.json")
+trap 'rm -f "$latchway_migration_status"' EXIT HUP INT TERM
+
+docker run --rm --platform linux/amd64 \
   -e LATCHWAY_DATABASE_URL \
-  ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST \
+  "$LATCHWAY_AMD64_IMAGE" \
   migrate up
+
+docker run --rm --platform linux/amd64 \
+  -e LATCHWAY_DATABASE_URL \
+  "$LATCHWAY_AMD64_IMAGE" \
+  --output json migrate status \
+  > "$latchway_migration_status"
+
+jq --exit-status '
+  (keys | sort) == ["available", "current", "up_to_date"] and
+  .up_to_date == true and .current == .available
+' "$latchway_migration_status" >/dev/null
+rm -f "$latchway_migration_status"
+trap - EXIT HUP INT TERM
 ```
 
-Run `migrate status` with the same digest and accept the migration only when
-`current` equals `available`. The first deployment retains
+The assertion must pass against the same canonical amd64 child that was
+mirrored. The first deployment retains
 `LATCHWAY_MIGRATE_ON_START=true` as an advisory-lock-protected fallback. After
 bootstrap, set it to `false` and use explicit migrations for every upgrade.
 
@@ -237,7 +303,7 @@ secrets file:
 
 ```bash
 pnpm release:deploy
-pnpm exec wrangler containers list
+pnpm exec wrangler containers list --config wrangler.release.jsonc
 ```
 
 Cloudflare activates Worker code before the container rollout completes. These
@@ -245,6 +311,67 @@ steps are not transactional, so the Worker URL can be live while the new
 container is still provisioning. Wait until the application and instances are
 active before testing or recording the deployment. Cloudflare documents this
 behavior in [Deploy Containers](https://developers.cloudflare.com/containers/guides/deploy/).
+
+Require the active application to name the exact mirror digest, then require the
+cron-targeted `instance-0` to run the active application version. Poll for at
+most four minutes because Worker activation and the Container rollout are
+asynchronous:
+
+<Warning>
+  Wrangler `4.127.1` returns only one provider page from `containers list
+  --json`; its `--per-page` option does not change that JSON path. Use a
+  dedicated deployment account whose `latchway` application is on that page,
+  or replace this block with a reviewed paginated Cloudflare API check. An
+  absent application blocks promotion; it does not prove rollout success or
+  failure.
+</Warning>
+
+```bash
+set -Eeuo pipefail
+latchway_cloudflare_state=$(mktemp -d "${TMPDIR:-/tmp}/latchway-cloudflare-state.XXXXXX")
+trap 'rm -rf "$latchway_cloudflare_state"' EXIT HUP INT TERM
+
+latchway_rollout_ready=false
+for _ in {1..24}; do
+  pnpm exec wrangler containers list --json \
+    --config wrangler.release.jsonc \
+    > "$latchway_cloudflare_state/applications.json"
+  latchway_application_id=$(jq -er --arg image "$LATCHWAY_CLOUDFLARE_IMAGE" '
+    [ .[]
+      | select(.name == "latchway" and .image == $image and
+               (.state == "active" or .state == "ready"))
+    ]
+    | if length == 1 and (.[0].instances | type == "number") and
+         .[0].instances >= 1 and (.[0].version | type == "number")
+      then .[0].id
+      else empty
+      end
+  ' "$latchway_cloudflare_state/applications.json" || true)
+
+  if [[ "$latchway_application_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    latchway_application_version=$(jq -er --arg id "$latchway_application_id" '
+      .[] | select(.id == $id) | .version
+    ' "$latchway_cloudflare_state/applications.json")
+    pnpm exec wrangler containers instances "$latchway_application_id" \
+      --search instance-0 \
+      --json \
+      --config wrangler.release.jsonc \
+      > "$latchway_cloudflare_state/instances.json"
+    if jq --exit-status --argjson version "$latchway_application_version" '
+      length == 1 and .[0].name == "instance-0" and
+      .[0].state == "running" and .[0].version == $version
+    ' "$latchway_cloudflare_state/instances.json" >/dev/null; then
+      latchway_rollout_ready=true
+      break
+    fi
+  fi
+  sleep 10
+done
+test "$latchway_rollout_ready" = true
+
+rm -rf "$latchway_cloudflare_state"
+trap - EXIT HUP INT TERM
+```
 
 Verify both platform and forwarded probes:
 
@@ -284,8 +411,31 @@ startup migrations, or the removed bootstrap binding.
 The checked-in rollout advances 10%, 50%, then 100%. Wait for completion and
 prove readiness and SSE behavior at every release. Use `wrangler versions list`
 to identify a previous Worker version and `wrangler rollback VERSION_ID` for an
-application rollback. Database migrations are forward-only; schema rollback
-requires a tested backup and the matching master key.
+application rollback. Cloudflare's [image-management guidance](https://developers.cloudflare.com/containers/guides/image-management/)
+warns that deleting an image makes a previous Worker version that references it
+fail when restored. Retain every prior mirror through the rollback window.
+
+After rollback, export the expected previous mirror digest and rerun the bounded
+application-and-instance block under
+[Deploy and wait for rollout](#deploy-and-wait-for-rollout) with that value:
+
+```bash
+export LATCHWAY_CLOUDFLARE_IMAGE='registry.cloudflare.com/ACCOUNT_ID/latchway@sha256:PREVIOUS_MIRROR_DIGEST'
+pnpm exec wrangler versions list --config wrangler.release.jsonc
+pnpm exec wrangler rollback VERSION_ID \
+  --config wrangler.release.jsonc \
+  --message 'Emergency rollback to reviewed previous release'
+```
+
+Then require the exact previous mirror image, `/readyz`, an authenticated
+non-streaming request, and an SSE request. Database migrations are forward-only.
+Use the previous application only after isolated current-schema proof; otherwise
+restore a tested backup with the matching master key.
+
+Cloudflare documents that rollback immediately creates a 100%-traffic
+deployment of the selected version and does not revert bound resources. Review
+the current [Workers rollback behavior and limits](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/)
+before invoking it.
 
 Container disk is ephemeral. PostgreSQL remains the only authoritative
 application state store. Never store recovery data inside the container or

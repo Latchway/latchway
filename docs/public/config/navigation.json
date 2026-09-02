@@ -187,20 +187,22 @@
           "group": "Observe and investigate",
           "pages": [
             "administration/observability",
-            "administration/audit-log"
+            "administration/audit-log",
+            "operations/telemetry-and-jobs",
+            "operations/self-tests"
           ]
         },
         {
-          "group": "Run Latchway",
+          "group": "Deploy",
           "pages": [
+            "operations/choose-deployment",
             "operations/deployment",
+            "operations/verify-release-image",
             "operations/deploy-docker-compose",
             "operations/deploy-google-cloud-run",
             "operations/deploy-aws-ecs",
             "operations/deploy-fly-io",
-            "operations/deploy-cloudflare-containers",
-            "operations/telemetry-and-jobs",
-            "operations/self-tests"
+            "operations/deploy-cloudflare-containers"
           ]
         },
         {
