@@ -32,7 +32,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>
 }));
 
-import { ConnectionWorkspacePage } from "./task-configuration-pages";
+import { ConnectionWorkspacePage, UsagePlanWorkspacePage } from "./task-configuration-pages";
 
 const instant = "2026-08-29T00:00:00Z";
 const activeDocument = {
@@ -70,5 +70,34 @@ describe("development-first connection path", () => {
     expect(await screen.findByText(/Observed/)).toHaveTextContent("req_0123456789abcdef");
     expect(runDevelopmentSampleMock).toHaveBeenCalledOnce();
     expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
+  });
+});
+
+describe("usage-plan effective-limit inspection", () => {
+  it("routes operators to the server-resolved Users inspector", async () => {
+    adminRequestMock.mockImplementation((path: string) => {
+      if (path.endsWith("/config")) {
+        return Promise.resolve({
+          data: {
+            activated_at: instant,
+            created_at: instant,
+            created_by: "adm_0123456789abcdef",
+            document: activeDocument,
+            environment_id: workspace.environment.id,
+            id: "rev_0123456789abcdef",
+            state: "active",
+            version: 1
+          },
+          etag: '"active-etag"'
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><UsagePlanWorkspacePage /></QueryClientProvider>);
+
+    const link = await screen.findByRole("link", { name: "Inspect resolved limits in Users" });
+    expect(link).toHaveAttribute("href", "/users");
+    expect(screen.queryByText(/no endpoint returns the fully resolved effective limits/i)).not.toBeInTheDocument();
   });
 });

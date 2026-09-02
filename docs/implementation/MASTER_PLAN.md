@@ -227,6 +227,9 @@ to apply to supported Android application trust surfaces.
   LangChain OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React
   Native 0.82.0 integration seams.
 - [x] Generate capability and limitation claims from the canonical registry.
+- [x] Enforce the 58-case schema-2 framework gate, including the 31-case
+  addendum common suite, exact per-case coverage, test-backed passing evidence,
+  bounded N/A policy, and explicit pending blocker classes.
 - [x] Implement the narrow Foundation Models 27 source adapter and pass its
   nine iOS 27.0 simulator cases while keeping physical framework and delegated
   extension evidence open. Keep stock MacPaw/OpenAI 0.5.1 unsupported; its
@@ -280,7 +283,7 @@ to apply to supported Android application trust surfaces.
   mirror drift.
 - [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
   verifiable-language rules.
-- [x] Pass the local 228-page Mintlify validation suite.
+- [x] Pass the complete local Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
   `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` (SHA-256
   `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`),

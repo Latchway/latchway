@@ -18,6 +18,7 @@ import unittest
 CORE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = CORE_ROOT / "scripts/cross-repo-conformance.py"
 BUILDER = CORE_ROOT / "scripts/build-contract-bundle.py"
+OPERATIONAL_EVIDENCE = CORE_ROOT / "scripts/operational-resilience-evidence.py"
 
 
 class SyntheticWorkspace:
@@ -988,7 +989,7 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         SyntheticWorkspace.git(core, "commit", "-m", "docs: record release coordinates")
         self.workspace.commits["core"] = SyntheticWorkspace.git(core, "rev-parse", "HEAD")
 
-        result, report, _, _ = self.run_gate("ancestor-contract-checkpoint")
+        result, report, output, _ = self.run_gate("ancestor-contract-checkpoint")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         check = next(
             item for item in report["checks"] if item["id"] == "source.contract_locks"
@@ -1003,9 +1004,24 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             for repository in report["repositories"]
             if repository["id"] == "core"
         )
-        self.assertEqual(core_repository["commit"], contract_source_commit)
+        self.assertEqual(core_repository["commit"], self.workspace.commits["core"])
+        self.assertNotEqual(core_repository["commit"], contract_source_commit)
         self.assertEqual(
             report["documentation"]["canonical_core_commit"],
+            self.workspace.commits["core"],
+        )
+
+        module_name = "latchway_operational_evidence_ancestor_checkpoint"
+        specification = importlib.util.spec_from_file_location(
+            module_name, OPERATIONAL_EVIDENCE
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        validated = module.validate_source(output, self.workspace.now)
+        self.assertEqual(
+            validated["repositories"]["core"]["commit"],
             self.workspace.commits["core"],
         )
 

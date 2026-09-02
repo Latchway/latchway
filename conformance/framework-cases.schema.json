@@ -3,9 +3,32 @@
   "$id": "https://latchway.dev/schemas/framework-conformance-cases.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "cases"],
+  "required": ["schema_version", "suites", "cases"],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": { "type": "integer", "const": 2 },
+    "suites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["addendum_common_v1"],
+      "properties": {
+        "addendum_common_v1": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["case_id", "not_applicable"],
+            "properties": {
+              "case_id": { "type": "string", "pattern": "^FW-[A-Z]+-[0-9]{3}$" },
+              "not_applicable": {
+                "type": "string",
+                "enum": ["forbidden", "evidence_required"]
+              }
+            }
+          }
+        }
+      }
+    },
     "cases": {
       "type": "array",
       "minItems": 1,

@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-02"
 owner: "core-operations"
 ---
 
@@ -45,8 +45,10 @@ for the supported registry flow.
 - a Cloudflare account with Containers enabled;
 - Node.js 24 and pnpm 10;
 - the repository-pinned Wrangler `4.127.1` release;
-- Docker Buildx, `jq`, and `sha256sum` for the one-time GHCR pull, mirror push,
-  and manifest comparison;
+- Docker Buildx, `curl`, `jq`, and `sha256sum` for the one-time GHCR pull,
+  mirror push, manifest comparison, and complete application discovery;
+- an account-scoped Cloudflare API token that can read Containers application
+  state, supplied only through `CLOUDFLARE_API_TOKEN` for the rollout check;
 - an active Cloudflare DNS zone for the final hostname, with no existing CNAME
   at that hostname;
 - a publicly reachable PostgreSQL 15 or newer endpoint with TLS; and
@@ -303,7 +305,6 @@ secrets file:
 
 ```bash
 pnpm release:deploy
-pnpm exec wrangler containers list --config wrangler.release.jsonc
 ```
 
 Cloudflare activates Worker code before the container rollout completes. These
@@ -317,32 +318,39 @@ cron-targeted `instance-0` to run the active application version. Poll for at
 most four minutes because Worker activation and the Container rollout are
 asynchronous:
 
-<Warning>
+<Info>
   Wrangler `4.127.1` returns only one provider page from `containers list
-  --json`; its `--per-page` option does not change that JSON path. Use a
-  dedicated deployment account whose `latchway` application is on that page,
-  or replace this block with a reviewed paginated Cloudflare API check. An
-  absent application blocks promotion; it does not prove rollout success or
-  failure.
-</Warning>
+  --json`; its `--per-page` option does not change that JSON path. The
+  checked-in `scripts/list-applications.sh` helper follows the provider cursor
+  directly. It rejects malformed pages, repeated cursors, duplicate application
+  IDs, more than 100 pages or 5,000 records, pages larger than 1 MiB, and output
+  larger than 8 MiB. The protected deployment-evidence workflow enforces the
+  same bounds without executing candidate source inside its credentialed job.
+</Info>
 
 ```bash
 set -Eeuo pipefail
+: "${CLOUDFLARE_ACCOUNT_ID:?Export the 32-character Cloudflare account ID}"
+if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  read -r -s -p 'Cloudflare Containers read token: ' CLOUDFLARE_API_TOKEN
+  printf '\n'
+fi
+export CLOUDFLARE_API_TOKEN
 latchway_cloudflare_state=$(mktemp -d "${TMPDIR:-/tmp}/latchway-cloudflare-state.XXXXXX")
-trap 'rm -rf "$latchway_cloudflare_state"' EXIT HUP INT TERM
+trap 'unset CLOUDFLARE_API_TOKEN; rm -rf -- "$latchway_cloudflare_state"' EXIT
+trap 'exit 130' HUP INT TERM
 
 latchway_rollout_ready=false
 for _ in {1..24}; do
-  pnpm exec wrangler containers list --json \
-    --config wrangler.release.jsonc \
-    > "$latchway_cloudflare_state/applications.json"
+  bash scripts/list-applications.sh \
+    "$latchway_cloudflare_state/applications.json"
   latchway_application_id=$(jq -er --arg image "$LATCHWAY_CLOUDFLARE_IMAGE" '
-    [ .[]
-      | select(.name == "latchway" and .image == $image and
-               (.state == "active" or .state == "ready"))
-    ]
-    | if length == 1 and (.[0].instances | type == "number") and
-         .[0].instances >= 1 and (.[0].version | type == "number")
+    [ .[] | select(.name == "latchway") ]
+    | if length == 1 and .[0].image == $image and
+         (.[0].state == "active" or .[0].state == "ready") and
+         (.[0].instances | type == "number") and .[0].instances >= 1 and
+         (.[0].version | type == "number") and .[0].version >= 1 and
+         (.[0].version | floor) == .[0].version
       then .[0].id
       else empty
       end
@@ -369,7 +377,8 @@ for _ in {1..24}; do
 done
 test "$latchway_rollout_ready" = true
 
-rm -rf "$latchway_cloudflare_state"
+unset CLOUDFLARE_API_TOKEN
+rm -rf -- "$latchway_cloudflare_state"
 trap - EXIT HUP INT TERM
 ```
 

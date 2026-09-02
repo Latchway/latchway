@@ -1373,11 +1373,7 @@ class Evaluator:
         return [
             {
                 "id": repository_id,
-                "commit": (
-                    self.state.get("contract_source_commit")
-                    if repository_id == "core"
-                    else commits.get(repository_id)
-                ),
+                "commit": commits.get(repository_id),
                 "version": versions.get(repository_id),
                 "intended_tag": tags.get(repository_id),
             }

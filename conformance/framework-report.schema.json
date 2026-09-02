@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "manifest_sha256", "repository", "integrations"],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": { "type": "integer", "const": 2 },
     "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "repository": { "type": "string", "pattern": "^latchway(?:-[a-z0-9-]+)?$" },
     "integrations": {
@@ -14,10 +14,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "support", "pass", "not_applicable"],
+        "required": ["id", "support", "pass", "not_applicable", "pending"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
-          "support": { "type": "string", "enum": ["experimental", "unsupported"] },
+          "support": { "type": "string", "enum": ["supported", "experimental", "unsupported"] },
           "unsupported_evidence": {
             "type": "array",
             "minItems": 1,
@@ -52,12 +52,46 @@
                 }
               }
             }
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["case_ids", "reason", "blocker", "evidence"],
+              "properties": {
+                "case_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "pattern": "^FW-[A-Z]+-[0-9]{3}$" }
+                },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "blocker": {
+                  "type": "string",
+                  "enum": ["local", "hosted", "protected_device", "upstream"]
+                },
+                "evidence": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+                }
+              }
+            }
           }
         },
         "allOf": [
           {
             "if": { "properties": { "support": { "const": "unsupported" } } },
-            "then": { "required": ["unsupported_evidence"] }
+            "then": {
+              "properties": { "unsupported_evidence": {} },
+              "required": ["unsupported_evidence"]
+            },
+            "else": { "properties": { "unsupported_evidence": false } }
+          },
+          {
+            "if": { "properties": { "support": { "const": "supported" } }, "required": ["support"] },
+            "then": { "properties": { "pending": { "type": "array", "maxItems": 0 } } }
           }
         ]
       }
