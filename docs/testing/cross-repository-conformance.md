@@ -13,9 +13,9 @@ The current candidate tuple binds core contract checkpoint
 `437708fb56d45196720b5769f2f59b0ee51f521d`, reproducible bundle SHA-256
 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
 JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
-`c0fac916836bcfbdbf7f6a81808036726589d563`, Android
-`3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
-`39fd86ef1f6f973953e4fd5d0057ae17cc035abb`. A clean six-repository source
+`fdad08f08ebdbaa03effc21ac4a9d0e81887ed17`, Android
+`f1719db0bd4acd6185494b3994fa0e1eb3040c4a`, and React Native
+`701ac227a25f1c9f24de338571a6ca9ee18e7396`. A clean six-repository source
 report passed with canonical core commit
 `8c3783133698d569652def30b1003bb67c6a10b9` and generated Mintlify mirror
 commit `a99308cf8892a5a857ac15cc02474333e5b9482c`. The first attempt correctly

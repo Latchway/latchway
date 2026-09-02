@@ -45,9 +45,9 @@ mirror.
 | Database | Schema `28` at `437708fb56d45196720b5769f2f59b0ee51f521d`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | JavaScript source | `01dfa223773c20fe3a31559116f16e31f757b94a` |
-| Swift source | `c0fac916836bcfbdbf7f6a81808036726589d563` |
-| Android source | `3e0a601fad28a5ccf6674472a473c4797a7b404d` |
-| React Native source | `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` |
+| Swift source | `fdad08f08ebdbaa03effc21ac4a9d0e81887ed17` |
+| Android source | `f1719db0bd4acd6185494b3994fa0e1eb3040c4a` |
+| React Native source | `701ac227a25f1c9f24de338571a6ca9ee18e7396` |
 | Mintlify mirror source | Generated from the final canonical core commit; the source-conformance report records the exact mirror commit |
 | Product release state | `unpublished` and not release-qualified; local source convergence only, with no merge, version 1 tag, GitHub release, package, image, cloud deployment, or production documentation deployment |
 
@@ -262,9 +262,9 @@ to apply to supported Android application trust surfaces.
 - [x] Pass the local 228-page Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
   `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
-  `c0fac916836bcfbdbf7f6a81808036726589d563`, Android
-  `3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
-  `39fd86ef1f6f973953e4fd5d0057ae17cc035abb`.
+  `fdad08f08ebdbaa03effc21ac4a9d0e81887ed17`, Android
+  `f1719db0bd4acd6185494b3994fa0e1eb3040c4a`, and React Native
+  `701ac227a25f1c9f24de338571a6ca9ee18e7396`.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App

@@ -43,14 +43,14 @@ supply-chain, publication, and post-publication domains remain open.
 | Prior schema-27 performance checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Core canonical-public-doc source | Clean-gate baseline `8c3783133698d569652def30b1003bb67c6a10b9`; ledger-only successors retain byte-identical `api/` sources |
 | JavaScript `latchway-js` | `01dfa223773c20fe3a31559116f16e31f757b94a` |
-| Swift `latchway-ios-sdk` | `c0fac916836bcfbdbf7f6a81808036726589d563` |
-| Android `latchway-android` | `3e0a601fad28a5ccf6674472a473c4797a7b404d` |
-| React Native `latchway-react-native-sdk` | `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` |
+| Swift `latchway-ios-sdk` | `fdad08f08ebdbaa03effc21ac4a9d0e81887ed17` |
+| Android `latchway-android` | `f1719db0bd4acd6185494b3994fa0e1eb3040c4a` |
+| React Native `latchway-react-native-sdk` | `701ac227a25f1c9f24de338571a6ca9ee18e7396` |
 | JavaScript documentation bundle SHA-256 | `f0d273acdf85f8d5f7ec79a4ac170f158729a40375d23961b11dd17c792636b2` |
-| Swift documentation bundle SHA-256 | `e22d6e472de404b75396eee1db5fce05eba7175d7f4be6469fb7d0422120f6f9` |
-| Android documentation bundle SHA-256 | `eebe14ec49a7c9493d238dcddaba57078188d9321623ff03e62659c0f8400f65` |
-| React Native documentation bundle SHA-256 | `81fe9a5c4a365f0761b269d3ee1cbe55d60922544ad78dd42091e8ba7c4f31bb` |
-| SDK documentation lock SHA-256 | `40dca672264d06c801a308c2cf6d774eff4d25c61e5630009c2e53cd3d9bcd4b` |
+| Swift documentation bundle SHA-256 | `4f33b2d5d95828592afe36898c68277fdc01e597545af2d20a74352991304a3a` |
+| Android documentation bundle SHA-256 | `bfcc46ff0fe0b8da451531579e62114f8760d7cd56c50d1d159985ba28908f14` |
+| React Native documentation bundle SHA-256 | `fab0b85adc9ce6eb03cbfdc43b28f2000715ca7818906dba1de7f970b3c33045` |
+| SDK documentation lock SHA-256 | `c59eb1f3eeee8eef05185e4ebe6d403aab17fae1b8fbc14dfed764ddce0336b1` |
 | Mintlify mirror `latchway-docs` | Clean-gate baseline `a99308cf8892a5a857ac15cc02474333e5b9482c`, bound to canonical core `8c3783133698d569652def30b1003bb67c6a10b9` |
 
 These coordinates form the current candidate source-conformance tuple. A clean
@@ -153,7 +153,7 @@ released checkpoint and reproducible bundle above.
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | The frozen checkpoint includes redaction-safe audit filtering/detail, a shared doctor/support-bundle contract, the exact `latchway test-upstream serve` fixture command, separate first-byte/first-token request timestamps, canonical Admin-session inventory/revoke across API, CLI, and Console, negotiated server capabilities and read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect, polling fallback, and no row data. Complete local core gates pass. | Protected deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a historical development-signed physical React Native iOS root run passed production App Attest registration and same-key assertion, the current source adds a Debug-only native App Intent delegated-request path, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical invocation of the current Debug App Intent path, protected extension matrix, physical Play Integrity, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | Implemented; source/check gates pass and released-contract successor locks name `v1.0.0` with final changelog headings. Stable preflights no longer reject draft metadata. | Physical proof where applicable, protected exact-candidate evidence, tags, and publication |
-| React Native SDK | Successor commit `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` is implemented, source/check gates pass, and it is pinned to the exact three SDK successor commits. Its lock and changelog now satisfy the released-contract portion of stable preflight. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution and extension-matrix proof; physical Android proof; protected evidence, tags, and publication |
+| React Native SDK | Successor commit `701ac227a25f1c9f24de338571a6ca9ee18e7396` is implemented, source/check gates pass, and it is pinned to the exact three SDK successor commits. Its lock and changelog now satisfy the released-contract portion of stable preflight. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution and extension-matrix proof; physical Android proof; protected evidence, tags, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
@@ -195,7 +195,7 @@ released checkpoint and reproducible bundle above.
   Attest and Keychain entitlement, registered-device, installation, and launch
   verification on the connected iPad. It did not contact a provider, collect
   App Attest evidence, or physically invoke the Debug App Intent. Current
-  released successor `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` includes the
+  released successor `701ac227a25f1c9f24de338571a6ca9ee18e7396` includes the
   later release-lock and source-tuple transition; the physical path was not
   rerun at that head.
 - The clean implementation-checkpoint load suite passed all targets: gateway
@@ -244,14 +244,14 @@ passing clean-tree cross-repository source gate binds core contract checkpoint
 `437708fb56d45196720b5769f2f59b0ee51f521d`, bundle SHA-256
 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
 JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, iOS
-`c0fac916836bcfbdbf7f6a81808036726589d563`, Android
-`3e0a601fad28a5ccf6674472a473c4797a7b404d`, React Native
-`39fd86ef1f6f973953e4fd5d0057ae17cc035abb`, and the generated Mintlify
+`fdad08f08ebdbaa03effc21ac4a9d0e81887ed17`, Android
+`f1719db0bd4acd6185494b3994fa0e1eb3040c4a`, React Native
+`701ac227a25f1c9f24de338571a6ca9ee18e7396`, and the generated Mintlify
 mirror. All four imported SDK documentation bundles record those source coordinates and
 `source_tree_clean: true`. React Native predecessor
 `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict development signing,
 entitlement, embedded-extension, registered-iPad, install, and launch
-verification. Current `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` was not
+verification. Current `701ac227a25f1c9f24de338571a6ca9ee18e7396` was not
 physically rerun. No successor collected new App Attest evidence or invoked the
 Debug App Intent, so the earlier live root-app
 observation remains bound to predecessor
