@@ -41,7 +41,7 @@ supply-chain, publication, and post-publication domains remain open.
 | --- | --- |
 | Core contract checkpoint `latchway` | `437708fb56d45196720b5769f2f59b0ee51f521d` |
 | Prior schema-27 performance checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
-| Core canonical-public-doc source | Clean-gate baseline `8c3783133698d569652def30b1003bb67c6a10b9`; ledger-only successors retain byte-identical `api/` sources |
+| Core canonical-public-doc source | Clean-gate baseline `20dcb67ba0171b84484a7d9509f02f13eb0a7af5`; ledger-only successors retain byte-identical `api/` sources |
 | JavaScript `latchway-js` | `01dfa223773c20fe3a31559116f16e31f757b94a` |
 | Swift `latchway-ios-sdk` | `fdad08f08ebdbaa03effc21ac4a9d0e81887ed17` |
 | Android `latchway-android` | `f1719db0bd4acd6185494b3994fa0e1eb3040c4a` |
@@ -51,7 +51,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Android documentation bundle SHA-256 | `bfcc46ff0fe0b8da451531579e62114f8760d7cd56c50d1d159985ba28908f14` |
 | React Native documentation bundle SHA-256 | `fab0b85adc9ce6eb03cbfdc43b28f2000715ca7818906dba1de7f970b3c33045` |
 | SDK documentation lock SHA-256 | `c59eb1f3eeee8eef05185e4ebe6d403aab17fae1b8fbc14dfed764ddce0336b1` |
-| Mintlify mirror `latchway-docs` | Clean-gate baseline `a99308cf8892a5a857ac15cc02474333e5b9482c`, bound to canonical core `8c3783133698d569652def30b1003bb67c6a10b9` |
+| Mintlify mirror `latchway-docs` | Clean-gate baseline `943efdc24ed7e5faa0bcabacdbb2d815716d6a59`, bound to canonical core `20dcb67ba0171b84484a7d9509f02f13eb0a7af5` |
 
 These coordinates form the current candidate source-conformance tuple. A clean
 six-repository run passed with the canonical core and generated mirror commits

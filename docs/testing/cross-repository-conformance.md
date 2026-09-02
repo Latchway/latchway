@@ -17,11 +17,15 @@ JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
 `f1719db0bd4acd6185494b3994fa0e1eb3040c4a`, and React Native
 `701ac227a25f1c9f24de338571a6ca9ee18e7396`. A clean six-repository source
 report passed with canonical core commit
-`8c3783133698d569652def30b1003bb67c6a10b9` and generated Mintlify mirror
-commit `a99308cf8892a5a857ac15cc02474333e5b9482c`. The first attempt correctly
+`20dcb67ba0171b84484a7d9509f02f13eb0a7af5` and generated Mintlify mirror
+commit `943efdc24ed7e5faa0bcabacdbb2d815716d6a59`. An earlier attempt correctly
 rejected an operational release-control schema placed under the contract-locked
 `api/` tree; moving that schema beside its `.github` manifest restored exact
 contract ancestry without changing the released checkpoint or bundle.
+Main-branch Android CI later caught a macOS-only `/sbin/sha256sum` assumption in
+an adversarial test shim. The portable Android and iOS successors resolve the
+system utility from a fixed non-stub path, and React Native pins those exact
+successors before this clean report.
 
 Branch synchronization is tracked independently as a delivery operation and
 does not change the source report's meaning. No local version 1 tag exists.
