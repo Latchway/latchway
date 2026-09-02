@@ -340,7 +340,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             set(policies),
             consumers,
         )
-        self.assertEqual(environment_job_count, 43)
+        self.assertEqual(
+            consumers["preview-image-publishing"],
+            ["preview-image.yml:publish", "preview-image.yml:sign"],
+        )
+        self.assertEqual(environment_job_count, 44)
         self.assertEqual(observed_secrets, declared_secrets)
         self.assertEqual(observed_variables, declared_variables)
 

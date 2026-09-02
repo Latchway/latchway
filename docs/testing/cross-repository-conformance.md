@@ -9,23 +9,24 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 
 ## Current status (2026-09-02)
 
-The current candidate tuple binds core contract checkpoint
-`437708fb56d45196720b5769f2f59b0ee51f521d`, reproducible bundle SHA-256
-`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
-JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
-`fdad08f08ebdbaa03effc21ac4a9d0e81887ed17`, Android
-`f1719db0bd4acd6185494b3994fa0e1eb3040c4a`, and React Native
-`701ac227a25f1c9f24de338571a6ca9ee18e7396`. A clean six-repository source
-report passed with canonical core commit
-`20dcb67ba0171b84484a7d9509f02f13eb0a7af5` and generated Mintlify mirror
-commit `943efdc24ed7e5faa0bcabacdbb2d815716d6a59`. An earlier attempt correctly
-rejected an operational release-control schema placed under the contract-locked
-`api/` tree; moving that schema beside its `.github` manifest restored exact
-contract ancestry without changing the released checkpoint or bundle.
-Main-branch Android CI later caught a macOS-only `/sbin/sha256sum` assumption in
-an adversarial test shim. The portable Android and iOS successors resolve the
-system utility from a fixed non-stub path, and React Native pins those exact
-successors before this clean report.
+The final locked tuple binds core contract checkpoint
+`cd47229eac32f4a93a0779903d927526b77817d6`, reproducible bundle SHA-256
+`0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`,
+JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`, Swift
+`ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
+`52f055152431d640febd6c2d64f16799e0f05589`, and React Native
+`55413d56b2e640cebfe3d77bf9462330d111193d`. The canonical documentation lock
+binds those SDK commits to archive SHA-256 values
+`1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`
+(JavaScript),
+`a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`
+(Swift),
+`2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7`
+(Android), and
+`52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9`
+(React Native). A fresh clean six-repository source report is still required
+after the current delivery commits; this document does not reuse an earlier
+report as evidence for a changed source tuple.
 
 Branch synchronization is tracked independently as a delivery operation and
 does not change the source report's meaning. No local version 1 tag exists.

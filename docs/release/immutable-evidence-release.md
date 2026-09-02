@@ -53,15 +53,60 @@ used.
 
 The first GitHub Container Registry publish creates
 `ghcr.io/latchway/latchway` as a private package even when it is produced by a
-public repository. Land the preview workflow on `main`, dispatch it with that
-exact current `main` SHA, and expect the first credential-free public-verifier
-job to fail after the source-free publisher creates the package. A package
-administrator must then open the `Latchway/latchway` container package
-settings, verify that it is linked to the `Latchway/latchway` repository, and
-change its visibility to **Public**. That visibility change is irreversible.
-Rerun only the failed workflow jobs; the anonymous digest, child-layer, and
+public repository. The ordinary draft-preview gate cannot bootstrap the current
+package because the version 1 contract is already released. Use the explicit
+`released-first-package-bootstrap` mode of `.github/workflows/preview-image.yml`
+instead. Dispatch the workflow from `main` with:
+
+- `preview_commit`: the exact current 40-character `main` SHA;
+- `publication_mode`: `released-first-package-bootstrap`;
+- `bootstrap_confirmation`: `bootstrap-ghcr-first-package-only`.
+
+The confirmation is rejected in draft-preview mode. Bootstrap mode is sealed
+to the already released version 1 coordinate: the contract and stable Console
+version must both be exactly `1.0.0`, the contract must have a canonical
+non-null UTC release timestamp, the checkout must be clean and exact, and the
+dispatch SHA must equal that checkout. It still assigns the image the synthetic
+runtime version `0.0.0-bootstrap.<12-character-commit>` and publishes only
+`bootstrap-<40-character-commit>-<run-id>-<run-attempt>` plus its two
+architecture-suffixed children. The handoff and retained manifest say
+`release_qualified: false` and `stable_promotion_eligible: false`. The workflow
+has no contents-write authority and contains no path that creates Git tags,
+GitHub releases, version tags, or moving/stable OCI aliases.
+
+All runs share one non-cancelling concurrency group. Before any bootstrap
+registry login, the protected publisher uses its workflow token to query the
+exact organization package and accepts only an authenticated `404` response
+whose body says `Not Found`; a network error or any other status fails closed.
+Consequently, bootstrap cannot run after the package exists, and concurrent
+bootstrap dispatches cannot both pass the absence check.
+
+Both modes first build, smoke, vulnerability-scan, generate SPDX SBOMs, and
+close the two credential-free image archives. Only then may the protected
+`preview-image-publishing` publisher validate the closed handoff without a
+checkout and publish the run-unique child and index coordinates. A second
+source-free job reuses that exact protected boundary, validates a closed
+unsigned handoff, rechecks the published tag and digests, and only then obtains
+OIDC to sign the index and attach provenance and SBOM attestations. Publisher,
+signer, authenticated verifier, and anonymous verifier each use a distinct
+fresh Docker configuration; credentials are logged out and removed. The
+anonymous verifier proves the exact tag, digest, child layers, labels, and
+signature without package permission or registry login. The authenticated
+attestation verifier runs only after that anonymous gate. The release-control
+validator inventories the publisher and signer as two exact consumers of the
+single `preview-image-publishing` sentinel.
+
+Expect that anonymous job to fail on the first bootstrap run after the
+source-free publisher creates the still-private package. A package administrator
+must then open the `Latchway/latchway` container package settings, verify that it
+is linked to the `Latchway/latchway` repository, and change its visibility to
+**Public**. That visibility change is irreversible. Rerun only the failed
+workflow jobs; they remain bound to the original publication run ID and
+attempt. Do not rerun all jobs: a fresh publisher attempt is expected to stop
+at the now-existing-package guard. The anonymous digest, child-layer, and
 signature checks plus the authenticated provenance/SBOM checks must all pass.
-Do not call the package published or usable before that rerun is green.
+Do not call the package published or usable before that rerun is green, and do
+not reuse this bootstrap mode for a stable release candidate.
 
 After visibility bootstrap, remove inherited human package-write access where
 the organization permits it and retain the protected workflows as the only

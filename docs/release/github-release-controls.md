@@ -1,6 +1,6 @@
 # GitHub and npm release controls
 
-Latchway keeps the reviewable desired state for all five release repositories
+Latchway keeps the reviewable desired state for all six controlled repositories
 in [`.github/release-controls.json`](../../.github/release-controls.json). The
 standard-library reconciler in
 [`scripts/github-release-controls.py`](../../scripts/github-release-controls.py)
@@ -91,9 +91,10 @@ release-domain source capture use anonymous, credential-disabled Git reads for
 sibling repositories. The built-in token remains limited to core-repository
 API authority where a workflow needs it.
 
-The manifest seals 50 concrete boundaries across all five repositories: 22 in
-the core repository, three in JavaScript, five in iOS, ten in Android, and ten
-in React Native. Core covers release and preview-image publication;
+The manifest seals 51 concrete boundaries across all six repositories: 22 in
+the core repository, three in JavaScript, five in iOS, ten in Android, ten in
+React Native, and one in the production-documentation repository. Core covers
+release and preview/bootstrap image publication;
 release-evidence publication, signing, live-provider, GitHub-read,
 physical-device, Firebase App Check, and Turnstile; security and
 private-sibling-read; deployment authentication, Compose, Cloud Run, AWS,
@@ -106,6 +107,13 @@ controls: an unprovisioned boundary remains unsealed and its workflow fails at
 the first step. Dynamic workflow syntax is permitted only where the workflow
 closes it over manifest names and maps every input choice or matrix row to its
 exact policy ID.
+
+The source-free `publish` and `sign` jobs in `preview-image.yml` deliberately
+reuse the single `preview-image-publishing` boundary. Each job asserts that
+boundary's exact policy ID as its literal first step. Workflow validation
+requires the manifest-backed consumer set to be exactly those two jobs, so a
+job split changes the privileged-job topology without inventing a second
+environment or weakening the 51-boundary inventory.
 
 ## Plan and verify
 

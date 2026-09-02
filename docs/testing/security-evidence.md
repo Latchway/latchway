@@ -170,9 +170,11 @@ and must contain exactly these eight review IDs:
 
 Every review has an exact candidate commit, tag, version, contract bundle,
 image index, `linux/amd64` and `linux/arm64` digest, promotion-report SHA-256,
-and five-repository coordinate binding. The overall and per-review UTC windows
-must start after both candidate creation and promotion evidence completion,
-remain no more than seven days old, and span no more than seven days. Finding
+and six-repository source binding: five product coordinates plus the exact
+generated documentation repository coordinate. The overall and per-review UTC
+windows must start after both candidate creation and promotion evidence
+completion, remain no more than seven days old, and span no more than seven
+days. Finding
 totals and unresolved counts are retained for `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, and
 `INFORMATIONAL`; unresolved `CRITICAL` or `HIGH` findings fail closed. Every
 unresolved `MEDIUM`, `LOW`, or `INFORMATIONAL` finding must have one
