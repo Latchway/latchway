@@ -10,8 +10,9 @@ changelog. Source/check gates pass; stable release preflights no longer reject
 draft metadata, but still require tags and protected evidence. Canonical SDK
 documentation bundles are imported into canonical documentation commit
 `cd4387fa095556e044945bf6e1e3237d857d912e` and synchronized Mintlify mirror
-commit `f37fde259986683f4957627b24d2106b2db81c78`. The current local tuple passes
-the core, SDK, package, and documentation gates recorded below. The
+commit `f37fde259986683f4957627b24d2106b2db81c78`. The successor tuple passes
+the core, SDK, package, documentation, and clean source-conformance gates
+recorded below and its six histories are delivered to `main`. The
 six-repository release-control desired state is implemented, including the
 docs-only review policy, but has not been applied live because no distinct
 reviewer is available. npm uses `auth-and-writes` 2FA; all five npm packages
@@ -337,16 +338,16 @@ complete; protected execution open
   the React Native dependency pins and final changelog, rebuild and import all
   SDK documentation bundles, synchronize the Mintlify mirror, and rerun clean
   cross-repository source conformance. The resulting successor tuple is
-  contract-released, internally converged, and locally green; it has not yet
-  been pushed, tagged, published, or admitted by protected exact-candidate
-  evidence.
+  contract-released, internally converged, locally green, clean-conformant, and
+  delivered to `main`; it has not been tagged, published, or admitted by
+  protected exact-candidate evidence.
 - [x] Extend the fail-closed release-control desired state to all six
   repositories and 51 environments. Require CODEOWNERS review, one approval,
   and a written docs-not-required check only for `latchway-docs`; retain the
   zero-source-review policy for product repositories. npm account 2FA is now
   `auth-and-writes`, but the five package coordinates remain unpublished.
-- [ ] Audit and non-force push the exact final local tuple, then regenerate the
-  clean six-repository source-conformance report from the pushed commits.
+- [x] Audit and non-force push the exact successor histories, verify all six
+  remote `main` heads, then pass clean six-repository source conformance.
 - [ ] Build and observe one final immutable multi-architecture image in the
   protected registry and run all external domains against its exact digests.
 - [ ] Produce the protected prepublication promotion record, then publish the

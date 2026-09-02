@@ -34,8 +34,9 @@ refresh hints, exact JSON/YAML numeric preservation, and explicit
 documentation commit `cd4387fa095556e044945bf6e1e3237d857d912e` is a
 documentation descendant, and Mintlify mirror
 `f37fde259986683f4957627b24d2106b2db81c78` names it in its source manifest. A
-fresh clean six-repository source-conformance report is still required before
-the current local tuple is pushed. None of these coordinates proves a tag,
+fresh clean six-repository source-conformance run passed after the current
+histories were delivered to `main` and their remote heads were verified. None
+of these coordinates proves a tag,
 GitHub release, package/container publication, cloud deployment, or production
 documentation deployment.
 
@@ -123,14 +124,15 @@ schema, semantic policy, generated Markdown, archive closure, and checksums.
 The bundle, exact contract checkpoint, bundle hash, wire-2 constants,
 component-attestation vector, and other generated fixtures are synchronized
 across all four SDK locks. A fresh clean six-repository source-conformance run
-is still required for the final canonical-docs and mirror coordinates.
+passed for the final canonical-docs and mirror coordinates after source
+delivery.
 
 ## Current SDK source checkpoints
 
-These coordinates record the current clean, locally source-converged version 1
+These coordinates record the current clean, source-converged version 1
 implementations. They are source checkpoints, not package-publication,
-production-support, or public-version claims. The current heads are ahead of
-the previously delivered `main` baseline and are not claimed as pushed.
+production-support, or public-version claims. The current histories are
+delivered to `main` and their intended remote heads were verified.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |

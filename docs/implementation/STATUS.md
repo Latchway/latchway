@@ -2,8 +2,9 @@
 
 Status date: 2026-09-02
 
-Latchway version 1 is source-complete at the current local implementation
-checkpoint. The released wire-2 contract, all four SDK locks, and the four
+Latchway version 1 is source-complete at the validated implementation
+checkpoint and the converged six-repository histories are delivered to `main`.
+The released wire-2 contract, all four SDK locks, and the four
 reproducible SDK documentation bundles converge on the exact coordinates below.
 The core `make check` gate and complete uncached PostgreSQL 15 and PostgreSQL 18
 suites pass. JavaScript `release:check`, the Android 665-task gate and local
@@ -34,16 +35,16 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: final local source tuple is assembled; clean source conformance/push, live release controls, publication, and protected exact-candidate execution remain open |
-| Current objective | Run clean source conformance, audit and push the exact six commits, add one distinct GitHub reviewer, apply and verify the six-repository controls, then execute protected release domains |
+| Current phase | Phase 9: the successor source tuple is clean-conformant and delivered to `main`; live release controls, publication, and protected exact-candidate execution remain open |
+| Current objective | Add one distinct GitHub reviewer, apply and verify the six-repository controls, then execute protected registry, publication, documentation, deployment, and evidence domains |
 | Validated implementation coordinates | Core/contract `cd47229eac32f4a93a0779903d927526b77817d6`; JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `76fe88ce8053c6983f03422238e9da12360d435d`; canonical docs `cd4387fa095556e044945bf6e1e3237d857d912e`; Mintlify mirror `f37fde259986683f4957627b24d2106b2db81c78` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Database schema version | `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
 | Last full test time | `2026-09-02` — core `cd47229eac32f4a93a0779903d927526b77817d6` passed full `make check` and complete uncached PostgreSQL 15 and PostgreSQL 18 `go test -count=1 ./...` suites. JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` passed `release:check`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` passed the 665-task gate and local publication smoke; React Native `76fe88ce8053c6983f03422238e9da12360d435d` passed `check`. Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` passed its full package/release gate: production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
-| Open blockers | Before stable release: clean six-repository source conformance and audited push; one accepted reviewer distinct from the operator; live GitHub environment/ruleset/immutable-release enforcement; npm package bootstrap and exact trusted publishers; registry/package publication; Mintlify custom-domain/DNS production routing for `docs.latchway.dev`; Apple distribution evidence; the protected delegated-extension matrix; operator-deferred App Intent/extension and physical Android/Google Play proof; Turnstile; immutable-image provider/cloud/resilience; and post-publication receipts |
+| Open blockers | Before stable release: one accepted reviewer distinct from the operator; live GitHub environment/ruleset/immutable-release enforcement; npm package bootstrap and exact trusted publishers; registry/package publication; Mintlify custom-domain/DNS production routing for `docs.latchway.dev`; Apple distribution evidence; the protected delegated-extension matrix; operator-deferred App Intent/extension and physical Android/Google Play proof; Turnstile; immutable-image provider/cloud/resilience; and post-publication receipts |
 | External credentials still required | Repository-administrator access and an npm owner session with `auth-and-writes` 2FA are available. All five npm package names remain unpublished. GitHub has no distinct reviewer across the six controlled repositories, so the fail-closed control reconciler cannot yet apply the live policy. Later protected gates require the applicable Apple distribution, Play, Turnstile, cloud, registry, KMS/signing, collector, and finalizer identities. |
-| Next executable task | Run clean source conformance, audit and non-force push the six exact commits, then add one distinct GitHub reviewer and apply/verify the six-repository control manifest before publication or tagging |
+| Next executable task | Add one distinct GitHub reviewer and apply/verify the six-repository control manifest before stable publication or tagging; npm package-name bootstrap may proceed separately without implying a stable release |
 
 ### Validated version 1 source coordinates
 
@@ -62,11 +63,13 @@ supply-chain, publication, and post-publication domains remain open.
 | React Native documentation bundle SHA-256 | `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d` |
 | Final Mintlify mirror `latchway-docs` | `f37fde259986683f4957627b24d2106b2db81c78`, generated from `cd4387fa095556e044945bf6e1e3237d857d912e` |
 
-These coordinates form the final local implementation tuple. The deterministic
+These coordinates form the validated implementation tuple delivered to `main`.
+The deterministic
 contract bundle SHA-256 is
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`.
-The final clean six-repository source report must be regenerated from these
-exact commits; no report digest is claimed in advance. No version 1 tag, GitHub
+A fresh clean six-repository source-conformance run passed after the audited
+non-force push, and all six remote `main` heads matched their intended source
+histories. This is source delivery only. No version 1 tag, GitHub
 release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud
 deployment, or protected production-documentation receipt is verified.
 
@@ -166,15 +169,17 @@ released checkpoint and reproducible bundle above.
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Release controls | The closed desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. Offline validation passes, but no live ruleset/environment apply is claimed. | One accepted independent reviewer, manual no-admin-bypass confirmation, live two-stage apply, and live verify; npm already has `auth-and-writes` 2FA but package bootstrap/trusted publishers remain open |
-| Mintlify public docs | Canonical source `cd4387fa095556e044945bf6e1e3237d857d912e` imports the exact four reproducible bundles and mirror `f37fde259986683f4957627b24d2106b2db81c78` names that source in its manifest. Local canonical/mirror checks are green. | Run clean source conformance, push the exact commits, configure `docs.latchway.dev`, deploy the exact mirror through protected controls, and seal post-deploy evidence |
+| Mintlify public docs | Canonical source `cd4387fa095556e044945bf6e1e3237d857d912e` imports the exact four reproducible bundles and mirror `f37fde259986683f4957627b24d2106b2db81c78` names that source in its manifest. Local canonical/mirror checks, clean source conformance, and audited source delivery are complete. | Configure `docs.latchway.dev`, deploy the exact mirror through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
 
 - The loopback Console preview at `http://127.0.0.1:18082` runs local image
-  `latchway:local-203d855-arm64`, whose embedded version reports core
-  `203d855f70932c72a63f9c3745cf250b767f4225`, contract `1.0.0`, and wire `2`.
-  Its readiness endpoint returns `200`; the rotated disposable owner login was
-  reverified, and the out-of-repository credential file remains mode `0600`.
+  `latchway:local-5dd351f-arm64`, whose embedded version reports core
+  `5dd351fdc7e20d24d4ccdfcf96bf7b9e8623901d`, contract `1.0.0`, and wire `2`.
+  It runs as UID/GID `65532:65532` with a read-only root filesystem, all Linux
+  capabilities dropped, `no-new-privileges`, and a `/tmp` tmpfs. Readiness,
+  Console HTML, and the rotated disposable owner login each return `200`; the
+  out-of-repository credential file remains mode `0600`.
   This preview is local operator evidence, not a registry or release receipt.
 - PostgreSQL-backed unit, integration, migration, authorization, replay,
   refresh, revocation, and direct-component-attestation vertical tests.
@@ -263,7 +268,7 @@ released checkpoint and reproducible bundle above.
   byte-identical released contract sources.
 
 These are source-development results, not protected release receipts. The
-final local tuple binds core/contract
+validated source tuple binds core/contract
 `cd47229eac32f4a93a0779903d927526b77817d6`, bundle SHA-256
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`,
 JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, iOS
@@ -280,9 +285,9 @@ physically rerun. No successor collected new App Attest evidence or invoked the
 Debug App Intent, so the earlier live root-app
 observation remains bound to predecessor
 `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`. The final documentation commits
-and a fresh clean six-repository source-conformance report are required before
-this tuple is synchronized. None of these results substitutes for a protected
-external domain.
+were synchronized, the exact source histories were delivered to `main`, and a
+fresh clean six-repository source-conformance run passed. None of these results
+substitutes for a protected external domain.
 
 ## Direct component attestation boundary
 
@@ -384,18 +389,18 @@ commits. The operator has now explicitly deferred App Intent/extension
 invocation and Google Play physical evidence; those remain open release gates.
 
 The user authorized a scoped non-force push of the six audited source-branch
-histories and separately requested GHCR and npm publication work. The earlier
-baseline is delivered to `main`; the exact current six-repository tuple remains
-local and awaits clean conformance plus an audited non-force push. Namespace
+histories and separately requested GHCR and npm publication work. The exact
+successor histories are delivered to `main`, their remote heads were verified,
+and fresh clean six-repository source conformance passed. Namespace
 bootstrap or explicitly non-stable preview artifacts do not authorize a stable
 tag, version 1 GitHub release, release-qualified production documentation
 receipt, or protected promotion.
 
 ## Release decision
 
-The repositories are locally source-converged but are not ready for release
-promotion. Final source delivery is still pending. Tagging, production
-promotion, package/container publication, release-qualified documentation
+The repositories are source-converged and delivered, but are not ready for
+release promotion. Tagging, production promotion, package/container
+publication, release-qualified documentation
 evidence, and a production-readiness claim remain blocked until the protected
 finalizer binds every required receipt to one immutable set of core, SDK,
 image, contract, package, and documentation coordinates.

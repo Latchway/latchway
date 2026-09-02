@@ -1,12 +1,13 @@
 # Version 1 completion gap ledger
 
-Status: **the version 1 implementation is locally source-converged at the exact
+Status: **the version 1 implementation is source-converged at the exact
 core, SDK, canonical-documentation, and Mintlify-mirror coordinates below. The
 core `make check` gate and complete uncached PostgreSQL 15/18 suites pass;
 JavaScript `release:check`, the Android 665-task/publication-smoke gate, React
-Native `check`, and the complete Swift package/CocoaPods gate pass. The current
-tuple is local and ahead of the previously delivered `main` baseline. Release
-controls cover all six repositories but are not applied live because no
+Native `check`, and the complete Swift package/CocoaPods gate pass. The exact
+successor histories are delivered to `main`, their remote heads were verified,
+and clean six-repository source conformance passed. Release controls cover all
+six repositories but are not applied live because no
 distinct reviewer is available. npm 2FA is `auth-and-writes`, but all five npm
 packages remain unpublished. App Intent/extension and physical Android/Google
 Play evidence remain explicitly deferred. No candidate is tagged, published,
@@ -30,7 +31,7 @@ deployments, or protected evidence that does not exist.
 | SDK documentation bundles | JavaScript `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`; Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`; Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`; React Native `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d` |
 | Public documentation source | Canonical core docs `cd4387fa095556e044945bf6e1e3237d857d912e`; generated Mintlify mirror `f37fde259986683f4957627b24d2106b2db81c78` |
 | SDK locks | All four released successor locks, four vector families, copied `protocol-version.json`, framework coordinates, final changelog headings, and reproducible documentation bundles converge on the current checkpoint. Stable preflights still require tags and protected exact-candidate evidence. |
-| Public release | The current tuple has not been pushed to `main`. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
+| Public release | Source histories are delivered to `main`, but source delivery is not a release. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
 
 Historical contract `0.5.1`, wire 1, schema 20, and their SDK locks remain
 immutable legacy coordinates. They are regression evidence only and cannot
@@ -48,7 +49,7 @@ authorize version 1.
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
-| Documentation | Canonical commit `cd4387fa095556e044945bf6e1e3237d857d912e` imports all four exact SDK bundles and synchronizes mirror commit `f37fde259986683f4957627b24d2106b2db81c78`; canonical and mirror validation are green | Push/audit the exact commits, route `docs.latchway.dev`, and collect protected production-deployment and post-deploy receipts |
+| Documentation | Canonical commit `cd4387fa095556e044945bf6e1e3237d857d912e` imports all four exact SDK bundles and synchronizes mirror commit `f37fde259986683f4957627b24d2106b2db81c78`; canonical and mirror validation, clean source conformance, and audited source delivery are complete | Route `docs.latchway.dev`, then collect protected production-deployment and post-deploy receipts |
 | Release controls and npm | Desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. npm 2FA is `auth-and-writes`. | Add a distinct reviewer, apply/verify the live controls, bootstrap the five unpublished package coordinates, and install exact trusted publishers |
 
 ## Schema-23 direct component App Attest step-up
@@ -94,10 +95,11 @@ replay, refresh/revocation, component attestation, policy/quota behavior,
 protocol/routing behavior, SDK unit and native consumer builds, dashboard and
 browser flows, deterministic contract/docs builds, workflow validation, and
 static/dry-run deployment and supply-chain checks. The disposable loopback
-Console preview was upgraded to local image `latchway:local-203d855-arm64`;
-the binary reports core `203d855f70932c72a63f9c3745cf250b767f4225`, its
-readiness endpoint returns `200`, and its rotated owner login succeeds. This is
-not a registry or protected deployment receipt. A real browser-minted
+Console preview was upgraded to local image `latchway:local-5dd351f-arm64`;
+the binary reports core `5dd351fdc7e20d24d4ccdfcf96bf7b9e8623901d`, runs as
+UID/GID `65532:65532` with a read-only root filesystem and hardened runtime
+flags, and returns `200` for readiness, Console HTML, and its rotated owner
+login. This is not a registry or protected deployment receipt. A real browser-minted
 Firebase App Check token from an allowed localhost origin passes the current
 source gateway, including the multi-audience token shape emitted by Firebase.
 The arbitrary ngrok hostname was not claimed as passing, and this observation
@@ -151,7 +153,9 @@ receipts. The current convergence run:
 - created canonical documentation commit
   `cd4387fa095556e044945bf6e1e3237d857d912e` and synchronized Mintlify mirror
   commit `f37fde259986683f4957627b24d2106b2db81c78` without creating a tag or
-  package release. The current six heads remain local and ahead of `main`.
+  package release; and
+- delivered the exact successor histories to `main`, verified all six intended
+  remote heads, and passed fresh clean six-repository source conformance.
 
 Core `cd47229eac32f4a93a0779903d927526b77817d6` passes the full current
 `make check`, including generated-source checks, all Go tests and vet, the
@@ -164,9 +168,9 @@ root-challenge and App Attest post-disable insertion races, configuration and
 family/component lock-order deadlocks, exact JSON/YAML numeric preservation,
 and explicit `READ COMMITTED` lifecycle behavior. Complete uncached PostgreSQL
 15 and PostgreSQL 18 `go test -count=1 ./...` suites also pass at that exact
-checkpoint. A fresh clean source-conformance report must bind the final six
-local commits before synchronization. Source-branch synchronization is a
-delivery operation and is not release evidence.
+checkpoint. Fresh clean source conformance passed after source-branch
+synchronization. That synchronization is a delivery operation and is not
+release evidence.
 
 Credential-free deployment validation also passes 9/9 static checks for the
 Compose, Cloud Run, AWS, Fly, and Cloudflare definitions; the Wrangler path
@@ -250,7 +254,7 @@ histories and separately requested GHCR and npm publication work. npm account
 unpublished. The six-repository GitHub desired state is not live because a
 distinct reviewer is unavailable. That authorization permits reviewed
 namespace bootstrap or explicitly non-stable preview artifacts; it does not
-make the locally released-contract successor tuple eligible for a stable
+make the source-delivered released-contract successor tuple eligible for a stable
 version 1 tag, protected promotion, release-qualified production
 documentation, or a production-readiness claim.
 Only the protected finalizer may produce the
