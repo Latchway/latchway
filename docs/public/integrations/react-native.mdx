@@ -6,14 +6,16 @@ audience: "mixed"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-02"
 owner: "framework-integrations"
 ---
 
 <Warning>
   The React Native source candidate exposes a native-backed fetch-shaped API,
-  but named framework compatibility remains pre-release and Installation Family
-  component support has not passed release conformance.
+  but named framework compatibility remains pre-release. Installation Family
+  and component behavior pass local conformance; hosted replay rejection,
+  protected native isolation, and physical-device evidence remain release
+  gates.
 </Warning>
 
 ## 1. What this integration does
@@ -39,10 +41,12 @@ materially adds root-owned component lifecycle and a Debug native App Intent
 delegated-request path. Its Apple Development app and embedded extension passed
 strict entitlement/provisioning, registered-device install, and launch checks
 without new App Attest or App Intent execution. Current
-`76fe88ce8053c6983f03422238e9da12360d435d` carries the release retry-closure
+`0cf6c00759121949d9c9bd14c99ad481be672f8e` carries the release retry-closure
 and transition-order hardening, locks the released contract plus final sibling
-SDK successor commits, and passes the full local plus generic iOS and isolated
-Debug/Release build gates; its physical path was not rerun. The
+SDK successor commits, and passes 103 Vitest tests, 58 Node tests, 4/4
+documentation-bundle tests, 8/8 vulnerability tests, Swift bridge 5/5,
+Android Robolectric 6/6, locked iOS semantics 10/10, locked Android semantics
+8/8, and a real CocoaPods/TurboModule build. Its physical path was not rerun. The
 historical root-app run above does not establish extension execution for the
 current source, and the operator has deferred that evidence.
 
@@ -58,13 +62,13 @@ unpublished.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Partial cross-platform evidence; Secure Enclave DPoP passed on physical iOS, while Android remains unproven |
-| Private key remains native | Partial cross-platform evidence; physical iOS and local bridge isolation pass, while Android remains unproven |
-| Streaming | Native pull streaming passes local gates and a physical iOS upstream run; Android remains unproven |
+| Full DPoP preserved | Local compiled/native iOS and Android gates pass; Secure Enclave DPoP passed on development-signed physical iOS, while protected hardware-key proof and physical Android remain open |
+| Private key remains native | Local Swift bridge, Android Robolectric, locked native-semantic, and CocoaPods/TurboModule gates pass; protected physical runtime isolation remains open |
+| Streaming | Native pull streaming passes local iOS and Android gates and a physical iOS upstream run; physical Android remains open |
 | Cancellation | Native cancellation passes local gates |
 | App extensions | Not provided by the React Native framework-fetch integration |
-| Structured output | Framework-specific evidence pending |
-| Tool calls | Framework-specific evidence pending |
+| Structured output | Local React Native behavior conformance passes; protected named-framework and physical evidence remain open |
+| Tool calls | Local React Native behavior conformance passes; protected named-framework and physical evidence remain open |
 | Protocol | Released source contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
 
 ## 5. Install packages
@@ -130,7 +134,8 @@ Browser-only streams, uploads, or framework hooks may not exist in React
 Native. The iPadOS 26.5 Debug observation used automatic Apple Development
 signing, not an Apple distribution-derived protected immutable candidate. The
 current Debug App Intent still requires physical invocation, and the broader
-protected extension matrix remains open. Android evidence also remains open.
+protected extension matrix remains open. Local compiled Android conformance
+passes; physical Play-distributed Android evidence remains open.
 
 ## 17. Verify the integration
 

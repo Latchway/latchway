@@ -598,7 +598,7 @@ def main() -> int:
     foundation_page = files_by_route.get("integrations/foundation-models")
     if foundation_page is not None:
         foundation_text = foundation_page.read_text(encoding="utf-8")
-        for current_claim in ("pre-release experimental", "exact `27.0.0`", "Nine iOS 27.0 simulator tests"):
+        for current_claim in ("pre-release experimental", "exact `27.0.0`", "Twelve iOS 27.0 simulator tests"):
             if current_claim not in foundation_text:
                 errors.append(f"Foundation Models page lacks current generated status: {current_claim}")
     choose_page = files_by_route.get("start/choose-an-integration")

@@ -55,7 +55,7 @@ frameworks:
       dpop: partial
       native_key_isolation: partial
     limitations:
-      - Nine iOS 27.0 simulator tests pass text, transcript, incremental usage, cancellation, quota/unavailable mapping, refresh, and explicit tools/schema rejection; physical framework execution and delegated-extension runtime remain pending.
+      - Twelve iOS 27.0 simulator tests pass text, transcript, incremental usage, cancellation, quota/unavailable mapping, refresh, header and provider-placeholder isolation, logger redaction, and explicit tools/schema rejection; physical framework execution and delegated-extension runtime remain pending.
   - id: koog-android
     name: Koog OpenAI client
     tier: tier_1

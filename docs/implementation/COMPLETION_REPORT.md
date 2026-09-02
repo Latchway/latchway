@@ -1,13 +1,15 @@
 # Version 1 completion gap ledger
 
-Status: **the version 1 implementation is source-converged at the exact
-core, SDK, canonical-documentation, and Mintlify-mirror coordinates below. The
+Status: **the version 1 product implementation and four SDKs are converged at
+the exact source coordinates below. Canonical public documentation is this
+checked-in source tree, and the generated mirror is required to bind that tree
+through `.latchway-docs-source.json`. The
 core `make check` gate and complete uncached PostgreSQL 15/18 suites pass;
-JavaScript `release:check`, the Android 665-task/publication-smoke gate, React
+JavaScript `release:check`, the Android 665-actionable-task/publication-smoke gate, React
 Native `check`, and the complete Swift package/CocoaPods gate pass. The exact
-successor histories are delivered to `main`, their remote heads were verified,
-and clean six-repository source conformance passed. Release controls cover all
-six repositories but are not applied live because no
+core and SDK successor histories are delivered to `main` and their remote
+heads were verified. Release controls cover all six repositories but are not
+applied live because no
 distinct reviewer is available. npm 2FA is `auth-and-writes`, but all five npm
 packages remain unpublished. App Intent/extension and physical Android/Google
 Play evidence remain explicitly deferred. No candidate is tagged, published,
@@ -26,12 +28,12 @@ deployments, or protected evidence that does not exist.
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Contract bundle | Reproducible SHA-256 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` at contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
-| Core implementation source | `cd47229eac32f4a93a0779903d927526b77817d6` |
-| SDK source tuple | JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `76fe88ce8053c6983f03422238e9da12360d435d` |
-| SDK documentation bundles | JavaScript `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`; Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`; Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`; React Native `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d` |
-| Public documentation source | Canonical core docs `e805873f9d151710b21c338e99128c3de4c20c34`; generated Mintlify mirror `b2db718d7c25f039ea757df4d54c5510725d8b3a` |
+| Core implementation source | `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, a contract-preserving descendant of the frozen contract checkpoint |
+| SDK source tuple | JavaScript `e3a57617e75bf3d46e858a1084749f46f819db1f`; Swift `9f306d1e585069ca4aa703412c5d70656336e50f`; Android `a994f8b5ee81fa831b8b2e57885df39f50fa2777`; React Native `0cf6c00759121949d9c9bd14c99ad481be672f8e` |
+| SDK documentation bundles | JavaScript `cf7073575aa1af89b1739387eca2cfa03bb822ab7dc397bbdf80e1ce7a2271ae`; Swift `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`; Android `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`; React Native `3680b196ffc71549af1247c2c3d872ca436ab64476dd0985cdba30928bc4c933` |
+| Public documentation source | This checked-in canonical tree imports the final bundles based on core implementation `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`; the generated mirror must bind its exact source through `.latchway-docs-source.json` |
 | SDK locks | All four released successor locks, four vector families, copied `protocol-version.json`, framework coordinates, final changelog headings, and reproducible documentation bundles converge on the current checkpoint. Stable preflights still require tags and protected exact-candidate evidence. |
-| Public release | Source histories are delivered to `main`, but source delivery is not a release. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
+| Public release | Core and all four SDK source heads are delivered to `main`, but source delivery is not a release. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
 
 Historical contract `0.5.1`, wire 1, schema 20, and their SDK locks remain
 immutable legacy coordinates. They are regression evidence only and cannot
@@ -45,11 +47,11 @@ authorize version 1.
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter plus local load/failure checks pass against the current source gateway | Protected immutable-image provider, load, and destructive-failure evidence |
 | Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. Complete local core gates pass. | Deployment operator acceptance on the final image |
-| SDKs | JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` passes `release:check`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` passes the 665-task gate and local publication smoke; React Native `76fe88ce8053c6983f03422238e9da12360d435d` passes `check`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` passes production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for all four subspecs. React Native retains its Debug-only native App Intent delegated request and fail-closed Release fixture; the current head was not physically rerun. | Operator-deferred physical invocation of the Debug App Intent/extension path; protected Apple distribution/extension-matrix proof; physical Android/Google Play proof; tags, protected evidence, and publication |
+| SDKs | JavaScript `e3a57617e75bf3d46e858a1084749f46f819db1f` passes 128 Vitest, 33 Node, 58 offline Python (57 pass and one skip), and 51 Playwright tests. Android `a994f8b5ee81fa831b8b2e57885df39f50fa2777` passes 75 offline release tests with one expected skip, its full 665-actionable-task Gradle gate, publication smoke, and 8/8 locked semantic slice. React Native `0cf6c00759121949d9c9bd14c99ad481be672f8e` passes 103 Vitest, 58 Node, 4/4 docs-bundle, and 8/8 dependency-scan tests plus Swift bridge 5/5, Robolectric 6/6, locked iOS 10/10, locked Android 8/8, and a real CocoaPods/TurboModule build. Swift `9f306d1e585069ca4aa703412c5d70656336e50f` passes 50 offline Python (49 pass and one skip), 8/8 vulnerability, 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), external SwiftPM consumer, and four CocoaPods lint gates. React Native retains its Debug-only native App Intent delegated request and fail-closed Release fixture; the final head was not physically rerun. | Hosted React Native replay rejection; operator-deferred physical invocation of the Debug App Intent/extension path; protected Apple distribution/extension-matrix proof and native isolation; physical Android/Google Play proof; tags, protected evidence, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows. Cloudflare provider evidence uses bounded cursor pagination with strict schema, duplicate, cursor-cycle, record-count, and byte limits rather than Wrangler's one-page JSON listing. | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
-| Documentation | Canonical commit `e805873f9d151710b21c338e99128c3de4c20c34` imports all four exact SDK bundles, adds task-oriented deployment comparison and release-image verification, and synchronizes mirror commit `b2db718d7c25f039ea757df4d54c5510725d8b3a`; canonical and mirror validation, clean source conformance, and audited source delivery are complete | Route `docs.latchway.dev`, then collect protected production-deployment and post-deploy receipts |
+| Documentation | This canonical tree imports all four final SDK bundles and retains the task-oriented deployment and release-image guidance. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Route `docs.latchway.dev`, deploy through protected controls, then collect production-deployment and post-deploy receipts |
 | Release controls and npm | Desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. npm 2FA is `auth-and-writes`. | Add a distinct reviewer, apply/verify the live controls, bootstrap the five unpublished package coordinates, and install exact trusted publishers |
 
 ## Schema-23 direct component App Attest step-up
@@ -95,8 +97,8 @@ replay, refresh/revocation, component attestation, policy/quota behavior,
 protocol/routing behavior, SDK unit and native consumer builds, dashboard and
 browser flows, deterministic contract/docs builds, workflow validation, and
 static/dry-run deployment and supply-chain checks. The disposable loopback
-Console preview was upgraded to local image `latchway:local-5dd351f-arm64`;
-the binary reports core `5dd351fdc7e20d24d4ccdfcf96bf7b9e8623901d`, runs as
+Console preview was upgraded to local image `latchway:local-d4693ee-arm64`;
+the binary reports core `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, runs as
 UID/GID `65532:65532` with a read-only root filesystem and hardened runtime
 flags, and returns `200` for readiness, Console HTML, and its rotated owner
 login. This is not a registry or protected deployment receipt. A real browser-minted
@@ -122,7 +124,7 @@ independently keyed delegated request with exact-run challenge/receipt binding.
 Its Apple Development build passed strict root/extension signing, provisioning,
 App Attest and Keychain entitlement, team, registered-device, install, and
 launch checks. It did not collect new App Attest proof or invoke the App Intent.
-Current successor `76fe88ce8053c6983f03422238e9da12360d435d` is a descendant
+Current successor `0cf6c00759121949d9c9bd14c99ad481be672f8e` is a descendant
 that adds release retry-closure, transition-order, wording,
 development-runner hardening, and the released-contract/source-tuple lock. It
 passes the full local plus generic iOS and isolated Debug/Release App Intent
@@ -130,9 +132,12 @@ build gates; the physical path was not rerun at that head. The Release target
 deliberately contains no executable Latchway request path.
 
 The Swift package gate at
-`ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` also passed production and debug
-builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods
-lint for AppAttest, AppExtensions, Core, and FirebaseAuth. The minimal pinned
+`9f306d1e585069ca4aa703412c5d70656336e50f` also passed 50 offline Python tests
+(49 pass and one skip), 8/8 vulnerability tests, the keychain invariant gate,
+166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App
+Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer
+build, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth.
+The minimal pinned
 MacPaw/OpenAI 0.5.1 upstream contribution propagates the injected
 `URLSession.configuration` into internal stream sessions, enabling a custom
 `URLProtocol` to own buffered and streaming Chat Completions/Responses
@@ -150,12 +155,12 @@ receipts. The current convergence run:
   protocol coordinate, and bundle lock across all SDK repositories;
 - ran the clean-tree core, SDK, dashboard, documentation, workflow, and
   cross-repository conformance gate on the exact commits; and
-- created canonical documentation commit
-  `e805873f9d151710b21c338e99128c3de4c20c34` and synchronized Mintlify mirror
-  commit `b2db718d7c25f039ea757df4d54c5510725d8b3a` without creating a tag or
-  package release; and
-- delivered the exact successor histories to `main`, verified all six intended
-  remote heads, and passed fresh clean six-repository source conformance.
+- imported all four final clean SDK documentation bundles in the canonical
+  working tree without creating a tag or package release; and
+- delivered the exact core and four SDK successor histories to `main` and
+  verified their intended remote heads. The generated documentation mirror is
+  required to bind the exact canonical source through
+  `.latchway-docs-source.json` before conformance is accepted.
 
 Core `cd47229eac32f4a93a0779903d927526b77817d6` passes the full current
 `make check`, including generated-source checks, all Go tests and vet, the
@@ -214,16 +219,15 @@ One immutable candidate still requires all of the following:
    verification, and clean post-publication consumers; and
 8. a protected Mintlify deployment receipt followed by candidate-bound link,
    accessibility, redirect, source-checkpoint, and AI-readable-output
-   validation. A prior Mintlify preview exists, but final mirror
-   `b2db718d7c25f039ea757df4d54c5510725d8b3a` is not claimed as a protected
-   production deployment and `docs.latchway.dev` is not routed.
+   validation. A Mintlify preview exists, but no protected production
+   deployment receipt is claimed and `docs.latchway.dev` is not routed.
 
 The connected iPad and Xcode-managed `dev.latchway` profile supported automatic
 Apple Development signing for predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`.
 That predecessor passed strict signed root/extension verification, installation,
 and launch; the earlier `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`
 root-app observation remains the only live App Attest/provider proof. The
-physical path was not rerun for current `76fe88ce8053c6983f03422238e9da12360d435d`.
+physical path was not rerun for current `0cf6c00759121949d9c9bd14c99ad481be672f8e`.
 No physical result closes the release gate until the protected collector and
 finalizer bind an Apple distribution-derived candidate to the exact repository,
 contract, application identity, signing, entitlement, package, and image

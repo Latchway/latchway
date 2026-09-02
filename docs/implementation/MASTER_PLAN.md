@@ -7,12 +7,14 @@ the contract checkpoint below; the runtime and control-plane implementation is
 the named contract-preserving descendant. The protocol manifest is released,
 and every SDK successor is bound to that frozen contract with a final `1.0.0`
 changelog. Source/check gates pass; stable release preflights no longer reject
-draft metadata, but still require tags and protected evidence. Canonical SDK
-documentation bundles are imported into canonical documentation commit
-`e805873f9d151710b21c338e99128c3de4c20c34` and synchronized Mintlify mirror
-commit `b2db718d7c25f039ea757df4d54c5510725d8b3a`. The successor tuple passes
-the core, SDK, package, documentation, and clean source-conformance gates
-recorded below and its six histories are delivered to `main`. The
+draft metadata, but still require tags and protected evidence. The final clean
+SDK documentation bundles are imported in the canonical documentation working
+tree based on core checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`.
+Canonical public documentation is this checked-in `docs/public` tree; the
+generated Mintlify mirror is required to bind its exact canonical source in
+`.latchway-docs-source.json`. The successor tuple passes the SDK and package
+gates recorded below, and core plus all four SDK heads are delivered to `main`.
+The
 six-repository release-control desired state is implemented, including the
 docs-only review policy, but has not been applied live because no distinct
 reviewer is available. npm uses `auth-and-writes` 2FA; all five npm packages
@@ -47,15 +49,15 @@ mirror.
 | Contract source checkpoint | Core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Bundle SHA-256 | `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Core implementation checkpoint | `cd47229eac32f4a93a0779903d927526b77817d6` |
-| Canonical SDK-bundle/public-doc source | `e805873f9d151710b21c338e99128c3de4c20c34`, a documentation descendant of the core checkpoint |
-| Database | Schema `28` at `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Core implementation checkpoint | `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, a contract-preserving descendant of the frozen contract checkpoint |
+| Canonical SDK-bundle/public-doc source | This checked-in `docs/public` tree imports the final bundles based on core implementation `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50` |
+| Database | Schema `28` at contract checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` and current implementation checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` |
-| Swift source | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` |
-| Android source | `f847ce600f0a48859ad4cb534b95b6251c3c633e` |
-| React Native source | `76fe88ce8053c6983f03422238e9da12360d435d` |
-| Mintlify mirror source | `b2db718d7c25f039ea757df4d54c5510725d8b3a`, generated from canonical docs `e805873f9d151710b21c338e99128c3de4c20c34` |
+| JavaScript source | `e3a57617e75bf3d46e858a1084749f46f819db1f` |
+| Swift source | `9f306d1e585069ca4aa703412c5d70656336e50f` |
+| Android source | `a994f8b5ee81fa831b8b2e57885df39f50fa2777` |
+| React Native source | `0cf6c00759121949d9c9bd14c99ad481be672f8e` |
+| Mintlify mirror source | The generated deployment mirror must record the exact canonical source in `.latchway-docs-source.json`; no protected production deployment receipt exists |
 | Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
@@ -173,10 +175,10 @@ parent mismatch.
 - [x] Repeat commit/lock convergence and the clean source gate for the current
   core contract delta.
 - [x] Bind the final SDK source tuple: JavaScript
-  `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, Swift
-  `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
-  `f847ce600f0a48859ad4cb534b95b6251c3c633e`, and React Native
-  `76fe88ce8053c6983f03422238e9da12360d435d`.
+  `e3a57617e75bf3d46e858a1084749f46f819db1f`, Swift
+  `9f306d1e585069ca4aa703412c5d70656336e50f`, Android
+  `a994f8b5ee81fa831b8b2e57885df39f50fa2777`, and React Native
+  `0cf6c00759121949d9c9bd14c99ad481be672f8e`.
 
 ### Phase 5: iOS Installation Family SDK — source complete,
 external proof open
@@ -197,9 +199,11 @@ external proof open
   Keychain challenge/receipt, while keeping the Release target free of a
   Latchway request path and fail-closed.
 - [x] Pass the final Swift package/release gate at
-  `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`: production and debug builds,
-  159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for
-  AppAttest, AppExtensions, Core, and FirebaseAuth.
+  `9f306d1e585069ca4aa703412c5d70656336e50f`: 50 offline Python tests
+  (49 pass and one skip), 8/8 vulnerability tests, the keychain invariant gate,
+  166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App
+  Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer
+  build, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth.
 - [x] Build the React Native example for the connected physical iPad with
   automatic Apple Development signing; strictly verify the root and App
   Intents identifiers, provisioning, App Attest and Keychain entitlements,
@@ -231,7 +235,7 @@ to apply to supported Android application trust surfaces.
   addendum common suite, exact per-case coverage, test-backed passing evidence,
   bounded N/A policy, and explicit pending blocker classes.
 - [x] Implement the narrow Foundation Models 27 source adapter and pass its
-  nine iOS 27.0 simulator cases while keeping physical framework and delegated
+  twelve iOS 27.0 simulator cases while keeping physical framework and delegated
   extension evidence open. Keep stock MacPaw/OpenAI 0.5.1 unsupported; its
   minimal upstream contribution propagates injected `URLSession`
   configuration to internal streams and passes all 213 upstream tests plus a
@@ -285,21 +289,18 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the complete local Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` (SHA-256
-  `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`),
-  Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` (SHA-256
-  `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`),
-  Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` (SHA-256
-  `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`),
-  and React Native `76fe88ce8053c6983f03422238e9da12360d435d`
+  `e3a57617e75bf3d46e858a1084749f46f819db1f` (SHA-256
+  `cf7073575aa1af89b1739387eca2cfa03bb822ab7dc397bbdf80e1ce7a2271ae`),
+  Swift `9f306d1e585069ca4aa703412c5d70656336e50f` (SHA-256
+  `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`),
+  Android `a994f8b5ee81fa831b8b2e57885df39f50fa2777` (SHA-256
+  `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`),
+  and React Native `0cf6c00759121949d9c9bd14c99ad481be672f8e`
   (SHA-256
-  `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d`).
-- [x] Regenerate and synchronize the current canonical source to the generated
-  mirror, then rerun both complete local suites from clean exact commits.
-- [x] Bind canonical documentation commit
-  `e805873f9d151710b21c338e99128c3de4c20c34` to synchronized Mintlify mirror
-  `b2db718d7c25f039ea757df4d54c5510725d8b3a` and pass their local validation
-  suites.
+  `3680b196ffc71549af1247c2c3d872ca436ab64476dd0985cdba30928bc4c933`).
+- [x] Define deterministic post-commit mirror synchronization: the generated
+  mirror records the exact canonical source in `.latchway-docs-source.json`,
+  and both repositories run their complete local validation suites.
 - [ ] Configure and verify the canonical `docs.latchway.dev` custom domain and
   DNS. Until then, protocol-generated documentation URLs and AI-readable link
   inventories intentionally retain their canonical origin but are not
@@ -337,23 +338,24 @@ complete; protected execution open
 - [x] Deliver the earlier six-repository converged baseline to `main` by audited
   non-force fast-forward; do not infer a tag, release, runtime deployment, or
   package publication from source delivery.
-- [x] Prepare the stable successor source tuple before candidate production:
+- [x] Finish the stable successor tuple before candidate production:
   create the released contract checkpoint with a fresh `released_at`, promote
   the core binary metadata and changelog to `1.0.0`, regenerate the contract
   bundle, update the JavaScript/iOS/Android locks and final changelogs, update
   the React Native dependency pins and final changelog, rebuild and import all
-  SDK documentation bundles, synchronize the Mintlify mirror, and rerun clean
-  cross-repository source conformance. The resulting successor tuple is
-  contract-released, internally converged, locally green, clean-conformant, and
-  delivered to `main`; it has not been tagged, published, or admitted by
-  protected exact-candidate evidence.
+  SDK documentation bundles, define deterministic Mintlify mirror
+  synchronization, and retain clean cross-repository source-conformance gates.
+  Core and the four SDK heads are delivered to `main`. No source delivery implies tagging,
+  publication, or admission by protected exact-candidate evidence.
 - [x] Extend the fail-closed release-control desired state to all six
   repositories and 51 environments. Require CODEOWNERS review, one approval,
   and a written docs-not-required check only for `latchway-docs`; retain the
   zero-source-review policy for product repositories. npm account 2FA is now
   `auth-and-writes`, but the five package coordinates remain unpublished.
-- [x] Audit and non-force push the exact successor histories, verify all six
-  remote `main` heads, then pass clean six-repository source conformance.
+- [x] Audit and non-force push the exact core and four SDK successor histories,
+  then verify those remote `main` heads.
+- [x] Require the generated docs mirror to bind the exact canonical source in
+  `.latchway-docs-source.json` and require six-repository source conformance.
 - [ ] Build and observe one final immutable multi-architecture image in the
   protected registry and run all external domains against its exact digests.
 - [ ] Produce the protected prepublication promotion record, then publish the

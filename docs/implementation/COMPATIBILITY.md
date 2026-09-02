@@ -30,13 +30,12 @@ separate durable forensic transaction boundary. Contract/source checkpoint
 version 1 runtime, schema 28, Admin-session inventory/revoke, configuration
 import/export, stable server-capability negotiation, authenticated Admin SSE
 refresh hints, exact JSON/YAML numeric preservation, and explicit
-`READ COMMITTED` application→environment lifecycle locking. Canonical
-documentation commit `e805873f9d151710b21c338e99128c3de4c20c34` is a
-documentation descendant, and Mintlify mirror
-`b2db718d7c25f039ea757df4d54c5510725d8b3a` names it in its source manifest. A
-fresh clean six-repository source-conformance run passed after the current
-histories were delivered to `main` and their remote heads were verified. None
-of these coordinates proves a tag,
+`READ COMMITTED` application→environment lifecycle locking. Current core
+implementation checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50` is a
+contract-preserving descendant and is delivered to `main` with all four final
+SDK heads. Canonical public documentation is the checked-in `docs/public`
+tree; its generated deployment mirror is bound to that source by
+`.latchway-docs-source.json`. None of these coordinates proves a tag,
 GitHub release, package/container publication, cloud deployment, or production
 documentation deployment.
 
@@ -123,30 +122,31 @@ The registry and its strict schema are deterministic members of the released
 schema, semantic policy, generated Markdown, archive closure, and checksums.
 The bundle, exact contract checkpoint, bundle hash, wire-2 constants,
 component-attestation vector, and other generated fixtures are synchronized
-across all four SDK locks. A fresh clean six-repository source-conformance run
-passed for the final canonical-docs and mirror coordinates after source
-delivery.
+across all four SDK locks. The generated documentation mirror must identify
+the exact canonical source through `.latchway-docs-source.json` before its
+source-conformance result is accepted.
 
 ## Current SDK source checkpoints
 
 These coordinates record the current clean, source-converged version 1
 implementations. They are source checkpoints, not package-publication,
-production-support, or public-version claims. The current histories are
-delivered to `main` and their intended remote heads were verified.
+production-support, or public-version claims. The core and four SDK histories
+are delivered to `main` and their intended remote heads were verified;
+documentation is defined by this checked-in canonical source tree.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, opaque-route hardening, adapters, framework-version conformance, three-browser/bundler consumers, and reproducible packages pass `mise exec -- pnpm release:check` |
-| Swift `Latchway` | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` | iOS 15+, macOS 12+ supported surfaces | Full package/release gate passes: production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth. Protected distribution and physical Foundation Models evidence remain required. |
-| Android `dev.latchway:latchway-*` | `f847ce600f0a48859ad4cb534b95b6251c3c633e` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass the 665-task gate and publication smoke. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
-| React Native `@latchway/react-native` | `76fe88ce8053c6983f03422238e9da12360d435d` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, root-owned component lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and the Debug-only native App Intent path pass `mise exec -- pnpm check`. The Release fixture remains fail-closed. The current head was not physically rerun; App Intent/extension invocation and physical Android/Google Play evidence are operator-deferred. Protected Apple distribution proof remains open and is not claimed as deferred. |
+| JavaScript `@latchway/client` | `e3a57617e75bf3d46e858a1084749f46f819db1f` | Node 24.19 or standards-based browser WebCrypto/fetch | `mise exec -- pnpm release:check` passes 128 Vitest tests, 33 Node tests, 58 offline Python tests (57 pass and one skip), 51 Playwright tests, reproducibility, package, transport, component-session, adapter, framework-version, and browser/bundler consumer gates. |
+| Swift `Latchway` | `9f306d1e585069ca4aa703412c5d70656336e50f` | iOS 15+, macOS 12+ supported surfaces | Full `scripts/verify-package.sh` passes 50 offline Python tests (49 pass and one skip), 8/8 vulnerability tests, the keychain invariant gate, 166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer build, and CocoaPods lint for all four subspecs. Protected distribution and physical Foundation Models evidence remain required. |
+| Android `dev.latchway:latchway-*` | `a994f8b5ee81fa831b8b2e57885df39f50fa2777` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass 75 offline release tests with one expected skip, the full Gradle gate, and publication smoke. The Gradle report records 665 actionable tasks, not 665 tests; the final locked semantic slice passes 8/8. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
+| React Native `@latchway/react-native` | `0cf6c00759121949d9c9bd14c99ad481be672f8e` | RN 0.82.x, iOS 15+, Android API 24+ | `mise exec -- pnpm check` passes 103 Vitest, 58 Node, 4/4 documentation-bundle, and 8/8 dependency-scan tests plus contract, compatibility, lint, typecheck, codegen, build, example, and native-boundary gates. Separate compiled/native gates pass Swift bridge 5/5, Android Robolectric 6/6, locked iOS semantics 10/10, locked Android semantics 8/8, and a real CocoaPods/TurboModule build. Hosted replay rejection and protected hardware/TurboModule isolation remain open. The Release fixture remains fail-closed; the final head was not physically rerun. |
 
 The reproducible documentation bundles for that table are, respectively,
-JavaScript `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`,
-Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`,
-Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`,
+JavaScript `cf7073575aa1af89b1739387eca2cfa03bb822ab7dc397bbdf80e1ce7a2271ae`,
+Swift `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`,
+Android `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`,
 and React Native
-`38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d`.
+`3680b196ffc71549af1247c2c3d872ca436ab64476dd0985cdba30928bc4c933`.
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. The checked-in SDK successor locks point to the clean released version
