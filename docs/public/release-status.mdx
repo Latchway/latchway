@@ -27,6 +27,11 @@ merged, tagged, published, deployed, or observed through protected
 post-publication checks. The released contract lock is not itself a public
 stable release.
 
+The coordinated core, four SDK, and generated documentation worktrees pass the
+clean local source-conformance gate. That result proves source alignment only;
+it does not substitute for protected artifact, device, registry, or deployment
+evidence.
+
 | Area | Current claim |
 | --- | --- |
 | Core gateway and control plane | Released-contract source checkpoint exists locally; core source gates pass, while the final protected exact-candidate run remains open |
@@ -57,8 +62,8 @@ suites; Console unit, build, and browser suites; and each SDK's release and
 consumer gates. Independent review closed root-challenge and App Attest
 post-disable insertion races, configuration and family/component lock-order
 deadlocks, exact JSON/YAML numeric preservation, and explicit `READ COMMITTED`
-lifecycle behavior. Those local results do not replace the final clean
-cross-repository run or protected artifact evidence for the exact publication
+lifecycle behavior. Those local results and the clean cross-repository source
+run do not replace protected artifact evidence for the exact publication
 candidate.
 
 Image publication, release promotion, public-state observation, deployment

@@ -9,9 +9,9 @@ hardening; the contract is marked released and every SDK successor is rebound
 to its deterministic contract bundle with final `1.0.0` changelog headings.
 All four SDK source/check gates pass, their exact documentation bundles are
 imported, and stable release preflights no longer reject draft locks or
-candidate changelogs. The current core/documentation candidate still requires
-its final clean six-repository conformance rerun; tags and protected evidence
-are also still required.
+candidate changelogs. The coordinated core, SDK, and documentation tuple passes
+the clean six-repository source-conformance gate; tags and protected evidence
+are still required.
 React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
 passed bounded Apple Development root/extension signing, entitlement,
 registered-device install, and launch checks; the physical path was not rerun
@@ -24,8 +24,8 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: final local source integration and live release-control provisioning; protected exact-candidate execution remains open |
-| Current objective | Close the clean six-repository tuple, apply the reviewed GitHub/npm controls, and execute protected release domains only with their required authority |
+| Current phase | Phase 9: source integration is converged; live release-control provisioning and protected exact-candidate execution remain open |
+| Current objective | Deliver the clean six-repository tuple, apply the reviewed GitHub/npm controls, and execute protected release domains only with their required authority |
 | Validated implementation coordinates | The frozen contract and SDK coordinates below; the final source-conformance report records the canonical-doc and mirror commits |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
 | Database schema version | `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and the current candidate descendant; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
@@ -33,7 +33,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before stable release: live GitHub environment/ruleset/immutable-release enforcement with an independent reviewer; npm sign-in, account 2FA, namespace bootstrap and exact trusted publishers; registry/package publication; an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate; the protected delegated-extension runtime matrix; operator-deferred App Intent and physical Android/Google Play proof; Turnstile; immutable-image provider/cloud/resilience; and post-publication receipts |
 | External credentials still required | The connected GitHub token can deliver source but lacks repository-administration/environment authority. Live controls require an administrator session plus a reviewer distinct from the authenticated operator. npm requires an authenticated 2FA-enabled publisher account before namespace bootstrap/trusted-publisher creation. Later protected gates require the applicable Apple distribution, Play, Turnstile, cloud, registry, KMS/signing, collector, and finalizer identities. |
-| Next executable task | Finish the clean source tuple, then apply and verify the reviewed GitHub/npm control manifest before any package, image, tag, or stable-release mutation |
+| Next executable task | Deliver the clean source tuple, then apply and verify the reviewed GitHub/npm control manifest before any package, image, tag, or stable-release mutation |
 
 ### Validated version 1 source coordinates
 
@@ -41,7 +41,7 @@ supply-chain, publication, and post-publication domains remain open.
 | --- | --- |
 | Core contract checkpoint `latchway` | `437708fb56d45196720b5769f2f59b0ee51f521d` |
 | Prior schema-27 performance checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
-| Core canonical-public-doc source | The final contract-preserving core commit containing this ledger |
+| Core canonical-public-doc source | Clean-gate baseline `8c3783133698d569652def30b1003bb67c6a10b9`; ledger-only successors retain byte-identical `api/` sources |
 | JavaScript `latchway-js` | `01dfa223773c20fe3a31559116f16e31f757b94a` |
 | Swift `latchway-ios-sdk` | `c0fac916836bcfbdbf7f6a81808036726589d563` |
 | Android `latchway-android` | `3e0a601fad28a5ccf6674472a473c4797a7b404d` |
@@ -51,11 +51,11 @@ supply-chain, publication, and post-publication domains remain open.
 | Android documentation bundle SHA-256 | `eebe14ec49a7c9493d238dcddaba57078188d9321623ff03e62659c0f8400f65` |
 | React Native documentation bundle SHA-256 | `81fe9a5c4a365f0761b269d3ee1cbe55d60922544ad78dd42091e8ba7c4f31bb` |
 | SDK documentation lock SHA-256 | `40dca672264d06c801a308c2cf6d774eff4d25c61e5630009c2e53cd3d9bcd4b` |
-| Mintlify mirror `latchway-docs` | Generated from the final canonical core commit; exact commit recorded by source conformance |
+| Mintlify mirror `latchway-docs` | Clean-gate baseline `a99308cf8892a5a857ac15cc02474333e5b9482c`, bound to canonical core `8c3783133698d569652def30b1003bb67c6a10b9` |
 
-These coordinates form the current candidate source-conformance tuple; the
-final clean-tree run is pending until the canonical core and generated mirror
-commits are sealed. The contract bundle SHA-256 is
+These coordinates form the current candidate source-conformance tuple. A clean
+six-repository run passed with the canonical core and generated mirror commits
+recorded above. The contract bundle SHA-256 is
 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`.
 Branch synchronization is a delivery operation, not release evidence. No local
 version 1 tags exist, and no merge, GitHub release, package publication,
@@ -156,7 +156,7 @@ released checkpoint and reproducible bundle above.
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Release controls | A canonical five-repository manifest covers 50 environments and 90 privileged jobs; its closed schema, deterministic 271-action offline plan, reversible fail-closed quarantine, partial-apply journal, exact main/tag rulesets, and five npm trusted-publisher tuples are implemented and independently validated without live mutation. | GitHub administrator login, independent reviewer selection, manual no-admin-bypass confirmation, npm account 2FA/bootstrap, live two-stage apply, and live verify |
-| Mintlify public docs | The current canonical core candidate imports exact reproducible SDK bundles and passes its complete local suite; mirror synchronization and final clean source conformance remain pending. | Seal/sync the mirror, run source conformance, merge, and perform production deploy/post-deploy validation |
+| Mintlify public docs | The canonical core imports exact reproducible SDK bundles; both canonical and mirrored documentation suites pass, the mirror is byte-identical, and clean source conformance passes. | Deliver the synchronized mirror and perform production deploy/post-deploy validation |
 
 ## Local source evidence
 
@@ -231,13 +231,14 @@ released checkpoint and reproducible bundle above.
   review closed root-challenge and App Attest post-disable insertion races,
   configuration and family/component lock-order deadlocks, exact JSON/YAML
   numeric preservation, and explicit `READ COMMITTED` lifecycle behavior.
-- The prior source tuple passed source-scope conformance from six clean
-  worktrees. The current SDK/documentation/control candidate has not yet run
-  that final clean-tree gate; mirror synchronization and the rerun remain
-  pending.
+- The current SDK/documentation/control tuple passed source-scope conformance
+  from six distinct clean worktrees. The gate also caught and rejected an
+  operational release-control schema under the contract-locked `api/` tree;
+  the schema now lives beside its `.github` manifest, and the rerun passes with
+  byte-identical released contract sources.
 
 These are source-development results, not protected release receipts. The
-pending clean-tree cross-repository source gate is intended to bind core contract checkpoint
+passing clean-tree cross-repository source gate binds core contract checkpoint
 `437708fb56d45196720b5769f2f59b0ee51f521d`, bundle SHA-256
 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
 JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, iOS

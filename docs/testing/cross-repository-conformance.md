@@ -15,10 +15,13 @@ The current candidate tuple binds core contract checkpoint
 JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
 `c0fac916836bcfbdbf7f6a81808036726589d563`, Android
 `3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
-`39fd86ef1f6f973953e4fd5d0057ae17cc035abb`. Its exact canonical core and
-generated Mintlify mirror commits will be recorded after both repositories are
-sealed. The final clean six-repository source report for this tuple is pending;
-the older passing report does not authorize these successor coordinates.
+`39fd86ef1f6f973953e4fd5d0057ae17cc035abb`. A clean six-repository source
+report passed with canonical core commit
+`8c3783133698d569652def30b1003bb67c6a10b9` and generated Mintlify mirror
+commit `a99308cf8892a5a857ac15cc02474333e5b9482c`. The first attempt correctly
+rejected an operational release-control schema placed under the contract-locked
+`api/` tree; moving that schema beside its `.github` manifest restored exact
+contract ancestry without changing the released checkpoint or bundle.
 
 Branch synchronization is tracked independently as a delivery operation and
 does not change the source report's meaning. No local version 1 tag exists.
