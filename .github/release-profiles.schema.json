@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/release-profiles.schema.json",
+  "title": "Latchway release assurance profiles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "kind",
+    "default_profile",
+    "profiles"
+  ],
+  "properties": {
+    "$schema": { "const": "./release-profiles.schema.json" },
+    "schema_version": { "const": 1 },
+    "kind": { "const": "latchway_release_profiles" },
+    "default_profile": { "const": "strict_full" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strict_full", "single_maintainer_v1"],
+      "properties": {
+        "strict_full": { "$ref": "#/$defs/profile" },
+        "single_maintainer_v1": { "$ref": "#/$defs/profile" }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.]{0,127}$"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status_claim",
+        "requires_independent_human_review",
+        "required_local_domains",
+        "required_external_claims",
+        "deferred_evidence",
+        "forbidden_claims"
+      ],
+      "properties": {
+        "status_claim": { "$ref": "#/$defs/identifier" },
+        "requires_independent_human_review": { "type": "boolean" },
+        "required_local_domains": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "required_external_claims": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        "deferred_evidence": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "forbidden_claims": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    }
+  }
+}

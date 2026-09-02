@@ -1214,11 +1214,15 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertIn("$LOAD_RUN_ID:$LOAD_RUN_ATTEMPT:.github/workflows/release-load-evidence.yml", workflow)
         self.assertIn("$FAILURE_RUN_ID:$FAILURE_RUN_ATTEMPT:.github/workflows/release-failure-evidence.yml", workflow)
         self.assertIn("/actions/runs/$run_id/attempts/$attempt", workflow)
-        self.assertIn('--load-producer-run-id "${{ inputs.load_evidence_run_id }}"', workflow)
         self.assertIn(
-            '--failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"',
+            "LOAD_PRODUCER_RUN_ID: ${{ inputs.load_evidence_run_id }}", workflow
+        )
+        self.assertIn('--load-producer-run-id "$LOAD_PRODUCER_RUN_ID"', workflow)
+        self.assertIn(
+            "FAILURE_PRODUCER_RUN_ID: ${{ inputs.failure_evidence_run_id }}",
             workflow,
         )
+        self.assertIn('--failure-producer-run-id "$FAILURE_PRODUCER_RUN_ID"', workflow)
         self.assertIn("operational_resilience.attestation.sigstore.json", workflow)
         self.assertNotIn("refs/tags/", workflow)
         self.assertNotIn("ghcr.io/latchway/latchway:$", workflow)

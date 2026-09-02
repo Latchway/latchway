@@ -801,6 +801,18 @@ jq -e --arg first_id "$FIRST_ID" --arg second_id "$SECOND_ID" --arg image "$MIRR
             quickstart["services"]["postgres"]["volumes"],
             ["postgres-data:/var/lib/postgresql"],
         )
+        terraform_main = (
+            SCRIPT.parent.parent / "deploy/cloud-run/terraform/main.tf"
+        ).read_text(encoding="utf-8")
+        terraform_variables = (
+            SCRIPT.parent.parent / "deploy/cloud-run/terraform/variables.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn("edition           = var.database_edition", terraform_main)
+        self.assertIn('default     = "ENTERPRISE"', terraform_variables)
+        self.assertIn(
+            'condition     = var.database_edition == "ENTERPRISE"',
+            terraform_variables,
+        )
 
     def test_fly_static_validator_rejects_unknown_fields(self) -> None:
         document = tomllib.loads(

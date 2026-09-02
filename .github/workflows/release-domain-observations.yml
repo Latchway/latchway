@@ -1115,9 +1115,11 @@ jobs:
       - name: Remove protected registry authentication and recheck anonymous state
         if: always() && (inputs.domain == 'supply_chain' || inputs.domain == 'public_registries')
         shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
         run: |
           set -Eeuo pipefail
-          if [[ "${{ inputs.domain }}" == supply_chain ]]; then
+          if [[ "$EVIDENCE_DOMAIN" == supply_chain ]]; then
             docker logout ghcr.io >/dev/null 2>&1 || true
           else
             jq --exit-status '. == {"auths":{}}' "$DOCKER_CONFIG/config.json" >/dev/null

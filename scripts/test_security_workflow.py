@@ -360,8 +360,9 @@ class SecurityWorkflowTests(unittest.TestCase):
             "--signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/security.yml\"",
             serialized,
         )
-        self.assertIn("--signer-digest \"${{ inputs.candidate_commit }}\"", serialized)
-        self.assertIn("--source-digest \"${{ inputs.candidate_commit }}\"", serialized)
+        self.assertIn("CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}", serialized)
+        self.assertIn('--signer-digest "$CANDIDATE_COMMIT"', serialized)
+        self.assertIn('--source-digest "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("latchway/scripts/security-evidence.py", serialized)
         self.assertIn(
             '--review-directory "$root/latchway-security/independent-review"',

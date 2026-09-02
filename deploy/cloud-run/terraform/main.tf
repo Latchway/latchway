@@ -75,6 +75,7 @@ resource "google_sql_database_instance" "main" {
   deletion_protection = true
 
   settings {
+    edition           = var.database_edition
     tier              = var.database_tier
     availability_type = var.database_availability_type
     disk_type         = "PD_SSD"

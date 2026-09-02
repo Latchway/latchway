@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-03"
 owner: "core-operations"
 ---
 
@@ -53,6 +53,7 @@ gcloud services enable \
   iam.googleapis.com \
   run.googleapis.com \
   secretmanager.googleapis.com \
+  servicenetworking.googleapis.com \
   sqladmin.googleapis.com \
   storage.googleapis.com \
   vpcaccess.googleapis.com
@@ -111,13 +112,17 @@ service_revision_name            = "latchway-release-id"
 previous_service_revision_name   = null
 service_traffic_percent          = 100
 public_origin = "https://ai.example.com"
+database_edition = "ENTERPRISE"
 ```
 
 Use a new, explicit `service_revision_name` for every image digest. The
 migration approval is an exact digest acknowledgement: Terraform refuses to
 create or route to a service image that does not equal it.
 
-Use `REGIONAL` database availability for production. The default maximum
+PostgreSQL 18 with the checked-in `db-custom-2-7680` tier requires Cloud SQL
+Enterprise edition; keep `database_edition = "ENTERPRISE"` unless the tier and
+its validation are changed together. Use `REGIONAL` database availability for
+production. The default maximum
 database pool is `max_instances × db_connections_per_instance`, or 200
 connections. Reserve additional capacity for migrations, administration,
 backups, and failover before raising either value.

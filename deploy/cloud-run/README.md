@@ -15,6 +15,39 @@ contains generated database, master-key, and bootstrap material even though the
 running service receives those values through Secret Manager. A local backend
 is not an allowed production path.
 
+The one-time Terraform bootstrap identity must be able to enable the APIs in
+`main.tf`, create the VPC/private-services connection and VPC connector, manage
+Cloud SQL, Secret Manager, Cloud Run services and jobs, create and attach the
+runtime service account, and write the narrow project/secret/service IAM
+bindings declared by the stack. A practical bootstrap role set is Service
+Usage Admin, Compute Network Admin, Serverless VPC Access Admin, Cloud SQL
+Admin, Secret Manager Admin, Service Account Admin, Service Account User,
+Cloud Run Admin, and Project IAM Admin. Scope Storage Admin to the dedicated
+Terraform-state bucket rather than the project. Prefer a custom role containing
+only the permissions in the reviewed plan, and remove the bootstrap roles after
+the apply; the runtime identity keeps only the Cloud SQL Client and named-secret
+access that Terraform grants. Existing Cloud Run Admin, Cloud SQL Admin, and
+Service Account Admin roles alone are not sufficient for this stack.
+
+Confirm billing first, then enable or allow Terraform to enable these APIs:
+
+```text
+cloudresourcemanager.googleapis.com
+compute.googleapis.com
+iam.googleapis.com
+run.googleapis.com
+secretmanager.googleapis.com
+servicenetworking.googleapis.com
+sqladmin.googleapis.com
+vpcaccess.googleapis.com
+```
+
+Review the plan as a cost boundary. The production defaults create a regional
+high-availability Cloud SQL instance, a Serverless VPC Access connector with at
+least two instances, and one always-on 2-vCPU/2-GiB Cloud Run instance. These
+resources continue billing until deliberately scaled down or removed; do not
+apply the plan merely to perform static validation.
+
 ```bash
 cd deploy/cloud-run/terraform
 cp terraform.tfvars.example terraform.tfvars
@@ -36,10 +69,13 @@ Set `service_image`, `migration_image`, and
 `migration_approved_service_image` to exact digests, never mutable tags. Every
 service digest has an explicit `service_revision_name`; Terraform refuses to
 create or route to it until the approved migration digest equals the service
-digest. `public_origin` must be the final custom HTTPS origin. The default
-allows unauthenticated Cloud Run ingress because Latchway performs its own
-session and DPoP authorization; use an external load balancer or Cloud Armor if
-additional edge policy is required.
+digest. PostgreSQL 18 is explicitly configured with the Cloud SQL Enterprise
+edition because the default `db-custom-2-7680` tier is not valid for Enterprise
+Plus. Keep `database_edition="ENTERPRISE"` unless the tier and its validation
+are changed together. `public_origin` must be the final custom HTTPS origin.
+The default allows unauthenticated Cloud Run ingress because Latchway performs
+its own session and DPoP authorization; use an external load balancer or Cloud
+Armor if additional edge policy is required.
 
 The stack does not provision a custom-domain frontend. For production, bind
 `public_origin` through Google's recommended global external Application Load
@@ -48,6 +84,15 @@ buffering and caching disabled for API and SSE paths. Native Cloud Run domain
 mapping remains limited-availability Preview and is not production-ready; use
 it only for evaluation after reviewing Google's current region and TLS
 limitations:
+
+For the first deployment, reserve the final hostname before applying this
+stack and set `public_origin` to that exact HTTPS origin even while DNS is not
+yet live. Apply the service, attach its serverless NEG to the external load
+balancer, provision the managed certificate, and then publish the final DNS
+record. Do not create an administrator, distribute SDK configuration, or call
+the deployment ready until the certificate is active and `/healthz` plus
+`/readyz` succeed through the final hostname. This avoids issuing sessions for
+a temporary Cloud Run URL and later changing the security origin.
 
 ```bash
 gcloud domains list-user-verified
@@ -172,6 +217,12 @@ secret metadata, execute and inspect the migration job, read that execution's
 Cloud Logging entries, update the service twice for a controlled revision
 replacement, and act as the existing runtime service account. It does not need
 permission to read Secret Manager payloads.
+
+Keep an independent required reviewer on this environment for `strict_full`.
+For the explicitly selected `single_maintainer_v1` profile it may temporarily
+be reviewer-free, provided its exact policy sentinel remains configured and
+the resulting release stays labeled lower-assurance. Do not report the strict
+release-control policy as passing again until reviewer protection is restored.
 
 Before dispatching the evidence workflow, confirm the provider sees the exact
 release digest and the expected resources:

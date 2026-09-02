@@ -395,6 +395,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_MANIFEST: ${{ runner.temp }}/authenticated-evidence/latchway-candidate/latchway-candidate.json
           SECURITY_REPORT: ${{ runner.temp }}/authenticated-evidence/latchway-security/security-summary.json
           PROMOTION_REPORT: ${{ runner.temp }}/authenticated-evidence/latchway-promotion/latchway-cross-repository.json
@@ -404,24 +405,24 @@ jobs:
             --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-candidate/latchway-candidate.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-digest "${{ inputs.candidate_commit }}" \
-            --signer-digest "${{ inputs.candidate_commit }}" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
           gh attestation verify "$SECURITY_REPORT" \
             --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-security/security-summary.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
-            --source-digest "${{ inputs.candidate_commit }}" \
-            --signer-digest "${{ inputs.candidate_commit }}" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
           gh attestation verify "$PROMOTION_REPORT" \
             --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
-            --source-digest "${{ inputs.candidate_commit }}" \
-            --signer-digest "${{ inputs.candidate_commit }}" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
       - name: Verify exact candidate security and aggregate bindings without source
@@ -531,18 +532,19 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           OCI_IMAGE_DIGEST: ${{ steps.verified.outputs.oci_image_digest }}
         run: |
           cosign verify \
             --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            --certificate-github-workflow-sha "${{ inputs.candidate_commit }}" \
+            --certificate-github-workflow-sha "$CANDIDATE_COMMIT" \
             "$OCI_IMAGE_DIGEST"
           gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-digest "${{ inputs.candidate_commit }}" \
-            --signer-digest "${{ inputs.candidate_commit }}" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
       - name: Preflight immutable releases and every fixed core release asset

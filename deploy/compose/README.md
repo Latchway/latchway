@@ -45,9 +45,14 @@ Before calling this a release deployment, use
 checkout does not prove that a released digest, cloud platform, or provider
 secret store was tested.
 
-For repeatable prepublication evidence, protect the GitHub environment
-`deployment-evidence-compose` with a required reviewer and dispatch the pinned
-workflow from protected `main` with the attested candidate coordinates:
+For repeatable prepublication evidence, use the fixed GitHub environment
+`deployment-evidence-compose` and dispatch the pinned workflow from protected
+`main` with the attested candidate coordinates. Under `strict_full`, keep the
+required independent reviewer. Under the explicitly selected
+`single_maintainer_v1` profile, the same environment may temporarily have no
+reviewer, but it must retain the exact policy sentinel documented in
+`docs/release/release-profiles.md`; strict-policy reconciliation then remains
+failed/unverified until reviewer protection is restored.
 
 ```bash
 gh workflow run deployment-evidence.yml --ref main \
@@ -55,6 +60,7 @@ gh workflow run deployment-evidence.yml --ref main \
   -f candidate_commit='<40 lowercase hex>' \
   -f intended_tag=v1.0.0 \
   -f candidate_run_id='<release-candidate workflow run ID>' \
+  -f candidate_run_attempt='<release-candidate workflow run attempt>' \
   -f image='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>' \
   -f endpoint='http://127.0.0.1:18080'
 ```

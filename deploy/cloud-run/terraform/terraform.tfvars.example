@@ -8,6 +8,7 @@ previous_service_revision_name   = null
 service_traffic_percent          = 100
 public_origin                    = "https://ai.example.com"
 
+database_edition           = "ENTERPRISE"
 min_instances               = 1
 max_instances               = 10
 db_connections_per_instance = 20

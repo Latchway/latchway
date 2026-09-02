@@ -631,23 +631,28 @@ jobs:
           --preloaded-previous-platform-image-id "$PREVIOUS_LOCAL_IMAGE_ID"
           --preloaded-postgres-image-id "$POSTGRES_LOCAL_IMAGE_ID"
       - name: Seal the operational-resilience domain
+        env:
+          FAILURE_PRODUCER_RUN_ID: ${{ inputs.failure_evidence_run_id }}
+          LOAD_PRODUCER_RUN_ID: ${{ inputs.load_evidence_run_id }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          PREVIOUS_CANDIDATE_RUN_ID: ${{ inputs.previous_candidate_run_id }}
         run: >-
           python3 scripts/operational-resilience-evidence.py
           --candidate-manifest "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json"
           --previous-candidate-manifest "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json"
           --previous-candidate-attestation "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.attestation.sigstore.json"
           --previous-candidate-run "$RUNNER_TEMP/authenticated/previous-candidate-run-receipt.json"
-          --previous-candidate-commit "${{ inputs.previous_candidate_commit }}"
-          --previous-candidate-run-id "${{ inputs.previous_candidate_run_id }}"
+          --previous-candidate-commit "$PREVIOUS_CANDIDATE_COMMIT"
+          --previous-candidate-run-id "$PREVIOUS_CANDIDATE_RUN_ID"
           --source-conformance "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json"
           --load-report "$RUNNER_TEMP/authenticated/load/load-v1.json"
           --load-producer-manifest "$RUNNER_TEMP/authenticated/load/load-producer.json"
           --load-producer-attestation "$RUNNER_TEMP/authenticated/load/load-producer.attestation.sigstore.json"
-          --load-producer-run-id "${{ inputs.load_evidence_run_id }}"
+          --load-producer-run-id "$LOAD_PRODUCER_RUN_ID"
           --failure-report "$RUNNER_TEMP/authenticated/failure/failure-release.json"
           --failure-producer-manifest "$RUNNER_TEMP/authenticated/failure/failure-producer.json"
           --failure-producer-attestation "$RUNNER_TEMP/authenticated/failure/failure-producer.attestation.sigstore.json"
-          --failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"
+          --failure-producer-run-id "$FAILURE_PRODUCER_RUN_ID"
           --failure-evidence-dir "$RUNNER_TEMP/authenticated/failure/live-failures"
           --backup-restore-report "$RUNNER_TEMP/operational-drills/backup-restore.json"
           --upgrade-rollback-report "$RUNNER_TEMP/operational-drills/upgrade-rollback.json"

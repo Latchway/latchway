@@ -45,6 +45,13 @@ def all_steps(workflow: dict) -> list[dict]:
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_dispatch_inputs_are_never_interpolated_inside_shell(self) -> None:
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            workflow = load_workflow(path.name)
+            for step in all_steps(workflow):
+                with self.subTest(path=path.name, step=step.get("name", step.get("uses"))):
+                    self.assertNotIn("${{ inputs.", step.get("run", ""))
+
     def test_every_managed_environment_consumer_asserts_exact_sentinel_first(
         self,
     ) -> None:
@@ -197,6 +204,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     self.assertNotIn("${{", raw_environment, label)
                     self.assertIn(raw_environment, policies, label)
                     concrete_environments = {raw_environment}
+                single_maintainer_profile = (
+                    path.name == "single-maintainer-release.yml"
+                    and raw_environment
+                    in {"release-evidence-signing", "release-image-publishing"}
+                )
 
                 for environment in concrete_environments:
                     self.assertIn(environment, policies, label)
@@ -207,12 +219,36 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertTrue(steps, f"{path.name}:{job_name}")
                 first = steps[0]
                 self.assertEqual(first.get("shell"), "bash", label)
-                self.assertEqual(
-                    first.get("env", {}).get("OBSERVED_POLICY_ID"),
-                    "${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}",
-                    label,
-                )
-                if dynamic_kind == "deployment":
+                if not single_maintainer_profile:
+                    self.assertEqual(
+                        first.get("env", {}).get("OBSERVED_POLICY_ID"),
+                        "${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}",
+                        label,
+                    )
+                if single_maintainer_profile:
+                    environment = next(iter(concrete_environments))
+                    self.assertEqual(
+                        first.get("name"),
+                        f"Verify the exact single-maintainer {environment} policy",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("env", {}).get("OBSERVED_POLICY_ID"),
+                        "${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("run", "").splitlines(),
+                        [
+                            "set -Eeuo pipefail",
+                            (
+                                'test "$OBSERVED_POLICY_ID" = '
+                                f'"latchway-release-profile-v1:latchway:single_maintainer_v1:{environment}"'
+                            ),
+                        ],
+                        label,
+                    )
+                elif dynamic_kind == "deployment":
                     self.assertEqual(
                         first.get("name"),
                         "Verify the exact protected deployment provider environment",
@@ -293,7 +329,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
                         r"vars\.([A-Z][A-Z0-9_]*)",
                         json.dumps(job, sort_keys=True),
                     )
-                    if name != "LATCHWAY_RELEASE_CONTROL_POLICY_ID"
+                    if name
+                    not in {
+                        "LATCHWAY_RELEASE_CONTROL_POLICY_ID",
+                        "LATCHWAY_RELEASE_PROFILE_POLICY_ID",
+                    }
                 }
                 for environment in concrete_environments:
                     observed_variables[environment].update(variable_references)
@@ -344,7 +384,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             consumers["preview-image-publishing"],
             ["preview-image.yml:publish", "preview-image.yml:sign"],
         )
-        self.assertEqual(environment_job_count, 44)
+        self.assertEqual(environment_job_count, 48)
         self.assertEqual(observed_secrets, declared_secrets)
         self.assertEqual(observed_variables, declared_variables)
 
@@ -596,6 +636,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "release-failure-evidence.yml",
                 "release-load-evidence.yml",
                 "security.yml",
+                "single-maintainer-release.yml",
             ],
         )
         observer = (ROOT / "scripts/release-domain-observer.py").read_text(

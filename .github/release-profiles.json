@@ -1,0 +1,139 @@
+{
+  "$schema": "./release-profiles.schema.json",
+  "schema_version": 1,
+  "kind": "latchway_release_profiles",
+  "default_profile": "strict_full",
+  "profiles": {
+    "strict_full": {
+      "status_claim": "strict_cross_repository_release_ready",
+      "requires_independent_human_review": true,
+      "required_local_domains": [
+        "local_source",
+        "local_promotion",
+        "local_release"
+      ],
+      "required_external_claims": {
+        "live_sdk_conformance": [
+          "javascript_against_release_image",
+          "ios_against_release_image",
+          "android_against_release_image",
+          "react_native_ios_against_release_image",
+          "react_native_android_against_release_image",
+          "dpop_vectors",
+          "error_mapping",
+          "session_refresh",
+          "installation_revocation",
+          "streaming",
+          "quota_snapshots",
+          "protocol_version_rejection"
+        ],
+        "public_tags": [
+          "remote_annotated_tags_verified",
+          "github_releases_verified"
+        ],
+        "public_registries": [
+          "documentation_production_verified",
+          "oci_digest_verified",
+          "npm_javascript_verified",
+          "npm_react_native_verified",
+          "swift_package_verified",
+          "cocoapods_verified",
+          "maven_central_verified"
+        ],
+        "physical_devices": [
+          "app_attest_production_verified",
+          "play_integrity_play_distributed_verified",
+          "react_native_ios_verified",
+          "react_native_android_verified"
+        ],
+        "live_provider": [
+          "openrouter_nonstreaming_verified",
+          "openrouter_streaming_verified",
+          "usage_verified",
+          "output_clamp_verified",
+          "error_normalization_verified"
+        ],
+        "cloud_deployments": [
+          "compose_verified",
+          "cloud_run_verified",
+          "aws_verified",
+          "fly_io_verified",
+          "cloudflare_containers_verified"
+        ],
+        "operational_resilience": [
+          "v1_load_targets_verified",
+          "live_failure_injection_verified",
+          "multi_replica_verified",
+          "backup_restore_drill_verified",
+          "previous_candidate_upgrade_rollback_verified"
+        ],
+        "supply_chain": [
+          "multi_arch_image_verified",
+          "vulnerability_scan_verified",
+          "license_scan_verified",
+          "sbom_verified",
+          "signature_verified",
+          "provenance_verified"
+        ]
+      },
+      "deferred_evidence": [],
+      "forbidden_claims": []
+    },
+    "single_maintainer_v1": {
+      "status_claim": "v1_profile_projection_passed_with_deferred_assurance",
+      "requires_independent_human_review": false,
+      "required_local_domains": [
+        "local_source",
+        "local_promotion",
+        "local_release"
+      ],
+      "required_external_claims": {
+        "public_tags": [
+          "remote_annotated_tags_verified",
+          "github_releases_verified"
+        ],
+        "public_registries": [
+          "oci_digest_verified",
+          "npm_javascript_verified",
+          "npm_react_native_verified",
+          "swift_package_verified",
+          "cocoapods_verified",
+          "maven_central_verified"
+        ],
+        "cloud_deployments": [
+          "compose_verified",
+          "cloud_run_verified"
+        ],
+        "supply_chain": [
+          "multi_arch_image_verified",
+          "vulnerability_scan_verified",
+          "license_scan_verified",
+          "sbom_verified",
+          "signature_verified",
+          "provenance_verified"
+        ]
+      },
+      "deferred_evidence": [
+        "independent_human_review",
+        "live_sdk_conformance",
+        "physical_devices",
+        "apple_distribution_and_extensions",
+        "play_integrity_and_android_device",
+        "firebase_app_check",
+        "turnstile",
+        "live_provider",
+        "cloud_deployments.aws_verified",
+        "cloud_deployments.fly_io_verified",
+        "cloud_deployments.cloudflare_containers_verified",
+        "operational_resilience",
+        "public_registries.documentation_production_verified",
+        "mintlify_production"
+      ],
+      "forbidden_claims": [
+        "release_qualified",
+        "fully_evidence_gated",
+        "independently_reviewed"
+      ]
+    }
+  }
+}

@@ -100,6 +100,17 @@ variable "database_user" {
   default = "latchway"
 }
 
+variable "database_edition" {
+  description = "Cloud SQL edition. PostgreSQL 18 with the db-custom tier requires Enterprise."
+  type        = string
+  default     = "ENTERPRISE"
+
+  validation {
+    condition     = var.database_edition == "ENTERPRISE"
+    error_message = "database_edition must be ENTERPRISE while database_tier uses db-custom."
+  }
+}
+
 variable "database_tier" {
   description = "Cloud SQL machine tier."
   type        = string
