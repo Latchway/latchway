@@ -118,7 +118,7 @@ frameworks:
     tier: tier_1
     ecosystem: apple
     package: MacPaw/OpenAI
-    integration: async_request_interceptor
+    integration: url_protocol_via_injected_session
     latchway_package: LatchwayOpenAI
     support: unsupported
     tested:
@@ -140,7 +140,7 @@ frameworks:
       dpop: not_applicable
       native_key_isolation: not_applicable
     limitations:
-      - Published MacPaw/OpenAI 0.5.1 lacks async request middleware and public streaming injection, so no adapter ships; a repository patch adding ordered async interception passes all 217 upstream tests but has not been accepted or released upstream.
+      - Published MacPaw/OpenAI 0.5.1 remains unsupported because streams discard the injected URLSession configuration. An unreleased configuration-propagation patch passes 213 upstream tests and a URLProtocol interception/cancellation probe, but no adapter ships and the patch is not accepted or released.
   - id: openai-js
     name: OpenAI JavaScript SDK
     tier: tier_1

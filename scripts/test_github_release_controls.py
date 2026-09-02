@@ -365,7 +365,7 @@ class GitHubReleaseControlTests(unittest.TestCase):
                 )
                 policy_ids.append(expected)
         self.assertEqual(len(policy_ids), len(set(policy_ids)))
-        self.assertEqual(len(policy_ids), 50)
+        self.assertEqual(len(policy_ids), 51)
         self.assertEqual(
             environment_counts,
             {
@@ -374,6 +374,7 @@ class GitHubReleaseControlTests(unittest.TestCase):
                 "latchway-ios-sdk": 5,
                 "latchway-android": 10,
                 "latchway-react-native-sdk": 10,
+                "latchway-docs": 1,
             },
         )
         self.assertEqual(len(self.manifest["npm_trusted_publishers"]), 5)
@@ -397,6 +398,17 @@ class GitHubReleaseControlTests(unittest.TestCase):
         branch = schema["$defs"]["branchRuleset"]
         self.assertEqual(branch["properties"]["bypass_actors"]["maxItems"], 0)
         self.assertEqual(branch["properties"]["rules"]["minItems"], 5)
+        docs_branch = schema["$defs"]["docsBranchRuleset"]
+        docs_pull_request = next(
+            item
+            for item in docs_branch["properties"]["rules"]["items"]["oneOf"]
+            if item["properties"]["type"] == {"const": "pull_request"}
+        )
+        docs_parameters = docs_pull_request["properties"]["parameters"]["properties"]
+        self.assertEqual(docs_parameters["require_code_owner_review"], {"const": True})
+        self.assertEqual(
+            docs_parameters["required_approving_review_count"], {"const": 1}
+        )
         environment = schema["$defs"]["environment"]
         self.assertEqual(
             environment["properties"]["reviewers"]["properties"]["minimum"],
@@ -417,6 +429,37 @@ class GitHubReleaseControlTests(unittest.TestCase):
             "LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN"
         ]
         with self.assertRaisesRegex(CONTROLS.ControlError, "environment_topology_invalid"):
+            CONTROLS.validate_manifest(manifest)
+
+        manifest = deepcopy(self.manifest)
+        docs = next(
+            item
+            for item in manifest["repositories"]
+            if item["name"] == "latchway-docs"
+        )
+        docs_pull_request = next(
+            rule
+            for rule in docs["rulesets"][1]["rules"]
+            if rule["type"] == "pull_request"
+        )
+        docs_pull_request["parameters"]["require_code_owner_review"] = False
+        docs_pull_request["parameters"]["required_approving_review_count"] = 0
+        with self.assertRaisesRegex(
+            CONTROLS.ControlError, "ruleset_not_protected_main"
+        ):
+            CONTROLS.validate_manifest(manifest)
+
+        manifest = deepcopy(self.manifest)
+        product_pull_request = next(
+            rule
+            for rule in manifest["repositories"][0]["rulesets"][1]["rules"]
+            if rule["type"] == "pull_request"
+        )
+        product_pull_request["parameters"]["require_code_owner_review"] = True
+        product_pull_request["parameters"]["required_approving_review_count"] = 1
+        with self.assertRaisesRegex(
+            CONTROLS.ControlError, "ruleset_not_protected_main"
+        ):
             CONTROLS.validate_manifest(manifest)
 
         manifest = deepcopy(self.manifest)
@@ -1059,9 +1102,9 @@ class GitHubReleaseControlTests(unittest.TestCase):
         payload = CONTROLS.canonical_bytes(evidence)
         self.assertEqual(payload, CONTROLS.canonical_bytes(json.loads(payload)))
         actions = [item["action"] for item in evidence["actions"]]
-        self.assertEqual(actions.count("ensure_release_control_policy_sentinel"), 50)
-        self.assertEqual(actions.count("verify_configuration_variable_names"), 50)
-        self.assertEqual(actions.count("ensure_repository_ruleset"), 10)
+        self.assertEqual(actions.count("ensure_release_control_policy_sentinel"), 51)
+        self.assertEqual(actions.count("verify_configuration_variable_names"), 51)
+        self.assertEqual(actions.count("ensure_repository_ruleset"), 12)
         self.assertEqual(actions.count("ensure_npm_trusted_publisher"), 5)
         release_evidence = next(
             action

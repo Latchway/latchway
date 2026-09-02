@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" role="img" aria-labelledby="routing-title routing-description">
+  <title id="routing-title">Feature-first routing and fallback</title>
+  <desc id="routing-description">A client names a stable feature. Latchway applies feature policy and exact quota guards, then selects an eligible weighted or sticky route. Each upstream attempt is recorded and fallback occurs only when the configured retry policy permits it.</desc>
+  <style>
+    :root { --ink:#14213d; --muted:#526079; --surface:#ffffff; --panel:#eef3ff; --accent:#3157d5; --route:#7c3aed; --good:#0f766e; --line:#8ca0c8; }
+    text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:var(--ink); }
+    .label { font-size:16px; font-weight:700; } .small { font-size:13px; fill:var(--muted); }
+    .node { fill:var(--surface); stroke:var(--line); stroke-width:2; } .feature { fill:var(--panel); stroke:var(--accent); stroke-width:3; } .route { fill:var(--panel); stroke:var(--route); stroke-width:2; }
+    .flow { fill:none; stroke:var(--accent); stroke-width:3; marker-end:url(#routing-arrow); } .fallback { stroke:var(--route); stroke-dasharray:8 7; } .settle { stroke:var(--good); }
+    @media (prefers-color-scheme: dark) { :root { --ink:#f2f5ff; --muted:#b8c3db; --surface:#131b2e; --panel:#1c2b55; --accent:#8fa8ff; --route:#c4b5fd; --good:#5eead4; --line:#60739c; } }
+    @media (forced-colors: active) { .node,.feature,.route { fill:Canvas; stroke:CanvasText; } .flow { stroke:LinkText; } text { fill:CanvasText; } }
+  </style>
+  <defs><marker id="routing-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker></defs>
+
+  <rect x="34" y="158" width="190" height="88" rx="16" class="node"/><text x="129" y="190" text-anchor="middle" class="label">Client request</text><text x="129" y="215" text-anchor="middle" class="small">feature: habit-assistant</text><text x="129" y="235" text-anchor="middle" class="small">supported request body</text>
+  <path d="M224 202 H281" class="flow"/>
+  <rect x="288" y="116" width="260" height="172" rx="18" class="feature"/><text x="418" y="149" text-anchor="middle" class="label">Stable feature contract</text><text x="418" y="177" text-anchor="middle" class="small">Trust + component authorization</text><text x="418" y="200" text-anchor="middle" class="small">Model-aware input preflight</text><text x="418" y="223" text-anchor="middle" class="small">Request, token, and cost quotas</text><text x="418" y="246" text-anchor="middle" class="small">Eligible route and retry policy</text><text x="418" y="269" text-anchor="middle" class="small">Client cannot name a physical model</text>
+  <path d="M548 202 H604" class="flow"/>
+
+  <rect x="611" y="56" width="185" height="80" rx="15" class="route"/><text x="703" y="86" text-anchor="middle" class="label">Route A</text><text x="703" y="109" text-anchor="middle" class="small">weighted or sticky</text><text x="703" y="128" text-anchor="middle" class="small">target + price snapshot</text>
+  <rect x="611" y="162" width="185" height="80" rx="15" class="route"/><text x="703" y="192" text-anchor="middle" class="label">Route B</text><text x="703" y="215" text-anchor="middle" class="small">fallback eligible only</text><text x="703" y="234" text-anchor="middle" class="small">under reviewed policy</text>
+  <rect x="611" y="268" width="185" height="80" rx="15" class="route"/><text x="703" y="298" text-anchor="middle" class="label">Route C</text><text x="703" y="321" text-anchor="middle" class="small">independent target</text><text x="703" y="340" text-anchor="middle" class="small">and circuit state</text>
+  <path d="M575 202 C590 202 585 96 604 96" class="flow"/><path d="M575 202 H604" class="flow fallback"/><path d="M575 202 C590 202 585 308 604 308" class="flow fallback"/>
+
+  <rect x="850" y="116" width="116" height="172" rx="18" class="node"/><text x="908" y="151" text-anchor="middle" class="label">Upstream</text><text x="908" y="180" text-anchor="middle" class="small">attempt 1</text><text x="908" y="202" text-anchor="middle" class="small">attempt 2</text><text x="908" y="224" text-anchor="middle" class="small">if permitted</text><path d="M865 244 H951" class="fallback"/><text x="908" y="270" text-anchor="middle" class="small">stream result</text>
+  <path d="M796 96 C825 96 820 155 843 170" class="flow"/><path d="M796 202 H843" class="flow fallback"/><path d="M796 308 C825 308 820 249 843 234" class="flow fallback"/>
+  <path d="M908 288 V374 H418 V296" class="flow settle"/><text x="650" y="398" text-anchor="middle" class="small">Settle exact usage, cost, attempt history, and quota reservation in PostgreSQL</text>
+</svg>

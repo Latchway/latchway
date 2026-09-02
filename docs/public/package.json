@@ -20,10 +20,12 @@
     "check:generated": "python3 scripts/check-generated.py && python3 scripts/check-sdk-bundles.py",
     "check:structure": "python3 scripts/check-structure.py",
     "check:metadata": "python3 scripts/check_metadata.py && python3 -m unittest scripts/test_check_metadata.py",
+    "check:visuals": "python3 scripts/check-visual-assets.py && python3 -m unittest scripts/test_check_visual_assets.py",
+    "check:policy": "python3 -m unittest scripts/test_check_docs_pr_policy.py",
     "check:prose": "vale --minAlertLevel=error .",
     "check:links": "mint broken-links --check-anchors --check-redirects --check-snippets",
     "check:a11y": "mint a11y",
-    "check": "pnpm check:generated && pnpm check:structure && pnpm check:metadata && pnpm check:prose && pnpm validate && pnpm check:links && pnpm check:a11y"
+    "check": "pnpm check:generated && pnpm check:structure && pnpm check:metadata && pnpm check:visuals && pnpm check:policy && pnpm check:prose && pnpm validate && pnpm check:links && pnpm check:a11y"
   },
   "devDependencies": {
     "mdx2vast": "0.5.0",

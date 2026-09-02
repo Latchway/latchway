@@ -51,6 +51,7 @@ EXPECTED_REPOSITORIES = {
     "latchway-ios-sdk",
     "latchway-android",
     "latchway-react-native-sdk",
+    "latchway-docs",
 }
 EXPECTED_FORBIDDEN_SECRET_NAMES = [
     "LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN",
@@ -95,6 +96,11 @@ EXPECTED_STATUS_CONTEXTS = {
     "latchway-react-native-sdk": [
         "Hermetic pull-request policy and source checks",
         "Pinned core plus React Native package/native split conformance",
+    ],
+    "latchway-docs": [
+        "Require a written docs-not-required reason",
+        "Validate Mintlify site",
+        "Verify synchronized source checkpoint",
     ],
 }
 EXPECTED_ENVIRONMENTS = {
@@ -204,6 +210,9 @@ EXPECTED_ENVIRONMENTS = {
         "npm": [],
         "release-administration": ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
         "github-release": [],
+    },
+    "latchway-docs": {
+        "documentation-production-evidence": ["MINTLIFY_SESSION_TOKEN"],
     },
 }
 EXPECTED_ENVIRONMENT_VARIABLES = {
@@ -658,7 +667,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         raise ControlError("manifest_identity_invalid")
 
     repositories = require_array(manifest["repositories"], "repositories_invalid")
-    if len(repositories) != 5:
+    if len(repositories) != 6:
         raise ControlError("repository_count_invalid")
     names: set[str] = set()
     for raw_repository in repositories:
@@ -869,9 +878,11 @@ def validate_manifest(value: Any) -> dict[str, Any]:
                 "parameters": {
                     "allowed_merge_methods": ["squash", "rebase"],
                     "dismiss_stale_reviews_on_push": False,
-                    "require_code_owner_review": False,
+                    "require_code_owner_review": name == "latchway-docs",
                     "require_last_push_approval": False,
-                    "required_approving_review_count": 0,
+                    "required_approving_review_count": (
+                        1 if name == "latchway-docs" else 0
+                    ),
                     "required_review_thread_resolution": True,
                 },
             },

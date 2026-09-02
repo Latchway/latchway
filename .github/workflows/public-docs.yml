@@ -69,10 +69,13 @@ jobs:
           version: 3.17.0
           workdir: docs/public
 
+      - name: Validate deterministic visual baseline
+        run: pnpm check:visuals
+
       - name: Validate public documentation
         env:
           DO_NOT_TRACK: "1"
         # Vale already ran in the pinned action above. The action intentionally
         # does not install a `vale` executable into later steps, so repeat only
         # the remaining self-contained documentation gates here.
-        run: pnpm check:generated && pnpm check:structure && pnpm check:metadata && pnpm validate && pnpm check:links && pnpm check:a11y
+        run: pnpm check:generated && pnpm check:structure && pnpm check:metadata && pnpm check:policy && pnpm validate && pnpm check:links && pnpm check:a11y

@@ -1,0 +1,122 @@
+---
+title: "Deploy to Fly.io"
+description: "Run the signed GHCR image on multiple Fly Machines with attached PostgreSQL, release-command migrations, and explicit recovery controls."
+icon: "plane"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The checked-in Fly configuration runs two combined API and worker Machines and
+applies forward migrations through a release command. PostgreSQL remains the
+only persistent application state store. Choose a primary region near the
+database and reserve enough connections for every Machine plus operations.
+
+<Warning>
+  The stable `1.0.0` image has not been published yet. Keep the placeholder
+  until the release page supplies a signed GHCR digest. A local Dockerfile build
+  does not prove the bytes used by the release workflow.
+</Warning>
+
+## Prerequisites
+
+- `flyctl` authenticated to an account with a globally unique app name;
+- the repository's `deploy/fly/fly.toml` configuration;
+- a PostgreSQL 15 or newer service reachable with verified TLS;
+- the signed GHCR image by immutable digest; and
+- separate custody for database backups and the stable master key.
+
+## Create or attach PostgreSQL
+
+```bash
+flyctl postgres create --name replace-latchway-db --region sin
+flyctl postgres attach replace-latchway-db \
+  --app replace-with-your-latchway-app \
+  --variable-name LATCHWAY_DATABASE_URL
+```
+
+Inspect the resulting database URL and require TLS for production. Fly's
+attachment is a convenience, not proof that backup, restore, capacity, or
+transport policy is correct.
+
+## Set protected values
+
+Set values interactively so secrets do not enter command history. The public
+origin is the final HTTPS origin with no path, query, or fragment. Generate the
+master key once and escrow it outside Fly.
+
+```bash
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_MASTER_KEY
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_PUBLIC_ORIGIN
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+```
+
+## Validate and deploy the immutable image
+
+```bash
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+export FLY_APP='replace-with-your-latchway-app'
+flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
+flyctl deploy --app "$FLY_APP" \
+  --config deploy/fly/fly.toml \
+  --image "$LATCHWAY_IMAGE" \
+  --wait-timeout 10m
+```
+
+Passing `--image` bypasses a Dockerfile rebuild. The release command applies
+migrations once before the rolling deployment. The default two 2-vCPU,
+2-GiB Machines reserve up to 40 application database connections in total;
+leave separate headroom for migrations, administration, backups, and database
+maintenance.
+
+## Verify rollout and streaming
+
+```bash
+flyctl apps list --json
+flyctl machine list --app "$FLY_APP" --json
+flyctl secrets list --app "$FLY_APP" --json
+curl --fail --show-error "https://${FLY_APP}.fly.dev/healthz"
+curl --fail --show-error "https://${FLY_APP}.fly.dev/readyz"
+```
+
+Require every running application Machine to resolve to the reviewed digest
+and at least two Machines to be started. Run `--output json migrate status` in
+an existing Machine and require current to equal available. Then exercise one
+authenticated non-streaming request and one SSE stream. Fly's proxy supports
+streaming, but clients must reconnect before platform or upstream timeouts.
+
+The rolling strategy allows at most one unavailable Machine. Latchway drains
+for 30 seconds and Fly waits 35 seconds before forcing the Machine down. Keep
+the platform timeout longer than the application drain timeout.
+
+## Remove bootstrap access
+
+After creating the first owner, remove the one-use bootstrap token:
+
+```bash
+flyctl secrets unset --app "$FLY_APP" LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+```
+
+Confirm the new Machine generation is ready and the secret metadata no longer
+lists an active bootstrap value.
+
+## Roll back and recover
+
+Use `flyctl releases` to identify the previous application release and deploy
+its immutable image digest explicitly. A schema rollback requires a tested
+PostgreSQL restore and matching master key. Machine filesystems are ephemeral
+and must never contain the only recovery copy.
+
+Complete [backup and restore](/operations/backup-restore),
+[disaster recovery](/operations/disaster-recovery), and
+[upgrades and rollback](/operations/upgrades) before promotion.
+
+## Release evidence boundary
+
+A successful Fly deploy is not a protected release receipt. Release evidence
+must bind the signed GHCR digest, provider-returned app and Machine identities,
+resolved image digest on every Machine, migration output, secret names without
+values, health/readiness, SSE, and replacement of one Machine after SIGTERM.

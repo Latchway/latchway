@@ -45,7 +45,17 @@ installed:
 pnpm check:generated
 python3 scripts/check-structure.py
 python3 scripts/check_metadata.py
+python3 scripts/check-visual-assets.py
 ```
+
+The visual gate byte-locks the four plan-required custom SVGs, rejects unsafe
+or externally loaded SVG content, requires an accessible title and description,
+dark-mode and forced-color policies, an exact text alternative, and one
+captioned page use. It gives every pull request a deterministic visual-source
+diff without requiring a browser credential. It does not claim pixel-level
+Mintlify layout equivalence: a rendered screenshot baseline and human review of
+the provider preview remain external repository/service configuration until a
+stable production theme and canonical domain exist.
 
 The generated gate derives the Client and Admin APIs, stable errors,
 configuration schema, framework compatibility pages, and release-bound SDK
@@ -91,6 +101,12 @@ python3 scripts/sync-public-docs.py --target ../latchway-docs --write
 python3 scripts/sync-public-docs.py --target ../latchway-docs --check
 ```
 
+Commit the canonical public-doc changes before the final `--write`. The mirror
+manifest records that exact core commit, and the required mirror workflow
+checks out `Latchway/latchway` at the recorded revision and byte-compares the
+complete publishable tree. If a working-tree preview was synchronized first,
+rerun `--write` after the core commit and before committing the mirror.
+
 The first adoption of an existing byte-identical mirror uses `--initialize`.
 That mode refuses to mutate a mismatched mirror.
 
@@ -105,8 +121,10 @@ manifest, checksum closure, source provenance, lock, and generated output.
 Owning SDK release workflows compile or run the source examples before building
 their bundles; Mintlify validation does not substitute for those SDK tests.
 The core-side synchronizer performs the byte-for-byte canonical-source
-comparison before updating that manifest. Neither validation path deploys or
-requires a cross-repository credential.
+comparison before updating that manifest. The mirror and protected production
+evidence workflows independently repeat the comparison against the exact
+recorded public core commit. Neither validation path deploys or requires a
+private cross-repository credential.
 
 ## Content policy
 

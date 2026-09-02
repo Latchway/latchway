@@ -1,6 +1,6 @@
 ---
 title: "Authentication providers"
-description: "Connect an existing Firebase, Supabase, Clerk, or custom JWT identity without confusing authentication with client attestation."
+description: "Connect an existing Firebase, Supabase, Clerk, generic OIDC, or custom JWT identity without confusing authentication with client attestation."
 icon: "user-round-check"
 audience: "mixed"
 pageType: "how-to"
@@ -56,6 +56,23 @@ identity.
 
 - Browser callback: [Supabase or Clerk](/clients/web/authentication)
 - Server constraints: [Identity and attestation](/concepts/identity-and-attestation)
+
+## Generic OIDC
+
+Choose `generic_oidc` when an OIDC issuer signs asymmetric identity tokens but
+does not match the Firebase, Supabase, or Clerk presets. Configure one exact
+issuer, a bounded audience set, optional authorized-party and claim mappings,
+an allowed asymmetric algorithm set, and exactly one reviewed key source: an
+HTTPS JWKS URL or an operator-pinned static public key.
+
+Latchway does not discover or trust a key endpoint from an unverified token.
+The operator supplies the exact key source and must keep its issuer and
+audience relationship stable. Use `custom_jwt` instead only when the token is
+not OIDC-shaped or when an explicitly acknowledged HS256 policy is required.
+
+- Browser callback: [Custom identity callback](/clients/web/authentication#custom-jwt)
+- Configuration fields: [Configuration schema](/reference/config-schema)
+- Verification boundary: [Identity and attestation](/concepts/identity-and-attestation#identity-providers)
 
 ## Custom JWT
 

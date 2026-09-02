@@ -18,32 +18,14 @@ limit plans, routes, upstreams, physical models, pricing, and retry behavior.
 
 ## Feature routing
 
-```mermaid
-flowchart LR
-    accTitle: Feature routing
-    accDescr: An untrusted client names only an application feature. Inside the Latchway boundary, the active immutable configuration combines verified identity, normalized trust, plan, health, weights, and sticky policy to select a route. The route chooses a configured upstream and physical model that the client cannot override.
+<Frame caption="The client names a stable feature. Latchway owns eligibility, quota preflight, route choice, fallback, and final settlement.">
 
-    subgraph client ["Untrusted client"]
-        feature["Feature ID"]
-    end
-    subgraph boundary ["Latchway boundary"]
-        verified["Verified principal and trust"]
-        policy["Feature policy"]
-        router["Weighted, sticky, health-aware routing"]
-    end
-    subgraph external ["Configured upstreams"]
-        routeA["Route A: upstream + physical model"]
-        routeB["Route B: fallback upstream + physical model"]
-    end
+  <img
+    src="/assets/feature-routing-overview.svg"
+    alt="A client names a stable feature; Latchway applies trust, model-aware input preflight, quotas, and retry policy before selecting a weighted or sticky route and recording each permitted upstream attempt."
+  />
 
-    config["Active immutable configuration"] -.-> policy
-    feature --> policy
-    verified --> policy
-    policy --> router
-    router -->|"Primary selection"| routeA
-    router -->|"Policy-bounded fallback before response"| routeB
-    router -->|"Decision and attempts"| postgres[("PostgreSQL")]
-```
+</Frame>
 
 ### What this establishes
 

@@ -23,21 +23,14 @@ trust provenance, aggregate visibility, and family-wide revocation.
 
 ## Installation Family hierarchy
 
-```mermaid
-flowchart TD
-    accTitle: Installation Family hierarchy
-    accDescr: An application user has one Installation Family parent. The directly attested main app and delegated Widget and Share Extension are separate child components, each with an independent P-256 DPoP key. Dashed authorization edges flow from the main app to the delegated components without claiming that they were directly attested.
+<Frame caption="A family groups components for policy and revocation; it never causes components to share keys or refresh state.">
 
-    applicationUser["Application User"] --> family["Installation Family"]
-    family --> mainApp["Main App: directly attested"]
-    family --> widget["Widget: delegated trust"]
-    family --> shareExtension["Share Extension: delegated trust"]
-    mainApp --> mainKey["Main App DPoP key"]
-    widget --> widgetKey["Widget DPoP key"]
-    shareExtension --> shareKey["Share Extension DPoP key"]
-    mainApp -.->|"Authorizes component key"| widget
-    mainApp -.->|"Authorizes component key"| shareExtension
-```
+  <img
+    src="/assets/installation-family-overview.svg"
+    alt="One application user has an Installation Family containing a directly attested main app and delegated widget and share components, each with an independent DPoP key and refresh chain."
+  />
+
+</Frame>
 
 Every Client Component has an independent P-256 key, DPoP identity, session
 family, rotating refresh-token chain, feature scope, quota attribution, and

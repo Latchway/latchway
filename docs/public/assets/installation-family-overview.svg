@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 440" role="img" aria-labelledby="family-title family-description">
+  <title id="family-title">Installation Family hierarchy</title>
+  <desc id="family-description">One application user has an Installation Family containing a directly attested main app plus delegated widget and share components. Every component owns a separate DPoP key and refresh chain. Delegation does not make extensions directly attested.</desc>
+  <style>
+    :root { --ink:#14213d; --muted:#526079; --surface:#ffffff; --panel:#eef3ff; --accent:#3157d5; --delegated:#7c3aed; --line:#8ca0c8; }
+    text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:var(--ink); }
+    .label { font-size:16px; font-weight:700; } .small { font-size:13px; fill:var(--muted); }
+    .node { fill:var(--surface); stroke:var(--line); stroke-width:2; } .family { fill:var(--panel); stroke:var(--accent); stroke-width:3; }
+    .edge { fill:none; stroke:var(--accent); stroke-width:3; } .delegation { fill:none; stroke:var(--delegated); stroke-width:2.5; stroke-dasharray:8 7; marker-end:url(#family-arrow); }
+    @media (prefers-color-scheme: dark) { :root { --ink:#f2f5ff; --muted:#b8c3db; --surface:#131b2e; --panel:#1c2b55; --accent:#8fa8ff; --delegated:#c4b5fd; --line:#60739c; } }
+    @media (forced-colors: active) { .node,.family { fill:Canvas; stroke:CanvasText; } .edge,.delegation { stroke:LinkText; } text { fill:CanvasText; } }
+  </style>
+  <defs><marker id="family-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker></defs>
+
+  <rect x="371" y="28" width="258" height="62" rx="16" class="node"/><text x="500" y="55" text-anchor="middle" class="label">Application user</text><text x="500" y="76" text-anchor="middle" class="small">Existing identity provider</text>
+  <path d="M500 90 V120" class="edge"/>
+  <rect x="330" y="120" width="340" height="74" rx="18" class="family"/><text x="500" y="151" text-anchor="middle" class="label">Installation Family</text><text x="500" y="176" text-anchor="middle" class="small">Policy, provenance, aggregate visibility, revocation</text>
+
+  <path d="M500 194 V226 H178 V252" class="edge"/><path d="M500 226 V252" class="edge"/><path d="M500 226 H822 V252" class="edge"/>
+  <rect x="48" y="252" width="260" height="92" rx="16" class="node"/><text x="178" y="281" text-anchor="middle" class="label">Main app</text><text x="178" y="304" text-anchor="middle" class="small">Directly attested root</text><text x="178" y="326" text-anchor="middle" class="small">Independent DPoP key + refresh chain</text>
+  <rect x="370" y="252" width="260" height="92" rx="16" class="node"/><text x="500" y="281" text-anchor="middle" class="label">Widget</text><text x="500" y="304" text-anchor="middle" class="small">Delegated component</text><text x="500" y="326" text-anchor="middle" class="small">Independent DPoP key + refresh chain</text>
+  <rect x="692" y="252" width="260" height="92" rx="16" class="node"/><text x="822" y="281" text-anchor="middle" class="label">Share extension</text><text x="822" y="304" text-anchor="middle" class="small">Delegated component</text><text x="822" y="326" text-anchor="middle" class="small">Independent DPoP key + refresh chain</text>
+
+  <path d="M308 286 C336 235 353 235 383 270" class="delegation"/><path d="M308 311 C475 385 650 385 704 311" class="delegation"/>
+  <text x="322" y="241" class="small">authorizes key</text><text x="430" y="386" class="small">authorization is not direct attestation</text>
+  <text x="48" y="416" class="small">Family revocation invalidates every component; component revocation stays scoped to that component.</text>
+</svg>

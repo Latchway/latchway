@@ -1,0 +1,8 @@
+# Public documentation has one currently verified repository administrator.
+# Branch rules must still require an approving reviewer distinct from the author.
+/docs/public/ @tiepvuvan
+/scripts/public_reference.py @tiepvuvan
+/scripts/sync-public-docs.py @tiepvuvan
+/.github/PULL_REQUEST_TEMPLATE.md @tiepvuvan
+/.github/workflows/docs-pr-policy.yml @tiepvuvan
+/.github/workflows/public-docs.yml @tiepvuvan

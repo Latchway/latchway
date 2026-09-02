@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "visuals": [
+    {
+      "alt": "A client sends identity, trust evidence, and a DPoP proof to Latchway, which applies security and feature policy, stores authoritative state in PostgreSQL, and calls an AI upstream with a server-held credential.",
+      "asset": "assets/architecture-home.svg",
+      "page": "index.mdx",
+      "purpose": "homepage-architecture",
+      "sha256": "21f4f1472add1a45cf1193d36fa085644d877db88833ee02a6a83bbb07192f3f"
+    },
+    {
+      "alt": "A client names a stable feature; Latchway applies trust, model-aware input preflight, quotas, and retry policy before selecting a weighted or sticky route and recording each permitted upstream attempt.",
+      "asset": "assets/feature-routing-overview.svg",
+      "page": "concepts/routing-and-quotas.mdx",
+      "purpose": "feature-routing-overview",
+      "sha256": "de094c8972e07c21b0860d41a556bfb489e184ef0d5621ad0738320a9c9664ff"
+    },
+    {
+      "alt": "One application user has an Installation Family containing a directly attested main app and delegated widget and share components, each with an independent DPoP key and refresh chain.",
+      "asset": "assets/installation-family-overview.svg",
+      "page": "concepts/installation-families.mdx",
+      "purpose": "installation-family-overview",
+      "sha256": "c30340f19068e9d8875334be7e0e246bddfeeacce3b46d6d38208c6f3f644465"
+    },
+    {
+      "alt": "An untrusted client presents an identity token, app or web trust evidence, and a fresh DPoP proof to separate Latchway verifiers before server-owned feature policy issues a bounded session.",
+      "asset": "assets/trust-boundary-overview.svg",
+      "page": "concepts/identity-and-attestation.mdx",
+      "purpose": "trust-boundary-overview",
+      "sha256": "2706b6818162c13fa4dfd905c3c81897d97e8c5baa0bdb08778b099fecc28c39"
+    }
+  ]
+}

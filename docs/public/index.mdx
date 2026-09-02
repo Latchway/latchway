@@ -73,10 +73,10 @@ repository](https://github.com/Latchway/latchway).
 
 <Frame caption="The client selects a feature. Latchway owns trust, limits, routing, and provider credentials.">
 
-```text
-Your app                  Latchway SDK                 Latchway                  AI upstream
-identity + trust    ->    DPoP-bound session    ->    policy + quotas    ->    credential injection
-```
+  <img
+    src="/assets/architecture-home.svg"
+    alt="A client sends identity, trust evidence, and a DPoP proof to Latchway, which applies security and feature policy, stores authoritative state in PostgreSQL, and calls an AI upstream with a server-held credential."
+  />
 
 </Frame>
 

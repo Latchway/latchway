@@ -194,7 +194,10 @@
           "group": "Run Latchway",
           "pages": [
             "operations/deployment",
+            "operations/deploy-docker-compose",
             "operations/deploy-google-cloud-run",
+            "operations/deploy-aws-ecs",
+            "operations/deploy-fly-io",
             "operations/deploy-cloudflare-containers",
             "operations/telemetry-and-jobs",
             "operations/self-tests"

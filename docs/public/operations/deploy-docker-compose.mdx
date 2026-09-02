@@ -1,0 +1,125 @@
+---
+title: "Deploy with Docker Compose"
+description: "Run the immutable Latchway release image with PostgreSQL, explicit migrations, readiness checks, and recoverable secret custody."
+icon: "container"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The release Compose template runs the same Latchway image as a migration job
+and as the combined API and worker service. PostgreSQL is the only persistent
+application state store. This path fits one-host evaluation and smaller
+installations that already provide TLS, monitoring, backups, and host
+operations.
+
+<Warning>
+  The stable `1.0.0` image has not been published yet. Keep the digest
+  placeholder until the release page supplies a signed GHCR index. Do not add a
+  source-build fallback to the release template.
+</Warning>
+
+## Prerequisites
+
+- Docker Engine with the Compose v2 plugin;
+- the checked-in `deploy/compose/compose.release.yaml` file;
+- a verified `ghcr.io/latchway/latchway@sha256:...` release index;
+- a public HTTPS origin and reverse proxy that preserves SSE streaming; and
+- durable storage for PostgreSQL plus independent custody for the master key.
+
+## Prepare protected runtime values
+
+Create an untracked, mode-`0600` environment file. URL-encode the database
+password inside `LATCHWAY_DATABASE_URL`. Generate the master key once, escrow
+it outside the host, and keep it with every database backup.
+
+```bash
+install -m 0600 /dev/null .env.release
+${EDITOR:-vi} .env.release
+```
+
+Enter exactly the deployment values, replacing every placeholder:
+
+```dotenv
+LATCHWAY_IMAGE=ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST
+POSTGRES_PASSWORD=REPLACE_WITH_RANDOM_PASSWORD
+LATCHWAY_DATABASE_URL=postgresql://latchway:URL_ENCODED_PASSWORD@postgres:5432/latchway?sslmode=disable
+LATCHWAY_MASTER_KEY=REPLACE_WITH_ONE_STABLE_32_BYTE_BASE64_KEY
+LATCHWAY_PUBLIC_ORIGIN=https://ai.example.com
+LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=REPLACE_WITH_ONE_USE_RANDOM_TOKEN
+```
+
+`sslmode=disable` is acceptable only across this template's private Compose
+network. Require and verify TLS when PostgreSQL is external.
+
+## Validate, pull, and start
+
+```bash
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+docker compose --env-file .env.release \
+  -f deploy/compose/compose.release.yaml config --quiet
+docker compose --env-file .env.release \
+  -f deploy/compose/compose.release.yaml pull
+docker compose --env-file .env.release \
+  -f deploy/compose/compose.release.yaml up -d --wait
+```
+
+The template has no `build` key. The migration service must finish before the
+gateway becomes healthy. If either pull or migration fails, stop and resolve
+the immutable image or database problem; do not switch to a mutable tag.
+
+## Verify the running deployment
+
+```bash
+curl --fail --show-error --silent http://127.0.0.1:8080/healthz
+curl --fail --show-error --silent http://127.0.0.1:8080/readyz
+docker compose --env-file .env.release \
+  -f deploy/compose/compose.release.yaml run --rm --no-deps \
+  latchway --output json migrate status
+```
+
+Accept migration status only when `up_to_date` is true and `current` equals
+`available`. Readiness also requires PostgreSQL, an active configuration,
+usable key material, and a recent worker heartbeat. Then verify the external
+HTTPS origin, one authenticated non-streaming request, and one SSE stream
+through the reverse proxy.
+
+## Remove bootstrap access
+
+Create the first owner in the Console, remove
+`LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` from `.env.release`, and recreate only the
+Latchway service. Preserve the PostgreSQL volume and master key.
+
+```bash
+docker compose --env-file .env.release \
+  -f deploy/compose/compose.release.yaml up -d --no-deps --force-recreate latchway
+```
+
+## Back up and upgrade safely
+
+The template pins PostgreSQL 18 and mounts its version-aware
+`/var/lib/postgresql` root. Never attach a PostgreSQL 17-or-earlier data
+directory directly. Restore a verified backup or complete a reviewed
+`pg_upgrade` procedure first.
+
+For a Latchway upgrade, back up and prove an isolated restore, run the new
+digest once with `migrate up`, verify migration status, and recreate the
+service with that same digest. Keep the previous digest available during the
+observation window. Migrations are forward-only; schema recovery uses the
+tested database backup and matching master key.
+
+Complete [backup and restore](/operations/backup-restore),
+[upgrades and rollback](/operations/upgrades), and
+[production readiness](/operations/production-readiness) before accepting
+production traffic.
+
+## Release evidence boundary
+
+A healthy source-built stack is not release evidence. The protected deployment
+receipt must prove that Compose pulled the exact signed digest, migration status
+passed, generated values did not enter logs or artifacts, health and readiness
+passed, SSE remained unbuffered, SIGTERM drained cleanly, and a replacement
+service returned ready.

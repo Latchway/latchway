@@ -225,10 +225,6 @@ CANONICAL_DIAGRAMS = {
         "start/architecture-at-a-glance",
         ("Data plane", "Control plane", "Admin API", "PostgreSQL"),
     ),
-    "Identity, attestation, and DPoP": (
-        "concepts/identity-and-attestation",
-        ("Identity token", "Attestation", "DPoP", "Authorize feature policy"),
-    ),
     "Session bootstrap sequence": (
         "concepts/identity-and-attestation",
         ("sequenceDiagram", "Session challenge", "component public key", "PostgreSQL"),
@@ -240,14 +236,6 @@ CANONICAL_DIAGRAMS = {
     "Reserve-execute-settle quota lifecycle": (
         "concepts/routing-and-quotas",
         ("Trusted preflight estimate", "Reserve atomically", "without open transaction", "Settle actual charge"),
-    ),
-    "Feature routing": (
-        "concepts/routing-and-quotas",
-        ("Feature ID", "Active immutable configuration", "physical model", "fallback"),
-    ),
-    "Installation Family hierarchy": (
-        "concepts/installation-families",
-        ("Installation Family", "directly attested", "delegated trust", "DPoP key"),
     ),
     "Delegated component provisioning": (
         "build/app-extensions/containing-app-provisioning",
@@ -836,7 +824,7 @@ def main() -> int:
     mermaid_count = len(diagrams)
     if mermaid_count != len(CANONICAL_DIAGRAMS):
         errors.append(
-            f"foundation requires exactly {len(CANONICAL_DIAGRAMS)} canonical diagrams; "
+            f"foundation requires exactly {len(CANONICAL_DIAGRAMS)} canonical Mermaid diagrams; "
             f"found {mermaid_count}"
         )
     diagram_titles = [title for title, _ in diagrams]

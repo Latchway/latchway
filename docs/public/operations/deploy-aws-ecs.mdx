@@ -1,0 +1,124 @@
+---
+title: "Deploy to AWS ECS and RDS"
+description: "Mirror the signed GHCR image into ECR and run private Fargate tasks with PostgreSQL 18 RDS, Secrets Manager, and an HTTPS load balancer."
+icon: "cloud"
+audience: "operator"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-09-01"
+owner: "core-operations"
+---
+
+The checked-in Terraform example runs two or more private Fargate tasks behind
+an HTTPS Application Load Balancer. It provisions encrypted PostgreSQL 18 RDS,
+Secrets Manager references, health checks, deployment rollback, autoscaling,
+and CloudWatch logs. Latchway remains the same non-root OCI application; AWS
+services do not become alternate application state stores.
+
+<Warning>
+  The stable `1.0.0` image has not been published yet. Do not deploy the
+  placeholder. Wait for the signed GHCR index and its provenance, vulnerability,
+  license, and SPDX receipts.
+</Warning>
+
+## Prerequisites
+
+- an AWS account and reviewed Terraform execution role;
+- a remote encrypted and locked Terraform backend;
+- an ACM certificate for the final `LATCHWAY_PUBLIC_ORIGIN` hostname;
+- the signed GHCR multi-architecture index mirrored into private ECR without a
+  rebuild; and
+- independent recovery custody for the generated master key and RDS backups.
+
+## Mirror the release image without rebuilding
+
+Copy the signed GHCR index and its platform manifests into ECR with a
+manifest-preserving registry copy tool. Record both registry references by
+digest. Compare the source and destination manifest descriptors before using
+the mirror; a matching tag, creation time, or successful container start is not
+sufficient.
+
+Set the Terraform `image` input to the immutable ECR digest reference. Keep the
+GHCR digest, ECR digest, copy command, and descriptor comparison in the
+deployment record.
+
+## Review and apply Terraform
+
+```bash
+cd deploy/aws/terraform
+cp terraform.tfvars.example terraform.tfvars
+${EDITOR:-vi} terraform.tfvars
+terraform init
+terraform fmt -check
+terraform validate
+terraform plan -out latchway.tfplan
+terraform show latchway.tfplan
+terraform apply latchway.tfplan
+```
+
+The plan creates generated credentials in Terraform state before delivering
+them through Secrets Manager. Restrict state access as tightly as secret
+access. Confirm that tasks and RDS have no public address, RDS accepts port
+5432 only from the task security group, and database transport requires TLS.
+
+## Bind the public origin
+
+Point the exact `public_origin` hostname at the ALB and wait for HTTPS to be
+valid. Keep ALB response buffering disabled for API and SSE paths. The template
+uses a 4,000-second idle timeout; clients must still reconnect before platform
+or upstream timeouts.
+
+## Bootstrap once, then remove access
+
+On the first deployment, startup migrations serialize on a PostgreSQL advisory
+lock. Read the generated bootstrap token directly into a password manager,
+create the first owner, set `inject_admin_bootstrap_token=false`, and apply
+again immediately. The second plan must remove the task-definition reference
+and the execution role's permission to read that secret.
+
+For later upgrades, set `migrate_on_start=false`. Run a private one-off task
+with command `migrate up`, followed by another with `--output json migrate
+status`. Accept it only when `up_to_date` is true and `current` equals
+`available`; a successful `RunTask` API response does not prove command
+completion.
+
+## Verify provider and application state
+
+```bash
+aws ecs describe-services --cluster CLUSTER --services SERVICE --region REGION
+aws ecs describe-task-definition --task-definition TASK_DEFINITION --region REGION
+aws ecs list-tasks --cluster CLUSTER --service-name SERVICE \
+  --desired-status RUNNING --region REGION
+aws ecs describe-tasks --cluster CLUSTER --tasks TASK_ARNS --region REGION
+curl --fail --show-error https://ai.example.com/healthz
+curl --fail --show-error https://ai.example.com/readyz
+```
+
+Require every running task to resolve to the reviewed ECR digest and at least
+two tasks to be healthy. Exercise one authenticated request and one SSE stream.
+At maximum scale, reserve `maximum_tasks × db_connections_per_task` application
+connections plus separate migration, maintenance, backup, and operator
+headroom.
+
+Keep the timing relationship ordered: Latchway's drain timeout is shorter than
+the ECS stop timeout, which is no longer than ALB target deregistration. The
+checked-in defaults are 30, 35, and 60 seconds respectively.
+
+## Roll back and recover
+
+The ECS circuit breaker can restore a prior task definition when readiness
+fails. It cannot reverse a schema migration. Keep the previous image digest and
+task definition, preserve point-in-time recovery, and use a tested database
+restore with the matching master key for schema recovery.
+
+Complete [backup and restore](/operations/backup-restore),
+[scaling](/operations/scaling), and
+[upgrades and rollback](/operations/upgrades) before promotion.
+
+## Release evidence boundary
+
+A Terraform apply is deployment evidence, not release evidence. The protected
+receipt must bind the signed GHCR index, content-reviewed ECR mirror, ECS task
+definition and resolved task digests, private migration output, secret names
+without values, health/readiness, SSE, and graceful replacement of one task.

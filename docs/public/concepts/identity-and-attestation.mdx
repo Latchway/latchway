@@ -21,31 +21,14 @@ bound to the installation's P-256 key with DPoP.
 
 ## Identity, attestation, and DPoP
 
-```mermaid
-flowchart LR
-    accTitle: Identity, attestation, and DPoP
-    accDescr: Three independent inputs cross the untrusted-client boundary: an identity token identifies the application user, platform evidence describes the application instance or web risk, and a P-256 proof demonstrates possession of the session-bound component key. Latchway verifies all three before policy authorizes a feature.
+<Frame caption="Identity, client trust, and DPoP cross the boundary as independent inputs; policy authorizes only after each required verifier passes.">
 
-    subgraph client ["Untrusted client"]
-        identityToken["Identity token"]
-        attestationEvidence["Attestation or web-risk evidence"]
-        componentKey["P-256 component key"]
-    end
-    subgraph boundary ["Latchway boundary"]
-        identityCheck["Authenticate user"]
-        attestationCheck["Verify trust evidence"]
-        dpopCheck["Verify DPoP possession"]
-        authorization["Authorize feature policy"]
-    end
+  <img
+    src="/assets/trust-boundary-overview.svg"
+    alt="An untrusted client presents an identity token, app or web trust evidence, and a fresh DPoP proof to separate Latchway verifiers before server-owned feature policy issues a bounded session."
+  />
 
-    identityToken --> identityCheck
-    attestationEvidence --> attestationCheck
-    componentKey -->|"Fresh proof"| dpopCheck
-    identityCheck --> authorization
-    attestationCheck --> authorization
-    dpopCheck --> authorization
-    authorization -->|"Server-owned decision"| session["Bounded session"]
-```
+</Frame>
 
 ### What this establishes
 

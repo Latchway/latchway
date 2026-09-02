@@ -2533,6 +2533,132 @@
           "target": "branch"
         }
       ]
+    },
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "documentation-production-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway-docs:documentation-production-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "MINTLIFY_SESSION_TOKEN"
+            ],
+            "required_names": [
+              "MINTLIFY_SESSION_TOKEN"
+            ]
+          }
+        }
+      ],
+      "name": "latchway-docs",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": true,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 1,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Require a written docs-not-required reason",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Validate Mintlify site",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Verify synchronized source checkpoint",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
     }
   ],
   "schema_version": 1

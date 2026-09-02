@@ -57,14 +57,17 @@ const authenticationPaths = {
   firebase: ["Firebase", "/clients/authentication-providers#firebase"],
   supabase: ["Supabase", "/clients/authentication-providers#supabase"],
   clerk: ["Clerk", "/clients/authentication-providers#clerk"],
+  oidc: ["Generic OIDC", "/clients/authentication-providers#generic-oidc"],
   custom: ["Custom JWT", "/clients/authentication-providers#custom-jwt"],
 };
 
 const deploymentPaths = {
   local: ["Local source candidate", "/operate/quickstart"],
-  "cloud-run": ["Google Cloud Run source template (provider proof open)", "/operations/deployment#implemented-deployment-templates"],
-  aws: ["AWS ECS/Fargate source template (provider proof open)", "/operations/deployment#implemented-deployment-templates"],
-  fly: ["Fly.io source template (provider proof open)", "/operations/deployment#implemented-deployment-templates"],
+  compose: ["Docker Compose release-image template", "/operations/deploy-docker-compose"],
+  "cloud-run": ["Google Cloud Run source template (provider proof open)", "/operations/deploy-google-cloud-run"],
+  aws: ["AWS ECS/Fargate source template (provider proof open)", "/operations/deploy-aws-ecs"],
+  fly: ["Fly.io source template (provider proof open)", "/operations/deploy-fly-io"],
+  cloudflare: ["Cloudflare Containers source template (provider proof open)", "/operations/deploy-cloudflare-containers"],
 };
 
 const DEFAULT_PREFERENCES = {
