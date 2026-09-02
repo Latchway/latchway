@@ -56,7 +56,7 @@ mirror.
 | JavaScript source | `e3a57617e75bf3d46e858a1084749f46f819db1f` |
 | Swift source | `9f306d1e585069ca4aa703412c5d70656336e50f` |
 | Android source | `a994f8b5ee81fa831b8b2e57885df39f50fa2777` |
-| React Native source | `0cf6c00759121949d9c9bd14c99ad481be672f8e` |
+| React Native source | `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9` |
 | Mintlify mirror source | The generated deployment mirror must record the exact canonical source in `.latchway-docs-source.json`; no protected production deployment receipt exists |
 | Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
 
@@ -178,7 +178,7 @@ parent mismatch.
   `e3a57617e75bf3d46e858a1084749f46f819db1f`, Swift
   `9f306d1e585069ca4aa703412c5d70656336e50f`, Android
   `a994f8b5ee81fa831b8b2e57885df39f50fa2777`, and React Native
-  `0cf6c00759121949d9c9bd14c99ad481be672f8e`.
+  `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9`.
 
 ### Phase 5: iOS Installation Family SDK — source complete,
 external proof open
@@ -295,9 +295,9 @@ to apply to supported Android application trust surfaces.
   `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`),
   Android `a994f8b5ee81fa831b8b2e57885df39f50fa2777` (SHA-256
   `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`),
-  and React Native `0cf6c00759121949d9c9bd14c99ad481be672f8e`
+  and React Native `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9`
   (SHA-256
-  `3680b196ffc71549af1247c2c3d872ca436ab64476dd0985cdba30928bc4c933`).
+  `59d98e3f0f79a75b7540af31f518ac8cfd878a030406abcf6d07dd564c6a74aa`).
 - [x] Define deterministic post-commit mirror synchronization: the generated
   mirror records the exact canonical source in `.latchway-docs-source.json`,
   and both repositories run their complete local validation suites.

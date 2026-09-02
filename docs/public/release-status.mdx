@@ -21,7 +21,7 @@ The source locks name JavaScript
 `e3a57617e75bf3d46e858a1084749f46f819db1f`, iOS
 `9f306d1e585069ca4aa703412c5d70656336e50f`, Android
 `a994f8b5ee81fa831b8b2e57885df39f50fa2777`, and React Native
-`0cf6c00759121949d9c9bd14c99ad481be672f8e`. The current core binary and SDK
+`b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9`. The current core binary and SDK
 source versions identify as `1.0.0`. Core and all four exact SDK heads are
 delivered to remote `main`. Canonical public documentation is this checked-in
 source tree, and the generated mirror must bind that exact source through
@@ -56,7 +56,7 @@ protected artifact, device, registry, or deployment evidence.
 | Public tags and immutable GitHub releases | No local version 1 tags; no remote tag or GitHub release is authenticated or verified |
 | GitHub and npm release controls | A closed six-repository manifest covers 51 protected environments and their manifest-bound privileged jobs. Its reversible quarantine, partial-apply journal, exact environment/ruleset model, dual npmjs scope pins, and five npm trusted-publisher tuples pass independent local review and deterministic plan validation. npm account 2FA is enabled in `auth-and-writes` mode. Live GitHub administration, a reviewer distinct from the operator, npm namespace bootstrap/trusted-publisher creation, manual no-admin-bypass confirmation, and live two-stage verification remain required. |
 | npm, Swift/CocoaPods, and Maven publication | Not yet published. The native `Latchway` CocoaPod does need publication because `@latchway/react-native` pins `Latchway/AppAttest` `1.0.0`; the React Native podspec itself ships inside its npm package and does not require a separate Trunk publication. |
-| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with production App Attest registration and same-key assertion. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. Current `0cf6c00759121949d9c9bd14c99ad481be672f8e` carries the release hardening and locks the released contract plus final sibling SDK successor commits; its physical path was not rerun. App Intent/extension and physical Android/Google Play evidence are operator-deferred release gates. Apple distribution-derived proof remains open and is not claimed as deferred. |
+| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with production App Attest registration and same-key assertion. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. Current `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9` carries the release hardening and locks the released contract plus final sibling SDK successor commits; its physical path was not rerun. App Intent/extension and physical Android/Google Play evidence are operator-deferred release gates. Apple distribution-derived proof remains open and is not claimed as deferred. |
 | Firebase Web App Check | A browser-minted reCAPTCHA Enterprise token exchange and server verifier pass against the current source gateway; protected immutable-candidate rerun remains required |
 | Cloudflare Turnstile | No configured observation exists; protected exact-candidate evidence remains required |
 | Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
@@ -114,7 +114,7 @@ the native extension client for one exact-run delegated request. Its Apple
 Development root app and embedded App Intents extension passed strict
 entitlement/provisioning, registered-device install, and launch checks. It did
 not invoke the intent or collect new App Attest proof. Current
-`0cf6c00759121949d9c9bd14c99ad481be672f8e` carries the release retry-closure,
+`b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9` carries the release retry-closure,
 transition-order, wording, and development-runner hardening, then locks the
 released contract and final JavaScript, iOS, and Android successor commits. Its
 local plus generic iOS and isolated Debug/Release App Intent build gates pass;
