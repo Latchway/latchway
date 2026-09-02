@@ -817,6 +817,7 @@ class Evaluator:
                 commits["core"],
                 "--",
                 "api",
+                "compatibility",
             )
         except VerificationError:
             raise VerificationError("sdk_locked_contract_source_drift") from None

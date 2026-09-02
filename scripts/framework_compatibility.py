@@ -336,9 +336,11 @@ def render_markdown(registry: Mapping[str, Any]) -> str:
         "  request does not mean supported compatibility.",
         "</Warning>",
         "",
-        "This page is generated from `compatibility/frameworks.yaml`. A support",
-        "claim requires pinned minimum/latest versions and the common conformance",
-        "evidence defined by ADR 0028. Do not edit this page by hand.",
+        "This page is generated from the released contract snapshot in",
+        "`compatibility/frameworks.yaml`. Once released, that snapshot stays",
+        "immutable. Integration guides may record later local verification, but",
+        "such evidence neither rewrites this bundle nor widens a support claim.",
+        "Do not edit this page by hand.",
         "",
         "<CompatibilityMatrix rows={compatibilityRows} />",
         "",
@@ -393,7 +395,7 @@ def render_markdown(registry: Mapping[str, Any]) -> str:
             _state(item["capabilities"][key]) for key in capability_columns
         ]
         lines.append("| " + " | ".join(_cell(value) for value in values) + " |")
-    lines.extend(["", "## Current limitations", ""])
+    lines.extend(["", "## Released contract limitations", ""])
     for item in registry["frameworks"]:
         joined = " ".join(str(value) for value in item["limitations"])
         lines.append(f"- **{_cell(item['name'])} (`{item['id']}`):** {_cell(joined)}")

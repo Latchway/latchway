@@ -26,11 +26,14 @@ introduce a parallel chat, prompt, tool, transcript, or model framework.
 
 ## 2. Supported framework versions
 
-The generated registry records one experimental source tuple: Apple Foundation
-Models `27.0.0` through `27.0.0`. Twelve iOS 27.0 simulator tests cover text,
-transcript, incremental usage, cancellation, quota and unavailable mapping,
-refresh, header and provider-placeholder isolation, logger redaction, and
-explicit tool and schema rejection. No broader or published range is implied.
+The released registry records one experimental source tuple: Apple Foundation
+Models `27.0.0` through `27.0.0`. Its immutable `1.0.0` snapshot records nine
+simulator tests covering text, transcript, incremental usage, cancellation,
+quota and unavailable mapping, refresh, and explicit tool and schema rejection.
+Twelve iOS 27.0 simulator tests now pass in current source; the three later cases
+cover header isolation, provider-placeholder isolation, and logger redaction.
+Those post-freeze cases strengthen local evidence without widening the released
+range.
 
 ## 3. Supported Latchway versions
 

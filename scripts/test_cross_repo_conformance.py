@@ -1040,6 +1040,28 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         reasons = {check.get("reason") for check in report["checks"]}
         self.assertIn("sdk_locked_contract_source_drift", reasons)
 
+    def test_contract_source_checkpoint_rejects_later_compatibility_drift(self) -> None:
+        core = self.workspace.repositories["core"]
+        SyntheticWorkspace.write(
+            core / "compatibility/frameworks.yaml",
+            "schema_version: 1\nframeworks:\n  - id: changed\n",
+        )
+        SyntheticWorkspace.git(core, "add", "compatibility/frameworks.yaml")
+        SyntheticWorkspace.git(
+            core,
+            "commit",
+            "-m",
+            "test: drift contract compatibility",
+        )
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("contract-checkpoint-compatibility-drift")
+        self.assertEqual(result.returncode, 1)
+        reasons = {check.get("reason") for check in report["checks"]}
+        self.assertIn("sdk_locked_contract_source_drift", reasons)
+
     def test_server_compatibility_range_is_checked_against_core_version(self) -> None:
         for repository_id in ("javascript", "ios", "android", "react_native"):
             repository = self.workspace.repositories[repository_id]

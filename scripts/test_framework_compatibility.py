@@ -237,6 +237,8 @@ class FrameworkCompatibilityTests(unittest.TestCase):
         self.assertIn("does not mean supported compatibility", first)
         self.assertIn("## Capability matrix", first)
         self.assertIn("Canonical source: compatibility/frameworks.yaml", first)
+        self.assertIn("released contract snapshot", first)
+        self.assertIn("## Released contract limitations", first)
         self.assertNotIn("| Supported |", first)
         self.assertIn("Experimental", first)
         self.assertIn("Unsupported", first)
