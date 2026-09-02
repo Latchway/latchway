@@ -14,9 +14,9 @@ SwiftOpenAI 7/7, Foundation Models 9/9, and all four CocoaPods subspec lints;
 the reproducible MacPaw contribution separately passes all 213 upstream tests
 and its positive transport/cancellation probe.
 
-Canonical documentation commit `cd4387fa095556e044945bf6e1e3237d857d912e`
+Canonical documentation commit `e805873f9d151710b21c338e99128c3de4c20c34`
 is synchronized to Mintlify mirror
-`f37fde259986683f4957627b24d2106b2db81c78`. The six-repository
+`b2db718d7c25f039ea757df4d54c5510725d8b3a`. The six-repository
 release-control desired state is
 implemented locally, including the docs-only code-owner/reviewer policy, but it
 has not been applied live because no distinct reviewer is available. npm 2FA is
@@ -37,7 +37,7 @@ supply-chain, publication, and post-publication domains remain open.
 | --- | --- |
 | Current phase | Phase 9: the successor source tuple is clean-conformant and delivered to `main`; live release controls, publication, and protected exact-candidate execution remain open |
 | Current objective | Add one distinct GitHub reviewer, apply and verify the six-repository controls, then execute protected registry, publication, documentation, deployment, and evidence domains |
-| Validated implementation coordinates | Core/contract `cd47229eac32f4a93a0779903d927526b77817d6`; JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `76fe88ce8053c6983f03422238e9da12360d435d`; canonical docs `cd4387fa095556e044945bf6e1e3237d857d912e`; Mintlify mirror `f37fde259986683f4957627b24d2106b2db81c78` |
+| Validated implementation coordinates | Core/contract `cd47229eac32f4a93a0779903d927526b77817d6`; JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `76fe88ce8053c6983f03422238e9da12360d435d`; canonical docs `e805873f9d151710b21c338e99128c3de4c20c34`; Mintlify mirror `b2db718d7c25f039ea757df4d54c5510725d8b3a` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Database schema version | `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
 | Last full test time | `2026-09-02` — core `cd47229eac32f4a93a0779903d927526b77817d6` passed full `make check` and complete uncached PostgreSQL 15 and PostgreSQL 18 `go test -count=1 ./...` suites. JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` passed `release:check`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` passed the 665-task gate and local publication smoke; React Native `76fe88ce8053c6983f03422238e9da12360d435d` passed `check`. Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` passed its full package/release gate: production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
@@ -52,7 +52,7 @@ supply-chain, publication, and post-publication domains remain open.
 | --- | --- |
 | Core contract/runtime checkpoint `latchway` | `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Prior schema-27 performance checkpoint `latchway` | `77069816dd68174052e7ebc163911883f8f07e7e` |
-| Final canonical-public-doc source | `cd4387fa095556e044945bf6e1e3237d857d912e`, a documentation descendant of `cd47229eac32f4a93a0779903d927526b77817d6` |
+| Final canonical-public-doc source | `e805873f9d151710b21c338e99128c3de4c20c34`, a documentation descendant of `cd47229eac32f4a93a0779903d927526b77817d6` |
 | JavaScript `latchway-js` | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` |
 | Swift `latchway-ios-sdk` | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` |
 | Android `latchway-android` | `f847ce600f0a48859ad4cb534b95b6251c3c633e` |
@@ -61,7 +61,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Swift documentation bundle SHA-256 | `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4` |
 | Android documentation bundle SHA-256 | `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b` |
 | React Native documentation bundle SHA-256 | `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d` |
-| Final Mintlify mirror `latchway-docs` | `f37fde259986683f4957627b24d2106b2db81c78`, generated from `cd4387fa095556e044945bf6e1e3237d857d912e` |
+| Final Mintlify mirror `latchway-docs` | `b2db718d7c25f039ea757df4d54c5510725d8b3a`, generated from `e805873f9d151710b21c338e99128c3de4c20c34` |
 
 These coordinates form the validated implementation tuple delivered to `main`.
 The deterministic
@@ -147,7 +147,7 @@ lock-order suites also pass against the frozen implementation checkpoint.
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Schema `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains the preceding schema-27 coordinate |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| Product release state | `unpublished` and not release-qualified; no local version 1 tags exist, and no package, image, or product-runtime cloud deployment is verified. A prior Mintlify preview exists, but final mirror `f37fde259986683f4957627b24d2106b2db81c78` is not claimed as a protected production deployment and `docs.latchway.dev` is not routed. |
+| Product release state | `unpublished` and not release-qualified; no local version 1 tags exist, and no package, image, or product-runtime cloud deployment is verified. A prior Mintlify preview exists, but final mirror `b2db718d7c25f039ea757df4d54c5510725d8b3a` is not claimed as a protected production deployment and `docs.latchway.dev` is not routed. |
 
 The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate bundle
 hashes are not release coordinates. All four SDK successor locks name the
@@ -167,9 +167,9 @@ released checkpoint and reproducible bundle above.
 | React Native SDK | Successor commit `76fe88ce8053c6983f03422238e9da12360d435d` is implemented, passes `mise exec -- pnpm check`, and is pinned to JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, and Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`. Its release workflow remains fail-closed until live protected controls exist. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution and extension-matrix proof; physical Android/Google Play proof; protected controls/evidence, tags, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
-| Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
+| Cloud and supply-chain workflows | Complete and statically/dry-run validated. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Release controls | The closed desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. Offline validation passes, but no live ruleset/environment apply is claimed. | One accepted independent reviewer, manual no-admin-bypass confirmation, live two-stage apply, and live verify; npm already has `auth-and-writes` 2FA but package bootstrap/trusted publishers remain open |
-| Mintlify public docs | Canonical source `cd4387fa095556e044945bf6e1e3237d857d912e` imports the exact four reproducible bundles and mirror `f37fde259986683f4957627b24d2106b2db81c78` names that source in its manifest. Local canonical/mirror checks, clean source conformance, and audited source delivery are complete. | Configure `docs.latchway.dev`, deploy the exact mirror through protected controls, and seal post-deploy evidence |
+| Mintlify public docs | Canonical source `e805873f9d151710b21c338e99128c3de4c20c34` imports the exact four reproducible bundles, adds task-oriented deployment comparison and release-image verification, and closes Cloud Run/Cloudflare cost, residency, migration, rollout, and rollback runbook gaps. Mirror `b2db718d7c25f039ea757df4d54c5510725d8b3a` names that source in its manifest. Canonical/mirror checks, clean source conformance, and audited source delivery are complete. | Configure `docs.latchway.dev`, deploy the exact mirror through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
 
@@ -275,8 +275,8 @@ JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, iOS
 `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
 `f847ce600f0a48859ad4cb534b95b6251c3c633e`, React Native
 `76fe88ce8053c6983f03422238e9da12360d435d`, canonical documentation
-`cd4387fa095556e044945bf6e1e3237d857d912e`, and Mintlify mirror
-`f37fde259986683f4957627b24d2106b2db81c78`. All four imported SDK documentation bundles
+`e805873f9d151710b21c338e99128c3de4c20c34`, and Mintlify mirror
+`b2db718d7c25f039ea757df4d54c5510725d8b3a`. All four imported SDK documentation bundles
 record those SDK coordinates and `source_tree_clean: true`. React Native predecessor
 `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict development signing,
 entitlement, embedded-extension, registered-iPad, install, and launch
