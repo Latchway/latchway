@@ -1350,14 +1350,148 @@ jobs:
           # The candidate bundle was already built in the credential-free job.
           # Upload it as data; do not evaluate candidate build plugins here.
           "${wrangler[@]}" deploy --no-bundle
+          [[ "$CLOUDFLARE_API_TOKEN" =~ ^[A-Za-z0-9._~-]{20,256}$ ]]
+          cloudflare_api_headers="$RUNNER_TEMP/cloudflare-container-api.headers"
+          (umask 077 && printf 'Authorization: Bearer %s\n' "$CLOUDFLARE_API_TOKEN" > "$cloudflare_api_headers")
+          # Wrangler 4.127.1 JSON output reads only the first Dash API page.
+          # Follow the provider cursor directly, preserving Wrangler's normalized
+          # application fields and state derivation for the evidence reducer.
+          cloudflare_applications_api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/dash/applications"
+          cloudflare_application_per_page=100
+          cloudflare_application_max_pages=100
+          cloudflare_application_max_records=5000
+          cloudflare_application_max_page_bytes=1048576
+          cloudflare_application_max_output_bytes=8388608
+          list_cloudflare_applications() {
+            local destination="$1"
+            local response="$RUNNER_TEMP/cloudflare-applications-api-response.json"
+            local normalized="$RUNNER_TEMP/cloudflare-applications-api-normalized.json"
+            local accumulator="$RUNNER_TEMP/cloudflare-applications-api-accumulator.json"
+            local combined="$RUNNER_TEMP/cloudflare-applications-api-combined.json"
+            local page_token=""
+            local next_page_token page_token_hash
+            local seen_page_token_hashes=""
+            local page_number=0
+            local -a curl_arguments=()
+            printf '[]\n' > "$accumulator"
+            while true; do
+              page_number=$((page_number + 1))
+              test "$page_number" -le "$cloudflare_application_max_pages"
+              curl_arguments=(
+                --silent --show-error --fail-with-body
+                --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30
+                --max-filesize "$cloudflare_application_max_page_bytes"
+                --get --header @"$cloudflare_api_headers"
+                --header 'Accept: application/json'
+                --data-urlencode "per_page=$cloudflare_application_per_page"
+                --output "$response"
+              )
+              if [[ -n "$page_token" ]]; then
+                curl_arguments+=(--data-urlencode "page_token=$page_token")
+              fi
+              curl "${curl_arguments[@]}" "$cloudflare_applications_api"
+              test -s "$response"
+              test "$(wc -c < "$response")" -le "$cloudflare_application_max_page_bytes"
+              jq -e '
+                def nonnegative_integer:
+                  type == "number" and . >= 0 and floor == .;
+                type == "object" and
+                .success == true and
+                .errors == [] and
+                (.messages | type == "array") and
+                (.result | type == "array") and
+                (.result_info | type == "object") and
+                (
+                  .result_info.next_page_token == null or
+                  (
+                    .result_info.next_page_token | type == "string" and
+                    length >= 1 and length <= 2048 and
+                    test("^[!-~]+$")
+                  )
+                ) and
+                all(.result[];
+                  type == "object" and
+                  (.id | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+                  (.name | type == "string" and length >= 1 and length <= 256) and
+                  (.image | type == "string" and length >= 1 and length <= 2048) and
+                  (.instances | nonnegative_integer) and
+                  (.version | nonnegative_integer) and
+                  (.updated_at | type == "string" and length >= 1) and
+                  (.created_at | type == "string" and length >= 1) and
+                  (.health | type == "object") and
+                  (.health.instances | type == "object") and
+                  (.health.instances.failed | nonnegative_integer) and
+                  (.health.instances.starting | nonnegative_integer) and
+                  (.health.instances.scheduling | nonnegative_integer) and
+                  (.health.instances.active | nonnegative_integer)
+                )
+              ' "$response" >/dev/null
+              jq --compact-output '
+                .result | map({
+                  id: .id,
+                  name: .name,
+                  state: (
+                    if .health.instances.failed > 0 then "degraded"
+                    elif .health.instances.starting > 0 or .health.instances.scheduling > 0 then "provisioning"
+                    elif .health.instances.active > 0 then "active"
+                    else "ready"
+                    end
+                  ),
+                  instances: .instances,
+                  image: .image,
+                  version: .version,
+                  updated_at: .updated_at,
+                  created_at: .created_at
+                })
+              ' "$response" > "$normalized"
+              jq --slurp '.[0] + .[1]' "$accumulator" "$normalized" > "$combined"
+              mv "$combined" "$accumulator"
+              test "$(jq -er 'length' "$accumulator")" -le "$cloudflare_application_max_records"
+              test "$(wc -c < "$accumulator")" -le "$cloudflare_application_max_output_bytes"
+              next_page_token=$(jq -er '.result_info.next_page_token // empty' "$response" || true)
+              if [[ -z "$next_page_token" ]]; then
+                break
+              fi
+              page_token_hash=$(printf '%s' "$next_page_token" | sha256sum | awk '{print $1}')
+              if [[ " $seen_page_token_hashes " == *" $page_token_hash "* ]]; then
+                return 1
+              fi
+              seen_page_token_hashes="${seen_page_token_hashes:+$seen_page_token_hashes }$page_token_hash"
+              page_token="$next_page_token"
+            done
+            jq -e --argjson max_records "$cloudflare_application_max_records" '
+              type == "array" and
+              length <= $max_records and
+              ([.[].id] | length) == ([.[].id] | unique | length) and
+              all(.[];
+                (keys | sort) == ["created_at", "id", "image", "instances", "name", "state", "updated_at", "version"] and
+                (.state == "active" or .state == "degraded" or .state == "provisioning" or .state == "ready")
+              )
+            ' "$accumulator" >/dev/null
+            jq --sort-keys 'sort_by(.id)' "$accumulator" > "$combined"
+            install -m 0644 "$combined" "$destination"
+            rm -f "$response" "$normalized" "$accumulator" "$combined"
+          }
           evidence_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           request_body=$(jq --null-input --compact-output --arg evidence_id "$evidence_id" '{evidence_id: $evidence_id}')
           migration_ready=0
           for _ in {1..24}; do
-            "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications-before.json
-            app_id=$(jq -er --arg image "$CLOUDFLARE_MIRROR_IMAGE" \
-              '[.[] | select(.name == "latchway" and .image == $image and (.state == "active" or .state == "ready"))] | if length == 1 then .[0].id else empty end' \
-              /tmp/cloudflare-applications-before.json || true)
+            list_cloudflare_applications /tmp/cloudflare-applications-before.json
+            application_record=$(jq -cer --arg image "$CLOUDFLARE_MIRROR_IMAGE" '
+              [.[] | select(.name == "latchway")] |
+              if length == 1 and .[0].image == $image and (.[0].state == "active" or .[0].state == "ready") and
+                (.[0].id | test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+                (.[0].version | type == "number" and . >= 1 and floor == .)
+              then .[0] | {name, image, state, id, version}
+              else empty
+              end
+            ' /tmp/cloudflare-applications-before.json || true)
+            if [[ -n "$application_record" ]]; then
+              app_id=$(jq -er '.id' <<< "$application_record")
+              app_version=$(jq -er '.version' <<< "$application_record")
+            else
+              app_id=""
+            fi
             if [[ "$app_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && \
               curl --silent --show-error --fail-with-body --max-time 20 \
                 --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
@@ -1366,7 +1500,6 @@ jobs:
                 --output /tmp/cloudflare-migration-before.json \
                 "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
               "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-before.json
-              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications-before.json)
               if jq -e --argjson version "$app_version" \
                 'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
                 /tmp/cloudflare-instances-before.json >/dev/null; then
@@ -1397,16 +1530,26 @@ jobs:
               --data "$request_body" \
               --output /tmp/cloudflare-migration.json \
               "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
-              "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications.json
-              "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-after.json
-              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications.json)
-              before_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-before.json)
-              after_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-after.json)
-              if [[ "$before_created" != "$after_created" ]] && jq -e --argjson version "$app_version" \
-                'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
-                /tmp/cloudflare-instances-after.json >/dev/null; then
-                replacement_ready=1
-                break
+              list_cloudflare_applications /tmp/cloudflare-applications.json
+              application_record=$(jq -cer --arg id "$app_id" --arg image "$CLOUDFLARE_MIRROR_IMAGE" '
+                [.[] | select(.name == "latchway")] |
+                if length == 1 and .[0].id == $id and .[0].image == $image and (.[0].state == "active" or .[0].state == "ready") and
+                  (.[0].version | type == "number" and . >= 1 and floor == .)
+                then .[0] | {name, image, state, id, version}
+                else empty
+                end
+              ' /tmp/cloudflare-applications.json || true)
+              if [[ -n "$application_record" ]]; then
+                app_version=$(jq -er '.version' <<< "$application_record")
+                "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-after.json
+                before_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-before.json)
+                after_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-after.json)
+                if [[ "$before_created" != "$after_created" ]] && jq -e --argjson version "$app_version" \
+                  'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
+                  /tmp/cloudflare-instances-after.json >/dev/null; then
+                  replacement_ready=1
+                  break
+                fi
               fi
             fi
             sleep 10
@@ -1433,13 +1576,19 @@ jobs:
           printf '%s\n' "$shutdown_started" > /tmp/cloudflare-provider-raw/shutdown-started.txt
           printf '%s\n' "$shutdown_finished" > /tmp/cloudflare-provider-raw/shutdown-finished.txt
           printf '%s\n' "$app_id" > /tmp/latchway-provider-resource-id
+          rm -f "$cloudflare_api_headers"
 
       - name: Remove any temporary Cloudflare registry credential
         if: always() && inputs.platform == 'cloudflare_containers'
         shell: bash
         run: |
           docker logout registry.cloudflare.com >/dev/null 2>&1 || true
-          rm -f /tmp/cloudflare-registry-credentials.json
+          rm -f /tmp/cloudflare-registry-credentials.json \
+            "$RUNNER_TEMP/cloudflare-container-api.headers" \
+            "$RUNNER_TEMP/cloudflare-applications-api-response.json" \
+            "$RUNNER_TEMP/cloudflare-applications-api-normalized.json" \
+            "$RUNNER_TEMP/cloudflare-applications-api-accumulator.json" \
+            "$RUNNER_TEMP/cloudflare-applications-api-combined.json"
 
       - name: Retain raw provider observations for fresh validation
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

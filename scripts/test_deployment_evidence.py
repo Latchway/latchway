@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -522,6 +523,206 @@ class DeploymentEvidenceTests(unittest.TestCase):
             "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
             compose,
         )
+
+    def test_cloudflare_application_discovery_is_complete_and_bounded(self) -> None:
+        workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"
+        jobs = deployment.yaml_as_json(workflow_path)["jobs"]
+        capture = jobs["capture"]
+        cloudflare_step = next(
+            step
+            for step in capture["steps"]
+            if step.get("name")
+            == "Capture Cloudflare Container image, migration, secret, and replacement evidence"
+        )
+        run = cloudflare_step["run"]
+        self.assertNotIn('"${wrangler[@]}" containers list', run)
+        self.assertNotIn(
+            '--header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"', run
+        )
+        for required in (
+            "[[ \"$CLOUDFLARE_API_TOKEN\" =~ ^[A-Za-z0-9._~-]{20,256}$ ]]",
+            "umask 077",
+            "Authorization: Bearer %s",
+            '--header @"$cloudflare_api_headers"',
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/dash/applications",
+            "cloudflare_application_per_page=100",
+            "cloudflare_application_max_pages=100",
+            "cloudflare_application_max_records=5000",
+            "cloudflare_application_max_page_bytes=1048576",
+            "cloudflare_application_max_output_bytes=8388608",
+            "page_number=$((page_number + 1))",
+            'curl_arguments+=(--data-urlencode "page_token=$page_token")',
+            ".result_info.next_page_token",
+            "seen_page_token_hashes",
+            ".success == true",
+            ".errors == []",
+            'if .health.instances.failed > 0 then "degraded"',
+            'elif .health.instances.starting > 0 or .health.instances.scheduling > 0 then "provisioning"',
+            'elif .health.instances.active > 0 then "active"',
+            "([.[].id] | length) == ([.[].id] | unique | length)",
+            "jq --sort-keys 'sort_by(.id)'",
+        ):
+            self.assertIn(required, run)
+        self.assertEqual(
+            run.count(
+                "list_cloudflare_applications /tmp/cloudflare-applications-before.json"
+            ),
+            1,
+        )
+        self.assertEqual(
+            run.count("list_cloudflare_applications /tmp/cloudflare-applications.json"),
+            1,
+        )
+        self.assertEqual(
+            run.count("then .[0] | {name, image, state, id, version}"), 2
+        )
+        cleanup = next(
+            step
+            for step in capture["steps"]
+            if step.get("name")
+            == "Remove any temporary Cloudflare registry credential"
+        )
+        self.assertEqual(
+            cleanup["if"], "always() && inputs.platform == 'cloudflare_containers'"
+        )
+        for path in (
+            "$RUNNER_TEMP/cloudflare-container-api.headers",
+            "$RUNNER_TEMP/cloudflare-applications-api-response.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-normalized.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-accumulator.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-combined.json",
+        ):
+            self.assertIn(path, cleanup["run"])
+
+    def test_cloudflare_application_discovery_follows_and_bounds_cursors(self) -> None:
+        workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"
+        jobs = deployment.yaml_as_json(workflow_path)["jobs"]
+        run = next(
+            step["run"]
+            for step in jobs["capture"]["steps"]
+            if step.get("name")
+            == "Capture Cloudflare Container image, migration, secret, and replacement evidence"
+        )
+        start = run.index("cloudflare_applications_api=")
+        end = run.index("\nevidence_id=", start)
+        paginator = run[start:end]
+        first_id = "11111111-1111-1111-1111-111111111111"
+        second_id = "22222222-2222-2222-2222-222222222222"
+
+        def application(
+            identifier: str, name: str, image: str, **health: int
+        ) -> dict[str, object]:
+            return {
+                "id": identifier,
+                "name": name,
+                "image": image,
+                "instances": 1,
+                "version": 3,
+                "updated_at": "2026-09-02T01:00:00Z",
+                "created_at": "2026-09-02T00:00:00Z",
+                "health": {
+                    "instances": {
+                        "failed": health.get("failed", 0),
+                        "starting": health.get("starting", 0),
+                        "scheduling": health.get("scheduling", 0),
+                        "active": health.get("active", 0),
+                    }
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.json"
+            second = root / "second.json"
+            output = root / "applications.json"
+            mirror = "registry.cloudflare.com/" + "a" * 32 + "/latchway@sha256:" + "b" * 64
+            dump(
+                first,
+                {
+                    "success": True,
+                    "errors": [],
+                    "messages": [],
+                    "result": [
+                        application(
+                            second_id, "other", "registry.cloudflare.com/other", failed=1
+                        )
+                    ],
+                    "result_info": {"next_page_token": "cursor-2"},
+                },
+            )
+            dump(
+                second,
+                {
+                    "success": True,
+                    "errors": [],
+                    "messages": [],
+                    "result": [application(first_id, "latchway", mirror, active=1)],
+                    "result_info": {"next_page_token": None},
+                },
+            )
+            wrapper = f"""set -Eeuo pipefail
+curl() {{
+  local output_path= cursor= argument
+  while (($# > 0)); do
+    argument="$1"
+    case "$argument" in
+      --output)
+        output_path="$2"
+        shift 2
+        ;;
+      --data-urlencode)
+        if [[ "$2" == page_token=* ]]; then cursor="${{2#page_token=}}"; fi
+        shift 2
+        ;;
+      *) shift ;;
+    esac
+  done
+  case "$cursor" in
+    "") install -m 0600 "$PAGE_ONE" "$output_path" ;;
+    cursor-2) install -m 0600 "$PAGE_TWO" "$output_path" ;;
+    *) return 65 ;;
+  esac
+}}
+{paginator}
+list_cloudflare_applications "$DESTINATION"
+jq -e --arg first_id "$FIRST_ID" --arg second_id "$SECOND_ID" --arg image "$MIRROR" '
+  length == 2 and
+  .[0].id == $first_id and .[0].name == "latchway" and .[0].image == $image and .[0].state == "active" and .[0].version == 3 and
+  .[1].id == $second_id and .[1].state == "degraded"
+' "$DESTINATION" >/dev/null
+"""
+            environment = {
+                "PATH": str(Path("/usr/bin")) + ":/bin:/usr/sbin:/sbin",
+                "RUNNER_TEMP": str(root),
+                "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
+                "cloudflare_api_headers": str(root / "headers"),
+                "PAGE_ONE": str(first),
+                "PAGE_TWO": str(second),
+                "DESTINATION": str(output),
+                "FIRST_ID": first_id,
+                "SECOND_ID": second_id,
+                "MIRROR": mirror,
+            }
+            success = subprocess.run(
+                ["bash", "-c", wrapper],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(success.returncode, 0, success.stderr)
+
+            repeated = json.loads(second.read_text(encoding="utf-8"))
+            repeated["result_info"]["next_page_token"] = "cursor-2"
+            dump(second, repeated)
+            rejected = subprocess.run(
+                ["bash", "-c", wrapper],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
 
     def test_fresh_signer_authenticates_raw_capture_and_archive_closure(self) -> None:
         workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"

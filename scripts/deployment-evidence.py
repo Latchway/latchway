@@ -1052,6 +1052,64 @@ def validate_workflow() -> Mapping[str, Any]:
         )
     ):
         raise EvidenceError("deployment_oidc_candidate_execution_forbidden")
+    cloudflare_capture_steps = [
+        step
+        for step in capture_job.get("steps", [])
+        if isinstance(step, dict)
+        and step.get("name")
+        == "Capture Cloudflare Container image, migration, secret, and replacement evidence"
+    ]
+    if len(cloudflare_capture_steps) != 1:
+        raise EvidenceError("deployment_cloudflare_capture_step_invalid")
+    cloudflare_run = cloudflare_capture_steps[0].get("run")
+    if not isinstance(cloudflare_run, str):
+        raise EvidenceError("deployment_cloudflare_capture_step_invalid")
+    required_cloudflare_discovery = (
+        "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/dash/applications",
+        "cloudflare_application_per_page=100",
+        "cloudflare_application_max_pages=100",
+        "cloudflare_application_max_records=5000",
+        "cloudflare_application_max_page_bytes=1048576",
+        "cloudflare_application_max_output_bytes=8388608",
+        "list_cloudflare_applications()",
+        '--header @"$cloudflare_api_headers"',
+        '--data-urlencode "page_token=$page_token"',
+        ".result_info.next_page_token",
+        "seen_page_token_hashes",
+        'if .health.instances.failed > 0 then "degraded"',
+        'elif .health.instances.starting > 0 or .health.instances.scheduling > 0 then "provisioning"',
+        'elif .health.instances.active > 0 then "active"',
+        "then .[0] | {name, image, state, id, version}",
+        "list_cloudflare_applications /tmp/cloudflare-applications-before.json",
+        "list_cloudflare_applications /tmp/cloudflare-applications.json",
+    )
+    if any(fragment not in cloudflare_run for fragment in required_cloudflare_discovery):
+        raise EvidenceError("deployment_cloudflare_application_pagination_incomplete")
+    if any(
+        fragment in cloudflare_run
+        for fragment in (
+            '"${wrangler[@]}" containers list',
+            '--header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"',
+        )
+    ):
+        raise EvidenceError("deployment_cloudflare_application_pagination_bypassed")
+    cleanup_steps = [
+        step
+        for step in capture_job.get("steps", [])
+        if isinstance(step, dict)
+        and step.get("name") == "Remove any temporary Cloudflare registry credential"
+    ]
+    if len(cleanup_steps) != 1 or any(
+        fragment not in str(cleanup_steps[0].get("run", ""))
+        for fragment in (
+            "$RUNNER_TEMP/cloudflare-container-api.headers",
+            "$RUNNER_TEMP/cloudflare-applications-api-response.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-normalized.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-accumulator.json",
+            "$RUNNER_TEMP/cloudflare-applications-api-combined.json",
+        )
+    ):
+        raise EvidenceError("deployment_cloudflare_application_cleanup_invalid")
     toolchain_source_text = json.dumps(cloudflare_toolchain_source, sort_keys=True)
     if any(
         fragment in toolchain_source_text
