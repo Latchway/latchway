@@ -50,10 +50,10 @@ mirror.
 | Canonical SDK-bundle/public-doc source | `8109b8e4a73dbd56b45b521298b69a1f13ab26e2`, a documentation descendant of the core checkpoint |
 | Database | Schema `28` at `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `c1934b9decf122e0e118976d90cf898a190c8c2f` |
+| JavaScript source | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` |
 | Swift source | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` |
 | Android source | `f847ce600f0a48859ad4cb534b95b6251c3c633e` |
-| React Native source | `aae6133bb47d131d5d2bc058cbfcad315edef4ff` |
+| React Native source | `76fe88ce8053c6983f03422238e9da12360d435d` |
 | Mintlify mirror source | `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d`, generated from canonical docs `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` |
 | Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
 
@@ -172,10 +172,10 @@ parent mismatch.
 - [x] Repeat commit/lock convergence and the clean source gate for the current
   core contract delta.
 - [x] Bind the final SDK source tuple: JavaScript
-  `c1934b9decf122e0e118976d90cf898a190c8c2f`, Swift
+  `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, Swift
   `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
   `f847ce600f0a48859ad4cb534b95b6251c3c633e`, and React Native
-  `aae6133bb47d131d5d2bc058cbfcad315edef4ff`.
+  `76fe88ce8053c6983f03422238e9da12360d435d`.
 
 ### Phase 5: iOS Installation Family SDK — source complete,
 external proof open
@@ -281,15 +281,15 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the local 228-page Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `c1934b9decf122e0e118976d90cf898a190c8c2f` (SHA-256
-  `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`),
+  `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` (SHA-256
+  `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`),
   Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` (SHA-256
   `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`),
   Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` (SHA-256
   `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`),
-  and React Native `aae6133bb47d131d5d2bc058cbfcad315edef4ff`
+  and React Native `76fe88ce8053c6983f03422238e9da12360d435d`
   (SHA-256
-  `f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99`).
+  `38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d`).
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [x] Bind canonical documentation commit

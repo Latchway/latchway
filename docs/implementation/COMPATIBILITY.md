@@ -134,17 +134,17 @@ the previously delivered `main` baseline and are not claimed as pushed.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `c1934b9decf122e0e118976d90cf898a190c8c2f` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, opaque-route hardening, adapters, framework-version conformance, three-browser/bundler consumers, and reproducible packages pass `mise exec -- pnpm release:check` |
+| JavaScript `@latchway/client` | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, opaque-route hardening, adapters, framework-version conformance, three-browser/bundler consumers, and reproducible packages pass `mise exec -- pnpm release:check` |
 | Swift `Latchway` | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` | iOS 15+, macOS 12+ supported surfaces | Full package/release gate passes: production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth. Protected distribution and physical Foundation Models evidence remain required. |
 | Android `dev.latchway:latchway-*` | `f847ce600f0a48859ad4cb534b95b6251c3c633e` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass the 665-task gate and publication smoke. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
-| React Native `@latchway/react-native` | `aae6133bb47d131d5d2bc058cbfcad315edef4ff` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, root-owned component lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and the Debug-only native App Intent path pass `mise exec -- pnpm check`. The Release fixture remains fail-closed. The current head was not physically rerun; App Intent/extension invocation and physical Android/Google Play evidence are operator-deferred. Protected Apple distribution proof remains open and is not claimed as deferred. |
+| React Native `@latchway/react-native` | `76fe88ce8053c6983f03422238e9da12360d435d` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, root-owned component lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and the Debug-only native App Intent path pass `mise exec -- pnpm check`. The Release fixture remains fail-closed. The current head was not physically rerun; App Intent/extension invocation and physical Android/Google Play evidence are operator-deferred. Protected Apple distribution proof remains open and is not claimed as deferred. |
 
 The reproducible documentation bundles for that table are, respectively,
-JavaScript `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`,
+JavaScript `5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`,
 Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`,
 Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`,
 and React Native
-`f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99`.
+`38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d`.
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. The checked-in SDK successor locks point to the clean released version

@@ -12,18 +12,18 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 The final locked tuple binds core contract checkpoint
 `cd47229eac32f4a93a0779903d927526b77817d6`, reproducible bundle SHA-256
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`,
-JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`, Swift
+JavaScript `8baeffa74d0916e3b9299e3a29a6a2dccf154e41`, Swift
 `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
 `f847ce600f0a48859ad4cb534b95b6251c3c633e`, and React Native
-`aae6133bb47d131d5d2bc058cbfcad315edef4ff`. The canonical documentation lock
+`76fe88ce8053c6983f03422238e9da12360d435d`. The canonical documentation lock
 binds those SDK commits to archive SHA-256 values
-`1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`
+`5c5aec14d562e71842aed6912de21b451a7c70444cbbca4fa70a768066ddcdf4`
 (JavaScript),
 `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`
 (Swift),
 `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`
 (Android), and
-`f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99`
+`38470a5e38e8f7c2b86378145cbc6667c31d4764001f4931d181088a7dcbc10d`
 (React Native). A fresh clean six-repository source report is still required
 after the current delivery commits; this document does not reuse an earlier
 report as evidence for a changed source tuple.
