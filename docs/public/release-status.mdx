@@ -22,8 +22,9 @@ The source locks name JavaScript
 `c0fac916836bcfbdbf7f6a81808036726589d563`, Android
 `3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
 `39fd86ef1f6f973953e4fd5d0057ae17cc035abb`. The current core binary and SDK
-source versions identify as `1.0.0`. These commits, however, have not been
-merged, tagged, published, deployed, or observed through protected
+source versions identify as `1.0.0`. The six audited source histories are
+delivered to `main`, but they have not been tagged, published as packages or a
+container, deployed as a product runtime, or observed through protected
 post-publication checks. The released contract lock is not itself a public
 stable release.
 
@@ -111,8 +112,10 @@ extends the historical live proof or authorizes release promotion.
 ## Current source and authorization boundary
 
 Source-branch synchronization is a delivery operation and does not promote a
-release. No merge, tag, GitHub release, package/container publication,
-production documentation deployment, or post-publication check is verified.
+release. All six audited histories are on `main`. No tag, GitHub release,
+package/container publication, product-runtime deployment, or protected
+post-publication check is verified. The public documentation is live on
+Mintlify, but no protected production-deployment receipt is sealed.
 
 Offline/local device build, install, and launch may proceed if it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.

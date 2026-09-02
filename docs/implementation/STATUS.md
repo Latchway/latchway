@@ -25,7 +25,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Required field | Current value |
 | --- | --- |
 | Current phase | Phase 9: source integration is converged; live release-control provisioning and protected exact-candidate execution remain open |
-| Current objective | Deliver the clean six-repository tuple, apply the reviewed GitHub/npm controls, and execute protected release domains only with their required authority |
+| Current objective | Apply the reviewed GitHub/npm controls, then execute protected release domains only with their required authority |
 | Validated implementation coordinates | The frozen contract and SDK coordinates below; the final source-conformance report records the canonical-doc and mirror commits |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` |
 | Database schema version | `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and the current candidate descendant; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
@@ -33,7 +33,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before stable release: live GitHub environment/ruleset/immutable-release enforcement with an independent reviewer; npm sign-in, account 2FA, namespace bootstrap and exact trusted publishers; registry/package publication; an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate; the protected delegated-extension runtime matrix; operator-deferred App Intent and physical Android/Google Play proof; Turnstile; immutable-image provider/cloud/resilience; and post-publication receipts |
 | External credentials still required | The connected GitHub token can deliver source but lacks repository-administration/environment authority. Live controls require an administrator session plus a reviewer distinct from the authenticated operator. npm requires an authenticated 2FA-enabled publisher account before namespace bootstrap/trusted-publisher creation. Later protected gates require the applicable Apple distribution, Play, Turnstile, cloud, registry, KMS/signing, collector, and finalizer identities. |
-| Next executable task | Deliver the clean source tuple, then apply and verify the reviewed GitHub/npm control manifest before any package, image, tag, or stable-release mutation |
+| Next executable task | Apply and verify the reviewed GitHub/npm control manifest before any package, image, tag, or stable-release mutation |
 
 ### Validated version 1 source coordinates
 
@@ -57,9 +57,11 @@ These coordinates form the current candidate source-conformance tuple. A clean
 six-repository run passed with the canonical core and generated mirror commits
 recorded above. The contract bundle SHA-256 is
 `14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`.
-Branch synchronization is a delivery operation, not release evidence. No local
-version 1 tags exist, and no merge, GitHub release, package publication,
-production deployment, or production documentation deployment is verified.
+Branch synchronization is a delivery operation, not release evidence. All six
+audited histories are delivered to `main`. No local version 1 tags exist, and
+no GitHub release, package/container publication, product-runtime deployment,
+or protected production-documentation receipt is verified. The public
+Mintlify content is live.
 
 ### Full-suite commands
 
@@ -156,7 +158,7 @@ released checkpoint and reproducible bundle above.
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Release controls | A canonical five-repository manifest covers 50 environments and 90 privileged jobs; its closed schema, deterministic 271-action offline plan, reversible fail-closed quarantine, partial-apply journal, exact main/tag rulesets, and five npm trusted-publisher tuples are implemented and independently validated without live mutation. | GitHub administrator login, independent reviewer selection, manual no-admin-bypass confirmation, npm account 2FA/bootstrap, live two-stage apply, and live verify |
-| Mintlify public docs | The canonical core imports exact reproducible SDK bundles; both canonical and mirrored documentation suites pass, the mirror is byte-identical, and clean source conformance passes. | Deliver the synchronized mirror and perform production deploy/post-deploy validation |
+| Mintlify public docs | The canonical core imports exact reproducible SDK bundles; both canonical and mirrored documentation suites pass, the mirror is byte-identical, clean source conformance passes, and the synchronized content is live on Mintlify. | Seal protected production-deployment and post-deploy evidence |
 
 ## Local source evidence
 
@@ -254,8 +256,8 @@ physically rerun. No successor collected new App Attest evidence or invoked the
 Debug App Intent, so the earlier live root-app
 observation remains bound to predecessor
 `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`. Source-branch synchronization is
-tracked separately as a delivery operation. None of these results substitutes
-for a protected external domain.
+complete and tracked separately as a delivery operation. None of these results
+substitutes for a protected external domain.
 
 ## Direct component attestation boundary
 
@@ -358,16 +360,16 @@ invocation and Google Play physical evidence; those remain open release gates.
 
 The user authorized a scoped non-force push of the six audited source-branch
 histories and separately requested GHCR and npm publication work. Reviewed
-namespace-bootstrap or explicitly non-stable preview artifacts do not
-authorize or evidence a merge, stable tag, version 1 GitHub release,
-release-qualified production documentation deployment, or protected
+histories are now delivered to `main`. Namespace bootstrap or explicitly
+non-stable preview artifacts do not authorize a stable tag, version 1 GitHub
+release, release-qualified production documentation receipt, or protected
 promotion.
 
 ## Release decision
 
 The repositories are locally source-converged but are not ready for release
-promotion. Merging, tagging, production promotion, package/container
-publication, production documentation deployment, and a production-readiness
-claim remain outside the source-push authorization and blocked until the
-protected finalizer binds every required receipt to one immutable set of core, SDK,
-image, contract, package, and documentation coordinates.
+promotion. Source delivery is complete. Tagging, production promotion,
+package/container publication, release-qualified documentation evidence, and a
+production-readiness claim remain blocked until the protected finalizer binds
+every required receipt to one immutable set of core, SDK, image, contract,
+package, and documentation coordinates.
