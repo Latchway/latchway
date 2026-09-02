@@ -4,7 +4,7 @@
     {
       "name": "@latchway/client",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "package.json",
         "region": {
           "end_line": 13,
@@ -20,7 +20,7 @@
     {
       "name": "@latchway/openai",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "packages/openai/package.json",
         "region": {
           "end_line": 4,
@@ -36,7 +36,7 @@
     {
       "name": "@latchway/vercel-ai",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "packages/vercel-ai/package.json",
         "region": {
           "end_line": 4,
@@ -52,7 +52,7 @@
     {
       "name": "@latchway/langchain",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "packages/langchain/package.json",
         "region": {
           "end_line": 4,
@@ -68,7 +68,7 @@
     {
       "name": "Node.js",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "package.json",
         "region": {
           "end_line": 14,
@@ -84,7 +84,7 @@
     {
       "name": "Web browser matrix",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "package.json",
         "region": {
           "end_line": 95,
@@ -100,7 +100,7 @@
     {
       "name": "openai minimum",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -116,7 +116,7 @@
     {
       "name": "openai latest",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -132,7 +132,7 @@
     {
       "name": "ai minimum",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -148,7 +148,7 @@
     {
       "name": "ai latest",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -164,7 +164,7 @@
     {
       "name": "@ai-sdk/openai minimum",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -180,7 +180,7 @@
     {
       "name": "@ai-sdk/openai latest",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -196,7 +196,7 @@
     {
       "name": "@langchain/openai minimum",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -212,7 +212,7 @@
     {
       "name": "@langchain/openai latest",
       "source": {
-        "commit": "e3a57617e75bf3d46e858a1084749f46f819db1f",
+        "commit": "efa0a1074fd5639a02c4b852eac9ecaf4baf00f7",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,

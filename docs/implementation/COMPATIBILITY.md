@@ -31,7 +31,7 @@ version 1 runtime, schema 28, Admin-session inventory/revoke, configuration
 import/export, stable server-capability negotiation, authenticated Admin SSE
 refresh hints, exact JSON/YAML numeric preservation, and explicit
 `READ COMMITTED` application→environment lifecycle locking. Current core
-implementation checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50` is a
+implementation checkpoint `8bf4d9dede1490c3129f7f745f1017875bd4a005` is a
 contract-preserving descendant and is delivered to `main` with all four final
 SDK heads. Canonical public documentation is the checked-in `docs/public`
 tree; its generated deployment mirror is bound to that source by
@@ -136,17 +136,17 @@ documentation is defined by this checked-in canonical source tree.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `e3a57617e75bf3d46e858a1084749f46f819db1f` | Node 24.19 or standards-based browser WebCrypto/fetch | `mise exec -- pnpm release:check` passes 128 Vitest tests, 33 Node tests, 58 offline Python tests (57 pass and one skip), 51 Playwright tests, reproducibility, package, transport, component-session, adapter, framework-version, and browser/bundler consumer gates. |
-| Swift `Latchway` | `9f306d1e585069ca4aa703412c5d70656336e50f` | iOS 15+, macOS 12+ supported surfaces | Full `scripts/verify-package.sh` passes 50 offline Python tests (49 pass and one skip), 8/8 vulnerability tests, the keychain invariant gate, 166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer build, and CocoaPods lint for all four subspecs. Protected distribution and physical Foundation Models evidence remain required. |
-| Android `dev.latchway:latchway-*` | `a994f8b5ee81fa831b8b2e57885df39f50fa2777` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass 75 offline release tests with one expected skip, the full Gradle gate, and publication smoke. The Gradle report records 665 actionable tasks, not 665 tests; the final locked semantic slice passes 8/8. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
-| React Native `@latchway/react-native` | `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9` | RN 0.82.x, iOS 15+, Android API 24+ | `mise exec -- pnpm check` passes 103 Vitest, 58 Node, 4/4 documentation-bundle, and 8/8 dependency-scan tests plus contract, compatibility, lint, typecheck, codegen, build, example, and native-boundary gates. Separate compiled/native gates pass Swift bridge 5/5, Android Robolectric 6/6, locked iOS semantics 10/10, locked Android semantics 8/8, and a real CocoaPods/TurboModule build. Hosted replay rejection and protected hardware/TurboModule isolation remain open. The Release fixture remains fail-closed; the final head was not physically rerun. |
+| JavaScript `@latchway/client` | `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` | Node 24.19 or standards-based browser WebCrypto/fetch | Full `pnpm check` and `release:check` pass, including 71 offline release tests (70 pass and one skip), 51 Playwright tests, reproducibility, package, transport, component-session, adapter, framework-version, and browser/bundler consumer gates. |
+| Swift `Latchway` | `92a394acbc00d1af6d258372f22b11ddae8e1750` | iOS 15+, macOS 12+ supported surfaces | Full `scripts/verify-package.sh` passes 65 offline release tests (64 pass and one skip), the keychain invariant gate, 166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer build, and CocoaPods lint for all four subspecs. Protected distribution and physical Foundation Models evidence remain required. |
+| Android `dev.latchway:latchway-*` | `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass 106 offline release tests (105 pass and one skip), the full Gradle gate, and publication smoke. The Gradle report records 665 actionable tasks, not 665 tests; the final locked semantic slice passes 8/8. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
+| React Native `@latchway/react-native` | `ba23c750ec662834b4d480940c4067508723defb` | RN 0.82.x, iOS 15+, Android API 24+ | `mise exec -- pnpm check` passes 103 Vitest, 62 Node, 19 Python, and 8/8 dependency-scan tests plus contract, compatibility, lint, typecheck, codegen, build, example, deterministic iOS/Android bundle, and native-boundary gates. Separate compiled/native gates pass Swift bridge 5/5, Android Robolectric 6/6, locked iOS semantics 10/10, locked Android semantics 8/8, and a real CocoaPods/TurboModule build. Hosted replay rejection and protected hardware/TurboModule isolation remain open. The Release fixture remains fail-closed; the final head was not physically rerun. |
 
 The reproducible documentation bundles for that table are, respectively,
-JavaScript `cf7073575aa1af89b1739387eca2cfa03bb822ab7dc397bbdf80e1ce7a2271ae`,
-Swift `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`,
-Android `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`,
+JavaScript `f4e814289055bad88d508dde862ebdbd105b03483db807c2f128b0681da07711`,
+Swift `c0cdad255cde507faaad173f9a2dba05a29e6be53130f07a25c2e4e831498f00`,
+Android `1a13c6834b960dbfc7fb91c390167624eadbf5f6e8d12325bd82423cc4f4a7f7`,
 and React Native
-`59d98e3f0f79a75b7540af31f518ac8cfd878a030406abcf6d07dd564c6a74aa`.
+`db7c9a569a86ec2f88750de80a1bc2f44dceb0c6db2d9f1613a309dcbbed37a2`.
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. The checked-in SDK successor locks point to the clean released version
@@ -154,16 +154,20 @@ history. The checked-in SDK successor locks point to the clean released version
 
 ## Distribution compatibility boundary
 
-The offline GitHub desired state now covers all six repositories and 51
+The offline GitHub desired state covers all six repositories and 51 strict
 protected environments. `latchway-docs` alone requires CODEOWNERS review, one
 approval, and a written docs-not-required status check; the five product
-repositories preserve the recorded zero-source-review policy. Those controls
-are not live because no reviewer distinct from the operator is available. npm
-account 2FA is enabled in `auth-and-writes` mode, but `@latchway/client`,
-`@latchway/openai`, `@latchway/vercel-ai`, `@latchway/langchain`, and
-`@latchway/react-native` remain unpublished. CocoaPods and Maven Central are
-also unpublished. Source compatibility does not imply registry compatibility
-until exact public bytes and clean public consumers are verified.
+repositories preserve the recorded zero-source-review policy. An explicit
+`single_maintainer_v1` profile permits a lower-assurance launch without an
+independent reviewer, keeps every deferred control visibly `unverified`, and
+forbids a `release-qualified` claim. Neither profile is claimed as applied live.
+npm account 2FA is enabled in `auth-and-writes` mode, and the inert
+`@latchway/client@0.0.0-bootstrap.0` namespace record is public; its unexpected
+`latest` alias still requires fail-closed cleanup, while the other four
+namespace records and every stable `1.0.0` npm package remain unpublished.
+CocoaPods and Maven Central are also unpublished. Source compatibility does not
+imply registry compatibility until exact public bytes and clean public
+consumers are verified.
 
 ## Header compatibility
 

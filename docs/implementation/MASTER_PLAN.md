@@ -1,6 +1,6 @@
 # Latchway version 1 master plan
 
-This is the canonical merged implementation plan as of 2026-09-02. It combines
+This is the canonical merged implementation plan as of 2026-09-03. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
 Admin Console, and Mintlify addenda. The version 1 API contract is frozen at
 the contract checkpoint below; the runtime and control-plane implementation is
@@ -9,16 +9,21 @@ and every SDK successor is bound to that frozen contract with a final `1.0.0`
 changelog. Source/check gates pass; stable release preflights no longer reject
 draft metadata, but still require tags and protected evidence. The final clean
 SDK documentation bundles are imported in the canonical documentation working
-tree based on core checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`.
+tree based on core checkpoint `8bf4d9dede1490c3129f7f745f1017875bd4a005`.
 Canonical public documentation is this checked-in `docs/public` tree; the
 generated Mintlify mirror is required to bind its exact canonical source in
 `.latchway-docs-source.json`. The successor tuple passes the SDK and package
 gates recorded below, and core plus all four SDK heads are delivered to `main`.
-The
-six-repository release-control desired state is implemented, including the
-docs-only review policy, but has not been applied live because no distinct
-reviewer is available. npm uses `auth-and-writes` 2FA; all five npm packages
-remain unpublished. The canonical `docs.latchway.dev` custom domain and DNS
+The six-repository strict release-control desired state is implemented,
+including the docs-only review policy. An explicit `single_maintainer_v1`
+profile permits a lower-assurance launch without a distinct reviewer while
+keeping the strict profile unchanged, every deferred control `unverified`, and
+the product ineligible for a `release-qualified` claim. Neither profile is
+claimed as applied live. npm uses `auth-and-writes` 2FA; the inert
+`@latchway/client@0.0.0-bootstrap.0` namespace record is public, but its
+unexpected `latest` alias requires cleanup and the other four namespace records
+plus every stable `1.0.0` npm package remain unpublished. The canonical
+`docs.latchway.dev` custom domain and DNS
 are not yet live. Release promotion remains blocked on live controls,
 publication, and protected exact-candidate evidence.
 
@@ -49,16 +54,16 @@ mirror.
 | Contract source checkpoint | Core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Bundle SHA-256 | `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Core implementation checkpoint | `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, a contract-preserving descendant of the frozen contract checkpoint |
-| Canonical SDK-bundle/public-doc source | This checked-in `docs/public` tree imports the final bundles based on core implementation `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50` |
-| Database | Schema `28` at contract checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` and current implementation checkpoint `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Core implementation checkpoint | `8bf4d9dede1490c3129f7f745f1017875bd4a005`, a contract-preserving descendant of the frozen contract checkpoint |
+| Canonical SDK-bundle/public-doc source | This checked-in `docs/public` tree imports the final bundles based on core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005` |
+| Database | Schema `28` at contract checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` and current implementation checkpoint `8bf4d9dede1490c3129f7f745f1017875bd4a005`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `e3a57617e75bf3d46e858a1084749f46f819db1f` |
-| Swift source | `9f306d1e585069ca4aa703412c5d70656336e50f` |
-| Android source | `a994f8b5ee81fa831b8b2e57885df39f50fa2777` |
-| React Native source | `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9` |
+| JavaScript source | `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` |
+| Swift source | `92a394acbc00d1af6d258372f22b11ddae8e1750` |
+| Android source | `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` |
+| React Native source | `ba23c750ec662834b4d480940c4067508723defb` |
 | Mintlify mirror source | The generated deployment mirror must record the exact canonical source in `.latchway-docs-source.json`; no protected production deployment receipt exists |
-| Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
+| Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, stable npm/CocoaPods/Maven package, public GHCR image, product-runtime cloud deployment, or protected production-documentation receipt is verified |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
 checkpoint. It is not rewritten by this plan.
@@ -175,10 +180,10 @@ parent mismatch.
 - [x] Repeat commit/lock convergence and the clean source gate for the current
   core contract delta.
 - [x] Bind the final SDK source tuple: JavaScript
-  `e3a57617e75bf3d46e858a1084749f46f819db1f`, Swift
-  `9f306d1e585069ca4aa703412c5d70656336e50f`, Android
-  `a994f8b5ee81fa831b8b2e57885df39f50fa2777`, and React Native
-  `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9`.
+  `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`, Swift
+  `92a394acbc00d1af6d258372f22b11ddae8e1750`, Android
+  `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`, and React Native
+  `ba23c750ec662834b4d480940c4067508723defb`.
 
 ### Phase 5: iOS Installation Family SDK — source complete,
 external proof open
@@ -199,8 +204,8 @@ external proof open
   Keychain challenge/receipt, while keeping the Release target free of a
   Latchway request path and fail-closed.
 - [x] Pass the final Swift package/release gate at
-  `9f306d1e585069ca4aa703412c5d70656336e50f`: 50 offline Python tests
-  (49 pass and one skip), 8/8 vulnerability tests, the keychain invariant gate,
+  `92a394acbc00d1af6d258372f22b11ddae8e1750`: 65 offline release tests
+  (64 pass and one skip), the keychain invariant gate,
   166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App
   Extensions 4/4 (193 Swift tests total), a clean external SwiftPM consumer
   build, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth.
@@ -289,15 +294,15 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the complete local Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `e3a57617e75bf3d46e858a1084749f46f819db1f` (SHA-256
-  `cf7073575aa1af89b1739387eca2cfa03bb822ab7dc397bbdf80e1ce7a2271ae`),
-  Swift `9f306d1e585069ca4aa703412c5d70656336e50f` (SHA-256
-  `a61358527468627d24d9aa922c0db849d31828a81d94dd435928e2324b12f812`),
-  Android `a994f8b5ee81fa831b8b2e57885df39f50fa2777` (SHA-256
-  `21804871c9d8922eb245ae1308b35b0d6a51f44f4c11052d895597d7bc72e5dc`),
-  and React Native `b6f3c5c5bf011867c8b7d22eb3f46d15ed1136d9`
+  `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` (SHA-256
+  `f4e814289055bad88d508dde862ebdbd105b03483db807c2f128b0681da07711`),
+  Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` (SHA-256
+  `c0cdad255cde507faaad173f9a2dba05a29e6be53130f07a25c2e4e831498f00`),
+  Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` (SHA-256
+  `1a13c6834b960dbfc7fb91c390167624eadbf5f6e8d12325bd82423cc4f4a7f7`),
+  and React Native `ba23c750ec662834b4d480940c4067508723defb`
   (SHA-256
-  `59d98e3f0f79a75b7540af31f518ac8cfd878a030406abcf6d07dd564c6a74aa`).
+  `db7c9a569a86ec2f88750de80a1bc2f44dceb0c6db2d9f1613a309dcbbed37a2`).
 - [x] Define deterministic post-commit mirror synchronization: the generated
   mirror records the exact canonical source in `.latchway-docs-source.json`,
   and both repositories run their complete local validation suites.
@@ -350,8 +355,11 @@ complete; protected execution open
 - [x] Extend the fail-closed release-control desired state to all six
   repositories and 51 environments. Require CODEOWNERS review, one approval,
   and a written docs-not-required check only for `latchway-docs`; retain the
-  zero-source-review policy for product repositories. npm account 2FA is now
-  `auth-and-writes`, but the five package coordinates remain unpublished.
+  zero-source-review policy for product repositories. The lower-assurance
+  `single_maintainer_v1` profile keeps strict review unchanged but does not
+  require an independent reviewer. npm account 2FA is now `auth-and-writes`;
+  the inert client bootstrap exists, while four namespace records and every
+  stable `1.0.0` coordinate remain unpublished.
 - [x] Audit and non-force push the exact core and four SDK successor histories,
   then verify those remote `main` heads.
 - [x] Require the generated docs mirror to bind the exact canonical source in
@@ -365,11 +373,19 @@ complete; protected execution open
   the post-publication finalizer, and only then publish final completion
   evidence and release-qualified documentation claims.
 
-## Version 1 Definition of Done
+## Version 1 launch and strict Definition of Done
 
 Source implementation is complete when the clean cross-repository source gate
-passes on synchronized commits. Version 1 is released only when the same
-candidate also has protected evidence for:
+passes on synchronized commits. The selected lower-assurance
+`single_maintainer_v1` public launch additionally requires authenticated
+evidence for public annotated tags and GitHub releases; GHCR, npm, SwiftPM,
+CocoaPods, and Maven publication; Docker Compose and Google Cloud Run against
+the exact immutable image; and the multi-architecture image, vulnerability and
+license scans, SBOM, signature, and provenance. It does not close deferred
+domains and cannot claim production readiness or `release-qualified`.
+
+The later strict-full Definition of Done requires the same candidate to have
+protected evidence for:
 
 1. physical root-app App Attest, Play Integrity, browser App Check/Turnstile
    where configured, and delegated app-extension/component isolation;
@@ -385,13 +401,13 @@ candidate also has protected evidence for:
 
 No source edit, local test, manually written receipt, prior-candidate result, or
 version string may substitute for protected exact-candidate evidence. The
-prepublication promotion record must accept every gate that can be evaluated
-before registry mutation before an immutable `v1.0.0` product tag, GHCR image,
-or SDK package is published. Those artifacts are publicly published but are not
-release-qualified, and the completion record remains `release_ready: false`,
-while clean public consumers and registry bytes are verified. Only the
-post-publication finalizer may close every domain and authorize final evidence
-plus release-qualified claims.
+selected profile's protected publication workflow must authenticate every
+required producer and exact-candidate artifact before an immutable `v1.0.0`
+product tag, GHCR image, or SDK package is published. Under
+`single_maintainer_v1`, those public artifacts retain the explicit deferred-
+assurance label, `profile_status: incomplete`, `publication_ready: false`, and
+`release_qualified: false`. Only the later strict post-publication finalizer may
+close every domain and authorize release-qualified claims.
 
 Offline/local device build, install, and launch may proceed when it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.
