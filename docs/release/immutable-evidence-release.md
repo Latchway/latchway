@@ -42,6 +42,13 @@ it. Both registry-bearing jobs always log out; neither executes candidate
 source or repository scripts. Configure required reviewers on both
 environments and do not place reusable secrets in either one.
 
+Bootstrap and continuously verify those environments, their unique fail-closed
+sentinels, the protected `main` and immutable version-tag rulesets, and npm
+trusted publishers with the [GitHub and npm release controls](github-release-controls.md)
+desired-state reconciler. A privileged workflow job must assert its exact
+environment sentinel before any credential, OIDC, or mutation-capable token is
+used.
+
 ## First GHCR package bootstrap
 
 The first GitHub Container Registry publish creates

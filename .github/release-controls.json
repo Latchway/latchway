@@ -1,0 +1,2539 @@
+{
+  "$schema": "../api/github-release-controls.schema.json",
+  "api_version": "2026-03-10",
+  "control_id": "latchway-release-controls-v1",
+  "forbidden_secret_names": [
+    "LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN"
+  ],
+  "kind": "latchway_github_release_controls",
+  "npm_trusted_publishers": [
+    {
+      "environment": "npm",
+      "package": "@latchway/client",
+      "permissions": [
+        "createPackage"
+      ],
+      "provider": "github",
+      "repository": "Latchway/latchway-js",
+      "workflow": "release.yml"
+    },
+    {
+      "environment": "npm",
+      "package": "@latchway/openai",
+      "permissions": [
+        "createPackage"
+      ],
+      "provider": "github",
+      "repository": "Latchway/latchway-js",
+      "workflow": "release.yml"
+    },
+    {
+      "environment": "npm",
+      "package": "@latchway/vercel-ai",
+      "permissions": [
+        "createPackage"
+      ],
+      "provider": "github",
+      "repository": "Latchway/latchway-js",
+      "workflow": "release.yml"
+    },
+    {
+      "environment": "npm",
+      "package": "@latchway/langchain",
+      "permissions": [
+        "createPackage"
+      ],
+      "provider": "github",
+      "repository": "Latchway/latchway-js",
+      "workflow": "release.yml"
+    },
+    {
+      "environment": "npm",
+      "package": "@latchway/react-native",
+      "permissions": [
+        "createPackage"
+      ],
+      "provider": "github",
+      "repository": "Latchway/latchway-react-native-sdk",
+      "workflow": "release.yml"
+    }
+  ],
+  "organization": "Latchway",
+  "policy_variable_name": "LATCHWAY_RELEASE_CONTROL_POLICY_ID",
+  "protected_secret_scope": "environment_only",
+  "repositories": [
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-image-publishing",
+          "policy_id": "latchway-release-controls-v1:latchway:release-image-publishing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-signing",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "INDEPENDENT_SECURITY_REVIEWER_IDENTITY",
+              "INDEPENDENT_SECURITY_REVIEWER_LOGIN",
+              "INDEPENDENT_SECURITY_REVIEWER_ORGANIZATION",
+              "INDEPENDENT_SECURITY_REVIEW_REPOSITORY",
+              "INDEPENDENT_SECURITY_REVIEW_WORKFLOW",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_SHA256"
+            ],
+            "required_names": [
+              "INDEPENDENT_SECURITY_REVIEWER_IDENTITY",
+              "INDEPENDENT_SECURITY_REVIEWER_LOGIN",
+              "INDEPENDENT_SECURITY_REVIEWER_ORGANIZATION",
+              "INDEPENDENT_SECURITY_REVIEW_REPOSITORY",
+              "INDEPENDENT_SECURITY_REVIEW_WORKFLOW",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_SHA256"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release",
+          "policy_id": "latchway-release-controls-v1:latchway:release",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN",
+              "LATCHWAY_RELEASE_DISPATCH_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN",
+              "LATCHWAY_RELEASE_DISPATCH_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-authentication",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-authentication",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-aws",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-aws",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "AWS_ROLE_TO_ASSUME"
+            ],
+            "required_names": [
+              "AWS_ROLE_TO_ASSUME"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-cloud_run",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-cloud_run",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "GCP_SERVICE_ACCOUNT",
+              "GCP_WORKLOAD_IDENTITY_PROVIDER"
+            ],
+            "required_names": [
+              "GCP_SERVICE_ACCOUNT",
+              "GCP_WORKLOAD_IDENTITY_PROVIDER"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-cloudflare_containers",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-cloudflare_containers",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "CLOUDFLARE_ACCOUNT_ID",
+              "CLOUDFLARE_API_TOKEN",
+              "CLOUDFLARE_EVIDENCE_TOKEN"
+            ],
+            "required_names": [
+              "CLOUDFLARE_ACCOUNT_ID",
+              "CLOUDFLARE_API_TOKEN",
+              "CLOUDFLARE_EVIDENCE_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-compose",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-compose",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-fly_io",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-fly_io",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "FLY_API_TOKEN"
+            ],
+            "required_names": [
+              "FLY_API_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "deployment-evidence-signing",
+          "policy_id": "latchway-release-controls-v1:latchway:deployment-evidence-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "operational-resilience-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway:operational-resilience-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "preview-image-publishing",
+          "policy_id": "latchway-release-controls-v1:latchway:preview-image-publishing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "private-sibling-read",
+          "policy_id": "latchway-release-controls-v1:latchway:private-sibling-read",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ],
+            "required_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-firebase-app-check",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-firebase-app-check",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_APPLICATION_ID",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_LIVE_SDK_FEATURE",
+              "LATCHWAY_LIVE_SDK_GRANT_SHA256",
+              "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
+              "LATCHWAY_LIVE_SDK_MODEL"
+            ],
+            "required_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_APPLICATION_ID",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_LIVE_SDK_FEATURE",
+              "LATCHWAY_LIVE_SDK_GRANT_SHA256",
+              "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
+              "LATCHWAY_LIVE_SDK_MODEL"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-github-read",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-github-read",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-live-provider",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-live-provider",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_PROVIDER_ENVIRONMENT_ID",
+              "LATCHWAY_LIVE_PROVIDER_GRANT_SHA256",
+              "LATCHWAY_LIVE_PROVIDER_MAX_COST_NANO_USD",
+              "LATCHWAY_LIVE_PROVIDER_MODEL_ID",
+              "LATCHWAY_LIVE_PROVIDER_UPSTREAM_ID"
+            ],
+            "required_names": [
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_PROVIDER_ENVIRONMENT_ID",
+              "LATCHWAY_LIVE_PROVIDER_GRANT_SHA256",
+              "LATCHWAY_LIVE_PROVIDER_MAX_COST_NANO_USD",
+              "LATCHWAY_LIVE_PROVIDER_MODEL_ID",
+              "LATCHWAY_LIVE_PROVIDER_UPSTREAM_ID"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-physical",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-physical",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-evidence-turnstile",
+          "policy_id": "latchway-release-controls-v1:latchway:release-evidence-turnstile",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_APPLICATION_ID",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_LIVE_SDK_FEATURE",
+              "LATCHWAY_LIVE_SDK_GRANT_SHA256",
+              "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
+              "LATCHWAY_LIVE_SDK_MODEL"
+            ],
+            "required_names": [
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_PEM",
+              "LATCHWAY_GATEWAY_EVIDENCE_PUBLIC_KEY_SHA256",
+              "LATCHWAY_LIVE_GATEWAY_BASE_URL",
+              "LATCHWAY_LIVE_SDK_APPLICATION_ID",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_LIVE_SDK_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+              "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_LIVE_SDK_FEATURE",
+              "LATCHWAY_LIVE_SDK_GRANT_SHA256",
+              "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
+              "LATCHWAY_LIVE_SDK_MODEL"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-failure-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway:release-failure-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-load-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway:release-load-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "security-evidence",
+          "policy_id": "latchway-release-controls-v1:latchway:security-evidence",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "INDEPENDENT_SECURITY_REVIEW_TOKEN"
+            ],
+            "required_names": [
+              "INDEPENDENT_SECURITY_REVIEW_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "INDEPENDENT_SECURITY_REVIEWER_IDENTITY",
+              "INDEPENDENT_SECURITY_REVIEWER_LOGIN",
+              "INDEPENDENT_SECURITY_REVIEWER_ORGANIZATION",
+              "INDEPENDENT_SECURITY_REVIEW_REPOSITORY",
+              "INDEPENDENT_SECURITY_REVIEW_WORKFLOW"
+            ],
+            "required_names": [
+              "INDEPENDENT_SECURITY_REVIEWER_IDENTITY",
+              "INDEPENDENT_SECURITY_REVIEWER_LOGIN",
+              "INDEPENDENT_SECURITY_REVIEWER_ORGANIZATION",
+              "INDEPENDENT_SECURITY_REVIEW_REPOSITORY",
+              "INDEPENDENT_SECURITY_REVIEW_WORKFLOW"
+            ]
+          }
+        }
+      ],
+      "name": "latchway",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Core (PostgreSQL 15)",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Core (PostgreSQL 18)",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Validate canonical Mintlify source",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "console",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "container",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "contracts",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "deployments",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "image",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "lint",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "reliability",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "source",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "static",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
+    },
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "npm",
+          "policy_id": "latchway-release-controls-v1:latchway-js:npm",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-administration",
+          "policy_id": "latchway-release-controls-v1:latchway-js:release-administration",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "github-release",
+          "policy_id": "latchway-release-controls-v1:latchway-js:github-release",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        }
+      ],
+      "name": "latchway-js",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Pinned core Docker and PostgreSQL conformance",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Pinned latest framework profile",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Pinned minimum framework profile",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "verify",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
+    },
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-administration",
+          "policy_id": "latchway-release-controls-v1:latchway-ios-sdk:release-administration",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "cocoapods-trunk",
+          "policy_id": "latchway-release-controls-v1:latchway-ios-sdk:cocoapods-trunk",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "COCOAPODS_TRUNK_TOKEN"
+            ],
+            "required_names": [
+              "COCOAPODS_TRUNK_TOKEN"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "github-release",
+          "policy_id": "latchway-release-controls-v1:latchway-ios-sdk:github-release",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "app-attest-production",
+          "policy_id": "latchway-release-controls-v1:latchway-ios-sdk:app-attest-production",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ASSERTION_DEVICE_GRANT",
+              "LATCHWAY_IOS_DEVICE_ID",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ASSERTION_DEVICE_GRANT",
+              "LATCHWAY_IOS_DEVICE_ID",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ACTION_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_ASSERTION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_BASE_URL",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_HOST_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_IOS_ACTION_BINARY_SHA256",
+              "LATCHWAY_IOS_ACTION_BUNDLE_ID",
+              "LATCHWAY_IOS_ACTION_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_PATH",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_ID_PREFIX",
+              "LATCHWAY_IOS_APP_VERSION",
+              "LATCHWAY_IOS_BUILD_NUMBER",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_DISTRIBUTION",
+              "LATCHWAY_IOS_HOST_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_INSTALL_MODE",
+              "LATCHWAY_IOS_SDK_VERSION",
+              "LATCHWAY_IOS_SHARE_BINARY_SHA256",
+              "LATCHWAY_IOS_SHARE_BUNDLE_ID",
+              "LATCHWAY_IOS_SHARE_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_IOS_TEAM_ID",
+              "LATCHWAY_IOS_WIDGET_BINARY_SHA256",
+              "LATCHWAY_IOS_WIDGET_BUNDLE_ID",
+              "LATCHWAY_IOS_WIDGET_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_SHARE_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_SOURCE_COMMIT",
+              "LATCHWAY_WIDGET_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_XCODE_IDENTITY"
+            ],
+            "required_names": [
+              "LATCHWAY_ACTION_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_ASSERTION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_BASE_URL",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_HOST_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_IOS_ACTION_BINARY_SHA256",
+              "LATCHWAY_IOS_ACTION_BUNDLE_ID",
+              "LATCHWAY_IOS_ACTION_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_PATH",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_ID_PREFIX",
+              "LATCHWAY_IOS_APP_VERSION",
+              "LATCHWAY_IOS_BUILD_NUMBER",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_DISTRIBUTION",
+              "LATCHWAY_IOS_HOST_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_INSTALL_MODE",
+              "LATCHWAY_IOS_SDK_VERSION",
+              "LATCHWAY_IOS_SHARE_BINARY_SHA256",
+              "LATCHWAY_IOS_SHARE_BUNDLE_ID",
+              "LATCHWAY_IOS_SHARE_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_IOS_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_IOS_TEAM_ID",
+              "LATCHWAY_IOS_WIDGET_BINARY_SHA256",
+              "LATCHWAY_IOS_WIDGET_BUNDLE_ID",
+              "LATCHWAY_IOS_WIDGET_PROVISIONING_PROFILE_UUID",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_SHARE_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_SOURCE_COMMIT",
+              "LATCHWAY_WIDGET_COMPONENT_DEFINITION_ID",
+              "LATCHWAY_XCODE_IDENTITY"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "physical-evidence-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-ios-sdk:physical-evidence-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_ASSERTION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_IOS_ACTION_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_SHARE_BINARY_SHA256",
+              "LATCHWAY_IOS_WIDGET_BINARY_SHA256",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT_SHA256"
+            ],
+            "required_names": [
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_ASSERTION_DEVICE_GRANT_SHA256",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_IOS_ACTION_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_SHARE_BINARY_SHA256",
+              "LATCHWAY_IOS_WIDGET_BINARY_SHA256",
+              "LATCHWAY_REGISTRATION_DEVICE_GRANT_SHA256"
+            ]
+          }
+        }
+      ],
+      "name": "latchway-ios-sdk",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Pinned core Docker and PostgreSQL conformance",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "iOS SDK live debug vertical (native macOS, no Docker claim)",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "package",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
+    },
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-administration",
+          "policy_id": "latchway-release-controls-v1:latchway-android:release-administration",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "maven-central-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-android:maven-central-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_SIGNING_KEY",
+              "LATCHWAY_SIGNING_PASSWORD"
+            ],
+            "required_names": [
+              "LATCHWAY_SIGNING_KEY",
+              "LATCHWAY_SIGNING_PASSWORD"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ],
+            "required_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "maven-central",
+          "policy_id": "latchway-release-controls-v1:latchway-android:maven-central",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_MAVEN_CENTRAL_PASSWORD",
+              "LATCHWAY_MAVEN_CENTRAL_USERNAME"
+            ],
+            "required_names": [
+              "LATCHWAY_MAVEN_CENTRAL_PASSWORD",
+              "LATCHWAY_MAVEN_CENTRAL_USERNAME"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ],
+            "required_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "github-release",
+          "policy_id": "latchway-release-controls-v1:latchway-android:github-release",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "maven-publication-verification",
+          "policy_id": "latchway-release-controls-v1:latchway-android:maven-publication-verification",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ],
+            "required_names": [
+              "LATCHWAY_MAVEN_SIGNING_FINGERPRINT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "play-candidate-build",
+          "policy_id": "latchway-release-controls-v1:latchway-android:play-candidate-build",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_SOURCE_COMMIT"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_SOURCE_COMMIT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "play-upload-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-android:play-upload-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_PLAY_UPLOAD_KEYSTORE_BASE64",
+              "LATCHWAY_PLAY_UPLOAD_KEYSTORE_PASSWORD",
+              "LATCHWAY_PLAY_UPLOAD_KEY_ALIAS",
+              "LATCHWAY_PLAY_UPLOAD_KEY_PASSWORD"
+            ],
+            "required_names": [
+              "LATCHWAY_PLAY_UPLOAD_KEYSTORE_BASE64",
+              "LATCHWAY_PLAY_UPLOAD_KEYSTORE_PASSWORD",
+              "LATCHWAY_PLAY_UPLOAD_KEY_ALIAS",
+              "LATCHWAY_PLAY_UPLOAD_KEY_PASSWORD"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_PLAY_AAB_VERIFIER_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_SIGNATURE_ALGORITHM"
+            ],
+            "required_names": [
+              "LATCHWAY_PLAY_AAB_VERIFIER_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_SIGNATURE_ALGORITHM"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "play-candidate-verification",
+          "policy_id": "latchway-release-controls-v1:latchway-android:play-candidate-verification",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_PLAY_AAB_VERIFIER_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_CERTIFICATE_SHA256"
+            ],
+            "required_names": [
+              "LATCHWAY_PLAY_AAB_VERIFIER_SHA256",
+              "LATCHWAY_PLAY_UPLOAD_CERTIFICATE_SHA256"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "play-integrity-production",
+          "policy_id": "latchway-release-controls-v1:latchway-android:play-integrity-production",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_DEVICE_SERIAL",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_DEVICE_SERIAL",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ADB_VERSION",
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APKSIGNER_VERSION",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_SOURCE_COMMIT"
+            ],
+            "required_names": [
+              "LATCHWAY_ADB_VERSION",
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APKSIGNER_VERSION",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IDENTITY_PROVIDER",
+              "LATCHWAY_SOURCE_COMMIT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "physical-evidence-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-android:physical-evidence-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_IDENTITY_PROVIDER"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_IDENTITY_PROVIDER"
+            ]
+          }
+        }
+      ],
+      "name": "latchway-android",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Pinned core Docker and PostgreSQL conformance",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "verify",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
+    },
+    {
+      "default_branch": "main",
+      "environments": [
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "private-sibling-read",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:private-sibling-read",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "npm",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:npm",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "release-administration",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:release-administration",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "github-release",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:github-release",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "react-native-ios-production",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:react-native-ios-production",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_IOS_DEVICE_ID",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_IOS_DEVICE_ID",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IOS_APPINTENTS_BUNDLE_ID",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_PATH",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_FILES_MANIFEST_SHA256",
+              "LATCHWAY_IOS_APP_ID_PREFIX",
+              "LATCHWAY_IOS_APP_VERSION",
+              "LATCHWAY_IOS_BUILD_NUMBER",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_COMMIT",
+              "LATCHWAY_IOS_DEVICE_GRANT_SHA256",
+              "LATCHWAY_IOS_DISTRIBUTION",
+              "LATCHWAY_IOS_INSTALL_MODE",
+              "LATCHWAY_IOS_JAVASCRIPT_BUNDLE_SHA256",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_IOS_NATIVE_PROFILE_PATH",
+              "LATCHWAY_IOS_SDK_VERSION",
+              "LATCHWAY_IOS_SHARED_KEYCHAIN_ACCESS_GROUP",
+              "LATCHWAY_IOS_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_IOS_TEAM_ID",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT",
+              "LATCHWAY_XCODE_IDENTITY"
+            ],
+            "required_names": [
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_IOS_APPINTENTS_BUNDLE_ID",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_PATH",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_FILES_MANIFEST_SHA256",
+              "LATCHWAY_IOS_APP_ID_PREFIX",
+              "LATCHWAY_IOS_APP_VERSION",
+              "LATCHWAY_IOS_BUILD_NUMBER",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_COMMIT",
+              "LATCHWAY_IOS_DEVICE_GRANT_SHA256",
+              "LATCHWAY_IOS_DISTRIBUTION",
+              "LATCHWAY_IOS_INSTALL_MODE",
+              "LATCHWAY_IOS_JAVASCRIPT_BUNDLE_SHA256",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_IOS_NATIVE_PROFILE_PATH",
+              "LATCHWAY_IOS_SDK_VERSION",
+              "LATCHWAY_IOS_SHARED_KEYCHAIN_ACCESS_GROUP",
+              "LATCHWAY_IOS_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_IOS_TEAM_ID",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT",
+              "LATCHWAY_XCODE_IDENTITY"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "react-native-android-production",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:react-native-android-production",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_DEVICE_SERIAL",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_DEVICE_SERIAL",
+              "LATCHWAY_ONE_TIME_DEVICE_GRANT"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ADB_VERSION",
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_COMMIT",
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_PROFILE_PATH",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APKSIGNER_VERSION",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT"
+            ],
+            "required_names": [
+              "LATCHWAY_ADB_VERSION",
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_COMMIT",
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_PROFILE_PATH",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APKSIGNER_VERSION",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_PATH",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_MINIMUM_TRUST_LEVEL",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "physical-evidence-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:physical-evidence-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_FILES_MANIFEST_SHA256",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_DEVICE_GRANT_SHA256",
+              "LATCHWAY_IOS_JAVASCRIPT_BUNDLE_SHA256",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_SHA256"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_DEVICE_GRANT_SHA256",
+              "LATCHWAY_ANDROID_INSTALLED_APK_SET_SHA256",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_PEM",
+              "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
+              "LATCHWAY_IOS_APP_BINARY_SHA256",
+              "LATCHWAY_IOS_APP_BUNDLE_TREE_SHA256",
+              "LATCHWAY_IOS_APP_FILES_MANIFEST_SHA256",
+              "LATCHWAY_IOS_BUNDLE_ID",
+              "LATCHWAY_IOS_DEVICE_GRANT_SHA256",
+              "LATCHWAY_IOS_JAVASCRIPT_BUNDLE_SHA256",
+              "LATCHWAY_IOS_NATIVE_EVIDENCE_SHA256"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "react-native-android-candidate-build",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:react-native-android-candidate-build",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_COMMIT",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_PATH",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_CORE_SOURCE_PATH",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_FIREBASE_ANDROID_CONFIG_PATH",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_JAVASCRIPT_SDK_PATH",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_APP_VERSION",
+              "LATCHWAY_ANDROID_CLOUD_PROJECT_NUMBER",
+              "LATCHWAY_ANDROID_COMMIT",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_PATH",
+              "LATCHWAY_ANDROID_NATIVE_EVIDENCE_SHA256",
+              "LATCHWAY_ANDROID_PACKAGE_NAME",
+              "LATCHWAY_ANDROID_PLAY_TRACK",
+              "LATCHWAY_ANDROID_SDK_PATH",
+              "LATCHWAY_ANDROID_SDK_VERSION",
+              "LATCHWAY_ANDROID_SIGNING_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_VERSION_CODE",
+              "LATCHWAY_APPLICATION_ID",
+              "LATCHWAY_CONTRACT_BUNDLE_SHA256",
+              "LATCHWAY_CONTRACT_VERSION",
+              "LATCHWAY_CORE_COMMIT",
+              "LATCHWAY_CORE_SOURCE_PATH",
+              "LATCHWAY_ENVIRONMENT",
+              "LATCHWAY_ERROR_MAPPING_FEATURE",
+              "LATCHWAY_FEATURE",
+              "LATCHWAY_FIREBASE_ANDROID_CONFIG_PATH",
+              "LATCHWAY_GATEWAY_CONFIGURATION_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_KEY_ID",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_PUBLIC_KEY_SHA256",
+              "LATCHWAY_GATEWAY_DEPLOYMENT_STATEMENT_SHA256",
+              "LATCHWAY_GATEWAY_IMAGE_DIGEST",
+              "LATCHWAY_GATEWAY_ORIGIN",
+              "LATCHWAY_JAVASCRIPT_SDK_PATH",
+              "LATCHWAY_MODEL",
+              "LATCHWAY_RN_SDK_VERSION",
+              "LATCHWAY_SOURCE_COMMIT"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "react-native-android-upload-signing",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:react-native-android-upload-signing",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_UPLOAD_KEYSTORE_BASE64",
+              "LATCHWAY_ANDROID_UPLOAD_KEYSTORE_PASSWORD",
+              "LATCHWAY_ANDROID_UPLOAD_KEY_ALIAS",
+              "LATCHWAY_ANDROID_UPLOAD_KEY_PASSWORD"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_UPLOAD_KEYSTORE_BASE64",
+              "LATCHWAY_ANDROID_UPLOAD_KEYSTORE_PASSWORD",
+              "LATCHWAY_ANDROID_UPLOAD_KEY_ALIAS",
+              "LATCHWAY_ANDROID_UPLOAD_KEY_PASSWORD"
+            ]
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_UPLOAD_SIGNATURE_ALGORITHM",
+              "LATCHWAY_REACT_NATIVE_AAB_VERIFIER_SHA256"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_ANDROID_UPLOAD_SIGNATURE_ALGORITHM",
+              "LATCHWAY_REACT_NATIVE_AAB_VERIFIER_SHA256"
+            ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "react-native-android-candidate-verification",
+          "policy_id": "latchway-release-controls-v1:latchway-react-native-sdk:react-native-android-candidate-verification",
+          "prevent_self_review": true,
+          "reviewers": {
+            "minimum": 1,
+            "source": "command_line"
+          },
+          "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          },
+          "variables": {
+            "allowed_names": [
+              "LATCHWAY_ANDROID_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_REACT_NATIVE_AAB_VERIFIER_SHA256"
+            ],
+            "required_names": [
+              "LATCHWAY_ANDROID_UPLOAD_CERTIFICATE_SHA256",
+              "LATCHWAY_REACT_NATIVE_AAB_VERIFIER_SHA256"
+            ]
+          }
+        }
+      ],
+      "name": "latchway-react-native-sdk",
+      "rulesets": [
+        {
+          "bypass_actors": [
+            {
+              "actor_id": 15368,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/tags/v*"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-v1-tags-immutable",
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "parameters": {
+                "update_allows_fetch_and_merge": false
+              },
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "target": "tag"
+        },
+        {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "refs/heads/main"
+              ]
+            }
+          },
+          "enforcement": "active",
+          "name": "latchway-main-protected",
+          "rules": [
+            {
+              "type": "deletion"
+            },
+            {
+              "type": "non_fast_forward"
+            },
+            {
+              "type": "required_linear_history"
+            },
+            {
+              "parameters": {
+                "allowed_merge_methods": [
+                  "squash",
+                  "rebase"
+                ],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": true
+              },
+              "type": "pull_request"
+            },
+            {
+              "parameters": {
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "Hermetic pull-request policy and source checks",
+                    "integration_id": 15368
+                  },
+                  {
+                    "context": "Pinned core plus React Native package/native split conformance",
+                    "integration_id": 15368
+                  }
+                ],
+                "strict_required_status_checks_policy": true
+              },
+              "type": "required_status_checks"
+            }
+          ],
+          "target": "branch"
+        }
+      ]
+    }
+  ],
+  "schema_version": 1
+}

@@ -307,9 +307,11 @@ class ReleaseEvidenceAggregationWorkflowTests(unittest.TestCase):
             "--source-digest \"$CANDIDATE_COMMIT\"",
             "--deny-self-hosted-runners",
             "source-archives.sha256",
-            "LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN",
+            "GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0",
+            "-c credential.helper=",
         ):
             self.assertIn(required, text)
+        self.assertNotIn("LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN", text)
         self.assertNotIn("continue-on-error", text)
 
 

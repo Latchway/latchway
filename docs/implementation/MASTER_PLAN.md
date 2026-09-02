@@ -44,10 +44,10 @@ mirror.
 | Canonical SDK-bundle/public-doc source | The core commit containing this ledger; its generated mirror manifest records the exact source commit |
 | Database | Schema `28` at `437708fb56d45196720b5769f2f59b0ee51f521d`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d` |
-| Swift source | `910e692278f05a56a5d007a18e6b82dcd2fab56b` |
-| Android source | `275b876e1beadeff4cf3e024c0207b73e7270a96` |
-| React Native source | `9227a12bdee1158277f1c12566dfe7331d2ace8f` |
+| JavaScript source | `01dfa223773c20fe3a31559116f16e31f757b94a` |
+| Swift source | `c0fac916836bcfbdbf7f6a81808036726589d563` |
+| Android source | `3e0a601fad28a5ccf6674472a473c4797a7b404d` |
+| React Native source | `39fd86ef1f6f973953e4fd5d0057ae17cc035abb` |
 | Mintlify mirror source | Generated from the final canonical core commit; the source-conformance report records the exact mirror commit |
 | Product release state | `unpublished` and not release-qualified; local source convergence only, with no merge, version 1 tag, GitHub release, package, image, cloud deployment, or production documentation deployment |
 
@@ -239,7 +239,7 @@ to apply to supported Android application trust surfaces.
 - [x] Implement authenticated Admin SSE refresh hints with no row data,
   periodic principal revalidation, reconnect behavior, and polling/manual
   fallback when `admin_event_stream` is absent.
-- [x] Pass `make check`, including all Go tests and vet, 343 script tests, 164
+- [x] Pass `make check`, including all Go tests and vet, 390 script tests, 167
   Console Vitest tests, production build, and 34 Playwright tests with one
   explicitly opt-in live-stack case skipped; also pass `make test-race`, the
   bounded fuzz corpus, and real PostgreSQL Admin/session/App Attest/
@@ -261,10 +261,10 @@ to apply to supported Android application trust surfaces.
   verifiable-language rules.
 - [x] Pass the local 228-page Mintlify validation suite.
 - [x] Import clean, reproducible documentation bundles from JavaScript
-  `ddd04d3a34be7ccbc7f30efc600c77b8594edd5d`, Swift
-  `910e692278f05a56a5d007a18e6b82dcd2fab56b`, Android
-  `275b876e1beadeff4cf3e024c0207b73e7270a96`, and React Native
-  `9227a12bdee1158277f1c12566dfe7331d2ace8f`.
+  `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
+  `c0fac916836bcfbdbf7f6a81808036726589d563`, Android
+  `3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
+  `39fd86ef1f6f973953e4fd5d0057ae17cc035abb`.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App

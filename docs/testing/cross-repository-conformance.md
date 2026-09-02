@@ -7,19 +7,18 @@ only local Git checkouts and an optional directory of independently produced
 external evidence. It never fetches a default branch, queries a registry,
 creates a tag, contacts a device or cloud, or publishes an artifact.
 
-## Current status (2026-09-01)
+## Current status (2026-09-02)
 
-The current source report covers a clean six-repository tuple. It binds core
-contract checkpoint `116ebe4ed31a6a86ec97dc5351e289e12b06a38e`, reproducible
-bundle SHA-256
-`a8ef48786f16c1a7c6acb5be4eb62269bf3f5fda55bb5dbbe2842c4c52cad8ad`,
-JavaScript `4b0626da478aa412daa07cc7bb595edfb53bf7c7`, Swift
-`aa182f766dc72d57f3915bd1c16678fe4f866ffe`, Android
-`ed1dc06134c5b7f37c03ff92405a5872a0f96457`, React Native
-`cc011841acc1be78022ef65a039d4aabf8a37b57`, the final canonical core commit,
-and its generated Mintlify mirror. Contract locks, fixtures, framework pins,
-SDK documentation bundles, generated public documentation, and mirror bytes
-are synchronized at exact commits.
+The current candidate tuple binds core contract checkpoint
+`437708fb56d45196720b5769f2f59b0ee51f521d`, reproducible bundle SHA-256
+`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`,
+JavaScript `01dfa223773c20fe3a31559116f16e31f757b94a`, Swift
+`c0fac916836bcfbdbf7f6a81808036726589d563`, Android
+`3e0a601fad28a5ccf6674472a473c4797a7b404d`, and React Native
+`39fd86ef1f6f973953e4fd5d0057ae17cc035abb`. Its exact canonical core and
+generated Mintlify mirror commits will be recorded after both repositories are
+sealed. The final clean six-repository source report for this tuple is pending;
+the older passing report does not authorize these successor coordinates.
 
 Branch synchronization is tracked independently as a delivery operation and
 does not change the source report's meaning. No local version 1 tag exists.
@@ -304,8 +303,9 @@ require `core_release_tag`, `candidate_oci_image_digest`, and the exact
 aggregate producer. The artifact name is derived from that run identity; it is
 not an operator input. The `private-sibling-read` authority job resolves those
 refs, fetches Git objects without creating a worktree, and seals credential-free
-source archives. The fixed public Latchway repositories are read anonymously
-over HTTPS. A separate job runs this command with no
+source archives. The current core repository is resolved with the job-scoped,
+read-only workflow token; the fixed public SDK and documentation repositories
+are read anonymously over HTTPS. A separate job runs this command with no
 repository credential or OIDC permission. A fresh no-checkout job in the
 protected `release-evidence-signing` environment validates the fixed report
 coordinates before attesting the exact source, promotion, or release JSON
@@ -315,14 +315,13 @@ source-scope evidence must verify the attestation against this exact workflow,
 neither needs nor claims an already-created tag. The workflow has no package,
 registry, release, or deployment-environment mutation permission.
 
-No sibling-repository credential is required for the public Latchway sources.
-For a private fork or mirror, configure the optional
-`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` secret in the protected
-`private-sibling-read` environment as a fine-grained credential with Contents:
-read access only to the four SDK repositories and the documentation mirror. In
-either mode, the authority job validates every resolved commit, never checks out
-or executes repository code, fails closed on a ref-resolution or Git error, and does not
-pass the credential to the conformance or attestation jobs.
+Sibling-source retrieval is deliberately anonymous. The authority job disables
+Git credential helpers and interactive prompting, fetches only the fixed public
+Latchway repository URLs over HTTPS, and fails closed if a requested ref cannot
+be resolved. It validates every resolved commit and packages Git objects without
+checking out or executing repository code. Private forks and mirrors are not a
+supported input to this public-release workflow; they require a separately
+reviewed workflow rather than a repository-read fallback credential.
 Configure required reviewers on `release-evidence-signing`; it contains no
 repository or provider secret.
 

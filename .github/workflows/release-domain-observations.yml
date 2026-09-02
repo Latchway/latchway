@@ -99,6 +99,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Verify the exact protected release-evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence"
       - name: Validate immutable inputs with no candidate checkout
         shell: bash
         env:
@@ -234,6 +241,13 @@ jobs:
       actions: read
       contents: none
     steps:
+      - name: Verify the exact protected release-evidence-live-provider environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence-live-provider"
       - name: Download authenticated candidate coordinates without a checkout
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -599,6 +613,13 @@ jobs:
     env:
       DOCKER_CONFIG: /tmp/latchway-github-authority-docker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      - name: Verify the exact protected release-evidence-github-read environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence-github-read"
       - name: Download authenticated candidate coordinates without a checkout
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1116,6 +1137,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      - name: Verify the exact protected release-evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence"
       - name: Check out the exact core candidate without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -1123,42 +1151,32 @@ jobs:
           path: latchway
           fetch-depth: 0
           persist-credentials: false
-      - name: Check out the exact JavaScript SDK
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: Latchway/latchway-js
-          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
-          ref: ${{ inputs.javascript_commit }}
-          path: latchway-js
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out the exact iOS SDK
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: Latchway/latchway-ios-sdk
-          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
-          ref: ${{ inputs.ios_commit }}
-          path: latchway-ios-sdk
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out the exact Android SDK
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: Latchway/latchway-android
-          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
-          ref: ${{ inputs.android_commit }}
-          path: latchway-android
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out the exact React Native SDK
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: Latchway/latchway-react-native-sdk
-          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
-          ref: ${{ inputs.react_native_commit }}
-          path: latchway-react-native-sdk
-          fetch-depth: 0
-          persist-credentials: false
+      - name: Fetch exact public SDK commits with credentials disabled
+        shell: bash
+        env:
+          JAVASCRIPT_COMMIT: ${{ inputs.javascript_commit }}
+          IOS_COMMIT: ${{ inputs.ios_commit }}
+          ANDROID_COMMIT: ${{ inputs.android_commit }}
+          REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
+        run: |
+          set -Eeuo pipefail
+          export GIT_ASKPASS=/bin/false
+          export GIT_TERMINAL_PROMPT=0
+          fetch_public_commit() {
+            local directory="$1" repository="$2" commit="$3"
+            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+            git init "$directory" >/dev/null
+            git -C "$directory" -c credential.helper= -c core.askPass=/bin/false \
+              remote add origin "https://github.com/Latchway/$repository.git"
+            git -C "$directory" -c credential.helper= -c core.askPass=/bin/false \
+              fetch --no-tags --depth=1 origin "$commit"
+            git -C "$directory" checkout --detach FETCH_HEAD >/dev/null
+            test "$(git -C "$directory" rev-parse --verify HEAD)" = "$commit"
+          }
+          fetch_public_commit latchway-js latchway-js "$JAVASCRIPT_COMMIT"
+          fetch_public_commit latchway-ios-sdk latchway-ios-sdk "$IOS_COMMIT"
+          fetch_public_commit latchway-android latchway-android "$ANDROID_COMMIT"
+          fetch_public_commit latchway-react-native-sdk latchway-react-native-sdk "$REACT_NATIVE_COMMIT"
       - name: Validate and archive exact credential-free source trees
         shell: bash
         env:
@@ -1192,6 +1210,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      - name: Verify the exact protected release-evidence-physical environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence-physical"
       - name: Require a fixed GitHub CLI verifier without candidate code
         shell: bash
         run: |
@@ -1366,11 +1391,13 @@ jobs:
           - provider: firebase_app_check
             audience: firebase-app-check
             environment: release-evidence-firebase-app-check
+            policy_id: latchway-release-controls-v1:latchway:release-evidence-firebase-app-check
             runner_label: latchway-live-sdk-firebase
             runner_slug: firebase
           - provider: turnstile
             audience: turnstile
             environment: release-evidence-turnstile
+            policy_id: latchway-release-controls-v1:latchway:release-evidence-turnstile
             runner_label: latchway-live-sdk-turnstile
             runner_slug: turnstile
     environment: ${{ matrix.environment }}
@@ -1378,6 +1405,14 @@ jobs:
     timeout-minutes: 20
     permissions: {}
     steps:
+      - name: Verify the exact protected live JavaScript evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+          EXPECTED_POLICY_ID: ${{ matrix.policy_id }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "$EXPECTED_POLICY_ID"
       - name: Download authenticated candidate inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1698,6 +1733,13 @@ jobs:
       actions: read
       contents: none
     steps:
+      - name: Verify the exact protected release-evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence"
       - name: Download authenticated candidate inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1787,6 +1829,13 @@ jobs:
       actions: read
       contents: none
     steps:
+      - name: Verify the exact protected release-evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence"
       - name: Download authenticated candidate inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -2020,6 +2069,13 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Verify the exact protected release-evidence-signing environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence-signing"
       - name: Download validated machine results on a fresh no-checkout runner
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

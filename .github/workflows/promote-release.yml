@@ -55,6 +55,13 @@ jobs:
       attestations: read
       contents: read
     steps:
+      - name: Verify the exact protected security-evidence environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:security-evidence"
       - name: Validate immutable inputs and fixed GitHub CLI without a checkout
         shell: bash
         env:
@@ -336,6 +343,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Verify the exact protected release environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release"
       - name: Preflight protected immutable-release settings without a checkout
         shell: bash
         env:
@@ -709,6 +723,13 @@ jobs:
       attestations: read
       contents: write
     steps:
+      - name: Verify the exact protected release environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release"
       - name: Download the exact source-free mutation handoff on a fresh runner
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1106,6 +1127,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Verify the exact protected release environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release"
       - name: Download the exact source-free mutation handoff on a fresh OCI runner
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1688,6 +1716,13 @@ jobs:
       report_sha256: ${{ steps.validated.outputs.report_sha256 }}
       oci_image_digest: ${{ steps.validated.outputs.oci_image_digest }}
     steps:
+      - name: Verify the exact protected release environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release"
       - name: Download the exact source-free mutation handoff on a fresh publication runner
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -2069,6 +2104,13 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Verify the exact protected release environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release"
       - name: Download the source-free promotion handoff after both mutations
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

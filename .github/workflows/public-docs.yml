@@ -1,47 +1,11 @@
 name: Public documentation
 
 on:
+  # This required context must exist on every PR and current main commit.
+  # Path filters either leave a PR Pending or make main unobservable.
   pull_request:
-    paths:
-      - "docs/public/**"
-      - "api/admin.openapi.yaml"
-      - "api/client.openapi.yaml"
-      - "api/error-codes.yaml"
-      - "api/config.schema.json"
-      - "compatibility/**"
-      - "docs/sdk-bundles.lock"
-      - "docs/sdk-bundles/**"
-      - "scripts/docs-sync-sdk"
-      - "scripts/docs_sdk_bundle.py"
-      - "scripts/test_docs_sdk_bundle.py"
-      - "scripts/public_reference.py"
-      - "scripts/framework_compatibility.py"
-      - "scripts/test_public_reference.py"
-      - "scripts/test_framework_compatibility.py"
-      - "scripts/sync-public-docs.py"
-      - "scripts/test_sync_public_docs.py"
-      - ".github/workflows/public-docs.yml"
   push:
     branches: [main]
-    paths:
-      - "docs/public/**"
-      - "api/admin.openapi.yaml"
-      - "api/client.openapi.yaml"
-      - "api/error-codes.yaml"
-      - "api/config.schema.json"
-      - "compatibility/**"
-      - "docs/sdk-bundles.lock"
-      - "docs/sdk-bundles/**"
-      - "scripts/docs-sync-sdk"
-      - "scripts/docs_sdk_bundle.py"
-      - "scripts/test_docs_sdk_bundle.py"
-      - "scripts/public_reference.py"
-      - "scripts/framework_compatibility.py"
-      - "scripts/test_public_reference.py"
-      - "scripts/test_framework_compatibility.py"
-      - "scripts/sync-public-docs.py"
-      - "scripts/test_sync_public_docs.py"
-      - ".github/workflows/public-docs.yml"
   workflow_dispatch:
 
 permissions:

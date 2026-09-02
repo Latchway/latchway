@@ -227,8 +227,24 @@ def schema_errors(schema_path: Path, schema: Any, instance: Any, location: str =
             encoded = [json.dumps(item, sort_keys=True, separators=(",", ":")) for item in instance]
             if len(encoded) != len(set(encoded)):
                 errors.append(f"{location}: duplicate array items")
-        if isinstance(schema.get("items"), dict):
-            for index, value in enumerate(instance):
+        prefix_items = schema.get("prefixItems", [])
+        if prefix_items and not isinstance(prefix_items, list):
+            errors.append(f"{location}: prefixItems is not an array")
+            prefix_items = []
+        for index, subschema in enumerate(prefix_items[: len(instance)]):
+            errors.extend(
+                schema_errors(
+                    schema_path,
+                    subschema,
+                    instance[index],
+                    f"{location}[{index}]",
+                )
+            )
+        remaining_start = len(prefix_items)
+        if schema.get("items") is False and len(instance) > remaining_start:
+            errors.append(f"{location}: items after prefixItems are forbidden")
+        elif isinstance(schema.get("items"), dict):
+            for index, value in enumerate(instance[remaining_start:], start=remaining_start):
                 errors.extend(schema_errors(schema_path, schema["items"], value, f"{location}[{index}]"))
         if "contains" in schema:
             contains_matches = sum(
@@ -748,6 +764,26 @@ def main() -> None:
         if errors:
             raise ValueError("configuration example failed schema:\n" + "\n".join(errors))
 
+    release_controls_schema_path = API / "github-release-controls.schema.json"
+    release_controls_schema = load_document(release_controls_schema_path)
+    if (
+        release_controls_schema.get("$schema")
+        != "https://json-schema.org/draft/2020-12/schema"
+        or release_controls_schema.get("$id")
+        != "https://latchway.dev/schemas/github-release-controls.schema.json"
+    ):
+        raise ValueError("GitHub release controls schema identity drifted")
+    walk_refs(release_controls_schema_path, release_controls_schema)
+    release_controls = load_document(ROOT / ".github/release-controls.json")
+    errors = schema_errors(
+        release_controls_schema_path,
+        release_controls_schema,
+        release_controls,
+        "github_release_controls",
+    )
+    if errors:
+        raise ValueError("GitHub release controls failed schema:\n" + "\n".join(errors))
+
     release_schema_path = API / "release-evidence.schema.json"
     release_schema = load_document(release_schema_path)
     if (
@@ -874,7 +910,7 @@ def main() -> None:
     if required != actual:
         raise ValueError(f"bundle manifest entries differ from builder: {sorted(required ^ actual)}")
     validate_framework_compatibility(check_generated=True)
-    print("contract validation passed: OpenAPI structure/refs, registries, schemas/examples, release evidence, root/component attestation hashes, DPoP signatures/semantics, family/component wire-2 semantics, generated framework compatibility")
+    print("contract validation passed: OpenAPI structure/refs, registries, schemas/examples, GitHub release controls, release evidence, root/component attestation hashes, DPoP signatures/semantics, family/component wire-2 semantics, generated framework compatibility")
 
 
 if __name__ == "__main__":

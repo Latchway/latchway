@@ -1,0 +1,38 @@
+{
+  "app": {
+    "id": 15368,
+    "slug": "github-actions"
+  },
+  "environments": [
+    "release-image-publishing",
+    "release-evidence-signing"
+  ],
+  "repository": {
+    "default_branch": "main",
+    "name": "latchway",
+    "private": false
+  },
+  "reviewer": {
+    "id": 101,
+    "login": "tiepvuvan",
+    "type": "User"
+  },
+  "rulesets": [
+    "latchway-v1-tags-immutable",
+    "latchway-main-protected"
+  ],
+  "status_contexts": [
+    "Core (PostgreSQL 15)",
+    "Core (PostgreSQL 18)",
+    "Validate canonical Mintlify source",
+    "console",
+    "container",
+    "contracts",
+    "deployments",
+    "image",
+    "lint",
+    "reliability",
+    "source",
+    "static"
+  ]
+}

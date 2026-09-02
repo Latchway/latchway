@@ -234,7 +234,12 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(self.text.count('--source-ref refs/heads/main'), 6)
         self.assertGreaterEqual(self.text.count('--source-digest "$CANDIDATE_COMMIT"'), 6)
         self.assertGreaterEqual(self.text.count('--signer-digest "$CANDIDATE_COMMIT"'), 6)
-        immutable_script = self.immutable_settings["steps"][0]["run"]
+        immutable_script = next(
+            step["run"]
+            for step in self.immutable_settings["steps"]
+            if step.get("name")
+            == "Preflight protected immutable-release settings without a checkout"
+        )
         self.assertIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", self.text)
         self.assertEqual(
             immutable_script.count('"repos/$repository/immutable-releases"'), 1

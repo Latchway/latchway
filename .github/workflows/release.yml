@@ -421,6 +421,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Verify the exact protected release-image-publishing environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-image-publishing"
       - name: Download the credential-free image handoff without a checkout
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -636,6 +643,13 @@ jobs:
       id-token: write
       packages: write
     steps:
+      - name: Verify the exact protected release-evidence-signing environment
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-controls-v1:latchway:release-evidence-signing"
       - name: Download unsigned candidate evidence without a checkout
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

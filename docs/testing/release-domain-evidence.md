@@ -34,10 +34,12 @@ checks out or executes candidate code:
 1. a passing source-scope cross-repository report;
 2. the immutable OCI candidate manifest and its hash-bound artifacts.
 
-Source retrieval is a separate protected job. It checks out the exact five
-repository commits with non-persisted credentials, verifies every `HEAD`,
-archives the clean worktrees, and ends without executing repository code. The
-selected source-controlled observation plan consumes only those archives.
+Source retrieval is a separate protected job. It checks out the exact core
+candidate without persisting the workflow credential and fetches the four fixed
+public SDK repositories anonymously with credential helpers and interactive
+prompting disabled. It verifies every `HEAD`, archives the clean worktrees, and
+ends without executing repository code. The selected source-controlled
+observation plan consumes only those archives.
 There is no uploaded-results input and no generic command input. Two additional
 fresh no-checkout jobs perform the privileged observations using fixed inline
 commands: one can call only the HTTPS health and Admin self-test endpoints, and
@@ -193,11 +195,11 @@ every result must bind the exact five repository commits, package tags and
 versions, contract version, bundle SHA-256, core release, and immutable OCI
 index digest.
 
-Private sibling retrieval uses the protected
-`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` secret. It must be a fine-grained
-Contents: read credential scoped only to the four SDK repositories. The token
-is not persisted by checkout, no repository code executes in that job, and the
-token is unnecessary when those repositories are public.
+Sibling retrieval accepts only the fixed public Latchway repository URLs and
+uses anonymous HTTPS Git operations with credential helpers and interactive
+prompting disabled. There is no repository-token fallback. A fetch failure,
+unexpected commit, dirty checkout, or private/missing repository fails the
+producer closed; repository code is never executed in the retrieval job.
 
 The finalizer accepts only the artifact name derived from the domain and
 candidate commit. It queries the GitHub Actions API and requires the supplied

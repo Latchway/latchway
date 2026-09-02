@@ -45,6 +45,347 @@ def all_steps(workflow: dict) -> list[dict]:
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_every_managed_environment_consumer_asserts_exact_sentinel_first(
+        self,
+    ) -> None:
+        manifest = json.loads(
+            (ROOT / ".github/release-controls.json").read_text(encoding="utf-8")
+        )
+        core = next(
+            repository
+            for repository in manifest["repositories"]
+            if repository["name"] == "latchway"
+        )
+        policies = {
+            environment["name"]: environment["policy_id"]
+            for environment in core["environments"]
+        }
+        self.assertEqual(len(policies), 22)
+        declared_secrets = {
+            environment["name"]: set(environment["secrets"]["allowed_names"])
+            for environment in core["environments"]
+        }
+        self.assertEqual(
+            declared_secrets,
+            {
+                environment["name"]: set(
+                    environment["secrets"]["required_names"]
+                )
+                for environment in core["environments"]
+            },
+        )
+        declared_variables = {
+            environment["name"]: set(
+                environment.get("variables", {"allowed_names": []})[
+                    "allowed_names"
+                ]
+            )
+            for environment in core["environments"]
+        }
+        self.assertEqual(
+            declared_variables,
+            {
+                environment["name"]: set(
+                    environment.get("variables", {"required_names": []})[
+                        "required_names"
+                    ]
+                )
+                for environment in core["environments"]
+            },
+        )
+        consumers = {name: [] for name in policies}
+        observed_secrets = {name: set() for name in policies}
+        observed_variables = {name: set() for name in policies}
+        environment_job_count = 0
+
+        deployment = load_workflow("deployment-evidence.yml")
+        platform_input = deployment["on"]["workflow_dispatch"]["inputs"][
+            "platform"
+        ]
+        deployment_platforms = {
+            "compose",
+            "cloud_run",
+            "aws",
+            "fly_io",
+            "cloudflare_containers",
+        }
+        self.assertEqual(platform_input["type"], "choice")
+        self.assertTrue(platform_input["required"])
+        self.assertEqual(set(platform_input["options"]), deployment_platforms)
+        deployment_policies = {
+            platform: f"deployment-evidence-{platform}"
+            for platform in deployment_platforms
+        }
+        self.assertLessEqual(set(deployment_policies.values()), set(policies))
+
+        live = load_workflow("release-domain-observations.yml")
+        live_rows = live["jobs"]["javascript_collect"]["strategy"]["matrix"][
+            "include"
+        ]
+        expected_live_pairs = {
+            "release-evidence-firebase-app-check": policies[
+                "release-evidence-firebase-app-check"
+            ],
+            "release-evidence-turnstile": policies[
+                "release-evidence-turnstile"
+            ],
+        }
+        self.assertEqual(
+            {row["environment"]: row["policy_id"] for row in live_rows},
+            expected_live_pairs,
+        )
+
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            workflow = load_workflow(path.name)
+            raw_workflow = path.read_text(encoding="utf-8")
+            for forbidden in manifest["forbidden_secret_names"]:
+                self.assertNotIn(forbidden, raw_workflow, path.name)
+            for job_name, job in workflow["jobs"].items():
+                raw_environment = job.get("environment")
+                if isinstance(raw_environment, dict):
+                    raw_environment = raw_environment.get("name")
+                permissions = job.get("permissions", workflow.get("permissions", {}))
+                custom_secrets = {
+                    name
+                    for name in re.findall(
+                        r"secrets\.([A-Z][A-Z0-9_]*)",
+                        json.dumps(job, sort_keys=True),
+                    )
+                    if name != "GITHUB_TOKEN"
+                }
+                if raw_environment is None:
+                    runs_on = job.get("runs-on")
+                    self.assertFalse(
+                        runs_on == "self-hosted"
+                        or (
+                            isinstance(runs_on, list)
+                            and "self-hosted" in runs_on
+                        ),
+                        f"self-hosted evidence job lacks a managed environment: {path.name}:{job_name}",
+                    )
+                    if isinstance(permissions, dict):
+                        self.assertFalse(
+                            any(value == "write" for value in permissions.values()),
+                            f"privileged job lacks a managed environment: {path.name}:{job_name}",
+                        )
+                    self.assertFalse(
+                        custom_secrets,
+                        f"custom-secret job lacks a managed environment: {path.name}:{job_name}",
+                    )
+                    continue
+
+                environment_job_count += 1
+                label = f"{path.name}:{job_name}"
+                dynamic_kind = None
+                if raw_environment == "deployment-evidence-${{ inputs.platform }}":
+                    self.assertEqual(path.name, "deployment-evidence.yml", label)
+                    self.assertIn(job_name, {"capture", "finalize"}, label)
+                    dynamic_kind = "deployment"
+                    concrete_environments = set(deployment_policies.values())
+                    if job_name == "capture":
+                        concrete_environments.remove("deployment-evidence-compose")
+                elif raw_environment == "${{ matrix.environment }}":
+                    self.assertEqual(
+                        (path.name, job_name),
+                        ("release-domain-observations.yml", "javascript_collect"),
+                        label,
+                    )
+                    dynamic_kind = "matrix"
+                    concrete_environments = set(expected_live_pairs)
+                else:
+                    self.assertIsInstance(raw_environment, str, label)
+                    self.assertNotIn("${{", raw_environment, label)
+                    self.assertIn(raw_environment, policies, label)
+                    concrete_environments = {raw_environment}
+
+                for environment in concrete_environments:
+                    self.assertIn(environment, policies, label)
+                    consumers[environment].append(label)
+
+                steps = job.get("steps")
+                self.assertIsInstance(steps, list, f"{path.name}:{job_name}")
+                self.assertTrue(steps, f"{path.name}:{job_name}")
+                first = steps[0]
+                self.assertEqual(first.get("shell"), "bash", label)
+                self.assertEqual(
+                    first.get("env", {}).get("OBSERVED_POLICY_ID"),
+                    "${{ vars.LATCHWAY_RELEASE_CONTROL_POLICY_ID }}",
+                    label,
+                )
+                if dynamic_kind == "deployment":
+                    self.assertEqual(
+                        first.get("name"),
+                        "Verify the exact protected deployment provider environment",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("env", {}).get("PLATFORM"),
+                        "${{ inputs.platform }}",
+                        label,
+                    )
+                    script = first.get("run", "")
+                    self.assertIn('case "$PLATFORM" in', script, label)
+                    self.assertIn("*) exit 1 ;;", script, label)
+                    self.assertIn(
+                        'test "$OBSERVED_POLICY_ID" = "$expected"', script, label
+                    )
+                    mappings = dict(
+                        re.findall(
+                            r"^\s*([a-z_]+)\) expected=\"([^\"]+)\" ;;$",
+                            script,
+                            flags=re.MULTILINE,
+                        )
+                    )
+                    self.assertEqual(
+                        mappings,
+                        {
+                            platform: policies[environment]
+                            for platform, environment in deployment_policies.items()
+                            if environment in concrete_environments
+                        },
+                        label,
+                    )
+                elif dynamic_kind == "matrix":
+                    self.assertEqual(
+                        first.get("name"),
+                        "Verify the exact protected live JavaScript evidence environment",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("env", {}).get("EXPECTED_POLICY_ID"),
+                        "${{ matrix.policy_id }}",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("run", "").splitlines(),
+                        [
+                            "set -Eeuo pipefail",
+                            'test "$OBSERVED_POLICY_ID" = "$EXPECTED_POLICY_ID"',
+                        ],
+                        label,
+                    )
+                else:
+                    environment = next(iter(concrete_environments))
+                    self.assertEqual(
+                        first.get("name"),
+                        f"Verify the exact protected {environment} environment",
+                        label,
+                    )
+                    self.assertEqual(
+                        first.get("run", "").splitlines(),
+                        [
+                            "set -Eeuo pipefail",
+                            (
+                                'test "$OBSERVED_POLICY_ID" = '
+                                f'"{policies[environment]}"'
+                            ),
+                        ],
+                        label,
+                    )
+                self.assertNotIn("uses", first, label)
+                self.assertNotIn("if", first, label)
+                self.assertNotIn("continue-on-error", first, label)
+                self.assertNotIn("secrets.", json.dumps(first, sort_keys=True), label)
+
+                variable_references = {
+                    name
+                    for name in re.findall(
+                        r"vars\.([A-Z][A-Z0-9_]*)",
+                        json.dumps(job, sort_keys=True),
+                    )
+                    if name != "LATCHWAY_RELEASE_CONTROL_POLICY_ID"
+                }
+                for environment in concrete_environments:
+                    observed_variables[environment].update(variable_references)
+
+                if dynamic_kind == "deployment":
+                    non_step_secrets = {
+                        name
+                        for name in re.findall(
+                            r"secrets\.([A-Z][A-Z0-9_]*)",
+                            json.dumps(
+                                {key: value for key, value in job.items() if key != "steps"},
+                                sort_keys=True,
+                            ),
+                        )
+                        if name != "GITHUB_TOKEN"
+                    }
+                    self.assertFalse(non_step_secrets, label)
+                    for step in steps:
+                        step_secrets = {
+                            name
+                            for name in re.findall(
+                                r"secrets\.([A-Z][A-Z0-9_]*)",
+                                json.dumps(step, sort_keys=True),
+                            )
+                            if name != "GITHUB_TOKEN"
+                        }
+                        if not step_secrets:
+                            continue
+                        match = re.fullmatch(
+                            r"inputs\.platform == '([a-z_]+)'", step.get("if", "")
+                        )
+                        self.assertIsNotNone(match, f"{label}:{step.get('name')}")
+                        platform = match.group(1)
+                        self.assertIn(platform, deployment_policies, label)
+                        observed_secrets[deployment_policies[platform]].update(
+                            step_secrets
+                        )
+                else:
+                    for environment in concrete_environments:
+                        observed_secrets[environment].update(custom_secrets)
+
+        self.assertEqual(
+            {name for name, jobs in consumers.items() if jobs},
+            set(policies),
+            consumers,
+        )
+        self.assertEqual(environment_job_count, 43)
+        self.assertEqual(observed_secrets, declared_secrets)
+        self.assertEqual(observed_variables, declared_variables)
+
+    def test_required_public_docs_check_runs_for_every_pr_and_main_push(self) -> None:
+        workflow = load_workflow("public-docs.yml")
+        pull_request = workflow["on"].get("pull_request")
+        self.assertTrue(
+            pull_request is None
+            or (
+                isinstance(pull_request, dict)
+                and "paths" not in pull_request
+                and "paths-ignore" not in pull_request
+            )
+        )
+        push = workflow["on"].get("push")
+        self.assertIsInstance(push, dict)
+        self.assertEqual(push.get("branches"), ["main"])
+        self.assertNotIn("paths", push)
+        self.assertNotIn("paths-ignore", push)
+        self.assertEqual(
+            workflow["jobs"]["validate"]["name"],
+            "Validate canonical Mintlify source",
+        )
+        manifest = json.loads(
+            (ROOT / ".github/release-controls.json").read_text(encoding="utf-8")
+        )
+        core = next(
+            repository
+            for repository in manifest["repositories"]
+            if repository["name"] == "latchway"
+        )
+        branch_ruleset = next(
+            ruleset for ruleset in core["rulesets"] if ruleset["target"] == "branch"
+        )
+        required = next(
+            rule
+            for rule in branch_ruleset["rules"]
+            if rule["type"] == "required_status_checks"
+        )
+        contexts = {
+            item["context"]
+            for item in required["parameters"]["required_status_checks"]
+        }
+        self.assertIn("Validate canonical Mintlify source", contexts)
+
     def test_privileged_container_build_helpers_are_immutable(self) -> None:
         buildx_steps = 0
         qemu_steps = 0
@@ -706,49 +1047,81 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertNotIn("python3 latchway/scripts/", serialized, job_name)
                 self.assertNotIn("cross-repo-conformance.py", serialized, job_name)
 
-    def test_sibling_sources_are_anonymous_or_use_a_least_privilege_read_token(self) -> None:
-        expected = "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}"
-        for workflow_name in ("release-domain-observations.yml",):
-            sibling_checkouts = [
-                step
-                for step in all_steps(load_workflow(workflow_name))
-                if isinstance(step.get("with"), dict)
-                and "repository" in step["with"]
-                and step["with"]["repository"].startswith("Latchway/")
-                and step.get("uses", "").startswith("actions/checkout@")
-            ]
-            self.assertEqual(len(sibling_checkouts), 4, workflow_name)
-            for step in sibling_checkouts:
-                self.assertEqual(step["with"].get("token"), expected, step)
+    def test_sibling_sources_are_anonymous_and_credentials_are_disabled(self) -> None:
+        observations = load_workflow("release-domain-observations.yml")
+        sources = observations["jobs"]["sources"]
+        sibling_checkouts = [
+            step
+            for step in sources["steps"]
+            if isinstance(step.get("with"), dict)
+            and str(step["with"].get("repository", "")).startswith("Latchway/")
+            and step.get("uses", "").startswith("actions/checkout@")
+        ]
+        self.assertEqual(sibling_checkouts, [])
+        sources_text = str(sources)
+        sources_run = "\n".join(
+            step.get("run", "")
+            for step in sources["steps"]
+            if isinstance(step.get("run"), str)
+        )
+        self.assertNotIn("LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN", sources_text)
+        self.assertNotIn("|| github.token", sources_text)
+        self.assertNotIn("secrets.", sources_text)
+        self.assertIn("GIT_ASKPASS=/bin/false", sources_run)
+        self.assertIn("GIT_TERMINAL_PROMPT=0", sources_run)
+        self.assertIn("-c credential.helper=", sources_run)
+        self.assertIn("https://github.com/Latchway/$repository.git", sources_run)
+        for repository in (
+            "latchway-js",
+            "latchway-ios-sdk",
+            "latchway-android",
+            "latchway-react-native-sdk",
+        ):
+            self.assertIn(f"fetch_public_commit {repository} {repository}", sources_run)
+
         cross = load_workflow("cross-repository-conformance.yml")
         authority = cross["jobs"]["authenticate-inputs"]
         evidence = cross["jobs"]["evidence"]
         attestor = cross["jobs"]["attest"]
         self.assertEqual(authority["environment"], "private-sibling-read")
         self.assertEqual(attestor["environment"], "release-evidence-signing")
-        self.assertIn("SIBLING_TOKEN", str(authority))
-        self.assertIn(
-            "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN }}",
-            str(authority),
-        )
         source_step = next(
             step
             for step in authority["steps"]
-            if step.get("name")
-            == "Resolve and package authenticated repository objects without a checkout"
+            if step.get("id") == "sources"
         )
         source_run = source_step["run"]
-        self.assertNotIn('test -n "$SIBLING_TOKEN"', source_run)
-        self.assertIn('if [[ -n "$token" ]]', source_run)
+        self.assertNotIn("LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN", str(authority))
+        self.assertNotIn("SIBLING_TOKEN", source_run)
         self.assertNotIn("curl ", source_run)
         self.assertIn("GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0", source_run)
-        self.assertIn("git -c credential.helper=", source_run)
+        self.assertIn("-c credential.helper=", source_run)
         self.assertIn('"https://github.com/$repository.git" "$requested_ref"', source_run)
         self.assertIn("rev-parse --verify 'FETCH_HEAD^{commit}'", source_run)
         self.assertIn("jq --null-input --arg sha", source_run)
-        self.assertIn('GH_TOKEN="$token" gh api', source_run)
-        self.assertIn('LATCHWAY_FETCH_TOKEN="$token"', source_run)
-        self.assertNotIn("|| github.token", str(authority))
+        for repository in (
+            "Latchway/latchway-js",
+            "Latchway/latchway-ios-sdk",
+            "Latchway/latchway-android",
+            "Latchway/latchway-react-native-sdk",
+            "Latchway/latchway-docs",
+        ):
+            self.assertIn(repository, source_run)
+        for repository_id, repository, ref in (
+            ("javascript", "Latchway/latchway-js", "JAVASCRIPT_REF"),
+            ("ios", "Latchway/latchway-ios-sdk", "IOS_REF"),
+            ("android", "Latchway/latchway-android", "ANDROID_REF"),
+            (
+                "react_native",
+                "Latchway/latchway-react-native-sdk",
+                "REACT_NATIVE_REF",
+            ),
+            ("documentation", "Latchway/latchway-docs", "DOCUMENTATION_REF"),
+        ):
+            self.assertIn(
+                f'package_repository {repository_id} {repository} "${ref}" ""',
+                source_run,
+            )
         self.assertNotIn("secrets.", str(evidence))
         self.assertNotIn("id-token", evidence["permissions"])
         self.assertEqual(attestor["permissions"]["id-token"], "write")

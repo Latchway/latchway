@@ -1312,7 +1312,16 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                 self.assertEqual(
                     authentication["environment"], authentication_environment
                 )
-                self.assertNotIn("environment", candidate)
+                if workflow_name == "release-failure-evidence.yml":
+                    self.assertEqual(
+                        candidate["environment"], authentication_environment
+                    )
+                    self.assertEqual(
+                        candidate["steps"][0]["name"],
+                        "Verify the exact protected release-failure-evidence environment",
+                    )
+                else:
+                    self.assertNotIn("environment", candidate)
                 self.assertEqual(attester["environment"], "release-evidence-signing")
                 self.assertEqual(candidate["needs"], authentication_name)
                 self.assertEqual(attester["needs"], candidate_name)
