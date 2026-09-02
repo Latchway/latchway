@@ -764,7 +764,7 @@ def main() -> None:
         if errors:
             raise ValueError("configuration example failed schema:\n" + "\n".join(errors))
 
-    release_controls_schema_path = API / "github-release-controls.schema.json"
+    release_controls_schema_path = ROOT / ".github/release-controls.schema.json"
     release_controls_schema = load_document(release_controls_schema_path)
     if (
         release_controls_schema.get("$schema")

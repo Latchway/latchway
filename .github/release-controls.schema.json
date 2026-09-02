@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://latchway.dev/schemas/github-release-controls.schema.json",
-  "title": "Latchway GitHub and npm release controls",
+  "title": "Latchway GitHub and npm operational release controls",
   "description": "Desired state for protected release environments and unique policy sentinels, protected main branches, controlled immutable release tags, and npm trusted publishers. It contains names, non-secret policy IDs, and identities, never credential values.",
   "type": "object",
   "additionalProperties": false,

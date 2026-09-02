@@ -1,5 +1,5 @@
 {
-  "$schema": "../api/github-release-controls.schema.json",
+  "$schema": "./release-controls.schema.json",
   "api_version": "2026-03-10",
   "control_id": "latchway-release-controls-v1",
   "forbidden_secret_names": [

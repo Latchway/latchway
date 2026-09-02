@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/github-release-controls.py"
 MANIFEST = ROOT / ".github/release-controls.json"
-SCHEMA = ROOT / "api/github-release-controls.schema.json"
+SCHEMA = ROOT / ".github/release-controls.schema.json"
 FIXTURE = (
     ROOT
     / "scripts/testdata/github-release-controls/compliant-latchway.json"
