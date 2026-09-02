@@ -10,7 +10,7 @@ public packages, live providers, physical devices, or production support.
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `released`, `released_at: 2026-09-01T20:25:00Z` |
 | Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
-| Database | Historical schema `20` | Schema `28` at contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d` and its contract-preserving descendants, including family/component state, component-scoped quota state, direct component-attestation linkage, protocol-aware first-token timing, hardened challenge Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, durable cost retry treatment, and physical-attempt quota ledger support; schema `27` remains at historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Database | Historical schema `20` | Schema `28` at contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`, including family/component state, component-scoped quota state, direct component-attestation linkage, protocol-aware first-token timing, hardened challenge Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, durable cost retry treatment, and physical-attempt quota ledger support; schema `27` remains at historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
 | Sessions | One installation key/session family | Independent component keys/session families |
 | Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
@@ -21,29 +21,32 @@ The released `0.5.1` bundle and SDK locks remain byte-frozen historical
 coordinates at their normative commits. Version 1 emits a distinct,
 deterministic released `1.0.0` bundle; it does not overwrite or silently amend
 the historical coordinate. All four SDK successor locks converge on contract
-source `437708fb56d45196720b5769f2f59b0ee51f521d` and bundle SHA-256
-`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`.
+source `cd47229eac32f4a93a0779903d927526b77817d6` and bundle SHA-256
+`0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`.
 Checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` previously removed two
 request-lifecycle PostgreSQL network turns without changing the contract or its
 separate durable forensic transaction boundary. Contract/source checkpoint
-`437708fb56d45196720b5769f2f59b0ee51f521d` descends from it and contains the
+`cd47229eac32f4a93a0779903d927526b77817d6` descends from it and contains the
 version 1 runtime, schema 28, Admin-session inventory/revoke, configuration
 import/export, stable server-capability negotiation, authenticated Admin SSE
 refresh hints, exact JSON/YAML numeric preservation, and explicit
-`READ COMMITTED` application→environment lifecycle locking. The final
-canonical-documentation commit is an API-preserving descendant and its
-generated Mintlify mirror is bound by clean source conformance. None of these
-coordinates proves a merge, tag, GitHub release, package or container
-publication, cloud deployment, or production documentation deployment.
+`READ COMMITTED` application→environment lifecycle locking. Canonical
+documentation commit `f852a618757313fdef5a3d0ac71e9a421cc8518c` is a
+documentation descendant, and Mintlify mirror
+`c2c2e5426b35f7e94d0725972cc5a17ba964f137` names it in its source manifest. A
+fresh clean six-repository source-conformance report is still required before
+the current local tuple is pushed. None of these coordinates proves a tag,
+GitHub release, package/container publication, cloud deployment, or production
+documentation deployment.
 
-Contract/source checkpoint `437708fb56d45196720b5769f2f59b0ee51f521d`
+Contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`
 also adds enforceable calendar, token-bucket, and aggregate per-request
 `upstream_attempts` limits plus configurable cost retry treatment.
 `actual_attempts` remains the default. A user-scoped `initial_attempt_only`
 rule is valid only when the same plan retains an organization-scoped, non-user
 `actual_attempts` rule, so product forgiveness cannot remove the durable
 infrastructure-cost bound. The deterministic
-`14cd2d8ddc8c4b85b8ab002359b373772d599a4eaaa8e95b9b0b793c684215c6`
+`0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`
 bundle and all four SDK successor locks already bind that schema-28 contract.
 
 ## Admin capability negotiation
@@ -79,8 +82,12 @@ Eight entries are `experimental` at exact locally tested versions: OkHttp
 `@langchain/openai` 1.5.10, OpenAI JavaScript 7.8.0, React Native 0.82.0,
 SwiftOpenAI 4.6.0, and Vercel AI SDK 7.0.85. MacPaw/OpenAI 0.5.1 is
 `unsupported` because its published public seams cannot preserve fresh
-asynchronous DPoP and streaming dispatch; the passing repository upstream
-patch is not an accepted release. No entry is `supported`.
+asynchronous DPoP across buffered and streaming dispatch. A minimal
+upstream-ready patch propagates the injected `URLSession` configuration into
+internal stream sessions, allowing a custom `URLProtocol` to own both paths;
+the patched checkout passes all 213 upstream tests and the positive
+transport/cancellation probe. The patch is not an accepted or released
+upstream seam. No entry is `supported`.
 
 Support states mean:
 
@@ -115,25 +122,46 @@ The registry and its strict schema are deterministic members of the released
 schema, semantic policy, generated Markdown, archive closure, and checksums.
 The bundle, exact contract checkpoint, bundle hash, wire-2 constants,
 component-attestation vector, and other generated fixtures are synchronized
-across all four SDK locks, and the clean local source-conformance gate passes.
+across all four SDK locks. A fresh clean six-repository source-conformance run
+is still required for the final canonical-docs and mirror coordinates.
 
 ## Current SDK source checkpoints
 
 These coordinates record the current clean, locally source-converged version 1
 implementations. They are source checkpoints, not package-publication,
-production-support, or public-version claims. No exact current head is
-claimed as pushed until the authorized final fetch/audit/push completes.
+production-support, or public-version claims. The current heads are ahead of
+the previously delivered `main` baseline and are not claimed as pushed.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `01dfa223773c20fe3a31559116f16e31f757b94a` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, three-browser conformance, bundler consumers, reproducible package checks, and tested vanilla-Web documentation sources implemented and locked to released contract `1.0.0` |
-| Swift `Latchway` | `fdad08f08ebdbaa03effc21ac4a9d0e81887ed17` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, a compiled Firebase/App Attest golden journey, and the narrow Foundation Models 27 adapter are implemented; SwiftPM, CocoaPods, consumer, reproducibility, and simulator gates pass, while protected distribution and physical Foundation Models evidence remain required |
-| Android `dev.latchway:latchway-*` | `f1719db0bd4acd6185494b3994fa0e1eb3040c4a` | Android API 23+, Java 17 | Component/OkHttp transport plus a compiled Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, exact Koog 1.1.1 fixtures, all five local Maven publications, and offline consumers pass; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
-| React Native `@latchway/react-native` | `701ac227a25f1c9f24de338571a6ca9ee18e7396` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-owned component descriptor lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and a Debug-only native App Intent delegated-request path are implemented and source/check gates pass. The released lock and final changelog satisfy the metadata portion of stable preflight; tags and protected evidence remain required. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at current successor `701ac227a25f1c9f24de338571a6ca9ee18e7396`. The Release App Intent fixture has no Latchway request path and fails closed. App Intent/extension invocation and physical Android evidence are operator-deferred release gates. Protected Apple distribution proof remains open and is not claimed as deferred. |
+| JavaScript `@latchway/client` | `c1934b9decf122e0e118976d90cf898a190c8c2f` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, opaque-route hardening, adapters, framework-version conformance, three-browser/bundler consumers, and reproducible packages pass `mise exec -- pnpm release:check` |
+| Swift `Latchway` | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` | iOS 15+, macOS 12+ supported surfaces | Full package/release gate passes: production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for AppAttest, AppExtensions, Core, and FirebaseAuth. Protected distribution and physical Foundation Models evidence remain required. |
+| Android `dev.latchway:latchway-*` | `52f055152431d640febd6c2d64f16799e0f05589` | Android API 23+, Java 17 | Atomic safe OkHttp setup, component transport, Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, Koog 1.1.1, all local Maven publications, and offline consumers pass the 665-task gate and publication smoke. Koog full streaming is limited to OkHttp 5.3.0; physical Play evidence is deferred. |
+| React Native `@latchway/react-native` | `55413d56b2e640cebfe3d77bf9462330d111193d` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, root-owned component lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and the Debug-only native App Intent path pass `mise exec -- pnpm check`. The Release fixture remains fail-closed. The current head was not physically rerun; App Intent/extension invocation and physical Android/Google Play evidence are operator-deferred. Protected Apple distribution proof remains open and is not claimed as deferred. |
+
+The reproducible documentation bundles for that table are, respectively,
+JavaScript `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`,
+Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`,
+Android `2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7`,
+and React Native
+`52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9`.
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. The checked-in SDK successor locks point to the clean released version
 1 checkpoint named above and bind the complete Admin API delta.
+
+## Distribution compatibility boundary
+
+The offline GitHub desired state now covers all six repositories and 51
+protected environments. `latchway-docs` alone requires CODEOWNERS review, one
+approval, and a written docs-not-required status check; the five product
+repositories preserve the recorded zero-source-review policy. Those controls
+are not live because no reviewer distinct from the operator is available. npm
+account 2FA is enabled in `auth-and-writes` mode, but `@latchway/client`,
+`@latchway/openai`, `@latchway/vercel-ai`, `@latchway/langchain`, and
+`@latchway/react-native` remain unpublished. CocoaPods and Maven Central are
+also unpublished. Source compatibility does not imply registry compatibility
+until exact public bytes and clean public consumers are verified.
 
 ## Header compatibility
 
