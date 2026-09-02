@@ -22,9 +22,17 @@ Cross-platform features may use different policies and limits. Operators see cle
 
 XSS, extensions, compromised dependencies and browser control can use the legitimate key. Sensitive features should require native trust, identity freshness, narrower quotas or explicit step-up. DPoP still mitigates off-device bearer replay.
 
+## Developer-experience implications
+
+Web and native applications can share feature-level APIs, but operators must deliberately allow the web trust level and may assign it different policies or limits. Web SDKs still provide DPoP and risk verification, while diagnostics must say when a feature requires a stronger native trust signal.
+
 ## Migration implications
 
 If browser platforms later expose stronger verifiable hardware/application signals, they receive a new normalized level only after threat-model review and compatibility-safe policy semantics.
+
+## Documentation implications
+
+Trust-level references must distinguish `web_risk_verified` from native application and device verification and give explicit policy examples for opting web clients in. Security guidance must cover XSS, extensions and controlled browsers and must not describe WebCrypto non-exportability as hardware-backed native assurance.
 
 ## Status
 

@@ -131,6 +131,16 @@ a quota bypass. Configuration preserves pricing safety for plans reachable
 through administrator-owned user overrides, while proof availability is
 enforced for the concrete selected route and plan at request time.
 
+## Developer-experience implications
+
+Operators who enable hard input, total-token, or input-priced cost limits must
+declare an immutable profile for each exact structured protocol and physical
+model that needs one. Simulation and request diagnostics must identify a
+missing profile, protocol/model mismatch, unsupported rich input, or exceeded
+context bound; application code does not supply token counts or proofs and may
+continue using richer shapes only on selected routes whose limits and prices
+do not require trusted preflight accounting.
+
 ## Migration implications
 
 Bucket, reservation-entry, usage, and snapshot representations remain
@@ -141,6 +151,16 @@ positive output bound for every generative structured protocol. The
 operator-facing profile protocol expansion is a configuration-contract
 `0.5.0` change; wire protocol remains `1`. Per-request-only reservations remain
 entryless, while their trusted bounds are request-local gates.
+
+## Documentation implications
+
+Configuration reference material must enumerate the supported text-only
+surfaces and excluded files, images, audio, tools, schemas, provider state and
+opaque bodies. It must document the framing formula, exact-model binding,
+output-cap requirements, fail-closed route behavior and conservative handling
+of unknown usage, with separate examples for generative and zero-output
+Embeddings profiles. Client documentation must make clear that this adds no
+client wire field or trusted client-side tokenizer.
 
 ## Status
 

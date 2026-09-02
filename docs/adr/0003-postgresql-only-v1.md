@@ -22,9 +22,17 @@ Database contention and retention require careful schema, indexes, partition/pru
 
 Fail closed when authoritative replay, revocation or hard-quota checks cannot execute. Use least privilege, TLS where appropriate, parameterized SQL, tenant ownership columns and encrypted backups.
 
+## Developer-experience implications
+
+A local or test deployment needs PostgreSQL but no Redis, queue or analytics service. Contributors implementing coordination must use and test the same PostgreSQL locking, uniqueness and transaction semantics that enforce production invariants, including unavailable-database behavior.
+
 ## Migration implications
 
 Future optional accelerators must preserve PostgreSQL as source of truth or define an explicit consistency migration. Version-1 deployments need only upgrade within supported PostgreSQL majors.
+
+## Documentation implications
+
+Deployment guidance must state the supported PostgreSQL majors, absence of required extensions and PostgreSQL's critical-path role. Operations material must cover least privilege, TLS, backup/restore, maintenance and failure behavior without presenting another store as authoritative.
 
 ## Status
 

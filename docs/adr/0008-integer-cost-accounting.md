@@ -22,9 +22,17 @@ UI and CLI format integers for humans. Maximum values need validation to avoid o
 
 Reject negative, overflowed, missing or ambiguous currency values. A hard cost limit fails closed when an applicable price is unknown or stale beyond policy.
 
+## Developer-experience implications
+
+Configuration and runtime APIs use integer nano-USD, while CLI and UI surfaces convert that value for human display. Validation errors must identify units and overflow or precision failures so contributors and operators do not introduce floating-point conversions on accounting paths.
+
 ## Migration implications
 
 Changing scale or adding currencies requires a versioned schema and data migration with exact conversion. Existing records retain original pricing revision and currency rather than being reinterpreted.
+
+## Documentation implications
+
+Every pricing and limit example must label nano-USD explicitly and show validated decimal-to-integer conversion and rounding. Reference material must document checked ranges, currency and pricing-revision provenance, and avoid floating-point configuration examples.
 
 ## Status
 

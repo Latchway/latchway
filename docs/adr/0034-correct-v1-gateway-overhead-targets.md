@@ -105,6 +105,15 @@ latency at the cost of quota overspend, ambiguous attempt ownership, lost
 settlement, or incomplete recovery evidence. The release finalizer continues
 to fail closed when a report declares thresholds wider than this decision.
 
+## Developer-experience implications
+
+Load configurations default to strict `15/20/30 ms` P50/P95/P99 thresholds,
+and the evidence finalizer rejects a wider declaration while allowing a
+stricter one. Contributors evaluating performance must use the unchanged
+acceptance environment and paired client-observed method; the correction is
+not permission to bypass synchronous correctness work or to advertise a
+general latency guarantee from local runs.
+
 ## Migration implications
 
 There is no database, wire-protocol, Admin API, or client SDK migration. Load
@@ -112,6 +121,15 @@ configurations and external evidence producers should adopt the corrected
 P50/P95 defaults. A producer may keep stricter targets, but previously failing
 evidence does not become a release pass unless the complete unchanged suite is
 rerun against the exact candidate artifact and satisfies every current gate.
+
+## Documentation implications
+
+Performance and release documentation must publish the strict corrected
+thresholds together with the unchanged throughput, streaming, quota, memory
+and correctness gates. It must distinguish the cited local diagnostic runs
+from exact-release evidence, describe the paired overhead calculation and
+tell external evidence producers to update defaults or retain their stricter
+values.
 
 ## Status
 

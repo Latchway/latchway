@@ -22,9 +22,17 @@ Adding an integration requires a core build/release and conformance tests. Inter
 
 Static review narrows the runtime attack surface. CEL remains non-Turing-complete, input-bounded and compiled at configuration activation. Built-ins still require dependency and parser hardening.
 
+## Developer-experience implications
+
+An integration contributor adds a reviewed built-in plus conformance coverage and ships it through the core release process. Operators extend behavior only through validated configuration and bounded CEL; there is no runtime plugin installation, plugin debugging or host API to learn in version 1.
+
 ## Migration implications
 
 A future WASM extension system requires a new ADR covering signed distribution, capability-based host APIs, deterministic resource limits, secret access, observability, compatibility and failure isolation.
+
+## Documentation implications
+
+Extension documentation must enumerate supported built-ins, the safe CEL configuration surface and the contribution path for a new integration. It must explicitly mark Go plugins, scripts, webhooks and WASM modules as unsupported runtime extension mechanisms rather than implying a future plugin ABI already exists.
 
 ## Status
 

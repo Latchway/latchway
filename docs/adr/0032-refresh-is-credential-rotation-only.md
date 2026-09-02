@@ -66,6 +66,14 @@ the exact new session exchange, while DPoP continues to bind refresh-token
 rotation to the installation key. Strict body parsing prevents accidental or
 malicious field smuggling.
 
+## Developer-experience implications
+
+SDK refresh code sends only the rotating refresh token under a fresh DPoP
+proof. When identity renewal, attestation step-up or stale evidence is
+reported, the SDK discards the old session and runs the ordinary challenge
+and exchange flow while keeping session generations monotonic. Integrators do
+not need a second attestation protocol hidden inside refresh.
+
 ## Migration implications
 
 SDKs and applications must stop sending identity or attestation fields to the
@@ -73,6 +81,14 @@ refresh endpoint. When identity renewal or attestation step-up is required,
 clients must discard the old session and run the existing challenge/exchange
 flow. Refresh-token storage, rotation, DPoP key handling, and the wire protocol
 version otherwise remain unchanged.
+
+## Documentation implications
+
+The refresh reference must show the exact one-field request body and a clear
+recovery sequence from refresh failure to fresh challenge/exchange. Platform
+guides must keep single-use identity or attestation evidence out of refresh,
+and compatibility notes must distinguish this legacy runtime record from ADR
+0024's Installation Family target behavior.
 
 ## Status
 

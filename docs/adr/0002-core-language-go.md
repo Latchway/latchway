@@ -22,9 +22,17 @@ Go API design, context propagation, explicit error handling, bounded goroutines 
 
 Static compilation reduces runtime surface, but memory/resource exhaustion, parser flaws and concurrency races remain. Cryptography uses maintained implementations and strict algorithm allowlists rather than custom primitives.
 
+## Developer-experience implications
+
+Core contributors use the repository-pinned Go toolchain and keep domain logic independent of HTTP and database adapters. Context propagation, bounded concurrency, explicit errors and race-tested changes are part of the normal contribution workflow, while dashboard asset generation remains a separate frontend step.
+
 ## Migration implications
 
 Changing the core language would require a new ADR and conformance-equivalent replacement, not an incremental package migration. Wire contracts remain language-neutral.
+
+## Documentation implications
+
+Contributor and build documentation must name the pinned Go version, the separate dashboard build prerequisite and the package-boundary conventions. Operator instructions should describe the produced binary or image and must not suggest that a Go toolchain is needed at runtime.
 
 ## Status
 

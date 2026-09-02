@@ -22,9 +22,17 @@ SDKs need secure key persistence, URI canonicalization, clock-skew handling, sin
 
 Reject private JWK members, remote key URLs, symmetric/unknown algorithms, stale `iat`, duplicate `jti`, wrong `htm`/`htu`, invalid `ath`, and thumbprint mismatch. DPoP reduces token replay; it does not protect a compromised process that can invoke the legitimate key.
 
+## Developer-experience implications
+
+SDKs must hide routine key persistence, proof construction, nonce handling and single-flight refresh while surfacing recoverable clock, nonce and session errors. Raw HTTP implementers need shared vectors for JWK thumbprints, URI canonicalization and `ath`; access tokens cannot be treated as ordinary bearer tokens.
+
 ## Migration implications
 
 A proof-format or algorithm change requires a wire-version decision and shared vector update. Active sessions remain valid across server signing-key rotation through overlapping public keys.
+
+## Documentation implications
+
+Client guides must trace the challenge, exchange, protected-request and refresh proofs, including required claims and error recovery. Platform key-storage guidance, clock-skew troubleshooting and the limits of proof-of-possession must be explicit, and no example may label a bound access token as bearer authentication.
 
 ## Status
 

@@ -45,9 +45,17 @@ that tradeoff where it shows unpublished revisions.
 
 Secrets are referenced, never embedded. Invalid or unsafe debug, CEL, pricing, protocol or destination configuration cannot activate. Tenant ownership and ETags prevent cross-scope or stale writes.
 
+## Developer-experience implications
+
+Operators edit complete drafts under an ETag and make activation or rollback an explicit action, so previews and diffs always refer to immutable revision IDs. The Admin API, CLI and console must surface stale-write conflicts and retained unpublished drafts rather than offering delete or abandon operations that version 1 does not support.
+
 ## Migration implications
 
 Schema evolution requires explicit `apiVersion` conversion or rejection. Active revisions remain interpretable across rolling upgrades, and rollback support is tested before release.
+
+## Documentation implications
+
+Configuration guides must describe create, read, full-draft replacement, validation, activation and rollback as one lifecycle, including ETag conflict recovery and redacted secret references. They must state that unpublished drafts remain inert but visible in history and must not document deletion or abandonment as version-1 capabilities.
 
 ## Status
 

@@ -22,9 +22,17 @@ Capability validation rejects incompatible route combinations before activation.
 
 Protocol parsing never chooses an arbitrary destination, and transport code never trusts client provider headers. Opaque HTTP has stricter explicit path/header/body restrictions and cannot expose arbitrary URLs.
 
+## Developer-experience implications
+
+Integration contributors implement and test protocol parsing independently from destination and credential transport behavior. Operators compose only declared-compatible adapter and upstream capabilities, with invalid combinations rejected during configuration validation instead of failing on live traffic.
+
 ## Migration implications
 
 New protocols and upstreams can be added independently behind conformance interfaces. Behavioral changes update protocol vectors and may require a compatibility revision without changing unrelated targets.
+
+## Documentation implications
+
+Reference material must keep protocol capabilities and upstream target setup in separate sections, then document the supported composition matrix. Examples must preserve that boundary, especially by distinguishing structured adapters from opaque HTTP restrictions and never treating a client URL or provider header as trusted routing input.
 
 ## Status
 

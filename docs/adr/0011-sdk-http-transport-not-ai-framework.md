@@ -22,9 +22,17 @@ SDKs need careful arbitrary-body, streaming, cancellation and non-replayable req
 
 SDKs must not transparently replay a request that may have reached an upstream. Secure storage, single-flight refresh, redacted diagnostics and feature header injection are security-critical responsibilities.
 
+## Developer-experience implications
+
+Application developers keep their platform HTTP client and provider request/response types, adding an authorized transport rather than adopting a Latchway prompt API. SDKs hide session mechanics but must preserve streaming, cancellation and non-replayable-body behavior in idiomatic platform APIs.
+
 ## Migration implications
 
 Wire DTOs may be regenerated internally from contract bundles, while public SDK migrations remain deliberate semantic-versioned changes. Applications can adopt Latchway without rewriting payload construction.
+
+## Documentation implications
+
+Quickstarts must wrap ordinary platform or provider HTTP clients and focus on identity-token callbacks, feature selection and transport installation. Platform guides must describe streaming, cancellation and ambiguous-send errors without presenting a proprietary AI object model or encouraging manual DPoP/session handling.
 
 ## Status
 

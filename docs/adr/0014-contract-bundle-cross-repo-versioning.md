@@ -22,9 +22,17 @@ Core contract changes precede SDK updates. Release automation publishes the bund
 
 Hashes and immutable release artifacts prevent accidental or supply-chain substitution. Fixtures contain test-only keys clearly isolated from production secrets. Signature/provenance verification can be added without changing bundle contents.
 
+## Developer-experience implications
+
+SDK contributors update `contract.lock`, regenerate only internal DTOs and run the shared vectors against the pinned bundle; CI turns accidental copied-file drift into an actionable failure. Core contributors publish a deterministic bundle before asking SDK repositories to adopt a contract change.
+
 ## Migration implications
 
 Wire-breaking changes increment protocol metadata and compatibility declarations. SDKs can test old/new bundles during a migration window; React Native waits for compatible native and JavaScript packages.
+
+## Documentation implications
+
+Release and SDK-maintainer documentation must list bundle contents, checksum verification, lock-file fields and the update workflow. Published compatibility tables must distinguish contract version, wire protocol, core release and SDK version so a bundle match is not mistaken for universal runtime compatibility.
 
 ## Status
 

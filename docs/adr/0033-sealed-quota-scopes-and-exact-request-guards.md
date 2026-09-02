@@ -108,12 +108,30 @@ Post-rewrite hashing and exact structured measurements prevent same-length body
 substitution, pre-rewrite undercounting, and fabricated request-local units;
 unsupported opaque measurements fail closed instead of becoming estimates.
 
+## Developer-experience implications
+
+Operators choose from one ordered scope vocabulary and can add at most one
+normalized-claim selector without exposing its raw value in quota records.
+Adapter authors count exact post-rewrite bytes and structured image/tool units
+and persist the versioned proof; clients never report these measurements.
+Route simulation may accept bounded hypothetical facts, but diagnostics must
+not imply that those facts affect production CEL or state.
+
 ## Migration implications
 
 Database schema `18` extends the closed scope vocabulary and adds the versioned
 attempt request-measurement binding. Existing buckets and schema-17 attempt
 rows are not rewritten. New attempts use decision-binding version `2`; legacy
 version `1` rows remain readable with measurement-binding version `0`.
+
+## Documentation implications
+
+Quota reference material must list the canonical dimension order, explain why
+`limit_plan` is implicit, and define missing versus present normalized claims,
+the accepted scalar grammar and digest-only persistence. Adapter tables must
+state exactly which OpenAI and Anthropic shapes count images or tool calls and
+why opaque HTTP cannot satisfy those guards. Migration notes must identify the
+schema and proof versions without suggesting that existing rows are rewritten.
 
 ## Status
 

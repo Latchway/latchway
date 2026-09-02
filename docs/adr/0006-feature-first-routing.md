@@ -22,9 +22,17 @@ Operators can change providers and models without app releases. Route simulation
 
 Features are resolved within the authenticated application/environment; route/model/price inputs from clients are ignored or rejected. Policy evaluation uses normalized server-owned context and safe CEL.
 
+## Developer-experience implications
+
+Application code names a stable feature and can keep the same request integration while operators change routes or physical models. Operator tooling needs reference validation and route simulation, and client libraries must expose stable feature-not-found and feature-not-allowed failures.
+
 ## Migration implications
 
 Renaming or removing a feature is an application contract change and should use an overlap/deprecation period. Backend model changes are configuration revisions, not wire changes.
+
+## Documentation implications
+
+Examples and API guides must lead with feature selection rather than client-selected providers or models. Operator documentation must explain feature-to-policy/route mapping, simulation and safe rename/deprecation, while SDK guides show how to set a feature and handle its stable errors.
 
 ## Status
 

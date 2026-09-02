@@ -22,9 +22,17 @@ Operational tools rely on request IDs, traces, usage and deterministic test fixt
 
 Redaction applies before logging and audit serialization, including errors from identity, attestation and upstream providers. Optional capture cannot include credentials or security proofs and requires separate viewer capability.
 
+## Developer-experience implications
+
+Routine debugging uses request IDs, traces, bounded metadata and sanitized reproductions rather than retrieving production prompts. Body capture must be an obvious, governed operator choice and cannot become a hidden development convenience or an SDK default.
+
 ## Migration implications
 
 Enabling capture changes the deployment privacy posture and must be recorded in configuration revision and audit. Disabling it triggers documented retention deletion rather than merely stopping new writes.
+
+## Documentation implications
+
+Observability and privacy guides must state plainly that bodies are not stored by default and enumerate the metadata that remains available. Any capture procedure must document authorization, encryption, size, retention, deletion and visible warnings, and published examples must use sanitized content.
 
 ## Status
 

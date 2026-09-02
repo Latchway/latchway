@@ -158,6 +158,15 @@ sizes, response cleanup, and backoff prevent retry amplification. Circuit
 observation keys, cache size, failure counters, and time windows are separately
 bounded to prevent telemetry state from causing unbounded memory growth.
 
+## Developer-experience implications
+
+Operators express bounded retry and fallback policy in configuration and use
+route simulation to inspect the same deterministic candidate order used by
+production. Adapter authors must prepare immutable request data and render a
+fresh body, destination and credentials for every attempt. Applications still
+observe one logical request, and SDKs or handlers must never imply that an
+attempt can be retried after response commitment.
+
 ## Migration implications
 
 The first implementation adds a forward-only database migration for immutable
@@ -170,6 +179,15 @@ Adding retry-policy configuration, immutable adapter preparation, and route-
 simulation output changes the operator contract and requires a later contract
 bundle version. Client DPoP/session wire protocol can remain version `1` because
 the data-plane endpoint and authorization shape do not change.
+
+## Documentation implications
+
+Routing and usage guides must distinguish logical requests from physical
+attempts and show deterministic priority, weighted/sticky ordering, retry
+exhaustion, fallback and per-attempt charging. Streaming documentation must
+define response commitment and ambiguous post-dispatch outcomes. Operational
+material must label circuit state as process-local telemetry that does not
+admit, suppress or reorder traffic in version 1.
 
 ## Status
 

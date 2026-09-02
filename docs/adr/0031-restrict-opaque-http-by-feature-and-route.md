@@ -103,6 +103,16 @@ explicit SSE gate prevents an administrator from accidentally activating an
 unbounded long-lived stream. Unsafe replay is off unless every executed route
 opts in.
 
+## Developer-experience implications
+
+Operators must declare the allowed methods, canonical path policy, client
+headers, request and response bounds, streaming permission and unsafe replay
+decision for each opaque feature and route. Clients call the canonical
+feature path with an exactly matching feature declaration; arbitrary
+destinations, query strings and undeclared headers are intentionally
+unavailable. Structured protocol integrations are unaffected by this escape
+hatch's narrower ergonomics.
+
 ## Migration implications
 
 Existing generic-upstream configurations with `pathPrefixes` remain valid and
@@ -116,6 +126,15 @@ an explicit revision, and the fields cannot coexist. Routes that assumed query
 forwarding, arbitrary headers, or retry of mutating methods must still use
 canonical provider paths, positive header allowlists, and an explicit
 unsafe-replay decision. Structured OpenAI and Anthropic routes are unaffected.
+
+## Documentation implications
+
+Opaque HTTP guides must present it as a bounded configured capability, never a
+forward proxy. They must include exact-depth template examples, the legacy
+segment-bound prefix rules, canonical-path rejections, positive header
+allowlisting, response/SSE caps and the explicit unsafe-method replay opt-in.
+Usage material must state that provider token usage remains unknown rather
+than inferred from arbitrary payloads.
 
 ## Status
 

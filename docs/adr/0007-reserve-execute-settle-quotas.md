@@ -32,9 +32,17 @@ Each adapter needs conservative estimates, settlement provenance and failure han
 
 Checked arithmetic, non-negative constraints, deterministic lock order and unique settlement operations prevent overflow, deadlock-driven abuse, double release and double settlement. Calendar boundaries use only the active server-owned rule; client timestamps and timezone headers cannot select a bucket. Unknown, malformed, local-process, and unavailable timezone identifiers fail closed. Hard cost caps fail closed without trusted pricing.
 
+## Developer-experience implications
+
+Adapter authors must provide conservative estimates and settlement provenance, while request handlers keep database transactions out of upstream streaming. Operator views and diagnostics need to distinguish reserved, settled, released and expiry-recovered capacity and identify the configured calendar timezone.
+
 ## Migration implications
 
 New metrics register reservation/settlement semantics before activation. Schema changes must preserve in-flight reservation recovery and idempotency during rolling upgrades.
+
+## Documentation implications
+
+Quota documentation must explain the three-stage lifecycle, idempotent recovery and the different accounting of logical requests and attempts. Calendar examples must spell out UTC defaults, local civil boundaries and daylight-saving behavior, and failure guidance must explain when conservative reservations are retained.
 
 ## Status
 

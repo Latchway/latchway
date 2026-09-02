@@ -22,9 +22,17 @@ Session exchange has distinct error codes, freshness and step-up behavior. Provi
 
 Attestation never upgrades an unverified identity, and identity never implies trusted app/device state. Raw provider payloads are size-bounded, minimally retained and absent from ordinary API/log output.
 
+## Developer-experience implications
+
+Integrators configure identity and attestation independently and receive distinct failures for each stage. Provider adapters can change behind stable normalized principal and trust signals, so application policy need not parse provider-specific payloads.
+
 ## Migration implications
 
 New providers map to existing stable signals or require a deliberate trust-model and contract revision. Existing policies continue using normalized fields rather than provider JSON.
+
+## Documentation implications
+
+Setup and troubleshooting material must keep authentication and attestation flows separate, then show explicitly how policy combines their normalized outputs. Provider guides must define what each signal establishes and must not claim that identity proves application integrity or that attestation identifies a user.
 
 ## Status
 
