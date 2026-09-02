@@ -28,7 +28,7 @@ deployments, or protected evidence that does not exist.
 | Core implementation source | `cd47229eac32f4a93a0779903d927526b77817d6` |
 | SDK source tuple | JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `aae6133bb47d131d5d2bc058cbfcad315edef4ff` |
 | SDK documentation bundles | JavaScript `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`; Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`; Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`; React Native `f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99` |
-| Public documentation source | Canonical core docs `f852a618757313fdef5a3d0ac71e9a421cc8518c`; generated Mintlify mirror `c2c2e5426b35f7e94d0725972cc5a17ba964f137` |
+| Public documentation source | Canonical core docs `8109b8e4a73dbd56b45b521298b69a1f13ab26e2`; generated Mintlify mirror `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d` |
 | SDK locks | All four released successor locks, four vector families, copied `protocol-version.json`, framework coordinates, final changelog headings, and reproducible documentation bundles converge on the current checkpoint. Stable preflights still require tags and protected exact-candidate evidence. |
 | Public release | The current tuple has not been pushed to `main`. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
 
@@ -48,7 +48,7 @@ authorize version 1.
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
-| Documentation | Canonical commit `f852a618757313fdef5a3d0ac71e9a421cc8518c` imports all four exact SDK bundles and synchronizes mirror commit `c2c2e5426b35f7e94d0725972cc5a17ba964f137`; canonical and mirror validation are green | Push/audit the exact commits, route `docs.latchway.dev`, and collect protected production-deployment and post-deploy receipts |
+| Documentation | Canonical commit `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` imports all four exact SDK bundles and synchronizes mirror commit `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d`; canonical and mirror validation are green | Push/audit the exact commits, route `docs.latchway.dev`, and collect protected production-deployment and post-deploy receipts |
 | Release controls and npm | Desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. npm 2FA is `auth-and-writes`. | Add a distinct reviewer, apply/verify the live controls, bootstrap the five unpublished package coordinates, and install exact trusted publishers |
 
 ## Schema-23 direct component App Attest step-up
@@ -149,8 +149,8 @@ receipts. The current convergence run:
 - ran the clean-tree core, SDK, dashboard, documentation, workflow, and
   cross-repository conformance gate on the exact commits; and
 - created canonical documentation commit
-  `f852a618757313fdef5a3d0ac71e9a421cc8518c` and synchronized Mintlify mirror
-  commit `c2c2e5426b35f7e94d0725972cc5a17ba964f137` without creating a tag or
+  `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` and synchronized Mintlify mirror
+  commit `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d` without creating a tag or
   package release. The current six heads remain local and ahead of `main`.
 
 Core `cd47229eac32f4a93a0779903d927526b77817d6` passes the full current
@@ -211,7 +211,7 @@ One immutable candidate still requires all of the following:
 8. a protected Mintlify deployment receipt followed by candidate-bound link,
    accessibility, redirect, source-checkpoint, and AI-readable-output
    validation. A prior Mintlify preview exists, but final mirror
-   `c2c2e5426b35f7e94d0725972cc5a17ba964f137` is not claimed as a protected
+   `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d` is not claimed as a protected
    production deployment and `docs.latchway.dev` is not routed.
 
 The connected iPad and Xcode-managed `dev.latchway` profile supported automatic
