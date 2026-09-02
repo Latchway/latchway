@@ -9,8 +9,8 @@ and every SDK successor is bound to that frozen contract with a final `1.0.0`
 changelog. Source/check gates pass; stable release preflights no longer reject
 draft metadata, but still require tags and protected evidence. Canonical SDK
 documentation bundles are imported into canonical documentation commit
-`8109b8e4a73dbd56b45b521298b69a1f13ab26e2` and synchronized Mintlify mirror
-commit `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d`. The current local tuple passes
+`cd4387fa095556e044945bf6e1e3237d857d912e` and synchronized Mintlify mirror
+commit `f37fde259986683f4957627b24d2106b2db81c78`. The current local tuple passes
 the core, SDK, package, and documentation gates recorded below. The
 six-repository release-control desired state is implemented, including the
 docs-only review policy, but has not been applied live because no distinct
@@ -47,14 +47,14 @@ mirror.
 | Bundle SHA-256 | `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Core implementation checkpoint | `cd47229eac32f4a93a0779903d927526b77817d6` |
-| Canonical SDK-bundle/public-doc source | `8109b8e4a73dbd56b45b521298b69a1f13ab26e2`, a documentation descendant of the core checkpoint |
+| Canonical SDK-bundle/public-doc source | `cd4387fa095556e044945bf6e1e3237d857d912e`, a documentation descendant of the core checkpoint |
 | Database | Schema `28` at `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | JavaScript source | `8baeffa74d0916e3b9299e3a29a6a2dccf154e41` |
 | Swift source | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` |
 | Android source | `f847ce600f0a48859ad4cb534b95b6251c3c633e` |
 | React Native source | `76fe88ce8053c6983f03422238e9da12360d435d` |
-| Mintlify mirror source | `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d`, generated from canonical docs `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` |
+| Mintlify mirror source | `f37fde259986683f4957627b24d2106b2db81c78`, generated from canonical docs `cd4387fa095556e044945bf6e1e3237d857d912e` |
 | Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
@@ -293,8 +293,8 @@ to apply to supported Android application trust surfaces.
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [x] Bind canonical documentation commit
-  `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` to synchronized Mintlify mirror
-  `f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d` and pass their local validation
+  `cd4387fa095556e044945bf6e1e3237d857d912e` to synchronized Mintlify mirror
+  `f37fde259986683f4957627b24d2106b2db81c78` and pass their local validation
   suites.
 - [ ] Configure and verify the canonical `docs.latchway.dev` custom domain and
   DNS. Until then, protocol-generated documentation URLs and AI-readable link

@@ -31,9 +31,9 @@ version 1 runtime, schema 28, Admin-session inventory/revoke, configuration
 import/export, stable server-capability negotiation, authenticated Admin SSE
 refresh hints, exact JSON/YAML numeric preservation, and explicit
 `READ COMMITTED` application→environment lifecycle locking. Canonical
-documentation commit `8109b8e4a73dbd56b45b521298b69a1f13ab26e2` is a
+documentation commit `cd4387fa095556e044945bf6e1e3237d857d912e` is a
 documentation descendant, and Mintlify mirror
-`f0cdf3a2b698e38224a9ddaa8a19edcbc77ef38d` names it in its source manifest. A
+`f37fde259986683f4957627b24d2106b2db81c78` names it in its source manifest. A
 fresh clean six-repository source-conformance report is still required before
 the current local tuple is pushed. None of these coordinates proves a tag,
 GitHub release, package/container publication, cloud deployment, or production
