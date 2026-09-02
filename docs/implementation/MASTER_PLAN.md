@@ -52,8 +52,8 @@ mirror.
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | JavaScript source | `c1934b9decf122e0e118976d90cf898a190c8c2f` |
 | Swift source | `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` |
-| Android source | `52f055152431d640febd6c2d64f16799e0f05589` |
-| React Native source | `55413d56b2e640cebfe3d77bf9462330d111193d` |
+| Android source | `f847ce600f0a48859ad4cb534b95b6251c3c633e` |
+| React Native source | `aae6133bb47d131d5d2bc058cbfcad315edef4ff` |
 | Mintlify mirror source | `c2c2e5426b35f7e94d0725972cc5a17ba964f137`, generated from canonical docs `f852a618757313fdef5a3d0ac71e9a421cc8518c` |
 | Product release state | `unpublished` and not release-qualified; no version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud deployment, or protected production-documentation receipt exists |
 
@@ -174,8 +174,8 @@ parent mismatch.
 - [x] Bind the final SDK source tuple: JavaScript
   `c1934b9decf122e0e118976d90cf898a190c8c2f`, Swift
   `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
-  `52f055152431d640febd6c2d64f16799e0f05589`, and React Native
-  `55413d56b2e640cebfe3d77bf9462330d111193d`.
+  `f847ce600f0a48859ad4cb534b95b6251c3c633e`, and React Native
+  `aae6133bb47d131d5d2bc058cbfcad315edef4ff`.
 
 ### Phase 5: iOS Installation Family SDK — source complete,
 external proof open
@@ -285,11 +285,11 @@ to apply to supported Android application trust surfaces.
   `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`),
   Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` (SHA-256
   `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`),
-  Android `52f055152431d640febd6c2d64f16799e0f05589` (SHA-256
-  `2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7`),
-  and React Native `55413d56b2e640cebfe3d77bf9462330d111193d`
+  Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` (SHA-256
+  `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`),
+  and React Native `aae6133bb47d131d5d2bc058cbfcad315edef4ff`
   (SHA-256
-  `52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9`).
+  `f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99`).
 - [x] Regenerate and synchronize the current canonical source to the generated
   mirror, then rerun both complete local suites from clean exact commits.
 - [x] Bind canonical documentation commit

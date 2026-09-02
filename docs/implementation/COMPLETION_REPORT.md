@@ -26,8 +26,8 @@ deployments, or protected evidence that does not exist.
 | Database | Schema `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Contract bundle | Reproducible SHA-256 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` at contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Core implementation source | `cd47229eac32f4a93a0779903d927526b77817d6` |
-| SDK source tuple | JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `52f055152431d640febd6c2d64f16799e0f05589`; React Native `55413d56b2e640cebfe3d77bf9462330d111193d` |
-| SDK documentation bundles | JavaScript `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`; Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`; Android `2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7`; React Native `52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9` |
+| SDK source tuple | JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e`; React Native `aae6133bb47d131d5d2bc058cbfcad315edef4ff` |
+| SDK documentation bundles | JavaScript `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`; Swift `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`; Android `a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`; React Native `f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99` |
 | Public documentation source | Canonical core docs `f852a618757313fdef5a3d0ac71e9a421cc8518c`; generated Mintlify mirror `c2c2e5426b35f7e94d0725972cc5a17ba964f137` |
 | SDK locks | All four released successor locks, four vector families, copied `protocol-version.json`, framework coordinates, final changelog headings, and reproducible documentation bundles converge on the current checkpoint. Stable preflights still require tags and protected exact-candidate evidence. |
 | Public release | The current tuple has not been pushed to `main`. No version 1 tag, GitHub release, npm/CocoaPods/Maven package, GHCR image, product-runtime deployment, canonical-domain routing, or protected production-docs receipt is verified. |
@@ -44,7 +44,7 @@ authorize version 1.
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter plus local load/failure checks pass against the current source gateway | Protected immutable-image provider, load, and destructive-failure evidence |
 | Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. Complete local core gates pass. | Deployment operator acceptance on the final image |
-| SDKs | JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f` passes `release:check`; Android `52f055152431d640febd6c2d64f16799e0f05589` passes the 665-task gate and local publication smoke; React Native `55413d56b2e640cebfe3d77bf9462330d111193d` passes `check`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` passes production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for all four subspecs. React Native retains its Debug-only native App Intent delegated request and fail-closed Release fixture; the current head was not physically rerun. | Operator-deferred physical invocation of the Debug App Intent/extension path; protected Apple distribution/extension-matrix proof; physical Android/Google Play proof; tags, protected evidence, and publication |
+| SDKs | JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f` passes `release:check`; Android `f847ce600f0a48859ad4cb534b95b6251c3c633e` passes the 665-task gate and local publication smoke; React Native `aae6133bb47d131d5d2bc058cbfcad315edef4ff` passes `check`; Swift `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f` passes production/debug builds, 159 core tests, SwiftOpenAI 7/7, Foundation Models 9/9, and CocoaPods lint for all four subspecs. React Native retains its Debug-only native App Intent delegated request and fail-closed Release fixture; the current head was not physically rerun. | Operator-deferred physical invocation of the Debug App Intent/extension path; protected Apple distribution/extension-matrix proof; physical Android/Google Play proof; tags, protected evidence, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
@@ -120,7 +120,7 @@ independently keyed delegated request with exact-run challenge/receipt binding.
 Its Apple Development build passed strict root/extension signing, provisioning,
 App Attest and Keychain entitlement, team, registered-device, install, and
 launch checks. It did not collect new App Attest proof or invoke the App Intent.
-Current successor `55413d56b2e640cebfe3d77bf9462330d111193d` is a descendant
+Current successor `aae6133bb47d131d5d2bc058cbfcad315edef4ff` is a descendant
 that adds release retry-closure, transition-order, wording,
 development-runner hardening, and the released-contract/source-tuple lock. It
 passes the full local plus generic iOS and isolated Debug/Release App Intent
@@ -219,7 +219,7 @@ Apple Development signing for predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4
 That predecessor passed strict signed root/extension verification, installation,
 and launch; the earlier `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`
 root-app observation remains the only live App Attest/provider proof. The
-physical path was not rerun for current `55413d56b2e640cebfe3d77bf9462330d111193d`.
+physical path was not rerun for current `aae6133bb47d131d5d2bc058cbfcad315edef4ff`.
 No physical result closes the release gate until the protected collector and
 finalizer bind an Apple distribution-derived candidate to the exact repository,
 contract, application identity, signing, entitlement, package, and image

@@ -14,16 +14,16 @@ The final locked tuple binds core contract checkpoint
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`,
 JavaScript `c1934b9decf122e0e118976d90cf898a190c8c2f`, Swift
 `ff1ba5c7b4a586019a5cd5e3b158b86c1d2bf98f`, Android
-`52f055152431d640febd6c2d64f16799e0f05589`, and React Native
-`55413d56b2e640cebfe3d77bf9462330d111193d`. The canonical documentation lock
+`f847ce600f0a48859ad4cb534b95b6251c3c633e`, and React Native
+`aae6133bb47d131d5d2bc058cbfcad315edef4ff`. The canonical documentation lock
 binds those SDK commits to archive SHA-256 values
 `1e185ca25f2b64ed8a08ccbd09a8e1f7ad3e24d99379dd7033bae9bead079a9e`
 (JavaScript),
 `a502896f1975d8bf2524cb56e4ed5d8270c5f8862b55f568d56369aa1b74a4a4`
 (Swift),
-`2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7`
+`a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b`
 (Android), and
-`52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9`
+`f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99`
 (React Native). A fresh clean six-repository source report is still required
 after the current delivery commits; this document does not reuse an earlier
 report as evidence for a changed source tuple.

@@ -3,16 +3,16 @@
   "bundles": [
     {
       "archive": "docs/sdk-bundles/android/docs-bundle-1.0.0.tar.gz",
-      "archive_bytes": 53874,
-      "archive_sha256": "2c5c9b42ac47a08fb97445830aa701456de86fb6bc7f4f5d46f3ba93c5965ef7",
-      "commit": "52f055152431d640febd6c2d64f16799e0f05589",
+      "archive_bytes": 53883,
+      "archive_sha256": "a34faf101754c1e9c02253ca132bf21d7ad09e6eec4e57f792e0b451d8d3385b",
+      "commit": "f847ce600f0a48859ad4cb534b95b6251c3c633e",
       "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
       "id": "android",
-      "manifest_sha256": "ffcc03bca3f82283b8d10421e11b7734500d325e4e6aaf427d7af1eb9a7900af",
+      "manifest_sha256": "adaa95b01c8837174889ff163b63502ac1da7eb18985109087fc8a0a3a387c74",
       "package": "dev.latchway",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-android",
-      "source_date_epoch": 1788321031,
+      "source_date_epoch": 1788322622,
       "source_tree_clean": true,
       "version": "1.0.0"
     },
@@ -48,16 +48,16 @@
     },
     {
       "archive": "docs/sdk-bundles/react-native/docs-bundle-1.0.0.tar.gz",
-      "archive_bytes": 36154,
-      "archive_sha256": "52bb0ba88bd52b5ea96296c100a6087f11bcce624a97bc3e3a5b6e25d9782ff9",
-      "commit": "55413d56b2e640cebfe3d77bf9462330d111193d",
+      "archive_bytes": 36171,
+      "archive_sha256": "f2cbe21a912a4cfa30fa040780ded74d2b9e32718f0d4e13b2dbfed0cb273a99",
+      "commit": "aae6133bb47d131d5d2bc058cbfcad315edef4ff",
       "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
       "id": "react-native",
-      "manifest_sha256": "7607c61c2318033a2db3252c488a3f4c2e54d3eb124fa0526f564e1f8cbb5c05",
+      "manifest_sha256": "ed8fa6d5debb35668e342d688b969a73dc22827a726c10db1a4d0e6d584a3250",
       "package": "@latchway/react-native",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-      "source_date_epoch": 1788321243,
+      "source_date_epoch": 1788324077,
       "source_tree_clean": true,
       "version": "1.0.0"
     }
