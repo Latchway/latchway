@@ -101,6 +101,29 @@ admin.client_component_revoke
 Family/component events distinguish renewal, re-attestation, and revocation;
 they do not imply that a delegated component was directly attested.
 
+## Client component lifecycle actions
+
+```text
+client.component.provisioned
+client.component.session_created
+client.component.direct_attestation_completed
+client.component.refresh_reuse_detected
+client.component.session_family_expired
+client.component.revoked
+```
+
+These system-owned events target the exact Client Component. Refresh reuse
+records the stable `refresh_reuse_detected` reason, revokes the affected
+component session family, and never stores refresh material. Filter the audit
+log by `resource_type=client_component` and the component ID to inspect
+individual lifecycle failures and reuse detections behind the aggregate
+component counters.
+
+The maintenance worker emits `client.component.session_family_expired` once
+for each atomic active-to-expired transition with reason
+`session_family_lifetime_elapsed`; racing maintenance passes do not duplicate
+the event.
+
 ## Self-test and system actions
 
 ```text

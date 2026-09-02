@@ -407,7 +407,19 @@ func (store *Store) rotateComponentSession(
 			}
 			return issued, nil
 		}
+		auditEventID, err := id.New(id.AuditEvent)
+		if err != nil {
+			return IssuedSession{}, fmt.Errorf("generate component refresh-reuse audit event ID: %w", err)
+		}
 		if err := revokeComponentRefreshFamily(ctx, tx, binding, now, "refresh_token_reuse", true); err != nil {
+			return IssuedSession{}, err
+		}
+		if err := insertComponentLifecycleAuditWithReason(
+			ctx, tx, auditEventID, binding.OrganizationID, binding.EnvironmentID,
+			"client.component.refresh_reuse_detected", binding.ComponentID,
+			"refresh_reuse_detected", now,
+			[][2]string{{"refresh_reuse", "set"}, {"component_refresh", "revoke"}, {"component_session_family", "revoke"}},
+		); err != nil {
 			return IssuedSession{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {

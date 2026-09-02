@@ -245,7 +245,8 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 	if subtle.ConstantTimeCompare(storedJTIHash, principal.JTIHash[:]) != 1 ||
 		result.OrganizationID != principal.OrganizationID || result.ApplicationID != principal.ApplicationID ||
 		result.EnvironmentID != principal.EnvironmentID || result.ApplicationUserID != principal.ApplicationUserID ||
-		result.InstallationID != principal.InstallationID || result.PolicyRevisionID != principal.PolicyRevisionID ||
+		(principal.ComponentID == "" && result.InstallationID != principal.InstallationID) ||
+		result.PolicyRevisionID != principal.PolicyRevisionID ||
 		result.DPoPJKT != principal.DPoPJKT || result.TrustLevel != principal.TrustLevel ||
 		result.IdentityProvider != principal.IdentityProvider || !result.AccessExpiresAt.Equal(principal.ExpiresAt) ||
 		!authorizationMatchesPrincipal(result.Authorization, principal) {
@@ -367,7 +368,12 @@ func authorizationStateError(state authorizationState, now time.Time, allowRevok
 	if state.AttestedAt.After(now) {
 		return ErrSessionInvalid
 	}
-	if !state.AttestationExpiresAt.After(now) {
+	// Component-aware access grants remain usable until their own bounded
+	// expiry. Expiring component or family trust prevents refresh and further
+	// provisioning, but require-reattestation/require-renewal deliberately do
+	// not revoke an already-issued access grant. Legacy grants retain their
+	// original attestation-expiry behavior.
+	if state.ComponentID == "" && !state.AttestationExpiresAt.After(now) {
 		return ErrAttestationRefreshNeeded
 	}
 	return nil
@@ -388,7 +394,7 @@ func validateAccessPrincipal(principal AccessPrincipal, now time.Time) error {
 		IdentityProvider: principal.IdentityProvider, TrustLevel: principal.TrustLevel,
 		PolicyRevisionID: principal.PolicyRevisionID, DPoPJKT: principal.DPoPJKT,
 	}
-	if !accessPrincipalSealValid(principal) || input.validate() != nil ||
+	if !accessPrincipalSealValid(principal) || input.validateSignedClaims() != nil ||
 		principal.JTIHash == ([sha256.Size]byte{}) || principal.tokenHash == ([sha256.Size]byte{}) ||
 		principal.IssuedAt.IsZero() || !principal.ExpiresAt.After(principal.IssuedAt) {
 		return ErrSessionInvalid
@@ -613,14 +619,52 @@ func lockAccessInstallation(ctx context.Context, tx pgx.Tx, principal AccessPrin
 	if exclusive {
 		lockClause = "FOR UPDATE"
 	}
-	var storedJKT, status string
+	var storedInstallationID, status string
+	if principal.ComponentID == "" {
+		var storedJKT string
+		err := tx.QueryRow(ctx, `
+			SELECT installation_id, dpop_jkt, status
+			FROM installations
+			WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
+			  AND application_user_id = $4 AND installation_id = $5
+		`+lockClause, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
+			principal.ApplicationUserID, principal.InstallationID).Scan(
+			&storedInstallationID, &storedJKT, &status,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSessionInvalid
+		}
+		if err != nil {
+			return fmt.Errorf("lock access installation: %w", err)
+		}
+		if status != "active" && status != "revoked" {
+			return ErrSessionInvalid
+		}
+		if subtle.ConstantTimeCompare([]byte(storedJKT), []byte(principal.DPoPJKT)) != 1 {
+			return ErrSessionInvalid
+		}
+		return nil
+	}
+
+	// Component-aware wire-2 tokens contain only family/component identity.
+	// Recover and lock the internal legacy installation anchor through the
+	// immutable session grant instead of accepting it as a signed public claim.
 	err := tx.QueryRow(ctx, `
-		SELECT dpop_jkt, status
-		FROM installations
-		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
-		  AND application_user_id = $4 AND installation_id = $5
-	`+lockClause, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
-		principal.ApplicationUserID, principal.InstallationID).Scan(&storedJKT, &status)
+		SELECT installation.installation_id, installation.status
+		FROM session_grants AS session_grant
+		JOIN installations AS installation
+		  ON installation.organization_id = session_grant.organization_id
+		 AND installation.application_id = session_grant.application_id
+		 AND installation.environment_id = session_grant.environment_id
+		 AND installation.application_user_id = session_grant.application_user_id
+		 AND installation.installation_id = session_grant.installation_id
+		WHERE session_grant.organization_id = $1 AND session_grant.application_id = $2
+		  AND session_grant.environment_id = $3 AND session_grant.application_user_id = $4
+		  AND session_grant.session_grant_id = $5 AND session_grant.installation_family_id = $6
+		  AND session_grant.client_component_id = $7
+	`+lockClause+` OF installation`, principal.OrganizationID, principal.ApplicationID,
+		principal.EnvironmentID, principal.ApplicationUserID, principal.SessionGrantID,
+		principal.InstallationFamilyID, principal.ComponentID).Scan(&storedInstallationID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSessionInvalid
 	}
@@ -629,12 +673,6 @@ func lockAccessInstallation(ctx context.Context, tx pgx.Tx, principal AccessPrin
 	}
 	if status != "active" && status != "revoked" {
 		return ErrSessionInvalid
-	}
-	if principal.ComponentID == "" {
-		if subtle.ConstantTimeCompare([]byte(storedJKT), []byte(principal.DPoPJKT)) != 1 {
-			return ErrSessionInvalid
-		}
-		return nil
 	}
 	var familyStatus, componentStatus, keyStatus, sessionStatus, componentJKT string
 	err = tx.QueryRow(ctx, `
@@ -656,7 +694,7 @@ func lockAccessInstallation(ctx context.Context, tx pgx.Tx, principal AccessPrin
 		      WHERE session_grant_id = $8
 		  )
 	`+lockClause+` OF f, c, sf, k`, principal.OrganizationID, principal.ApplicationID,
-		principal.EnvironmentID, principal.ApplicationUserID, principal.InstallationID,
+		principal.EnvironmentID, principal.ApplicationUserID, storedInstallationID,
 		principal.InstallationFamilyID, principal.ComponentID, principal.SessionGrantID).Scan(
 		&familyStatus, &componentStatus, &keyStatus, &sessionStatus, &componentJKT,
 	)
@@ -791,7 +829,11 @@ func (authorization Authorization) ValidatedSnapshot(now time.Time) (Authorizati
 	if normalized.AttestedAt.After(now) {
 		return Authorization{}, ErrSessionInvalid
 	}
-	if !normalized.AttestationExpiresAt.After(now) {
+	// Durable authorization already validated the component and family state.
+	// A component-aware snapshot therefore follows the same bounded-grant
+	// semantics as authorizationStateError: trust expiry gates refresh and
+	// provisioning, not use of an otherwise-current access grant.
+	if normalized.ComponentID == "" && !normalized.AttestationExpiresAt.After(now) {
 		return Authorization{}, ErrAttestationRefreshNeeded
 	}
 	normalized.seal = digest

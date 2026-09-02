@@ -147,25 +147,21 @@
       "additionalProperties": false,
       "required": [
         "installation_family_id",
-        "client_component_id",
+        "component_id",
         "component_definition_id",
         "component_kind",
         "component_is_root",
-        "granted_features",
-        "trust_source"
+        "features",
+        "trust"
       ],
       "properties": {
         "installation_family_id": { "$ref": "#/$defs/FamilyID" },
-        "client_component_id": { "$ref": "#/$defs/ComponentID" },
+        "component_id": { "$ref": "#/$defs/ComponentID" },
         "component_definition_id": { "$ref": "#/$defs/Identifier" },
         "component_kind": { "type": "string", "minLength": 1, "maxLength": 64 },
         "component_is_root": { "type": "boolean" },
-        "granted_features": { "$ref": "#/$defs/Features" },
-        "trust_source": {
-          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "delegated_direct_attested", "identity_only", "web_risk_verified", "debug"]
-        },
-        "parent_component_id": { "$ref": "#/$defs/ComponentID" },
-        "delegation_id": { "$ref": "#/$defs/DelegationID" }
+        "features": { "$ref": "#/$defs/Features" },
+        "trust": { "$ref": "#/$defs/AccessTrustClaims" }
       },
       "allOf": [
         {
@@ -173,17 +169,42 @@
             "properties": { "component_is_root": { "const": false } },
             "required": ["component_is_root"]
           },
-          "then": { "required": ["parent_component_id", "delegation_id"] },
+          "then": {
+            "properties": {
+              "trust": {
+                "required": ["parent_component_id", "delegation_id"]
+              }
+            }
+          },
           "else": {
-            "not": {
-              "anyOf": [
-                { "required": ["parent_component_id"] },
-                { "required": ["delegation_id"] }
-              ]
+            "properties": {
+              "trust": {
+                "not": {
+                  "anyOf": [
+                    { "required": ["parent_component_id"] },
+                    { "required": ["parent_attestation_provider"] },
+                    { "required": ["delegation_id"] }
+                  ]
+                }
+              }
             }
           }
         }
       ]
+    },
+    "AccessTrustClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "delegated_direct_attested", "identity_only", "web_risk_verified", "debug"]
+        },
+        "attestation_provider": { "$ref": "#/$defs/Identifier" },
+        "parent_component_id": { "$ref": "#/$defs/ComponentID" },
+        "parent_attestation_provider": { "$ref": "#/$defs/Identifier" },
+        "delegation_id": { "$ref": "#/$defs/DelegationID" }
+      }
     },
     "ProvisionedComponent": {
       "type": "object",

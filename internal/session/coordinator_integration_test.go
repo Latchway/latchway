@@ -647,7 +647,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	elevatedActionAccess, err := accessIssuer.IssueFor(ctx, AccessIssueInput{
 		OrganizationID: actionPrincipal.OrganizationID, ApplicationID: actionPrincipal.ApplicationID,
 		EnvironmentID: actionPrincipal.EnvironmentID, ApplicationUserID: actionPrincipal.ApplicationUserID,
-		InstallationID: actionPrincipal.InstallationID, InstallationFamilyID: actionPrincipal.InstallationFamilyID,
+		InstallationID: refreshed.Installation.ID, InstallationFamilyID: actionPrincipal.InstallationFamilyID,
 		ComponentID: actionPrincipal.ComponentID, ComponentDefinitionID: actionPrincipal.ComponentDefinitionID,
 		ComponentKind: actionPrincipal.ComponentKind, ComponentIsRoot: false,
 		TrustSource: "delegated_identity_only", AttestationProvider: "app_attest",
@@ -997,6 +997,26 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		componentSessionStatus != "revoked" || retainedRotationResults != 0 {
 		t.Fatalf("after-grace reuse state old=%q new=%q family=%q cached=%d",
 			oldRefreshStatus, newRefreshStatus, componentSessionStatus, retainedRotationResults)
+	}
+	var reuseAuditAction, reuseAuditReason string
+	var reuseAuditChanges, sensitiveReuseChanges int
+	if err := pool.QueryRow(ctx, `
+		SELECT event.action, COALESCE(event.reason, ''), count(*)::int,
+		       count(*) FILTER (WHERE change.classification = 'sensitive')::int
+		FROM audit_events AS event
+		JOIN audit_event_changes AS change ON change.audit_event_id = event.audit_event_id
+		WHERE event.resource_type = 'client_component' AND event.resource_id = $1
+		  AND event.action = 'client.component.refresh_reuse_detected'
+		GROUP BY event.audit_event_id, event.action, event.reason
+	`, provisionedComponent.ComponentID).Scan(
+		&reuseAuditAction, &reuseAuditReason, &reuseAuditChanges, &sensitiveReuseChanges,
+	); err != nil {
+		t.Fatalf("inspect component refresh-reuse audit event: %v", err)
+	}
+	if reuseAuditAction != "client.component.refresh_reuse_detected" ||
+		reuseAuditReason != "refresh_reuse_detected" || reuseAuditChanges != 3 || sensitiveReuseChanges != 2 {
+		t.Fatalf("component refresh-reuse audit action=%q reason=%q changes=%d sensitive=%d",
+			reuseAuditAction, reuseAuditReason, reuseAuditChanges, sensitiveReuseChanges)
 	}
 	revokedFamilyRefreshProof := signedSessionDPoP(
 		t, childPrivateKey, http.MethodPost, refreshTarget, now,
@@ -2037,7 +2057,9 @@ func assertClientHTTPAccessToken(t *testing.T, ctx context.Context, keyManager *
 	}
 	if principal.OrganizationID != fixture.organizationID || principal.ApplicationID != fixture.applicationID ||
 		principal.EnvironmentID != fixture.environmentID || id.Validate(principal.ApplicationUserID, id.ApplicationUser) != nil ||
-		id.Validate(principal.InstallationID, id.Installation) != nil || id.Validate(principal.SessionGrantID, id.SessionGrant) != nil ||
+		principal.InstallationID != "" || id.Validate(principal.InstallationFamilyID, id.InstallationFamily) != nil ||
+		id.Validate(principal.ComponentID, id.ClientComponent) != nil || !principal.ComponentIsRoot ||
+		id.Validate(principal.SessionGrantID, id.SessionGrant) != nil ||
 		principal.IdentityProvider != "custom" || principal.TrustLevel != "debug" ||
 		principal.PolicyRevisionID != revisionID || principal.DPoPJKT != dpopJKT {
 		t.Fatal("client HTTP access token did not preserve the verified session scope")

@@ -93,6 +93,10 @@ describe("Installation Family console", () => {
     expect(screen.getByText("keychain")).toBeInTheDocument();
     expect(screen.getByText("Refresh reuse events").parentElement).toHaveTextContent("2");
     expect(screen.getByText("Closed session families").parentElement).toHaveTextContent("3");
+    expect(screen.getByRole("link", { name: "Inspect session failures and reuse" })).toHaveAttribute(
+      "href",
+      `/audit?environment_id=${environmentID}&resource_id=${childID}&resource_type=client_component`
+    );
     await user.click(screen.getByRole("button", { name: "Review re-attestation" }));
     expect(screen.getByRole("heading", { name: "Require fresh trust for ios-widget?" })).toBeInTheDocument();
     expect(screen.getByText(/No old refresh credential is restored/)).toBeInTheDocument();

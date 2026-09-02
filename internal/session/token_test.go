@@ -192,6 +192,74 @@ func TestAccessIssueAcceptsDelegatedDirectAttestedTrust(t *testing.T) {
 	}
 }
 
+func TestComponentAccessTokenOmitsLegacyInstallationClaim(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	now := time.Unix(1_787_820_000, 0).UTC()
+	keys := staticAccessTokenKeys{key: signingKey{material: &signingKeyMaterial{
+		kid: "gsk-component-final-model", private: privateKey,
+		notBefore: now.Add(-time.Hour), notAfter: now.Add(24 * time.Hour),
+	}}}
+	issuer, err := NewAccessTokenIssuer(AccessTokenIssuerConfig{
+		Keys: keys, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct access-token issuer: %v", err)
+	}
+	input := AccessIssueInput{
+		OrganizationID: mustTokenID(t, id.Organization), ApplicationID: mustTokenID(t, id.Application),
+		EnvironmentID: mustTokenID(t, id.Environment), ApplicationUserID: mustTokenID(t, id.ApplicationUser),
+		InstallationID: mustTokenID(t, id.Installation), InstallationFamilyID: mustTokenID(t, id.InstallationFamily),
+		ComponentID: mustTokenID(t, id.ClientComponent), ComponentDefinitionID: "ios-main",
+		ComponentKind: "main_app", ComponentIsRoot: true, TrustSource: "direct_attested",
+		AttestationProvider: "app_attest", Features: []string{"assistant"},
+		SessionGrantID: mustTokenID(t, id.SessionGrant), IdentityProvider: "firebase",
+		TrustLevel: "device_verified", PolicyRevisionID: mustTokenID(t, id.ConfigRevision),
+		DPoPJKT: base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	}
+	issued, err := issuer.Issue(context.Background(), input)
+	if err != nil {
+		t.Fatalf("issue component access token: %v", err)
+	}
+	_, payload, err := preflightAccessToken(issued.Token.Reveal())
+	if err != nil {
+		t.Fatalf("decode component access token: %v", err)
+	}
+	if _, exists := payload["installation_id"]; exists {
+		t.Fatal("wire-2 component token retained the legacy installation_id claim")
+	}
+	verifier, err := NewAccessTokenVerifier(AccessTokenVerifierConfig{
+		Keys: keys, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct access-token verifier: %v", err)
+	}
+	principal, err := verifier.Verify(context.Background(), issued.Token)
+	if err != nil {
+		t.Fatalf("verify component access token: %v", err)
+	}
+	if principal.InstallationID != "" || principal.ComponentID != input.ComponentID ||
+		principal.InstallationFamilyID != input.InstallationFamilyID {
+		t.Fatalf("unexpected final-model component principal: %#v", principal)
+	}
+
+	claimInput := input
+	claimInput.InstallationID = ""
+	if err := claimInput.validateSignedClaims(); err != nil {
+		t.Fatalf("final-model component claims rejected: %v", err)
+	}
+	claimInput.InstallationID = input.InstallationID
+	if err := claimInput.validateSignedClaims(); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("legacy installation claim on component token error = %v, want token invalid", err)
+	}
+}
+
 func TestPreparedAccessIssuerFormattingIsRedacted(t *testing.T) {
 	t.Parallel()
 

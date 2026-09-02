@@ -586,16 +586,18 @@ def validate_installation_family_vectors(vector_set: dict[str, Any]) -> None:
         raise ValueError("installation-family vector must begin with one active root")
     root_expected = {
         "installation_family_id": family["id"],
-        "client_component_id": root["id"],
+        "component_id": root["id"],
         "component_definition_id": root["definition_id"],
         "component_kind": root["kind"],
         "component_is_root": True,
-        "granted_features": root["granted_features"],
+        "features": root["granted_features"],
+        "trust": {
+            "source": "direct_attested",
+            "attestation_provider": "app_attest",
+        },
     }
-    if any(root_claims.get(key) != value for key, value in root_expected.items()):
+    if root_claims != root_expected:
         raise ValueError("root component claims do not match the family fixture")
-    if "parent_component_id" in root_claims or "delegation_id" in root_claims:
-        raise ValueError("root component claims contain delegated provenance")
 
     child_ids: list[str] = []
     delegation_ids: list[str] = []
@@ -615,13 +617,17 @@ def validate_installation_family_vectors(vector_set: dict[str, Any]) -> None:
             raise ValueError(f"component vector {vector['id']} does not consume its exact grant")
         expected_claims = {
             "installation_family_id": family["id"],
-            "client_component_id": response["component_id"],
+            "component_id": response["component_id"],
             "component_definition_id": request["component_definition_id"],
             "component_is_root": False,
-            "granted_features": response["granted_features"],
-            "trust_source": trust["source"],
-            "parent_component_id": root["id"],
-            "delegation_id": trust["delegation_id"],
+            "features": response["granted_features"],
+            "trust": {
+                "source": trust["source"],
+                "attestation_provider": trust["provider"],
+                "parent_component_id": root["id"],
+                "parent_attestation_provider": trust["parent_attestation_provider"],
+                "delegation_id": trust["delegation_id"],
+            },
         }
         if any(claims.get(key) != value for key, value in expected_claims.items()):
             raise ValueError(f"component vector {vector['id']} claims drift from provisioning")

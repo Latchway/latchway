@@ -139,6 +139,45 @@ func TestAuthorizationStateAllowsIndependentNonRootComponentTrust(t *testing.T) 
 	}
 }
 
+func TestComponentAuthorizationSurvivesTrustExpiryUntilAccessExpiry(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	authorization := testAuthorization(now, map[string]any{"plan": "premium"})
+	authorization.InstallationFamilyID = "fam_00000000000000000000000000"
+	authorization.InstallationFamilyStatus = "active"
+	authorization.ComponentID = "cmp_00000000000000000000000000"
+	authorization.ComponentDefinitionID = "ios-main-app"
+	authorization.ComponentKind = "main_app"
+	authorization.ComponentIsRoot = true
+	authorization.ComponentSessionFamilyID = "csf_00000000000000000000000000"
+	authorization.ComponentKeyID = "cky_00000000000000000000000000"
+	authorization.TrustSource = "direct_attested"
+	authorization.GrantedFeatures = []string{"assistant"}
+	authorization.AttestationExpiresAt = now
+
+	state := activeAuthorizationState(now)
+	state.Authorization = authorization
+	state.familyStatus = "active"
+	state.componentStatus = "active"
+	state.componentKeyStatus = "active"
+	state.componentSessionStatus = "active"
+	if err := authorizationStateError(state, now, false); err != nil {
+		t.Fatalf("component access rejected at trust expiry: %v", err)
+	}
+
+	sealed, err := sealAuthorization(authorization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sealed.ValidatedSnapshot(now); err != nil {
+		t.Fatalf("component snapshot rejected at trust expiry: %v", err)
+	}
+	if _, err := sealed.ValidatedSnapshot(authorization.AccessExpiresAt); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("component snapshot at access expiry error = %v, want token expired", err)
+	}
+}
+
 func TestAuthorizationMatchesPrincipalBindsAttestationProvider(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	authorization := testAuthorization(now, map[string]any{"plan": "premium"})

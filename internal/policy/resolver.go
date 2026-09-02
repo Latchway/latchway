@@ -914,8 +914,14 @@ func validRuntimeAttestationOrigins(platform string, selection configuration.Pla
 
 func sealedSessionAttestationFresh(authorization authorizationFacts, now time.Time) error {
 	if authorization.attestedAt.IsZero() || authorization.attestedAt.After(now) ||
-		!authorization.attestationExpiresAt.After(authorization.attestedAt) ||
-		!authorization.attestationExpiresAt.After(now) {
+		!authorization.attestationExpiresAt.After(authorization.attestedAt) {
+		return session.ErrAttestationRefreshNeeded
+	}
+	// Wire-2 component access grants are bounded snapshots of trust at issue
+	// time. Family/component renewal gates refresh and provisioning, while the
+	// already-issued grant remains usable until its own expiry. Legacy grants
+	// retain the original request-time attestation-expiry check.
+	if authorization.componentID == "" && !authorization.attestationExpiresAt.After(now) {
 		return session.ErrAttestationRefreshNeeded
 	}
 	return nil
@@ -924,6 +930,9 @@ func sealedSessionAttestationFresh(authorization authorizationFacts, now time.Ti
 func configuredAttestationFresh(policy configuration.AttestationPolicy, authorization authorizationFacts, now time.Time) error {
 	if err := sealedSessionAttestationFresh(authorization, now); err != nil {
 		return err
+	}
+	if authorization.componentID != "" {
+		return nil
 	}
 	if !authorization.attestedAt.Add(policy.MaxAge).After(now) {
 		return session.ErrAttestationRefreshNeeded

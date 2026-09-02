@@ -56,7 +56,7 @@ type accessTokenClaims struct {
 	OrganizationID        string             `json:"organization_id"`
 	ApplicationID         string             `json:"application_id"`
 	EnvironmentID         string             `json:"environment_id"`
-	InstallationID        string             `json:"installation_id"`
+	InstallationID        string             `json:"installation_id,omitempty"`
 	InstallationFamilyID  string             `json:"installation_family_id,omitempty"`
 	ComponentID           string             `json:"component_id,omitempty"`
 	ComponentDefinitionID string             `json:"component_definition_id,omitempty"`
@@ -97,15 +97,39 @@ type AccessIssueInput struct {
 }
 
 func (input AccessIssueInput) validate() error {
-	if id.Validate(input.OrganizationID, id.Organization) != nil || id.Validate(input.ApplicationID, id.Application) != nil || id.Validate(input.EnvironmentID, id.Environment) != nil || id.Validate(input.ApplicationUserID, id.ApplicationUser) != nil || id.Validate(input.InstallationID, id.Installation) != nil || id.Validate(input.SessionGrantID, id.SessionGrant) != nil || id.Validate(input.PolicyRevisionID, id.ConfigRevision) != nil {
+	return input.validateWithInstallationMode(true)
+}
+
+// validateSignedClaims validates the public wire representation. Component-
+// aware wire-2 tokens deliberately omit the legacy installation_id claim;
+// their durable root-installation anchor is recovered from the bound session
+// grant. Issuance still requires that internal anchor through validate.
+func (input AccessIssueInput) validateSignedClaims() error {
+	return input.validateWithInstallationMode(false)
+}
+
+func (input AccessIssueInput) validateWithInstallationMode(requireInternalInstallation bool) error {
+	if id.Validate(input.OrganizationID, id.Organization) != nil || id.Validate(input.ApplicationID, id.Application) != nil || id.Validate(input.EnvironmentID, id.Environment) != nil || id.Validate(input.ApplicationUserID, id.ApplicationUser) != nil || id.Validate(input.SessionGrantID, id.SessionGrant) != nil || id.Validate(input.PolicyRevisionID, id.ConfigRevision) != nil {
 		return ErrTokenInvalid
 	}
 	if !sessionIdentifierPattern.MatchString(input.IdentityProvider) || !trustLevelPattern.MatchString(input.TrustLevel) || !validThumbprint(input.DPoPJKT) {
 		return ErrTokenInvalid
 	}
 	componentAware := input.InstallationFamilyID != "" || input.ComponentID != "" ||
-		input.ComponentDefinitionID != "" || input.ComponentKind != "" || input.TrustSource != "" ||
-		len(input.Features) != 0
+		input.ComponentDefinitionID != "" || input.ComponentKind != "" || input.ComponentIsRoot ||
+		input.TrustSource != "" || input.AttestationProvider != "" || input.ParentComponentID != "" ||
+		input.ParentAttestationProvider != "" || input.DelegationID != "" || len(input.Features) != 0
+	if requireInternalInstallation {
+		if id.Validate(input.InstallationID, id.Installation) != nil {
+			return ErrTokenInvalid
+		}
+	} else if componentAware {
+		if input.InstallationID != "" {
+			return ErrTokenInvalid
+		}
+	} else if id.Validate(input.InstallationID, id.Installation) != nil {
+		return ErrTokenInvalid
+	}
 	if componentAware {
 		if id.Validate(input.InstallationFamilyID, id.InstallationFamily) != nil ||
 			id.Validate(input.ComponentID, id.ClientComponent) != nil ||
@@ -273,7 +297,7 @@ func (prepared *preparedAccessTokenIssuer) IssueFor(input AccessIssueInput, life
 	jti := base64.RawURLEncoding.EncodeToString(jtiBytes)
 	claims := accessTokenClaims{
 		OrganizationID: input.OrganizationID, ApplicationID: input.ApplicationID,
-		EnvironmentID: input.EnvironmentID, InstallationID: input.InstallationID,
+		EnvironmentID:  input.EnvironmentID,
 		SessionGrantID: input.SessionGrantID, IdentityProvider: input.IdentityProvider,
 		AttestationLevel: input.TrustLevel, PolicyRevision: input.PolicyRevisionID,
 		Confirmation: Confirmation{JKT: input.DPoPJKT},
@@ -296,6 +320,8 @@ func (prepared *preparedAccessTokenIssuer) IssueFor(input AccessIssueInput, life
 			DelegationID:              input.DelegationID,
 		}
 		claims.Features = append([]string(nil), input.Features...)
+	} else {
+		claims.InstallationID = input.InstallationID
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["kid"] = key.KeyID()
@@ -507,7 +533,8 @@ func validateAccessClaims(claims accessTokenClaims, maximumLifetime time.Duratio
 		input.DelegationID = claims.Trust.DelegationID
 	}
 	input.Features = append([]string(nil), claims.Features...)
-	if input.validate() != nil || claims.IssuedAt == nil || claims.ExpiresAt == nil || claims.ID == "" || len(claims.ID) > 128 || strings.ContainsAny(claims.ID, "\r\n\x00") {
+	if (claims.ComponentID == "" && claims.Trust != nil) ||
+		input.validateSignedClaims() != nil || claims.IssuedAt == nil || claims.ExpiresAt == nil || claims.ID == "" || len(claims.ID) > 128 || strings.ContainsAny(claims.ID, "\r\n\x00") {
 		return ErrTokenInvalid
 	}
 	issuedAt := claims.IssuedAt.UTC()

@@ -63,6 +63,14 @@ function cost(value: number): string {
   return `${value.toLocaleString()} nUSD`;
 }
 
+function componentAuditHref(component: ClientComponent): string {
+  return `/audit?${new URLSearchParams({
+    environment_id: component.environment_id,
+    resource_id: component.id,
+    resource_type: "client_component"
+  }).toString()}`;
+}
+
 function TrustGraphNode({
   component,
   components,
@@ -96,7 +104,7 @@ function ComponentDetail({ component, busy, canRevoke, familyActive, onClose, on
     <h3>Trust provenance</h3><dl><div><dt>Trust source</dt><dd>{label(component.trust_source)}</dd></div><div><dt>Provider</dt><dd>{component.attestation_provider ?? "—"}</dd></div><div><dt>Parent component</dt><dd>{component.parent_component_id ?? "root"}</dd></div><div><dt>Parent attestation event</dt><dd>{component.parent_attestation_event_id ?? "—"}</dd></div><div><dt>Verified</dt><dd>{time(component.trust_verified_at)}</dd></div><div><dt>Trust expires</dt><dd>{time(component.trust_expires_at)}</dd></div></dl>
     {component.delegation ? <section className="provenance-panel"><h3>Delegation receipt</h3><dl><div><dt>Delegation</dt><dd>{component.delegation.id}</dd></div><div><dt>Configuration revision</dt><dd>{component.delegation.configuration_revision_id}</dd></div><div><dt>Trust level</dt><dd>{label(component.delegation.trust_level)}</dd></div><div><dt>Feature scopes</dt><dd>{component.delegation.feature_scopes.join(", ")}</dd></div><div><dt>Identity expires</dt><dd>{time(component.delegation.identity_expires_at)}</dd></div><div><dt>Attestation expires</dt><dd>{time(component.delegation.attestation_expires_at)}</dd></div><div><dt>Delegation expires</dt><dd>{time(component.delegation.expires_at)}</dd></div><div><dt>Consumed</dt><dd>{time(component.delegation.consumed_at)}</dd></div></dl></section> : null}
     <h3>Component key and grants</h3><dl><div><dt>Definition</dt><dd>{component.definition_id}</dd></div><div><dt>Component key</dt><dd>{component.component_key_id}</dd></div><div><dt>DPoP thumbprint</dt><dd><code>{component.dpop_jkt}</code></dd></div><div><dt>Key storage claim</dt><dd>{label(component.key_storage_claim)}</dd></div><div><dt>Granted features</dt><dd>{component.granted_features.join(", ")}</dd></div><div><dt>Status</dt><dd>{component.status}</dd></div><div><dt>Last activity</dt><dd>{time(component.last_seen_at)}</dd></div><div><dt>App / SDK version</dt><dd>{component.app_version ?? "—"} / {component.sdk_version ?? "—"}</dd></div></dl>
-    <h3>Session and reuse</h3><dl><div><dt>Session family</dt><dd>{component.session_family_id ?? "—"}</dd></div><div><dt>Session status</dt><dd>{component.session_status ?? "—"}</dd></div><div><dt>Access expires</dt><dd>{time(component.session_expires_at)}</dd></div><div><dt>Closed session families</dt><dd>{component.session_failure_count.toLocaleString()}</dd></div><div><dt>Refresh reuse events</dt><dd>{component.refresh_reuse_count.toLocaleString()}</dd></div><div><dt>Revoked</dt><dd>{time(component.revoked_at)}</dd></div><div><dt>Revocation reason</dt><dd>{component.revocation_reason ?? "—"}</dd></div></dl>
+    <h3>Session and reuse</h3><dl><div><dt>Session family</dt><dd>{component.session_family_id ?? "—"}</dd></div><div><dt>Session status</dt><dd>{component.session_status ?? "—"}</dd></div><div><dt>Access expires</dt><dd>{time(component.session_expires_at)}</dd></div><div><dt>Closed session families</dt><dd>{component.session_failure_count.toLocaleString()}</dd></div><div><dt>Refresh reuse events</dt><dd>{component.refresh_reuse_count.toLocaleString()}</dd></div><div><dt>Revoked</dt><dd>{time(component.revoked_at)}</dd></div><div><dt>Revocation reason</dt><dd>{component.revocation_reason ?? "—"}</dd></div></dl><a className="secondary-action" href={componentAuditHref(component)}>Inspect session failures and reuse</a>
     <h3>Usage and cost</h3><Table headers={["Requests", "Logical requests", "Input", "Output", "Total", "Cost"]} rows={[[component.request_count, component.usage.logical_requests, component.usage.input_tokens, component.usage.output_tokens, component.usage.total_tokens, cost(component.usage.cost_nano_usd)]]} />
   </section>;
 }

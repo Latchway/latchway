@@ -666,6 +666,15 @@ func TestResolverEnforcesFeatureAttestationBeforeCEL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	makeComponentAware := func(input *Input) {
+		input.authorization.installationFamilyID = "fam_00000000000000000000000000"
+		input.authorization.installationFamilyStatus = "active"
+		input.authorization.componentID = "cmp_00000000000000000000000000"
+		input.authorization.componentDefinitionID = "ios-main"
+		input.authorization.componentKind = "main_app"
+		input.authorization.componentIsRoot = true
+		input.authorization.trustSource = "direct_attested"
+	}
 	tests := []struct {
 		name   string
 		mutate func(*fakeSnapshot, *Input)
@@ -716,6 +725,20 @@ func TestResolverEnforcesFeatureAttestationBeforeCEL(t *testing.T) {
 				input.authorization.attestationExpiresAt = policyTestNow
 			},
 			want: session.ErrAttestationRefreshNeeded,
+		},
+		{
+			name: "required component grant survives durable trust expiry",
+			mutate: func(_ *fakeSnapshot, input *Input) {
+				makeComponentAware(input)
+				input.authorization.attestationExpiresAt = policyTestNow
+			},
+		},
+		{
+			name: "required component grant survives policy maximum age",
+			mutate: func(_ *fakeSnapshot, input *Input) {
+				makeComponentAware(input)
+				input.authorization.attestedAt = policyTestNow.Add(-10 * time.Minute)
+			},
 		},
 		{
 			name: "required rejects ambiguous challenge policy",

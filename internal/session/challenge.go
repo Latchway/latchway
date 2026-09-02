@@ -544,6 +544,52 @@ func (store *ChallengeStore) DeleteExpired(ctx context.Context, before time.Time
 		return 0, fmt.Errorf("begin expired challenge cleanup: %w", err)
 	}
 	defer rollbackSigning(tx)
+	legacyBudget := limit
+	if limit > 1 {
+		// Reserve capacity for both challenge classes so a sustained root-session
+		// backlog cannot starve direct-component challenge cleanup. Any unused
+		// component capacity is filled from legacy challenges below.
+		legacyBudget = (limit + 1) / 2
+	}
+	legacyDeleted, err := deleteExpiredSessionChallenges(
+		ctx, tx, before.UTC(), cleanupNow, legacyBudget,
+	)
+	if err != nil {
+		return 0, err
+	}
+	remaining := limit - int(legacyDeleted)
+	componentDeleted, err := deleteExpiredComponentAttestationChallenges(
+		ctx, tx, before.UTC(), remaining,
+	)
+	if err != nil {
+		return 0, err
+	}
+	remaining -= int(componentDeleted)
+	if remaining > 0 {
+		additionalLegacy, deleteErr := deleteExpiredSessionChallenges(
+			ctx, tx, before.UTC(), cleanupNow, remaining,
+		)
+		if deleteErr != nil {
+			return 0, deleteErr
+		}
+		legacyDeleted += additionalLegacy
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit expired challenge cleanup: %w", err)
+	}
+	return legacyDeleted + componentDeleted, nil
+}
+
+func deleteExpiredSessionChallenges(
+	ctx context.Context,
+	tx pgx.Tx,
+	before time.Time,
+	cleanupNow time.Time,
+	limit int,
+) (int64, error) {
+	if limit == 0 {
+		return 0, nil
+	}
 	// Challenge rows also hold the pre-installation DPoP replay key. Retain
 	// expired rows for the replay window so short challenge TTLs cannot make an
 	// otherwise still-acceptable proof reusable after cleanup.
@@ -555,7 +601,7 @@ func (store *ChallengeStore) DeleteExpired(ctx context.Context, before time.Time
 		ORDER BY expires_at, session_challenge_id
 		LIMIT $2
 		FOR UPDATE SKIP LOCKED
-	`, before.UTC(), limit, cleanupNow.Add(-defaultReplayLifetime))
+	`, before, limit, cleanupNow.Add(-defaultReplayLifetime))
 	if err != nil {
 		return 0, fmt.Errorf("select expired session challenges: %w", err)
 	}
@@ -574,9 +620,6 @@ func (store *ChallengeStore) DeleteExpired(ctx context.Context, before time.Time
 	}
 	rows.Close()
 	if len(challengeIDs) == 0 {
-		if err := tx.Commit(ctx); err != nil {
-			return 0, fmt.Errorf("commit empty challenge cleanup: %w", err)
-		}
 		return 0, nil
 	}
 	if _, err := tx.Exec(ctx, `
@@ -592,10 +635,35 @@ func (store *ChallengeStore) DeleteExpired(ctx context.Context, before time.Time
 	if err != nil {
 		return 0, fmt.Errorf("delete expired session challenges: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit expired challenge cleanup: %w", err)
-	}
 	return command.RowsAffected(), nil
+}
+
+func deleteExpiredComponentAttestationChallenges(
+	ctx context.Context,
+	tx pgx.Tx,
+	before time.Time,
+	limit int,
+) (int64, error) {
+	if limit == 0 {
+		return 0, nil
+	}
+	result, err := tx.Exec(ctx, `
+		WITH doomed AS (
+			SELECT component_attestation_challenge_id
+			FROM component_attestation_challenges
+			WHERE expires_at < $1
+			ORDER BY expires_at, component_attestation_challenge_id
+			LIMIT $2 FOR UPDATE SKIP LOCKED
+		)
+		DELETE FROM component_attestation_challenges AS challenge
+		USING doomed
+		WHERE challenge.component_attestation_challenge_id =
+		      doomed.component_attestation_challenge_id
+	`, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired component attestation challenges: %w", err)
+	}
+	return result.RowsAffected(), nil
 }
 
 func isUniqueViolation(err error) bool {

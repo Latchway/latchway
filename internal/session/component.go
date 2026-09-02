@@ -1017,17 +1017,25 @@ func (store *Store) RevokeCurrentFamily(ctx context.Context, access AccessReques
 
 func insertComponentLifecycleAudit(ctx context.Context, tx pgx.Tx, eventID, organizationID,
 	environmentID, action, componentID string, now time.Time, changes [][2]string) error {
+	return insertComponentLifecycleAuditWithReason(
+		ctx, tx, eventID, organizationID, environmentID, action, componentID, "", now, changes,
+	)
+}
+
+func insertComponentLifecycleAuditWithReason(ctx context.Context, tx pgx.Tx, eventID, organizationID,
+	environmentID, action, componentID, reason string, now time.Time, changes [][2]string) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (
 			audit_event_id, organization_id, environment_id, actor_kind, actor_id,
-			action, resource_type, resource_id, outcome, occurred_at, source
-		) VALUES ($1, $2, $3, 'system', NULL, $4, 'client_component', $5, 'succeeded', $6, 'system')
-	`, eventID, organizationID, environmentID, action, componentID, now); err != nil {
+			action, resource_type, resource_id, outcome, occurred_at, source, reason
+		) VALUES ($1, $2, $3, 'system', NULL, $4, 'client_component', $5, 'succeeded', $6, 'system', NULLIF($7, ''))
+	`, eventID, organizationID, environmentID, action, componentID, now, reason); err != nil {
 		return fmt.Errorf("record component lifecycle audit event: %w", err)
 	}
 	for index, change := range changes {
 		classification := "public"
-		if strings.Contains(change[0], "grant") || strings.Contains(change[0], "key") {
+		if strings.Contains(change[0], "grant") || strings.Contains(change[0], "key") ||
+			strings.Contains(change[0], "refresh") {
 			classification = "sensitive"
 		}
 		if _, err := tx.Exec(ctx, `
