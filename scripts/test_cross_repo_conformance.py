@@ -998,6 +998,9 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertEqual(
             check["details"]["contract_source_commit"], contract_source_commit
         )
+        self.assertEqual(
+            report["contract"]["bundle_sha256"], self.workspace.bundle_sha256
+        )
 
         core_repository = next(
             repository
@@ -1059,8 +1062,10 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
 
         result, report, _, _ = self.run_gate("contract-checkpoint-compatibility-drift")
         self.assertEqual(result.returncode, 1)
-        reasons = {check.get("reason") for check in report["checks"]}
-        self.assertIn("sdk_locked_contract_source_drift", reasons)
+        check = next(
+            item for item in report["checks"] if item["id"] == "source.contract_locks"
+        )
+        self.assertEqual(check["reason"], "sdk_locked_contract_source_drift")
 
     def test_server_compatibility_range_is_checked_against_core_version(self) -> None:
         for repository_id in ("javascript", "ios", "android", "react_native"):
