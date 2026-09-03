@@ -209,6 +209,40 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- Private terminal-validator candidate `ec177decc80f2439f7874e365ee22a27c3dd391b`
+  (parent `568f4f6950acec79c65ca59b3f829d7612242a11`) consolidates repeated reads
+  in the existing deferred function without changing its trigger timing,
+  constraints, indexes, locks, error ordering or legacy repair. It is not
+  integrated into main and has no measured speedup yet. On native local
+  PostgreSQL 18, all `48` differential cases passed in both query protocols,
+  including named real-COMMIT cases; the exact schema `28` to `29` catalog/OID
+  check, full quota suite (`114` roots), and focused race suite (`5` roots)
+  also passed. An initial catalog test had incorrectly used a historical helper
+  capped at schema `20`; the corrected test explicitly verifies both migration
+  ledgers, and the original failed-attempt receipt remains preserved. The
+  successful fixture completed and cleaned up in `36.267` seconds. Exact
+  container/volume absence and all six running previews were independently
+  verified. PostgreSQL 15, performance, full-candidate and release evidence are
+  not claimed by this local correctness result.
+- Corrected native streaming-memory diagnostic `33743262556`, attempt `1`, at
+  tooling `8cbd8ee104d4c51c165ab11a4e78dbb88614021c` completed one unchanged-source
+  A/B pair in `820.328` seconds. Its exact archive digest and ten allowlisted
+  artifact files were independently verified; both arm cleanups and final
+  exact resource/image absence passed. The earlier default-memory growth was
+  **not reproduced**: all `500` streams remained open for `60` seconds in both
+  arms, with essentially zero plateau slopes. Default RSS stayed `170.957 MiB`;
+  THP-disabled RSS stayed about `167.262 MiB`. Each arm had three fresh paired
+  Go/OS samples over more than `34` seconds with stable host THP controls,
+  GOGC and GOMEMLIMIT. Anonymous huge pages stayed flat at `16 / 2 MiB`, and
+  heap-object growth was only `0.238 / 0.249 MiB`; last-GC live heap, GC cycles,
+  stack memory and goroutine counts stayed flat within each held window.
+  This observes different huge-page levels, not a demonstrated fix for the
+  earlier growth failure. No production runtime setting is changed. Both arms
+  still failed overhead (`22.577 / 22.550 ms` medians) and sustained load
+  (`4,738 / 4,243` successes out of `6,000`), with different preconditioning
+  outcomes. The diagnostic is not a full release gate, and the failed protected
+  candidate remains failed. No further diagnostic dispatch or publication was
+  performed from this result.
 - Native streaming-memory diagnostic `33741971790`, attempt `1`, at tooling
   `e0aebac2ebdc514509ecb79d3fbdd68e6da0b042` stopped during `source_and_build`
   after `201.150` seconds on 2026-09-03. Neither workload arm started. The exact
@@ -323,6 +357,11 @@ released checkpoint and reproducible bundle above.
   stack, live cleanup arm, or GCP workflow dispatch exists. Authenticated
   candidate verification and the integrated creator/supervisor/cleanup
   boundaries remain prerequisites for live provisioning.
+  The private thin controller and its reviewed transport/journal/IAM/GitHub/
+  free-cleanup dependencies subsequently passed `194` combined offline tests
+  independently with warnings treated as errors. This is callable integration
+  only: authentic process supervision, candidate/evidence verification, and
+  cleanup/reference ownership bindings are still required before live use.
 
 - A second reviewed optimization batches only BeginAttempt's final attempt
   and allocation inserts. Its earlier reads, classifiers, ordered locks,
