@@ -209,7 +209,91 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
-- The next candidate includes only advisory load-diagnostic tooling changes,
+- A second reviewed optimization batches only BeginAttempt's final attempt
+  and allocation inserts. Its earlier reads, classifiers, ordered locks,
+  identifier generation, fresh clock/expiry checks, and checked dispatch
+  update remain unchanged. The measured three-token shape removes three
+  explicit exchanges; retry insertion remains sequential. The full real
+  PostgreSQL 18 quota suite passed in `22.825 s`, the new cases passed in
+  simple-protocol mode, and the focused race suite passed in `6.529 s`.
+  Tests cover rollback after the third allocation fails, exact attribution
+  and counts, zero allocations, pending and terminal replay without a new
+  identifier, and the existing 48 overlapping lifecycles. Independent review
+  found no remaining issues. Full load verification remains outstanding.
+- Integrated source `b6da040f22b8f9a67cc86c6486d2b533f6cd58f5` passed
+  full uncached Go tests and vet, all 474 release/tool tests, Go formatting,
+  workflow lint, and normative contract validation. Canonical public docs
+  passed the complete check across 233 routes, including build, links,
+  generated references, pinned prose checks, and accessibility. Initial
+  sandbox-only cache/loopback restrictions were resolved by rerunning the
+  same checks with the required local permissions; no tests were disabled.
+- The complete unchanged local load suite at
+  `ed0dfa345c8a4bf2fcf57bc3cc0794220f36b3f6` passed five of six gates.
+  Gateway-overhead p50 was `15.070375 ms`, above the `15 ms` limit;
+  p95/p99 passed at `19.876999`/`27.279041 ms`. All 6,000 non-stream
+  requests returned HTTP 200, with exact terminal accounting and zero
+  pending reservations. All 500 SSE streams held for 60 seconds; peak
+  RSS was `155.133 MiB`, growth `96.203 MiB`, and the hold plateau was
+  flat. Preflight, idle memory, and zero-overspend contention also passed.
+  The overall result remains failed, not release evidence. Its exact
+  temporary containers, network, and image tags were removed; the six
+  existing preview containers remain running. This was not a matched
+  before/after experiment, so it does not establish an optimization speedup.
+- The same local source passed complete uncached `go test -count=1 ./...`
+  and `go vet ./...`. Those commands had no database fixture; the separate
+  complete PostgreSQL 18 quota suite is recorded below.
+- A bounded, sanitized SQL profile of baseline `3eb76e7` completed 400
+  exact-accounted lifecycles without query errors. Serial mean lifecycle
+  time was `14.489 ms`; at concurrency 16, two shared-bucket lock-containing
+  batches accounted for `85.1%` of the `146.064 ms` mean. This is consistent
+  with contention, not direct server wait timing. BeginAttempt made 13
+  separate client query calls, identifying its tail inserts as a narrower
+  next optimization. These private diagnostic results are not release gates
+  or an exact network-round-trip count.
+- A reviewed Reserve-only optimization batches the post-lock clock and stage
+  number reads with the existing sorted bucket locks, and batches decision
+  provenance with capacity/reservation writes. It removes three explicit
+  warmed-path database exchanges on accepted requests without dropping SQL
+  commands, accounting checks, row-count guards, or ordered locks. Denial and
+  replay behavior remain intact. The complete real PostgreSQL 18 quota suite
+  passed in 21.290 seconds, including three injected rollback boundaries,
+  48 overlapping complete lifecycles with exact accounting, and last-bucket
+  lock waits in both cached-statement and simple-protocol modes. Independent
+  review caught and reproduced a stale batched `statement_timestamp()` in
+  simple protocol; a trailing `clock_timestamp()` corrects only this new
+  path and preserves the full post-lock reservation lifetime. Offline quota
+  tests and separate source review also passed. The subsequent full load
+  result is recorded above and remains below release requirements.
+- Advisory memory diagnostics now sample six numeric process-memory counters
+  and four allowlisted Linux huge-page controls through the existing load
+  runner, without elevated privileges, new services, or runtime tuning. Raw
+  process mappings, paths, credentials, and dependency errors are discarded.
+  Missing or denied measurements remain unknown, not zero. Sampling uses
+  the existing slower lifecycle cadence, and interruption cleanup requires
+  the exact owned runner label/image/create intent. The combined diagnostic,
+  CI, release, and resilience script checks passed 104 tests. These counters
+  are diagnostic only and do not establish the cause of the memory growth.
+  The complete local ARM64 run successfully captured the counters and
+  recorded `66 MiB` of anonymous huge pages during its flat SSE plateau.
+  Huge-page configuration alone therefore does not establish the cause of
+  the earlier CI memory staircase; CI process counters remain outstanding.
+- Candidate run `33723723170`, at exact source
+  `3eb76e733ca54304f7deb3fcd186409648d11b03`, passed core, Console, and
+  deterministic failure/replica gates but failed the complete load suite.
+  Image building, publication, and signing were skipped. The diagnostics
+  recorded four actual runner CPUs, up to 31 blocked PostgreSQL backends
+  (tuple/transaction-ID lock waits), and substantial CPU pressure, with no
+  deadlocks or OOM. Overhead p50/p95/p99 was `26.481`/`32.927`/`37.606` ms.
+  Of 6,000 non-stream requests, 3,637 returned HTTP 200 and 2,363 returned
+  HTTP 503 `server_not_ready`; 1,196 reservations remained pending after the
+  settlement wait. All 500 SSE streams held, but RSS slope was
+  `82.642 MiB/min`, above the unchanged `<5` requirement. The remaining
+  reservations belonged to the earlier non-stream gate, not the SSE
+  cancellations. Preflight, idle memory, and zero-overspend contention
+  passed. Row-lock contention is observed; its exact SQL cost and the
+  streaming memory increase still require diagnosis. No passing release
+  or protected deployment evidence is claimed from this run.
+- That candidate included only advisory load-diagnostic tooling changes,
   not production-path changes or relaxed release gates. Bounded, read-only
   PostgreSQL activity/lifecycle aggregates, host/scoped-container resource
   measurements, and allowlisted database error labels retain neither SQL
@@ -221,7 +305,7 @@ released checkpoint and reproducible bundle above.
   write proving read-only enforcement. A separate review found no remaining
   issues. Canonical public documentation passed its complete `pnpm check`
   across 233 routes, including pinned Vale 3.17.0, build/link validation, and
-  accessibility checks. Protected CI results for this update remain open.
+  accessibility checks. Its failed protected load result is recorded above.
 - Candidate run `33718191675`, at exact remote source
   `3b4cf7bf4ea019202c01ca4f9224b19129660d38`, failed the complete isolated
   load gate after core, Console, and deterministic failure/replica gates
@@ -291,7 +375,13 @@ released checkpoint and reproducible bundle above.
   `billingEnabled: true` at `2026-09-03T06:16:44Z`. Its non-secret cleanup
   receipt records that API change; no billable resources, IAM changes,
   billing-association changes, or persistent credentials/configuration were
-  created by this setup step.
+  created by this setup step. The owner separately approved up to 30 minutes
+  of emergency cleanup after the two-hour deadline, solely for removing
+  this test's resources, including independently owned database/secrets
+  when app shutdown cannot be confirmed. This does not increase the $10
+  budget or authorize new resources or continued testing. The fixed-scope
+  cleanup safeguard passed 35 offline tests; it is not armed and no paid
+  resources have been created.
 - Candidate run `33714186880` at
   `056fba2030b6573cfef69514a027a002a54d5eb6` passed contract/release-tooling,
   core/race/fuzz, Console, and deterministic failure/replica gates, then failed
