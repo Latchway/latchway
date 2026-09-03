@@ -37,6 +37,22 @@ single-gate run can exit successfully for iteration, but its JSON contains
 The complete suite also requires a clean source worktree so its commit identity
 actually describes the harness being run.
 
+The release-candidate workflow runs the complete load suite in a separate,
+fresh `ubuntu-24.04` job after core, Console, and deterministic failure checks.
+That job has no GitHub service containers: the load script owns its database,
+gateway, upstream fixture, and load generator. This avoids sharing the measured
+host with the verification job's additional PostgreSQL service and preceding
+test workload. The gateway remains capped at 2 CPUs / 2 GiB, its database at
+4 CPUs / 4 GiB, and the connection pool at 32. These CPU limits are ceilings
+sharing the measured host, not a promise of six dedicated CPUs.
+
+Candidate diagnostic artifacts are split by job:
+`latchway-candidate-reliability-<commit>` contains deterministic failure
+evidence; `latchway-candidate-load-<commit>` contains the full load evidence.
+Image creation requires both verification jobs to succeed. Fresh-runner
+isolation does not itself establish a performance fix or replace the later
+protected exact-release-image evidence.
+
 The failure report has two independent verdicts:
 
 - `automated_passed` covers deterministic unit/PostgreSQL semantic evidence;

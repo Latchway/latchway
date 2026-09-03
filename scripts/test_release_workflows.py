@@ -685,7 +685,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_candidate_image_signing_is_fresh_and_executes_no_candidate_tooling(self) -> None:
         workflow = load_workflow("release.yml")
         self.assertEqual(
-            set(workflow["jobs"]), {"verify", "image", "publish-image", "sign"}
+            set(workflow["jobs"]), {"verify", "load", "image", "publish-image", "sign"}
         )
         image = workflow["jobs"]["image"]
         publisher = workflow["jobs"]["publish-image"]

@@ -209,6 +209,57 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- The next candidate workflow isolates the full load suite in a fresh
+  `ubuntu-24.04` job after verification, without the verification job's extra
+  uncapped PostgreSQL service or prior core/Console/failure-test host history.
+  Image creation explicitly requires both jobs. Candidate failure and load
+  artifacts now have distinct names; no automated consumer of the former
+  combined diagnostic layout was found across the six repositories. Workloads,
+  production code, database/gateway limits, worker role, pool size, and every
+  acceptance threshold remain unchanged. This corrects a measured-environment
+  confound; no performance improvement or successful new run is yet claimed.
+  Independent source review, pinned actionlint `1.7.12`, and contract validation
+  passed. The full discovered script run executed `479` tests: `478` passed
+  and one localhost-listener test was blocked by the sandbox; that unchanged
+  test separately passed with local socket permission in `0.624 s`. The
+  focused workflow suites also passed all `44` tests.
+- Protected release-candidate run `33749042507`, attempt `1`, at exact source
+  `2d6d4636a8f0ed941b61d5f0308798d35faa49c3` passed core normal/race/fuzz,
+  Console and deterministic failure/replica checks, but failed the unchanged
+  complete load suite. Image build, publication and signing were skipped.
+  The exact retained numeric report shows overhead p50/p95/p99 of
+  `28.158 / 31.654 / 36.752 ms` against `15 / 20 / 30 ms` limits. Of `6,000`
+  scheduled non-stream requests, `3,741` returned HTTP 200 and `2,259` returned
+  the structured `server_not_ready` HTTP 503 response; there were no transport
+  errors or invalid problem responses. Request-start lag passed at `7.100 ms`
+  against `25 ms`, but request completion took `90.221 s` and the subsequent
+  terminal snapshot retained `1,218` request reservations. This is not exact
+  terminal accounting or evidence that readiness itself flapped.
+  All `500` SSE streams established and stayed open for the full hold. RSS
+  growth was `117.359 MiB` (below `128 MiB`), while hold slope was
+  `74.161 MiB/min` (above `5 MiB/min`). Stream terminal accounting was skipped
+  after the slope failure, not independently measured as failed. Preflight,
+  idle RSS (`176.051 MiB`) and contention (`64` accepted, `64` denied, zero
+  overspend) passed. The report alone does not establish CPU/lock attribution
+  or a heap leak. Artifact `9891681188` is bound to the exact run/source and
+  provider archive SHA-256
+  `4fc283b7316438f89d54cdb798f22043c1aa3d17d2576b66052dd0c3458baedf`;
+  report SHA-256 is
+  `c8964edf3c403f4bd6fe0bddb8a370b13c3077e38ee4760d36a2d70346ceb85a`.
+  Separately authenticated enum/numeric diagnostics show `27–32` active
+  database backends, up to `31` blocked backends and `341.96%` PostgreSQL CPU
+  on the shared four-CPU host during non-stream load. During the SSE hold,
+  sampled database connections were idle and RSS rose `70.949 MiB` while
+  anonymous huge-page backing rose `70 MiB`; host huge-page scanning was
+  configured every ten seconds. That correlation does not prove a Go heap
+  leak or a memory-setting fix. The older `1,218` reservations stayed unchanged
+  during the observation, which ended before their default fifteen-minute
+  expiry; permanent abandonment is not established. Subsequent numeric
+  lifecycle counters record cancellation of all `500` SSE attempts, but do
+  not turn the skipped formal stream-accounting check into a pass.
+  No rerun, threshold change, stable publication or billable GCP resource
+  creation followed this failure; root diagnosis continues from sanitized
+  retained measurements.
 - Terminal-validator candidate `ec177decc80f2439f7874e365ee22a27c3dd391b`
   (parent `568f4f6950acec79c65ca59b3f829d7612242a11`) consolidates repeated reads
   in the existing deferred function without changing its trigger timing,

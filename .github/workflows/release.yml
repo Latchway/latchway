@@ -109,12 +109,7 @@ jobs:
           scripts/run-failure-gates.sh
           -scope automated
           -output /tmp/latchway-failure-candidate.json
-      - name: Run the complete isolated v1 load gate
-        run: >-
-          scripts/run-local-load-gates.sh
-          -acknowledge-load
-          -evidence-dir /tmp/latchway-load-candidate
-      - name: Retain local reliability evidence
+      - name: Retain automated failure and replica evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -123,7 +118,6 @@ jobs:
             /tmp/latchway-failure-candidate.json
             /tmp/latchway-failure-candidate.json.junit.xml
             /tmp/latchway-failure-candidate.logs
-            /tmp/latchway-load-candidate/
           if-no-files-found: warn
           retention-days: 90
       - name: Scan the reachable release binary
@@ -132,9 +126,53 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
           govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
 
-  image:
+  # A fresh hosted runner keeps the verification job's PostgreSQL service and
+  # earlier test workloads out of the measured, resource-capped load fixture.
+  load:
     if: github.ref == 'refs/heads/main'
     needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact untagged candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject mutable or mismatched candidate coordinates
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.([1-9][0-9]*))?$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          python3 scripts/release-preflight.py \
+            --candidate \
+            --commit "$CANDIDATE_COMMIT" \
+            "$INTENDED_TAG"
+      - name: Run the complete isolated v1 load gate
+        run: >-
+          scripts/run-local-load-gates.sh
+          -acknowledge-load
+          -evidence-dir /tmp/latchway-load-candidate
+      - name: Retain isolated load evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-candidate-load-${{ inputs.candidate_commit }}
+          path: /tmp/latchway-load-candidate/
+          if-no-files-found: warn
+          retention-days: 90
+
+  image:
+    if: github.ref == 'refs/heads/main'
+    needs: [verify, load]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:

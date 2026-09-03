@@ -26,6 +26,151 @@ def load_workflow(path: Path) -> dict:
 
 
 class CIWorkflowTests(unittest.TestCase):
+    def test_candidate_load_uses_a_fresh_serial_service_free_runner(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "release.yml")
+        load = workflow["jobs"]["load"]
+        self.assertEqual(
+            set(load),
+            {"if", "needs", "runs-on", "timeout-minutes", "permissions", "steps"},
+        )
+        self.assertEqual(load["if"], "github.ref == 'refs/heads/main'")
+        self.assertEqual(load["needs"], "verify")
+        self.assertEqual(load["runs-on"], "ubuntu-24.04")
+        self.assertEqual(load["timeout-minutes"], 45)
+        self.assertEqual(load["permissions"], {"contents": "read"})
+        self.assertEqual(
+            [step["name"] for step in load["steps"]],
+            [
+                "Check out the exact untagged candidate",
+                "Reject mutable or mismatched candidate coordinates",
+                "Run the complete isolated v1 load gate",
+                "Retain isolated load evidence",
+            ],
+        )
+        self.assertNotIn("env", workflow)
+        self.assertIn("postgres", workflow["jobs"]["verify"]["services"])
+        self.assertIn(
+            "LATCHWAY_TEST_DATABASE_URL", workflow["jobs"]["verify"]["env"]
+        )
+
+    def test_candidate_load_repeats_exact_credential_free_source_validation(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "release.yml")
+        verify = workflow["jobs"]["verify"]
+        load = workflow["jobs"]["load"]
+        self.assertEqual(load["steps"][:2], verify["steps"][:2])
+        checkout, preflight = load["steps"][:2]
+        self.assertEqual(
+            checkout["uses"],
+            "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+        )
+        self.assertEqual(
+            checkout["with"],
+            {"ref": "${{ inputs.candidate_commit }}", "fetch-depth": 0,
+             "persist-credentials": False},
+        )
+        self.assertEqual(preflight["shell"], "bash")
+        self.assertEqual(
+            preflight["env"],
+            {"CANDIDATE_COMMIT": "${{ inputs.candidate_commit }}",
+             "INTENDED_TAG": "${{ inputs.intended_tag }}"},
+        )
+        for guard in (
+            '[[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]',
+            'test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"',
+            'test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"',
+            'python3 scripts/release-preflight.py \\\n'
+            '  --candidate \\\n'
+            '  --commit "$CANDIDATE_COMMIT" \\\n'
+            '  "$INTENDED_TAG"',
+        ):
+            self.assertIn(guard, preflight["run"])
+
+    def test_candidate_load_keeps_the_complete_unmodified_gate_command(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "release.yml")
+        load_step = workflow["jobs"]["load"]["steps"][2]
+        self.assertEqual(
+            load_step,
+            {"name": "Run the complete isolated v1 load gate",
+             "run": "scripts/run-local-load-gates.sh -acknowledge-load "
+                    "-evidence-dir /tmp/latchway-load-candidate"},
+        )
+        occurrences = [
+            job_name
+            for job_name, job in workflow["jobs"].items()
+            for step in job["steps"]
+            if "scripts/run-local-load-gates.sh" in step.get("run", "")
+        ]
+        self.assertEqual(occurrences, ["load"])
+        verification = "\n".join(
+            step.get("run", "") for step in workflow["jobs"]["verify"]["steps"]
+        )
+        for command in (
+            "go test -count=1 ./...", "go test -race -count=1 ./...",
+            "make fuzz-smoke", "pnpm --dir web/console check",
+            "scripts/run-failure-gates.sh -scope automated",
+            "govulncheck -mode=binary",
+        ):
+            self.assertIn(command, verification)
+
+    def test_candidate_image_and_publication_require_both_successful_gates(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "release.yml")
+        self.assertEqual(workflow["jobs"]["image"]["needs"], ["verify", "load"])
+        self.assertEqual(workflow["jobs"]["publish-image"]["needs"], "image")
+        self.assertEqual(workflow["jobs"]["sign"]["needs"], "publish-image")
+        for job_name, job in workflow["jobs"].items():
+            with self.subTest(job=job_name):
+                # The implicit success() dependency condition must not be
+                # replaced by always(), !cancelled(), or error suppression.
+                self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+                self.assertNotIn("continue-on-error", job)
+                for step in job["steps"]:
+                    self.assertNotIn("continue-on-error", step)
+        for step in workflow["jobs"]["load"]["steps"][:3]:
+            self.assertNotIn("if", step)
+
+    def test_candidate_failure_and_load_artifacts_are_distinct_and_retained(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "release.yml")
+        uploads = {}
+        for job_name in ("verify", "load"):
+            steps = workflow["jobs"][job_name]["steps"]
+            artifacts = [
+                step for step in steps
+                if step.get("uses", "").startswith("actions/upload-artifact@")
+            ]
+            self.assertEqual(len(artifacts), 1)
+            uploads[job_name] = artifacts[0]
+            self.assertEqual(artifacts[0]["if"], "always()")
+            self.assertEqual(
+                artifacts[0]["uses"],
+                "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+            )
+            self.assertEqual(artifacts[0]["with"]["retention-days"], 90)
+            self.assertEqual(artifacts[0]["with"]["if-no-files-found"], "warn")
+        self.assertEqual(
+            uploads["verify"]["with"]["name"],
+            "latchway-candidate-reliability-${{ inputs.candidate_commit }}",
+        )
+        self.assertEqual(
+            uploads["verify"]["with"]["path"].splitlines(),
+            ["/tmp/latchway-failure-candidate.json",
+             "/tmp/latchway-failure-candidate.json.junit.xml",
+             "/tmp/latchway-failure-candidate.logs"],
+        )
+        self.assertEqual(
+            uploads["load"]["with"]["name"],
+            "latchway-candidate-load-${{ inputs.candidate_commit }}",
+        )
+        self.assertEqual(
+            uploads["load"]["with"]["path"], "/tmp/latchway-load-candidate/"
+        )
+        artifact_names = [
+            step["with"]["name"]
+            for job in workflow["jobs"].values()
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+        self.assertEqual(len(artifact_names), len(set(artifact_names)))
+
     def test_postgres_compatibility_matrix_uses_exact_images(self) -> None:
         workflow = load_workflow(WORKFLOWS / "ci.yml")
         rows = workflow["jobs"]["core"]["strategy"]["matrix"]["postgres"]
