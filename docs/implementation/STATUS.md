@@ -209,6 +209,20 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- Native streaming-memory diagnostic `33741971790`, attempt `1`, at tooling
+  `e0aebac2ebdc514509ecb79d3fbdd68e6da0b042` stopped during `source_and_build`
+  after `201.150` seconds on 2026-09-03. Neither workload arm started. The exact
+  archive digest was independently verified; its three redacted records confirm
+  no arm containers/networks/volumes were created and both owned image names
+  were absent after cleanup. No Go/OS memory comparison or THP conclusion is
+  available. A subsequent offline reproduction found that the tooling rejects
+  the blank line from an empty Docker runtime-environment projection; the coarse
+  original failure record does not establish the exact hosted stopping call.
+  A bounded read-only Docker probe confirmed the empty and per-entry trailing
+  newline shapes. The parser now ignores only empty lines while preserving
+  strict keys, values, ASCII and size bounds. All `33` offline tests passed
+  independently; failure reports now retain only closed substage/reason codes.
+  No production setting, workload, resource cap or load gate was changed.
 - A separate no-input native AMD64 streaming-memory diagnostic now compares one
   unchanged-source A/B pair, with only `GODEBUG=disablethp=1` differing in B.
   Both arms use one instrumented gateway image, fresh databases, the original

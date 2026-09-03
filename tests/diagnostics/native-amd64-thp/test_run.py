@@ -75,11 +75,18 @@ class FakeRunner(d.Runner):
         self.failure_key = None
         self.create_error = None
         self.memory = memory_records()
+        self.runtime_projection = b"GOGC=100\nGODEBUG=madvdontneed=1,otherflag=0\n\n"
+        self.fail_substage = None
 
-    def inspect(self, key, cleanup=False): return self.objects.get(key)
+    def inspect(self, key, cleanup=False):
+        if self.stage == self.fail_substage and not cleanup:
+            raise d.n.Stopped("CHILD_FAILED")
+        return self.objects.get(key)
 
     def call(self, argv, **kwargs):
         self.remaining(kwargs.get("cleanup", False))
+        if self.stage == self.fail_substage and not kwargs.get("cleanup", False):
+            raise d.n.Stopped("CHILD_FAILED")
         self.commands.append((argv, kwargs))
         if argv[:3] == ["git", "rev-parse", "HEAD"]: return 0, (TOOLING+"\n").encode()
         if argv[:3] == ["git", "diff", "--name-status"]:
@@ -92,7 +99,7 @@ class FakeRunner(d.Runner):
             self.objects[key] = {"id": "sha256:"+hashlib.sha256(key.encode()).hexdigest()}
         if argv[:3] == ["docker", "image", "inspect"]:
             if argv[-1] == d.n.PG_IMAGE: return 0, d.n.canonical({"id": "sha256:"+"b"*64, "os": "linux", "arch": "amd64"})
-            return 0, b"GOGC=100\nGODEBUG=madvdontneed=1,otherflag=0\n"
+            return 0, self.runtime_projection
         if argv[:3] in (["docker", "network", "create"], ["docker", "volume", "create"]):
             key = next(key for key, name in self.paths.items() if name == argv[-1])
             self.objects[key] = {"id": hashlib.sha256(key.encode()).hexdigest()}
@@ -266,6 +273,57 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(d.merge_disable_thp("a=1,disablethp=0,b=2"), "a=1,b=2,disablethp=1")
         for bad in ("disablethp=1", "a", "a=1,", "a=x\nTOKEN", "a=", "a=x=y"):
             with self.assertRaises(d.n.Stopped): d.merge_disable_thp(bad)
+
+    def test_runtime_projection_accepts_actual_docker_empty_and_entry_newlines(self):
+        for raw in (b"", b"\n", b"\n\n"):
+            self.assertEqual(d.parse_runtime_environment(raw), {})
+        self.assertEqual(d.parse_runtime_environment(b"GOGC=100\n\n"), {"GOGC": "100"})
+        self.assertEqual(d.parse_runtime_environment(b"GODEBUG=a=1,b=2\nGOGC=100\nGOMEMLIMIT=2GiB\nGOMAXPROCS=2\n\n"),
+                         {"GODEBUG": "a=1,b=2", "GOGC": "100", "GOMEMLIMIT": "2GiB", "GOMAXPROCS": "2"})
+        self.assertEqual(d.parse_runtime_environment(b"GODEBUG=\n\n"), {"GODEBUG": ""})
+        self.assertEqual(d.parse_runtime_environment(b"GOGC=100 \n\n"), {"GOGC": "100 "})
+        self.assertEqual(d.parse_runtime_environment(b"GODEBUG="+b"x"*4096+b"\n\n"), {"GODEBUG": "x"*4096})
+
+    def test_runtime_projection_rejects_duplicate_unknown_nonascii_or_malformed_lines(self):
+        for raw in (b"GOGC=100\nGOGC=100\n\n", b"GOGC=100\n\nGOGC=50\n", b"PRIVATE=value\n", b"GOGC\n", b" \n", b"\t\n",
+                    b"GOGC=100\r\n", b"GOGC=100\x00\n", b"GOGC=\xff\n", b"GODEBUG="+b"x"*4097+b"\n\n", b"\n"*8193, "GOGC=100"):
+            with self.subTest(raw_type=type(raw).__name__, size=len(raw)), self.assertRaises(d.n.Stopped) as raised:
+                d.parse_runtime_environment(raw)
+            self.assertEqual(raised.exception.args, ("RUNTIME_ENV_SHAPE",))
+
+    def test_empty_runtime_environment_now_completes_fake_pair(self):
+        runner = self.runner(); runner.runtime_projection = b"\n"
+        self.assertEqual(self.execute(runner), 0)
+        self.assertEqual(runner.baseline_debug, "")
+        self.assertEqual(runner.disabled_debug, "disablethp=1")
+
+    def test_failure_receipt_only_allows_closed_stage_and_stopped_reason_enums(self):
+        accepted = d.failure_receipt("runtime_environment_parse", d.n.Stopped("RUNTIME_ENV_SHAPE"))
+        self.assertEqual(accepted["stage"], "runtime_environment_parse")
+        self.assertEqual(accepted["reason"], "RUNTIME_ENV_SHAPE")
+        for error in (ValueError("private payload"), d.n.Stopped("private payload"), d.n.Stopped("CHILD_FAILED", "private"),
+                      RuntimeError("CHILD_FAILED"), d.n.Stopped({"private": "value"})):
+            receipt = d.failure_receipt("private stage", error)
+            self.assertEqual(receipt["stage"], "unclassified")
+            self.assertEqual(receipt["reason"], "UNCLASSIFIED_REDACTED")
+            self.assertNotIn("private", json.dumps(receipt))
+
+    def test_source_failure_substages_survive_without_raw_dependency_output(self):
+        for stage in ("source_identity", "native_host", "source_clone", "gateway_image_build", "gateway_image_validate", "tools_image_build",
+                      "tools_image_validate", "postgres_image_pull", "postgres_image_validate", "runtime_environment_inspect"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                runner = FakeRunner({**self.environment, "RUNNER_TEMP": directory}); runner.fail_substage = stage
+                try:
+                    self.assertEqual(self.execute(runner), 2)
+                    failure = d.private_json(runner.artifacts/"failure.json")
+                    self.assertEqual((failure["stage"], failure["reason"]), (stage, "CHILD_FAILED"))
+                finally:
+                    runner.unlock()
+        runner = self.runner(); runner.runtime_projection = b"UNKNOWN=private\n"
+        self.assertEqual(self.execute(runner), 2)
+        failure = d.private_json(runner.artifacts/"failure.json")
+        self.assertEqual((failure["stage"], failure["reason"]), ("runtime_environment_parse", "RUNTIME_ENV_SHAPE"))
+        self.assertNotIn("private", json.dumps(failure))
 
     def test_source_allowlist_excludes_any_product_or_policy_edit(self):
         raw = "".join("A\t"+p+"\n" for p in (*d.FILES, *d.n.FILES, d.n.WORKFLOW)).encode()

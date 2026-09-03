@@ -22,6 +22,14 @@ full-load resource caps: gateway 2 CPU/2 GiB, PostgreSQL 4 CPU/4 GiB,
 B can start. No host THP settings, GC controls, memory limits or quota gates are
 changed. A→B order is not randomized and is not a statistical population sample.
 
+The selected runtime-environment parser accepts Docker's empty/trailing newline
+formatting by ignoring empty lines only. It retains strict ASCII, the four known
+unique keys, byte/value bounds and unchanged setting values; malformed or unknown
+entries are not normalized into an accepted environment. Failures retain an
+allowlisted setup substage and an allowlisted internal stop code. Unrecognized
+exceptions, captured output, command arguments and dependency messages remain
+redacted rather than becoming diagnostic artifacts.
+
 ## Workload and observation
 
 The existing load/provision/fixture source and default image CMD are unchanged.

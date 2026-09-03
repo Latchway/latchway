@@ -42,6 +42,46 @@ PG_IP = "10.239.170.20"
 FIXTURE_IP = "10.239.170.10"
 GATES = ("preflight", "idle_memory", "gateway_overhead", "non_stream_100_rps", "sse_500_concurrent_memory")
 RUNTIME_KEYS = {"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS"}
+FAILURE_STAGES = {"initialization", "source_identity", "native_host", "source_clone", "sampler_overlay",
+                  "gateway_image_build", "gateway_image_validate", "tools_image_build", "tools_image_validate",
+                  "postgres_image_pull", "postgres_image_validate", "runtime_environment_inspect", "runtime_environment_parse",
+                  "runtime_environment_validate", "A_fixture", "A_load", "B_fixture", "B_load"}
+FAILURE_REASONS = {"CHILD_TIMEOUT", "CHILD_OUTPUT_BOUND", "CHILD_FAILED", "CHILD_INTERRUPTED", "CHILD_CLEANUP_UNCONFIRMED",
+                   "TOOLING_CHECKOUT", "MAIN_MOVED", "NATIVE_HOST_REQUIRED", "PRODUCT_SOURCE_CHANGED", "DIFF_BOUND", "TOOLING_FILES_MISSING",
+                   "OVERLAY_BOUND", "NO_ADOPTION_OR_REPEAT", "CREATE_UNCONFIRMED", "TARGET_OWNERSHIP", "IMAGE_PLATFORM_SOURCE",
+                   "SAMPLER_EXACT_ACTIVATION", "ABSENCE_UNCONFIRMED", "TARGET_ID", "VOLUME_IDENTITY", "INTERNAL_NETWORK", "CONTAINER_SCOPE",
+                   "FORWARD_DEADLINE", "CLEANUP_DEADLINE", "ARM_HEADROOM_REQUIRED", "RUNTIME_ENV_SHAPE", "BASELINE_ALREADY_DISABLED",
+                   "PINNED_POSTGRES_PLATFORM", "ARM_CLEANUP_UNCONFIRMED", "POSTGRES_NOT_READY_OR_CONFIG_CHANGED",
+                   "PRECONDITION_INCOMPLETE", "PRECONDITION_WORKLOAD_CHANGED", "HELD_STREAM_OBSERVATION_INCOMPLETE", "HELD_STREAM_SAMPLE_TIMES",
+                   "SUBSET_REPORT_IDENTITY", "SUBSET_GATES", "SUBSET_GATE_SHAPE", "SUBSET_METRICS", "SUBSET_NUMERIC", "RSS_SAMPLES",
+                   "PRIVATE_FILE_SHAPE", "PRIVATE_FILE_BOUND", "JSON_SIZE", "JSON_INVALID", "INTERRUPTED"}
+
+
+def failure_receipt(stage, error):
+    reason = error.args[0] if isinstance(error, n.Stopped) and len(error.args) == 1 else None
+    return {"schema_version": 1, "status": "stopped_no_repeat", "advisory_only": True, "release_evidence": False,
+            "stage": stage if type(stage) is str and stage in FAILURE_STAGES else "unclassified",
+            "reason": reason if type(reason) is str and reason in FAILURE_REASONS else "UNCLASSIFIED_REDACTED"}
+
+
+def parse_runtime_environment(raw):
+    n.need(type(raw) is bytes and len(raw) <= 8192, "RUNTIME_ENV_SHAPE")
+    try:
+        lines = raw.decode("ascii").split("\n")
+    except UnicodeError:
+        raise n.Stopped("RUNTIME_ENV_SHAPE") from None
+    runtime = {}
+    for line in lines:
+        # Docker appends a newline after the template, including an empty
+        # result; println within the template adds per-entry newlines too.
+        # Ignore empty lines only. Never strip or reinterpret a setting value.
+        if line == "":
+            continue
+        n.need("=" in line and all(32 <= ord(char) <= 126 for char in line), "RUNTIME_ENV_SHAPE")
+        key, value = line.split("=", 1)
+        n.need(key in RUNTIME_KEYS and key not in runtime and len(value) <= 4096, "RUNTIME_ENV_SHAPE")
+        runtime[key] = value
+    return runtime
 
 
 def timestamp(value):
@@ -340,28 +380,35 @@ class Runner(n.Runner):
         return complete
 
     def prepare(self):
-        self.stage = "source_and_build"
+        self.stage = "source_identity"
         n.need(self.call(["git", "rev-parse", "HEAD"], cwd=REPO)[1].decode().strip() == self.tooling, "TOOLING_CHECKOUT")
         self.call(["git", "diff", "--exit-code", "HEAD"], cwd=REPO)
         validate_source_diff(self.call(["git", "diff", "--name-status", "--no-renames", BASE, self.tooling], cwd=REPO)[1])
         remote = self.call(["git", "ls-remote", "--exit-code", "https://github.com/Latchway/latchway.git", "refs/heads/main"], timeout=20)[1]
         n.need(remote.decode().strip() == self.tooling + "\trefs/heads/main", "MAIN_MOVED")
+        self.stage = "native_host"
         info = n.strict_json(self.call(["docker", "info", "--format", '{"cpu":{{json .NCPU}},"arch":{{json .Architecture}},"os":{{json .OSType}}}'])[1])
         n.need(info == {"cpu": 4, "arch": "x86_64", "os": "linux"} and os.getuid() != 0, "NATIVE_HOST_REQUIRED")
+        self.stage = "source_clone"
         self.call(["git", "clone", "--no-hardlinks", "--no-checkout", str(REPO), str(self.source)], timeout=30)
         self.call(["git", "checkout", "--detach", BASE], cwd=self.source)
         self.call(["git", "diff", "--exit-code", "HEAD"], cwd=self.source)
+        self.stage = "sampler_overlay"
         for name in ("advisory_memory.go", "advisory_memory_test.go"):
             raw = (REPO / DIRECTORY / (name + ".in")).read_bytes()
             n.need(0 < len(raw) <= 32768, "OVERLAY_BOUND")
             fd = os.open(self.source / "cmd/latchway" / name, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream: stream.write(raw)
         for key, dockerfile, timeout in (("gateway_image", "Dockerfile", 480), ("tools_image", "tests/load/Dockerfile", 180)):
+            self.stage = key + "_build"
             self.intent(key)
             self.call(["docker", "build", "--platform=linux/amd64", "--file", str(self.source / dockerfile), "--build-arg", "COMMIT=" + BASE,
                        *self.labels(key), "--tag", self.paths[key], str(self.source)], timeout=timeout, discard=True)
+            self.stage = key + "_validate"
             self.observe(key)
+        self.stage = "postgres_image_pull"
         self.call(["docker", "pull", "--platform=linux/amd64", n.PG_IMAGE], timeout=120, discard=True)
+        self.stage = "postgres_image_validate"
         raw = self.call(["docker", "image", "inspect", "--format", '{"id":{{json .Id}},"os":{{json .Os}},"arch":{{json .Architecture}}}', n.PG_IMAGE])[1]
         info = n.strict_json(raw)
         n.need(info.get("os") == "linux" and info.get("arch") == "amd64" and n.matches(info.get("id"), r"sha256:[0-9a-f]{64}"), "PINNED_POSTGRES_PLATFORM")
@@ -369,12 +416,11 @@ class Runner(n.Runner):
         # Only these four non-secret runtime variables are inspected. Image
         # configuration is otherwise preserved by running the immutable image.
         template = '{{range .Config.Env}}{{$k := index (split . "=") 0}}{{if or (eq $k "GODEBUG") (eq $k "GOGC") (eq $k "GOMEMLIMIT") (eq $k "GOMAXPROCS")}}{{println .}}{{end}}{{end}}'
+        self.stage = "runtime_environment_inspect"
         raw = self.call(["docker", "image", "inspect", "--format", template, self.ledger["ids"]["gateway_image"]], maximum=8192)[1]
-        runtime = {}
-        for line in raw.decode("ascii").splitlines():
-            key, value = line.split("=", 1)
-            n.need(key in RUNTIME_KEYS and key not in runtime and len(value) <= 4096, "RUNTIME_ENV_SHAPE")
-            runtime[key] = value
+        self.stage = "runtime_environment_parse"
+        runtime = parse_runtime_environment(raw)
+        self.stage = "runtime_environment_validate"
         self.baseline_debug = runtime.get("GODEBUG", "")
         self.disabled_debug = merge_disable_thp(self.baseline_debug)
         self.runtime_env_hash = hashlib.sha256(n.canonical(runtime)).hexdigest()
@@ -503,8 +549,8 @@ class Runner(n.Runner):
                     n.need(self.cleanup(arm), "ARM_CLEANUP_UNCONFIRMED")
             shared.clear()
             outcome = "pair_observed_not_release_evidence"
-        except BaseException:
-            n.atomic_json(self.artifacts / "failure.json", {"schema_version": 1, "status": "stopped_no_repeat", "stage": self.stage, "advisory_only": True, "release_evidence": False})
+        except BaseException as error:
+            n.atomic_json(self.artifacts / "failure.json", failure_receipt(self.stage, error))
         finally:
             clean = self.cleanup()
         workload_complete = outcome == "pair_observed_not_release_evidence"
