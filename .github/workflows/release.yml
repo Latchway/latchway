@@ -82,6 +82,7 @@ jobs:
             scripts/test_release_preflight.py \
             scripts/test_validate_contracts.py \
             scripts/test_ci_workflow.py \
+            scripts/test_load_runtime_diagnostics.py \
             scripts/test_cross_repo_conformance.py \
             scripts/test_cloudflare_deployment_capture.py \
             scripts/test_deployment_evidence.py

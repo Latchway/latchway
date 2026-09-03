@@ -143,6 +143,7 @@ tools_tag="latchway-load-tools:$suffix"
 network_created=false
 gateway_image_created=false
 tools_image_created=false
+diagnostics_pid=
 postgres_cpu_millicores=4000
 postgres_nano_cpus=4000000000
 postgres_memory_bytes=4294967296
@@ -185,6 +186,30 @@ cleanup() {
   status=$?
   trap - EXIT HUP INT TERM
   set +e
+  # Diagnostics are advisory. Stop them before removing their exact fixture,
+  # preserving the original gate exit status even if collection was unavailable.
+  if [ -n "$diagnostics_pid" ]; then
+    touch "$run_dir/runtime-diagnostics.stop"
+    diagnostics_stop_attempt=0
+    while kill -0 "$diagnostics_pid" 2>/dev/null && [ "$diagnostics_stop_attempt" -lt 15 ]; do
+      sleep 1
+      diagnostics_stop_attempt=$((diagnostics_stop_attempt + 1))
+    done
+    if kill -0 "$diagnostics_pid" 2>/dev/null; then
+      kill -TERM "$diagnostics_pid" 2>/dev/null
+      sleep 1
+    fi
+    if kill -0 "$diagnostics_pid" 2>/dev/null; then
+      kill -KILL "$diagnostics_pid" 2>/dev/null
+    fi
+    if kill -0 "$diagnostics_pid" 2>/dev/null; then
+      # Never wait indefinitely for an uninterruptible collector. The process
+      # is our own child; all fixture and evidence targets remain exact.
+      printf '%s\n' '{"kind":"collector","status":"stop_timeout"}' >>"$evidence_dir/runtime-diagnostics.jsonl"
+    elif ! wait "$diagnostics_pid"; then
+      printf '%s\n' '{"kind":"collector","status":"unavailable"}' >>"$evidence_dir/runtime-diagnostics.jsonl"
+    fi
+  fi
   if docker inspect "$gateway" >/dev/null 2>&1; then
     docker logs "$gateway" >"$evidence_dir/gateway.log" 2>&1
   fi
@@ -196,7 +221,7 @@ cleanup() {
   fi
   docker rm --force "$gateway" >/dev/null 2>&1
   docker rm --force "$fixture" >/dev/null 2>&1
-  docker rm --force "$postgres" >/dev/null 2>&1
+  docker rm --force --volumes "$postgres" >/dev/null 2>&1
   if [ "$network_created" = true ]; then
     docker network rm "$network" >/dev/null 2>&1
   fi
@@ -497,6 +522,17 @@ docker run --rm \
 
 cp "$run_dir/runtime/provision.json" "$evidence_dir/provision.json"
 cp "$run_dir/runtime/load-config.json" "$evidence_dir/load-config.json"
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$run_dir/source/scripts/load-runtime-diagnostics.py" \
+    --postgres "$postgres" --gateway "$gateway" \
+    --pool-max-connections "$gateway_db_pool_max_connections" \
+    --output "$evidence_dir/runtime-diagnostics.jsonl" \
+    --stop-file "$run_dir/runtime-diagnostics.stop" >/dev/null 2>&1 &
+  diagnostics_pid=$!
+else
+  printf '%s\n' '{"kind":"collector","status":"python_unavailable"}' >"$evidence_dir/runtime-diagnostics.jsonl"
+fi
 
 docker run --rm \
   --network "container:$gateway" \
