@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/latchway/latchway/internal/protocol"
@@ -337,24 +338,38 @@ func TestCredentialBoundaryRejectsOversizeAndInvalidBytesBeforeDispatch(t *testi
 }
 
 func TestTimeoutIsBoundedAndSafe(t *testing.T) {
-	fake := &fakeTarget{t: t, secret: []byte(testCredential), steps: []fakeStep{
-		func(request *http.Request, _ string, _ []byte) (*http.Response, error) {
-			<-request.Context().Done()
-			return nil, request.Context().Err()
-		},
-	}}
-	verifier := verifierWithTarget(fake)
-	verifier.totalTimeout = 5 * time.Millisecond
-	started := time.Now()
-	_, err := verifier.Verify(context.Background(), Request{
-		Mode: ModeOpenAIChat, BaseURL: "https://provider.example", Model: "model",
-		Credential: credentialSource(testCredential),
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 5 * time.Millisecond
+		fake := &fakeTarget{t: t, secret: []byte(testCredential), steps: []fakeStep{
+			func(request *http.Request, _ string, _ []byte) (*http.Response, error) {
+				if request.Context().Err() != nil {
+					t.Fatal("verification deadline expired before dispatch")
+				}
+				// Fake time advances only here, after both probes are prepared,
+				// so scheduler delays cannot move expiry into input preflight.
+				<-request.Context().Done()
+				if request.Context().Err() != context.DeadlineExceeded {
+					t.Fatal("verification did not expire its dispatch deadline")
+				}
+				return nil, request.Context().Err()
+			},
+		}}
+		verifier := verifierWithTarget(fake)
+		verifier.totalTimeout = timeout
+		started := time.Now()
+		report, err := verifier.Verify(context.Background(), Request{
+			Mode: ModeOpenAIChat, BaseURL: "https://provider.example", Model: "model",
+			Credential: credentialSource(testCredential),
+		})
+		assertErrorCode(t, err, "non_streaming")
+		if elapsed := time.Since(started); elapsed != timeout {
+			t.Fatalf("verification timeout elapsed=%s, want %s", elapsed, timeout)
+		}
+		if fake.index != 1 || !fake.closed {
+			t.Fatalf("timeout dispatches=%d closed=%v", fake.index, fake.closed)
+		}
+		assertNoSecret(t, report, err)
 	})
-	assertErrorCode(t, err, "non_streaming")
-	if time.Since(started) > time.Second {
-		t.Fatal("verification timeout was not bounded")
-	}
-	assertNoSecret(t, Report{}, err)
 }
 
 func TestInputAndDestinationValidation(t *testing.T) {

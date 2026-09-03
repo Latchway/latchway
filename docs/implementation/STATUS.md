@@ -209,6 +209,21 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- Protected release-candidate run `33753494421`, attempt `1`, at exact source
+  `2062a11d4513fcaccca6beacfc807df7d061eadc` stopped in core verification before
+  the isolated load job. `TestTimeoutIsBoundedAndSafe` expected `non_streaming`
+  but received the safe `input_preflight` error: its five-millisecond total
+  deadline could expire while preparing the probes, before the fake provider
+  dispatch. The test now uses Go's controlled test clock, still waits for the
+  actual context deadline inside dispatch, and checks exactly five milliseconds,
+  one dispatch, target closure, the original error code and secret redaction.
+  Production timeouts, error classification, workloads and acceptance gates are
+  unchanged. This failed run provides no new load, image or deployment evidence.
+  Offline native Go `1.27` checks passed: the focused test repeated `1,000` times
+  in `0.578 s`, the complete package in `0.230 s`, and the complete package under
+  the race detector repeated ten times in `1.942 s`; formatting and diff checks
+  also passed. Root independently repeated the focused test `1,000` times each
+  with `GOMAXPROCS=1` and `16` (`0.446 / 0.297 s`) and ran package vet; all passed.
 - The next candidate workflow isolates the full load suite in a fresh
   `ubuntu-24.04` job after verification, without the verification job's extra
   uncapped PostgreSQL service or prior core/Console/failure-test host history.
@@ -257,8 +272,9 @@ released checkpoint and reproducible bundle above.
   expiry; permanent abandonment is not established. Subsequent numeric
   lifecycle counters record cancellation of all `500` SSE attempts, but do
   not turn the skipped formal stream-accounting check into a pass.
-  No rerun, threshold change, stable publication or billable GCP resource
-  creation followed this failure; root diagnosis continues from sanitized
+  The subsequent source-pinned candidate stopped in the unrelated core timeout
+  test described above, before load. No threshold change, stable publication or
+  billable GCP resource creation followed; diagnosis continues from sanitized
   retained measurements.
 - Terminal-validator candidate `ec177decc80f2439f7874e365ee22a27c3dd391b`
   (parent `568f4f6950acec79c65ca59b3f829d7612242a11`) consolidates repeated reads
