@@ -63,7 +63,7 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; the selected profile's 13 authorized environment policies are configured, while registry identities, publication, and protected exact-candidate execution remain open |
+| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; the selected profile's 13 authorized environment policies and npm/native publishing identities are configured. Candidate load verification, publication, and protected exact-image deployment remain open |
 | Current objective | Execute the explicit `single_maintainer_v1` launch profile: publish the exact GHCR/npm/SwiftPM/CocoaPods/Maven coordinates, pass supply-chain verification, and verify Docker Compose plus Google Cloud Run. Strict independent review and the other external domains remain deferred and unverified. |
 | Validated implementation coordinates | Contract `cd47229eac32f4a93a0779903d927526b77817d6`; core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005`; JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
@@ -71,8 +71,8 @@ supply-chain, publication, and post-publication domains remain open.
 | Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
-| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. All five npm namespace publications and exact trusted-publisher grants are complete. The approved CocoaPods token is installed only in the iOS `single-maintainer-v1` environment; the Maven signing key/passphrase are installed only in Android `single-maintainer-v1-signing`, with the public fingerprint bound in Android's signing, Maven, and verification environments. Upload acknowledgments and exact metadata read-back passed. Sonatype sign-in succeeded and `dev.latchway` is registered but unverified: `latchway.dev` returns NXDOMAIN and domain control has not been established. No Sonatype token has been created. Verified Sonatype namespace/Portal credentials and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
-| Next executable task | Bootstrap/publish the registry coordinates and candidate GHCR image, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
+| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. All five inert npm namespace publications and exact trusted-publisher grants are complete. The approved CocoaPods token is installed only in the iOS `single-maintainer-v1` environment; the Maven signing key/passphrase are installed only in Android `single-maintainer-v1-signing`, with the public fingerprint bound in Android's signing, Maven, and verification environments. Sonatype verified `dev.latchway` under Latchway on 2026-09-03. After separate explicit approval, one account-wide publishing token was created with expiration 2026-10-03; exactly its username/password secrets are installed in Android `single-maintainer-v1-maven`. Independent metadata/policy read-back passed. The updated disposable GCP identity passes all tested setup/evidence/cleanup permission checks for project `latchway`; protected short-lived workload identity configuration and deployment setup remain outstanding. The owner authorizes a disposable `asia-southeast1` verification stack only in `latchway`, at most two hours and $10, with cleanup of resources created for the test. No billable stack starts before a verified candidate image. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
+| Next executable task | Diagnose candidate load failures without relaxing the gates, publish and verify the passing candidate GHCR image and registry coordinates, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
 
 ### Validated version 1 source coordinates
 
@@ -204,11 +204,94 @@ released checkpoint and reproducible bundle above.
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
-| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. The five npm namespaces and exact selected-profile trusted publishers are verified, and the separately authorized CocoaPods/signing secrets and public fingerprint variables are installed only in their approved environments. | Verified Sonatype namespace/Portal credentials and protected exact-candidate publication remain open. No strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
+| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. The five npm namespaces and exact selected-profile trusted publishers are verified. Separately authorized CocoaPods/signing secrets and fingerprint variables are installed only in their approved environments. Sonatype namespace verification and the one-month token's two exact Maven-environment secrets are complete, with independent metadata/policy verification. | Passing candidate load verification, protected GCP workload identity setup, and exact-candidate publication remain open. No strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
 | Mintlify public docs | This canonical tree imports the four final reproducible bundles and retains task-oriented deployment comparison, release-image verification, and the completed Cloud Run/Cloudflare runbooks. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Configure `docs.latchway.dev`, deploy through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
 
+- The next candidate includes only advisory load-diagnostic tooling changes,
+  not production-path changes or relaxed release gates. Bounded, read-only
+  PostgreSQL activity/lifecycle aggregates, host/scoped-container resource
+  measurements, and allowlisted database error labels retain neither SQL
+  text nor credentials. Collector shutdown is bounded and cannot replace
+  the gate's result; cleanup removes only the exact fixture's anonymous
+  PostgreSQL volume. The reviewed tooling change passed 96 script/workflow
+  tests, shell syntax, and a fresh pinned PostgreSQL 18 smoke with all 28
+  migrations, both aggregate queries under a 500 ms timeout, and a rejected
+  write proving read-only enforcement. A separate review found no remaining
+  issues. Canonical public documentation passed its complete `pnpm check`
+  across 233 routes, including pinned Vale 3.17.0, build/link validation, and
+  accessibility checks. Protected CI results for this update remain open.
+- Candidate run `33718191675`, at exact remote source
+  `3b4cf7bf4ea019202c01ca4f9224b19129660d38`, failed the complete isolated
+  load gate after core, Console, and deterministic failure/replica gates
+  passed. The PostgreSQL startup fix worked and all six load gates ran.
+  Overhead p50/p95/p99 was `23.64`/`63.14`/`111.31` ms; the 6,000-request
+  gate returned 3,750 HTTP 200 and 2,250 slow HTTP 503 `server_not_ready`
+  results and retained 1,192 pending reservations after its settlement
+  wait. All 500 SSE streams stayed open, but RSS slope was `75.26 MiB/min`
+  against `<5`; terminal stream accounting was skipped after that failure,
+  not independently failed. Preflight, idle memory, and zero-overspend
+  contention passed. Image build, publication, and signing were skipped.
+  The retained evidence does not identify the underlying database error or
+  prove a product memory leak; actual host CPU metadata was not retained.
+- One fresh, native ARM64 local diagnostic on exact `3b4cf7bf` retained
+  unchanged workloads, resource caps, and thresholds. All 6,000 non-stream
+  requests returned HTTP 200; all 7,021 fixture requests settled exactly
+  with zero reservations. Overhead was `14.569`/`20.397`/`27.328` ms, so p95
+  still failed its `<20 ms` gate. Nineteen bounded database samples found
+  zero deadlocks or sampled blocked connections and a maximum of 11
+  connections including the sampler. This partial suite differs from CI's
+  AMD64 environment and is diagnostic evidence, not a passing release gate.
+  Its exact temporary containers, network, and volume were removed; the
+  six existing preview/E2E containers were preserved.
+- A separate fresh ARM64 `preflight,idle,streams` diagnostic on the same
+  committed source passed all three selected gates: 500/500 streams held
+  for 60 seconds, RSS remained flat at `162.66 MiB`, and terminal concurrency
+  quotas returned exactly to 600/600. Temporary natural-GC/scavenger tracing
+  showed GC during establishment and cancellation, not the hold. This does
+  not reproduce CI's memory staircase or distinguish full-suite history
+  from platform effects. Its exact temporary containers, network, volume,
+  and image tags were removed; existing previews were preserved.
+- The subsequent single full native ARM64 diagnostic on `3b4cf7bf`, with
+  only temporary natural-GC/scavenger tracing, passed all six original gates.
+  Overhead p50/p95/p99 was `13.236`/`16.940`/`24.863` ms; all 6,000 non-stream
+  requests succeeded at 100 requests/second with exact settlement. All 500
+  SSE streams held for 60 seconds and terminal quotas settled exactly. RSS
+  increased from `58.832` to `159.160 MiB` during establishment, then stayed
+  effectively flat (`0.00274 MiB/min`); no GC occurred during the hold and
+  live heap fell after cancellation. Full-suite history alone did not
+  reproduce the CI failure locally. This temporary-instrumentation local
+  run is diagnostic, not protected exact-image release evidence. All exact
+  temporary resources were removed; the six previews were preserved.
+- On 2026-09-03, authoritative and public-resolver DNS checks confirmed the
+  owner's Sonatype TXT record, and Central Portal reported `dev.latchway`
+  verified under Latchway. The separately authorized one-month Portal token
+  expires on 2026-10-03. Its two approved GitHub environment secrets were
+  created at `2026-09-03T06:03:47Z` and `2026-09-03T06:04:14Z`; independent
+  metadata verification confirms no extra Maven secrets, unchanged signing
+  secrets, zero verification-environment secrets, and exact unchanged
+  main-only/reviewer-free policies and public variables. No Maven artifact
+  has been published.
+- A fresh, ephemeral GCP inventory used only `cloud-platform.read-only`
+  without credential activation or persistence. Project `latchway` is active;
+  Cloud Resource Manager, Logging, and Service Usage are enabled. Cloud Run,
+  IAM, IAM Credentials, Secret Manager, Cloud SQL Admin, and Security Token
+  Service are disabled. Their resource inventories were not queried, so
+  resource existence remains unknown rather than empty. That inventory made
+  no API, IAM, billing, configuration, or runtime changes. After the owner
+  supplied the updated disposable identity, a separate in-memory scoped
+  preflight passed all tested setup, evidence, and cleanup permissions.
+  Billing readiness remained unknown because the Cloud Billing API was
+  disabled. The approved temporary stack is restricted to project `latchway`,
+  `asia-southeast1`, two hours, and $10; no billable resources have been
+  created. The subsequent one-shot billing-readiness helper pinned project
+  number `1016447222915`, recorded Cloud Billing's original disabled state,
+  enabled only `cloudbilling.googleapis.com`, and verified
+  `billingEnabled: true` at `2026-09-03T06:16:44Z`. Its non-secret cleanup
+  receipt records that API change; no billable resources, IAM changes,
+  billing-association changes, or persistent credentials/configuration were
+  created by this setup step.
 - Candidate run `33714186880` at
   `056fba2030b6573cfef69514a027a002a54d5eb6` passed contract/release-tooling,
   core/race/fuzz, Console, and deterministic failure/replica gates, then failed
