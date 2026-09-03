@@ -1,0 +1,541 @@
+package quota
+
+// Diagnostic-only database observations. Never retrieve query text, arguments,
+// usernames, connection strings, PIDs, schema names, or request/row identifiers.
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"net/url"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const advisorySourceCommit = "568f4f6950acec79c65ca59b3f829d7612242a11"
+
+const advisoryStatementSQL = `
+SELECT queryid::text, toplevel, calls, total_exec_time, rows,
+       shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written,
+       temp_blks_read, temp_blks_written, shared_blk_read_time, shared_blk_write_time,
+       wal_records, wal_fpi, wal_bytes::bigint
+FROM public.pg_stat_statements(showtext := false)
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+ORDER BY queryid, toplevel LIMIT 513`
+
+// Row-level tuple locks are not a complete row-lock inventory. Transactionid
+// waits frequently have no relation, and relation is then explicitly "none".
+// Multiple held/requested lock rows can describe one waiter. Counts are NOT
+// summed across output groups to infer pool waiters or distinct transactions.
+const advisoryLocksSQL = `
+WITH activity AS MATERIALIZED (
+  SELECT pid, query_id, state, wait_event_type, wait_event, xact_start,
+         pg_blocking_pids(pid) AS blockers
+  FROM pg_stat_activity
+  WHERE datid = (SELECT oid FROM pg_database WHERE datname = current_database())
+    AND application_name = 'latchway_advisory_workload'
+), observations AS (
+  SELECT COALESCE(a.query_id,0)::text AS waiter_query_id,
+         COALESCE(b.query_id,0)::text AS blocker_query_id,
+         CASE WHEN a.state IN ('active','idle','idle in transaction') THEN a.state ELSE 'other' END AS waiter_state,
+         CASE WHEN b.state IN ('active','idle','idle in transaction') THEN b.state ELSE 'other' END AS blocker_state,
+         CASE WHEN a.wait_event_type IN ('Lock','LWLock','IO','Client') THEN a.wait_event_type ELSE 'other' END AS wait_type,
+         CASE WHEN a.wait_event IN ('tuple','transactionid','WALWrite','WALInsert','WalSync','WalWrite','ClientRead','ClientWrite')
+              THEN a.wait_event ELSE 'other' END AS wait_event,
+         CASE WHEN c.relnamespace = current_schema()::regnamespace AND c.relname IN
+              ('quota_buckets','quota_reservations','quota_reservation_entries','logical_requests',
+               'upstream_attempts','upstream_attempt_quota_entries','concurrency_leases','usage_records',
+               'session_grants','installations','application_users') THEN c.relname::text
+              WHEN l.relation IS NULL THEN 'none' ELSE 'other' END AS relation_class,
+         CASE WHEN l.locktype IN ('tuple','transactionid') THEN l.locktype ELSE 'none' END AS lock_type,
+         CASE WHEN l.mode IN ('AccessShareLock','RowShareLock','RowExclusiveLock','ShareUpdateExclusiveLock',
+              'ShareLock','ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock','SIReadLock') THEN l.mode ELSE 'none' END AS lock_mode,
+         COALESCE(l.granted,false) AS granted,
+         a.pid AS internal_waiter,
+         GREATEST(0,EXTRACT(EPOCH FROM clock_timestamp()-a.xact_start)*1000)::double precision AS waiter_age_ms,
+         GREATEST(0,EXTRACT(EPOCH FROM clock_timestamp()-b.xact_start)*1000)::double precision AS blocker_age_ms
+  FROM activity a
+  LEFT JOIN LATERAL unnest(a.blockers) AS blocking(pid) ON true
+  LEFT JOIN pg_stat_activity b ON b.pid = blocking.pid
+  LEFT JOIN pg_locks l ON l.pid = a.pid AND l.locktype IN ('tuple','transactionid')
+  LEFT JOIN pg_class c ON c.oid = l.relation
+  WHERE cardinality(a.blockers)>0 OR a.wait_event_type IN ('Lock','LWLock','IO')
+)
+SELECT waiter_query_id, blocker_query_id, waiter_state, blocker_state, wait_type,
+       wait_event, relation_class, lock_type, lock_mode, granted,
+       count(DISTINCT internal_waiter), COALESCE(max(waiter_age_ms),0), COALESCE(max(blocker_age_ms),0)
+FROM observations GROUP BY 1,2,3,4,5,6,7,8,9,10 ORDER BY 1,2,3,4,5,6,7,8,9,10 LIMIT 129`
+
+type advisoryStatement struct {
+	QueryID       string  `json:"query_id"`
+	TopLevel      bool    `json:"top_level"`
+	Calls         int64   `json:"calls"`
+	ExecutionMS   float64 `json:"execution_ms"`
+	Rows          int64   `json:"rows"`
+	SharedHit     int64   `json:"shared_hit"`
+	SharedRead    int64   `json:"shared_read"`
+	SharedDirtied int64   `json:"shared_dirtied"`
+	SharedWritten int64   `json:"shared_written"`
+	TempRead      int64   `json:"temp_read"`
+	TempWritten   int64   `json:"temp_written"`
+	ReadMS        float64 `json:"read_ms"`
+	WriteMS       float64 `json:"write_ms"`
+	WALRecords    int64   `json:"wal_records"`
+	WALFPI        int64   `json:"wal_fpi"`
+	WALBytes      int64   `json:"wal_bytes"`
+}
+
+type advisoryLock struct {
+	WaiterQueryID  string  `json:"waiter_query_id"`
+	BlockerQueryID string  `json:"blocker_query_id"`
+	WaiterState    string  `json:"waiter_state"`
+	BlockerState   string  `json:"blocker_state"`
+	WaitType       string  `json:"wait_type"`
+	WaitEvent      string  `json:"wait_event"`
+	Relation       string  `json:"relation_class"`
+	LockType       string  `json:"lock_type"`
+	LockMode       string  `json:"lock_mode"`
+	Granted        bool    `json:"granted"`
+	Connections    int64   `json:"connections"`
+	WaiterAgeMS    float64 `json:"waiter_age_ms"`
+	BlockerAgeMS   float64 `json:"blocker_age_ms"`
+}
+
+type advisoryLockSample struct {
+	ElapsedMS  int64          `json:"elapsed_ms"`
+	Status     string         `json:"status"`
+	DurationMS int64          `json:"duration_ms"`
+	Locks      []advisoryLock `json:"locks"`
+}
+
+type advisorySnapshot struct {
+	statements []advisoryStatement
+	dealloc    int64
+	reset      time.Time
+	wal        []int64
+	io         []float64
+	cgroup     map[string]int64
+}
+
+type advisoryDatabasePhase struct {
+	Phase               string               `json:"phase"`
+	Statements          []advisoryStatement  `json:"statements"`
+	Locks               []advisoryLockSample `json:"lock_samples"`
+	WALDelta            []int64              `json:"wal_delta"`
+	IODelta             []float64            `json:"io_delta"`
+	CgroupDelta         map[string]int64     `json:"workload_cgroup_delta"`
+	CgroupAvailable     bool                 `json:"workload_cgroup_available"`
+	StatsResetOrEvicted bool                 `json:"stats_reset_or_evicted"`
+}
+
+type advisoryDatabaseObserver struct {
+	pool    *pgxpool.Pool
+	ctx     context.Context
+	samples []advisoryLockSample
+}
+
+func newAdvisoryDatabaseObserver(t *testing.T, fixture quotaPostgreSQLFixture) *advisoryDatabaseObserver {
+	t.Helper()
+	cfg := fixture.pool.Config()
+	cfg.MaxConns = 1
+	cfg.ConnConfig.RuntimeParams["application_name"] = "latchway_advisory_collector"
+	// Disable only observer-session statement tracking, not workload/nested FK
+	// tracking. Observer still consumes one connection and CPU/IO; disclose that.
+	cfg.ConnConfig.RuntimeParams["pg_stat_statements.track"] = "none"
+	pool, err := pgxpool.NewWithConfig(fixture.ctx, cfg)
+	if err != nil {
+		t.Fatal("OBSERVER_POOL_FAILED")
+	}
+	t.Cleanup(pool.Close)
+	ctx, cancel := context.WithTimeout(fixture.ctx, 2*time.Second)
+	defer cancel()
+	if _, err := pool.Exec(ctx, "CREATE EXTENSION pg_stat_statements WITH SCHEMA public"); err != nil {
+		t.Fatal("OBSERVER_EXTENSION_FAILED")
+	}
+	var version int
+	var trackIO, trackWAL bool
+	var preload, queryID, track string
+	if err := pool.QueryRow(ctx, `SELECT current_setting('server_version_num')::int,
+	    current_setting('track_io_timing')::boolean, current_setting('track_wal_io_timing')::boolean,
+	    current_setting('shared_preload_libraries'), current_setting('compute_query_id'),
+	    current_setting('pg_stat_statements.track')`).Scan(&version, &trackIO, &trackWAL, &preload, &queryID, &track); err != nil ||
+		version < 180000 || version >= 190000 || !trackIO || !trackWAL || preload != "pg_stat_statements" || queryID != "on" || track != "none" {
+		t.Fatal("OBSERVER_FIXED_SETTINGS_MISMATCH")
+	}
+	// This is a fresh, exclusively owned diagnostic cluster. Discard setup and
+	// warmup entries once, before measured work; never reset between phases.
+	if _, err := pool.Exec(ctx, "SELECT public.pg_stat_statements_reset()"); err != nil {
+		t.Fatal("OBSERVER_INITIAL_RESET_FAILED")
+	}
+	return &advisoryDatabaseObserver{pool: pool, ctx: fixture.ctx}
+}
+
+func advisoryFinite(values ...float64) bool {
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1e15 {
+			return false
+		}
+	}
+	return true
+}
+
+func advisoryNumericID(value string) bool {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && strconv.FormatInt(parsed, 10) == value
+}
+
+func (item advisoryStatement) valid() bool {
+	return advisoryNumericID(item.QueryID) && item.Calls >= 0 && item.Rows >= 0 && item.SharedHit >= 0 && item.SharedRead >= 0 &&
+		item.SharedDirtied >= 0 && item.SharedWritten >= 0 && item.TempRead >= 0 && item.TempWritten >= 0 && item.WALRecords >= 0 &&
+		item.WALFPI >= 0 && item.WALBytes >= 0 && advisoryFinite(item.ExecutionMS, item.ReadMS, item.WriteMS)
+}
+
+func (observer *advisoryDatabaseObserver) snapshot(t *testing.T) advisorySnapshot {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(observer.ctx, 2*time.Second)
+	defer cancel()
+	result := advisorySnapshot{wal: make([]int64, 4), io: make([]float64, 8), cgroup: advisoryCgroup()}
+	rows, err := observer.pool.Query(ctx, advisoryStatementSQL)
+	if err != nil {
+		t.Fatal("STATEMENT_SNAPSHOT_FAILED")
+	}
+	for rows.Next() {
+		var item advisoryStatement
+		if err := rows.Scan(&item.QueryID, &item.TopLevel, &item.Calls, &item.ExecutionMS, &item.Rows, &item.SharedHit, &item.SharedRead,
+			&item.SharedDirtied, &item.SharedWritten, &item.TempRead, &item.TempWritten, &item.ReadMS, &item.WriteMS, &item.WALRecords, &item.WALFPI, &item.WALBytes); err != nil || !item.valid() || len(result.statements) >= 512 {
+			rows.Close()
+			t.Fatal("STATEMENT_SNAPSHOT_INVALID")
+		}
+		result.statements = append(result.statements, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		t.Fatal("STATEMENT_SNAPSHOT_FAILED")
+	}
+	if err = observer.pool.QueryRow(ctx, "SELECT dealloc,stats_reset FROM public.pg_stat_statements_info").Scan(&result.dealloc, &result.reset); err != nil {
+		t.Fatal("STATEMENT_INFO_FAILED")
+	}
+	if err = observer.pool.QueryRow(ctx, "SELECT wal_records,wal_fpi,wal_bytes::bigint,wal_buffers_full FROM pg_stat_wal").Scan(&result.wal[0], &result.wal[1], &result.wal[2], &result.wal[3]); err != nil {
+		t.Fatal("WAL_SNAPSHOT_FAILED")
+	}
+	// PG18 WAL write/fsync timing is in pg_stat_io, not removed pg_stat_wal columns.
+	if err = observer.pool.QueryRow(ctx, `SELECT
+	 COALESCE(sum(read_time) FILTER(WHERE object<>'wal'),0), COALESCE(sum(write_time) FILTER(WHERE object<>'wal'),0),
+	 COALESCE(sum(fsync_time) FILTER(WHERE object<>'wal'),0), COALESCE(sum(reads) FILTER(WHERE object<>'wal'),0)::double precision,
+	 COALESCE(sum(write_time) FILTER(WHERE object='wal'),0), COALESCE(sum(fsync_time) FILTER(WHERE object='wal'),0),
+	 COALESCE(sum(writes) FILTER(WHERE object='wal'),0)::double precision, COALESCE(sum(fsyncs) FILTER(WHERE object='wal'),0)::double precision
+	 FROM pg_stat_io`).Scan(&result.io[0], &result.io[1], &result.io[2], &result.io[3], &result.io[4], &result.io[5], &result.io[6], &result.io[7]); err != nil {
+		t.Fatal("IO_SNAPSHOT_FAILED")
+	}
+	if !advisoryFinite(result.io...) {
+		t.Fatal("IO_SNAPSHOT_INVALID")
+	}
+	return result
+}
+
+func advisoryStatementDelta(before, after advisoryStatement) (advisoryStatement, error) {
+	if before.QueryID != "" && (before.QueryID != after.QueryID || before.TopLevel != after.TopLevel) {
+		return advisoryStatement{}, errors.New("STATEMENT_DELTA_IDENTITY")
+	}
+	result := after
+	result.Calls -= before.Calls
+	result.ExecutionMS -= before.ExecutionMS
+	result.Rows -= before.Rows
+	result.SharedHit -= before.SharedHit
+	result.SharedRead -= before.SharedRead
+	result.SharedDirtied -= before.SharedDirtied
+	result.SharedWritten -= before.SharedWritten
+	result.TempRead -= before.TempRead
+	result.TempWritten -= before.TempWritten
+	result.ReadMS -= before.ReadMS
+	result.WriteMS -= before.WriteMS
+	result.WALRecords -= before.WALRecords
+	result.WALFPI -= before.WALFPI
+	result.WALBytes -= before.WALBytes
+	if !result.valid() {
+		return advisoryStatement{}, errors.New("STATEMENT_COUNTER_REGRESSION")
+	}
+	return result, nil
+}
+
+func (observer *advisoryDatabaseObserver) finish(t *testing.T, phase string, before advisorySnapshot) advisoryDatabasePhase {
+	t.Helper()
+	after := observer.snapshot(t)
+	result := advisoryDatabasePhase{Phase: phase, Statements: []advisoryStatement{}, Locks: observer.samples, WALDelta: make([]int64, 4), IODelta: make([]float64, 8), CgroupDelta: map[string]int64{}}
+	result.StatsResetOrEvicted = before.dealloc != after.dealloc || !before.reset.Equal(after.reset)
+	if result.StatsResetOrEvicted {
+		t.Fatal("STATEMENT_STATS_RESET_OR_EVICTED")
+	}
+	old := map[string]advisoryStatement{}
+	key := func(item advisoryStatement) string { return item.QueryID + ":" + strconv.FormatBool(item.TopLevel) }
+	for _, item := range before.statements {
+		old[key(item)] = item
+	}
+	for _, item := range after.statements {
+		delta, err := advisoryStatementDelta(old[key(item)], item)
+		if err != nil {
+			t.Fatal("STATEMENT_COUNTER_REGRESSION")
+		}
+		delete(old, key(item))
+		if delta.Calls > 0 {
+			result.Statements = append(result.Statements, delta)
+		}
+	}
+	if len(old) > 0 {
+		t.Fatal("STATEMENT_STATS_DISAPPEARED")
+	}
+	for index := range result.WALDelta {
+		result.WALDelta[index] = after.wal[index] - before.wal[index]
+		if result.WALDelta[index] < 0 {
+			t.Fatal("WAL_COUNTER_REGRESSION")
+		}
+	}
+	for index := range result.IODelta {
+		result.IODelta[index] = after.io[index] - before.io[index]
+	}
+	if !advisoryFinite(result.IODelta...) {
+		t.Fatal("IO_COUNTER_REGRESSION")
+	}
+	result.CgroupAvailable = before.cgroup != nil && after.cgroup != nil
+	if result.CgroupAvailable {
+		for key, value := range after.cgroup {
+			delta := value - before.cgroup[key]
+			if delta < 0 {
+				t.Fatal("CGROUP_COUNTER_REGRESSION")
+			}
+			result.CgroupDelta[key] = delta
+		}
+	}
+	return result
+}
+
+func (observer *advisoryDatabaseObserver) start(phase string) func() {
+	observer.samples = make([]advisoryLockSample, 0, 120)
+	ctx, cancel := context.WithCancel(observer.ctx)
+	var joined sync.WaitGroup
+	joined.Add(1)
+	started := time.Now()
+	go func() {
+		defer joined.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if len(observer.samples) >= 120 {
+					return
+				}
+				sample := observer.sample(ctx)
+				sample.ElapsedMS = time.Since(started).Milliseconds()
+				observer.samples = append(observer.samples, sample)
+			}
+		}
+	}()
+	return func() { cancel(); joined.Wait() }
+}
+
+func (observer *advisoryDatabaseObserver) sample(parent context.Context) advisoryLockSample {
+	started := time.Now()
+	result := advisoryLockSample{Status: "unavailable", Locks: []advisoryLock{}}
+	ctx, cancel := context.WithTimeout(parent, 750*time.Millisecond)
+	defer cancel()
+	rows, err := observer.pool.Query(ctx, advisoryLocksSQL)
+	if err == nil {
+		valid := true
+		for rows.Next() {
+			var item advisoryLock
+			if rows.Scan(&item.WaiterQueryID, &item.BlockerQueryID, &item.WaiterState, &item.BlockerState, &item.WaitType, &item.WaitEvent, &item.Relation,
+				&item.LockType, &item.LockMode, &item.Granted, &item.Connections, &item.WaiterAgeMS, &item.BlockerAgeMS) != nil || !item.valid() || len(result.Locks) >= 128 {
+				valid = false
+				break
+			}
+			result.Locks = append(result.Locks, item)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err == nil && valid {
+			result.Status = "ok"
+		} else {
+			result.Locks = []advisoryLock{}
+		}
+	}
+	result.DurationMS = time.Since(started).Milliseconds()
+	return result
+}
+
+func advisoryIn(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func (item advisoryLock) valid() bool {
+	return advisoryNumericID(item.WaiterQueryID) && advisoryNumericID(item.BlockerQueryID) && item.Connections >= 1 && item.Connections <= 32 &&
+		advisoryFinite(item.WaiterAgeMS, item.BlockerAgeMS) &&
+		advisoryIn(item.WaiterState, "active", "idle", "idle in transaction", "other") && advisoryIn(item.BlockerState, "active", "idle", "idle in transaction", "other") &&
+		advisoryIn(item.WaitType, "Lock", "LWLock", "IO", "Client", "other") &&
+		advisoryIn(item.WaitEvent, "tuple", "transactionid", "WALWrite", "WALInsert", "WalSync", "WalWrite", "ClientRead", "ClientWrite", "other") &&
+		advisoryIn(item.Relation, "quota_buckets", "quota_reservations", "quota_reservation_entries", "logical_requests", "upstream_attempts", "upstream_attempt_quota_entries", "concurrency_leases", "usage_records", "session_grants", "installations", "application_users", "none", "other") &&
+		advisoryIn(item.LockType, "tuple", "transactionid", "none") &&
+		advisoryIn(item.LockMode, "AccessShareLock", "RowShareLock", "RowExclusiveLock", "ShareUpdateExclusiveLock", "ShareLock", "ShareRowExclusiveLock", "ExclusiveLock", "AccessExclusiveLock", "SIReadLock", "none")
+}
+
+func advisoryParseCgroup(raw []byte) map[string]int64 {
+	if len(raw) > 4096 {
+		return nil
+	}
+	result := map[string]int64{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) != 2 {
+			return nil
+		}
+		if !advisoryIn(fields[0], "usage_usec", "user_usec", "system_usec", "nr_periods", "nr_throttled", "throttled_usec") {
+			continue
+		}
+		value, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil || value < 0 {
+			return nil
+		}
+		if _, exists := result[fields[0]]; exists {
+			return nil
+		}
+		result[fields[0]] = value
+	}
+	if len(result) != 6 {
+		return nil
+	}
+	return result
+}
+
+func advisoryCgroup() map[string]int64 {
+	file, err := os.Open("/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil {
+		return nil
+	}
+	return advisoryParseCgroup(raw)
+}
+
+// Local query-shape smoke only; no timing/performance or native-AMD64 claim.
+// This is never selected by the hosted workflow and never uses an existing DB.
+func TestAdvisoryDatabaseQueryShape(t *testing.T) {
+	if os.Getenv("LATCHWAY_ADVISORY_QUERY_SHAPE_SMOKE") != "1" {
+		t.Skip("explicit local smoke opt-in required")
+	}
+	parsed, err := url.Parse(os.Getenv("LATCHWAY_TEST_DATABASE_URL"))
+	if err != nil || parsed.Scheme != "postgres" || parsed.Host != "127.0.0.1:59567" || parsed.Path != "/latchway" {
+		t.Fatal("SMOKE_FIXED_DATABASE_REQUIRED")
+	}
+	fixture := newQuotaPostgreSQLFixture(t)
+	observer := newAdvisoryDatabaseObserver(t, fixture)
+	before := observer.snapshot(t)
+	if _, err := fixture.pool.Exec(fixture.ctx, "SELECT 1"); err != nil {
+		t.Fatal("SMOKE_QUERY_FAILED")
+	}
+	// A separate workload-labelled session waits on this fixture's table lock,
+	// exercising the real lock-result projection without outputting identifiers.
+	cfg := fixture.pool.Config()
+	cfg.MaxConns = 2
+	cfg.ConnConfig.RuntimeParams["application_name"] = "latchway_advisory_workload"
+	pool, err := pgxpool.NewWithConfig(fixture.ctx, cfg)
+	if err != nil {
+		t.Fatal("SMOKE_POOL_FAILED")
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatal("SMOKE_TRANSACTION_FAILED")
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = tx.Rollback(ctx)
+	}()
+	if _, err = tx.Exec(fixture.ctx, "LOCK TABLE quota_buckets IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal("SMOKE_LOCK_FAILED")
+	}
+	ctx, cancel := context.WithTimeout(fixture.ctx, 2*time.Second)
+	defer cancel()
+	finished := make(chan struct{})
+	go func() { defer close(finished); _, _ = pool.Exec(ctx, "SELECT count(*) FROM quota_buckets") }()
+	var sample advisoryLockSample
+	for index := 0; index < 20; index++ {
+		sample = observer.sample(fixture.ctx)
+		if sample.Status == "ok" && len(sample.Locks) > 0 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	cancel()
+	<-finished
+	if sample.Status != "ok" || len(sample.Locks) == 0 {
+		t.Fatal("SMOKE_LOCK_PROJECTION_FAILED")
+	}
+	observer.samples = []advisoryLockSample{sample}
+	phase := observer.finish(t, "serial", before)
+	if len(phase.Statements) == 0 || len(phase.WALDelta) != 4 || len(phase.IODelta) != 8 {
+		t.Fatal("SMOKE_SNAPSHOT_SHAPE_FAILED")
+	}
+	fmt.Println("ADVISORY_QUERY_SHAPE_SMOKE_OK_NOT_PERFORMANCE_EVIDENCE")
+}
+
+func TestAdvisoryDatabaseOfflineValidation(t *testing.T) {
+	if !advisoryNumericID("-9223372036854775808") || advisoryNumericID("private") || advisoryNumericID("01") {
+		t.Fatal("numeric query-ID closure")
+	}
+	base := advisoryStatement{QueryID: "1", Calls: 2, ExecutionMS: 3}
+	next := base
+	next.Calls = 4
+	next.ExecutionMS = 7
+	delta, err := advisoryStatementDelta(base, next)
+	if err != nil || delta.Calls != 2 || delta.ExecutionMS != 4 {
+		t.Fatal("statement delta")
+	}
+	if _, err = advisoryStatementDelta(next, base); err == nil {
+		t.Fatal("counter regression accepted")
+	}
+	valid := advisoryLock{WaiterQueryID: "1", BlockerQueryID: "2", WaiterState: "active", BlockerState: "active", WaitType: "Lock", WaitEvent: "tuple", Relation: "quota_buckets", LockType: "tuple", LockMode: "AccessExclusiveLock", Connections: 1}
+	if !valid.valid() {
+		t.Fatal("valid lock rejected")
+	}
+	valid.Relation = "private-provider-value"
+	if valid.valid() {
+		t.Fatal("raw relation accepted")
+	}
+	for _, raw := range []string{"private raw mapping", strings.Repeat("x", 4097), "usage_usec 1\nusage_usec 2"} {
+		if advisoryParseCgroup([]byte(raw)) != nil {
+			t.Fatal("raw cgroup accepted")
+		}
+	}
+	fields := []string{"usage_usec", "user_usec", "system_usec", "nr_periods", "nr_throttled", "throttled_usec"}
+	sort.Strings(fields)
+	var raw strings.Builder
+	for _, field := range fields {
+		raw.WriteString(field + " 2\n")
+	}
+	if len(advisoryParseCgroup([]byte(raw.String()))) != 6 {
+		t.Fatal("valid cgroup rejected")
+	}
+}

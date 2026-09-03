@@ -209,6 +209,64 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- A manually dispatched native AMD64 advisory diagnostic now profiles the
+  quota lifecycle against the unchanged failed-candidate production source
+  `568f4f6950acec79c65ca59b3f829d7612242a11`. Its separate test overlays record
+  bounded, redacted client timing, PostgreSQL statement counters, lock groups,
+  WAL and I/O counters, with exact accounting checks and owned-resource cleanup.
+  It has no release, signing, publication, secret, or production configuration
+  access. The runner's `25` offline tests, workflow lint, and fresh PostgreSQL
+  18 query-shape checks passed before dispatch; these are tooling checks, not
+  hosted timing or a passed load gate. All `474` existing script tests were
+  accounted for, with one local loopback-port test rerun successfully after
+  the sandbox initially blocked its temporary listener. The diagnostic excludes
+  HTTP, authentication, upstream execution, retries, streaming and operational
+  jobs, and cannot substitute for the protected full-load candidate.
+- Protected candidate run `33730714475`, attempt `1`, at source
+  `568f4f6950acec79c65ca59b3f829d7612242a11` failed its unchanged load gate
+  on 2026-09-03 after core, Console, and failure/replica checks passed.
+  Image build/publication/signing were skipped. The retained native AMD64
+  run passed preflight, idle memory (`181.313 MiB`), and contention
+  (`64` accepted, `64` denied, zero overspend), but failed overhead
+  (`26.971 / 49.425 / 132.414 ms` p50/p95/p99), sustained load
+  (`2,826` HTTP 200 and `3,174` HTTP 503 `server_not_ready` out of `6,000`),
+  and SSE memory slope (`72.783 MiB/min`, unchanged bound `5`).
+  Actual request-start lag stayed within `25 ms` at `12.507 ms`.
+  Nonstream accounting remained unsettled after the bounded drain, with
+  `1,372` logical-request units reserved. All `500` SSE requests established
+  and remained open; memory grew `102.746 MiB`, under the `128 MiB` growth
+  bound but not the independent plateau-slope bound. SSE terminal accounting
+  was not measured after that earlier failure, not silently marked passed.
+  New process-memory observations during the held-stream interval show
+  roughly `68 MiB` additional anonymous huge pages alongside `69.769 MiB`
+  RSS growth. This supports a kernel huge-page contribution but is not a
+  controlled causal experiment or proof that there is no application leak.
+  A subsequent two-container native Linux ARM64 synthetic sparse-heap
+  comparison did not reproduce that growth in its default control: both
+  default and per-process THP-disabled runs retained zero anonymous huge
+  pages throughout. It establishes no application mitigation. The temporary
+  containers/image were removed, and production runtime settings are unchanged.
+  The candidate remains failed; no gate or resource cap was relaxed.
+- A separate, unintegrated calendar-capacity vector experiment completed one
+  fixed local ABBA comparison against `e064e671a8baa34bf0b559c7c8f3fccbcd6a1959`.
+  All `1,600` measured requests had exact accounting and no traced errors.
+  The two-run serial Reserve mean fell `4.451 → 4.285 ms`; concurrent
+  whole-lifecycle means were effectively unchanged (`127.804 → 127.698 ms`).
+  These overlapping local samples demonstrate fewer statements in the final
+  batch, not a material end-to-end or hosted-release benefit. The experiment
+  remains outside main. Its exact temporary database and anonymous volume
+  were removed; the six existing preview containers were preserved.
+- The owner separately approved up to 30 minutes of emergency removal beyond
+  the temporary GCP test's two-hour deadline, including independently owned
+  database/secrets when application shutdown cannot be confirmed. This does
+  not authorize new resources, continued testing, or an increase above `$10`.
+  The updated cleanup watchdog and terminal-intent reconciliation helper
+  passed `58` offline tests; the bounded database/proxy child bridge passed
+  `23`. Those are private operator-tool checks, not cloud evidence. No paid
+  stack, live cleanup arm, or GCP workflow dispatch exists. Authenticated
+  candidate verification and the integrated creator/supervisor/cleanup
+  boundaries remain prerequisites for live provisioning.
+
 - A second reviewed optimization batches only BeginAttempt's final attempt
   and allocation inserts. Its earlier reads, classifiers, ordered locks,
   identifier generation, fresh clock/expiry checks, and checked dispatch

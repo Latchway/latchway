@@ -1,0 +1,62 @@
+name: Native AMD64 quota diagnostic (advisory only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-amd64-quota-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    if: >-
+      github.repository == 'Latchway/latchway' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out the reviewed tooling revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check diagnostic safety and redaction without a database
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: >-
+          python3 -W error::ResourceWarning -m unittest discover
+          -s tests/diagnostics/native-amd64 -p test_run.py
+
+      - name: Measure one fixed-source advisory sample
+        id: sample
+        timeout-minutes: 20
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/diagnostics/native-amd64/run.py --run
+
+      - name: Recheck removal of this diagnostic's resources
+        if: always() && steps.sample.outcome != 'skipped'
+        timeout-minutes: 3
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/diagnostics/native-amd64/run.py --cleanup
+
+      - name: Retain only validated redacted diagnostic records
+        if: always() && steps.sample.outcome != 'skipped'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-native-amd64-advisory-${{ github.run_id }}-1
+          path: |
+            ${{ runner.temp }}/latchway-native-amd64-${{ github.run_id }}-1/report.json
+            ${{ runner.temp }}/latchway-native-amd64-${{ github.run_id }}-1/environment.json
+            ${{ runner.temp }}/latchway-native-amd64-${{ github.run_id }}-1/cleanup.json
+            ${{ runner.temp }}/latchway-native-amd64-${{ github.run_id }}-1/failure.json
+          if-no-files-found: warn
+          retention-days: 30

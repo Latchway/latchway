@@ -1,0 +1,458 @@
+package quota
+
+// Diagnostic-only template, overlaid on the fixed candidate for one sample. No
+// threshold assertions. Query/batch observations are client wall time, not
+// PostgreSQL executor time. Batched members are counted, never timed separately.
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"net/url"
+	"os"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type advisoryOperationKey struct{}
+type advisoryQueryKey struct{}
+type advisoryBatchKey struct{}
+type advisoryAcquireKey struct{}
+type advisoryPrepareKey struct{}
+
+type advisoryOperation struct{ phase, stage string }
+type advisorySpan struct {
+	op          advisoryOperation
+	start       time.Time
+	label, hash string
+	endOnce     *sync.Once
+}
+type advisoryMetricKey struct{ phase, stage, category, label, hash string }
+type advisoryMetric struct {
+	durations             []float64
+	count, errors, noRows int
+}
+type advisoryTracer struct {
+	mu      sync.Mutex
+	metrics map[advisoryMetricKey]*advisoryMetric
+}
+type advisorySummary struct {
+	Phase    string   `json:"phase"`
+	Stage    string   `json:"stage"`
+	Category string   `json:"category"`
+	Label    string   `json:"label"`
+	SQLHash  string   `json:"sql_hash,omitempty"`
+	Count    int      `json:"count"`
+	Errors   int      `json:"errors"`
+	NoRows   int      `json:"no_rows"`
+	TotalMS  *float64 `json:"total_ms,omitempty"`
+	MeanMS   *float64 `json:"mean_ms,omitempty"`
+	P50MS    *float64 `json:"p50_ms,omitempty"`
+	P95MS    *float64 `json:"p95_ms,omitempty"`
+	MaxMS    *float64 `json:"max_ms,omitempty"`
+}
+
+func advisoryHash(sql string) string {
+	hash := sha256.Sum256([]byte(sql))
+	return hex.EncodeToString(hash[:])
+}
+
+func advisorySQLLabel(sql string) string {
+	switch sql {
+	case materializeQuotaBucketSQL:
+		return "materialize_quota_bucket"
+	case findQuotaBucketIDSQL:
+		return "find_quota_bucket_id"
+	case lockQuotaBucketSQL:
+		return "lock_quota_bucket"
+	case reserveCalendarBucketSQL:
+		return "reserve_calendar_bucket"
+	case insertQuotaReservationSQL:
+		return "insert_quota_reservation"
+	case insertQuotaReservationEntrySQL:
+		return "insert_quota_reservation_entry"
+	case lockQuotaReservationSQL:
+		return "lock_quota_reservation"
+	case lockLogicalRequestSQL:
+		return "lock_logical_request"
+	case lockUpstreamAttemptsSQL:
+		return "lock_upstream_attempts"
+	case lockReservationEntriesSQL:
+		return "lock_reservation_entries"
+	case lockReservationEntriesSQL + " FOR UPDATE OF entry":
+		return "lock_private_reservation_entries"
+	case lockReservationEntriesSQL + " FOR UPDATE OF entry, bucket":
+		return "lock_shared_reservation_entries_and_buckets"
+	case lockConcurrencyLeasesSQL:
+		return "lock_concurrency_leases"
+	case lockAttemptQuotaEntriesSQL:
+		return "lock_attempt_quota_entries"
+	case countInitialSettlementUsageSQL:
+		return "count_initial_settlement_usage"
+	case countAttemptUsageSQL:
+		return "count_attempt_usage"
+	case markInitialAttemptFirstByteSQL:
+		return "mark_initial_attempt_first_byte"
+	case markInitialLogicalStreamingSQL:
+		return "mark_initial_logical_streaming"
+	case settleInitialCalendarBucketsSQL:
+		return "settle_initial_calendar_buckets"
+	case settleInitialReservationEntriesSQL:
+		return "settle_initial_reservation_entries"
+	case settleInitialAttemptQuotaEntriesSQL:
+		return "settle_initial_attempt_quota_entries"
+	case insertInitialAttemptUsageSQL:
+		return "insert_initial_attempt_usage"
+	case completeInitialAttemptSQL:
+		return "complete_initial_attempt"
+	case insertInitialLogicalUsageSQL:
+		return "insert_initial_logical_usage"
+	case completeInitialLogicalRequestSQL:
+		return "complete_initial_logical_request"
+	case completeInitialReservationSQL:
+		return "complete_initial_reservation"
+	case "SELECT transaction_timestamp()":
+		return "transaction_timestamp"
+	case "SELECT statement_timestamp()":
+		return "statement_timestamp"
+	case "begin isolation level read committed":
+		return "begin_transaction"
+	case "commit":
+		return "commit_transaction"
+	case "rollback":
+		return "rollback_transaction"
+	default:
+		return "other_static_sql"
+	}
+}
+
+func advisoryOperationFrom(ctx context.Context) (advisoryOperation, bool) {
+	op, ok := ctx.Value(advisoryOperationKey{}).(advisoryOperation)
+	return op, ok && (op.phase == "serial" || op.phase == "concurrent") &&
+		(op.stage == "reserve" || op.stage == "begin" || op.stage == "mark" || op.stage == "settle" || op.stage == "lifecycle")
+}
+
+func (tracer *advisoryTracer) record(op advisoryOperation, category, label, hash string, elapsed *time.Duration, err error) {
+	if op.phase != "serial" && op.phase != "concurrent" {
+		return
+	}
+	key := advisoryMetricKey{op.phase, op.stage, category, label, hash}
+	tracer.mu.Lock()
+	defer tracer.mu.Unlock()
+	metric := tracer.metrics[key]
+	if metric == nil {
+		if len(tracer.metrics) >= 512 {
+			panic("fixed profiler metric bound exceeded")
+		}
+		metric = &advisoryMetric{}
+		tracer.metrics[key] = metric
+	}
+	metric.count++
+	if errors.Is(err, pgx.ErrNoRows) {
+		metric.noRows++
+	} else if err != nil {
+		metric.errors++
+	}
+	if elapsed != nil {
+		if len(metric.durations) >= 10000 {
+			panic("fixed profiler sample bound exceeded")
+		}
+		metric.durations = append(metric.durations, float64(*elapsed)/float64(time.Millisecond))
+	}
+}
+
+func (tracer *advisoryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	op, ok := advisoryOperationFrom(ctx)
+	if !ok {
+		return ctx
+	}
+	// Deliberately never copy, inspect, stringify, or retain data.Args.
+	span := advisorySpan{op: op, start: time.Now(), label: advisorySQLLabel(data.SQL), hash: advisoryHash(data.SQL)}
+	return context.WithValue(ctx, advisoryQueryKey{}, span)
+}
+func (tracer *advisoryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if span, ok := ctx.Value(advisoryQueryKey{}).(advisorySpan); ok {
+		elapsed := time.Since(span.start)
+		tracer.record(span.op, "query", span.label, span.hash, &elapsed, data.Err)
+	}
+}
+func (tracer *advisoryTracer) TraceBatchStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
+	op, ok := advisoryOperationFrom(ctx)
+	if !ok {
+		return ctx
+	}
+	span := advisorySpan{op: op, start: time.Now(), label: "other_batch", endOnce: &sync.Once{}}
+	var hashes strings.Builder
+	for index, item := range data.Batch.QueuedQueries {
+		hashes.WriteString(advisoryHash(item.SQL))
+		tracer.record(op, "batch_queued_count_only", advisorySQLLabel(item.SQL), advisoryHash(item.SQL), nil, nil)
+		if index == 0 {
+			span.label = "batch_first_" + advisorySQLLabel(item.SQL)
+		}
+	}
+	span.hash = advisoryHash(hashes.String())
+	return context.WithValue(ctx, advisoryBatchKey{}, span)
+}
+func (tracer *advisoryTracer) TraceBatchQuery(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchQueryData) {
+	if span, ok := ctx.Value(advisoryBatchKey{}).(advisorySpan); ok {
+		tracer.record(span.op, "batch_member_count_only", advisorySQLLabel(data.SQL), advisoryHash(data.SQL), nil, data.Err)
+	}
+}
+func (tracer *advisoryTracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchEndData) {
+	if span, ok := ctx.Value(advisoryBatchKey{}).(advisorySpan); ok {
+		span.endOnce.Do(func() {
+			elapsed := time.Since(span.start)
+			tracer.record(span.op, "batch", span.label, span.hash, &elapsed, data.Err)
+		})
+	}
+}
+func (tracer *advisoryTracer) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
+	op, ok := advisoryOperationFrom(ctx)
+	if !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, advisoryAcquireKey{}, advisorySpan{op: op, start: time.Now()})
+}
+func (tracer *advisoryTracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
+	if span, ok := ctx.Value(advisoryAcquireKey{}).(advisorySpan); ok {
+		elapsed := time.Since(span.start)
+		tracer.record(span.op, "pool_acquire", "pool_acquire", "", &elapsed, data.Err)
+	}
+}
+func (tracer *advisoryTracer) TracePrepareStart(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
+	op, ok := advisoryOperationFrom(ctx)
+	if !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, advisoryPrepareKey{}, advisorySpan{op: op, start: time.Now(), label: advisorySQLLabel(data.SQL), hash: advisoryHash(data.SQL)})
+}
+func (tracer *advisoryTracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
+	if span, ok := ctx.Value(advisoryPrepareKey{}).(advisorySpan); ok {
+		elapsed := time.Since(span.start)
+		label := span.label
+		if data.AlreadyPrepared {
+			label = "cached_" + label
+		}
+		tracer.record(span.op, "prepare_inclusive_overlap", label, span.hash, &elapsed, data.Err)
+	}
+}
+
+func (tracer *advisoryTracer) summaries() []advisorySummary {
+	tracer.mu.Lock()
+	defer tracer.mu.Unlock()
+	result := make([]advisorySummary, 0, len(tracer.metrics))
+	for key, value := range tracer.metrics {
+		item := advisorySummary{Phase: key.phase, Stage: key.stage, Category: key.category, Label: key.label,
+			SQLHash: key.hash, Count: value.count, Errors: value.errors, NoRows: value.noRows}
+		if len(value.durations) > 0 {
+			samples := append([]float64(nil), value.durations...)
+			sort.Float64s(samples)
+			total := 0.0
+			for _, elapsed := range samples {
+				total += elapsed
+			}
+			mean, p50 := total/float64(len(samples)), samples[int(math.Ceil(float64(len(samples))*0.50))-1]
+			p95, maximum := samples[int(math.Ceil(float64(len(samples))*0.95))-1], samples[len(samples)-1]
+			item.TotalMS, item.MeanMS, item.P50MS, item.P95MS, item.MaxMS = &total, &mean, &p50, &p95, &maximum
+		}
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		return a.Phase+"/"+a.Stage+"/"+a.Category+"/"+a.SQLHash < b.Phase+"/"+b.Stage+"/"+b.Category+"/"+b.SQLHash
+	})
+	return result
+}
+
+func advisoryRunOne(ctx context.Context, store *Store, tracer *advisoryTracer, phase string, input ReserveInput) (Reservation, string) {
+	whole := time.Now()
+	stage := func(name string) (context.Context, time.Time) {
+		return context.WithValue(ctx, advisoryOperationKey{}, advisoryOperation{phase, name}), time.Now()
+	}
+	record := func(name string, started time.Time, err error) {
+		elapsed := time.Since(started)
+		tracer.record(advisoryOperation{phase, name}, "stage_inclusive", name, "", &elapsed, err)
+	}
+	operation, started := stage("reserve")
+	reservation, err := store.Reserve(operation, input)
+	record("reserve", started, err)
+	if err != nil {
+		return Reservation{}, "RESERVE_FAILED"
+	}
+	operation, started = stage("begin")
+	attempt, owner, err := store.BeginAttempt(operation, reservation)
+	record("begin", started, err)
+	if err != nil || !owner {
+		return reservation, "BEGIN_FAILED"
+	}
+	operation, started = stage("mark")
+	err = store.MarkFirstByte(operation, attempt)
+	record("mark", started, err)
+	if err != nil {
+		return reservation, "MARK_FAILED"
+	}
+	operation, started = stage("settle")
+	err = store.Settle(operation, attempt, hotPathSuccessOutcome())
+	record("settle", started, err)
+	if err != nil {
+		return reservation, "SETTLE_FAILED"
+	}
+	elapsed := time.Since(whole)
+	tracer.record(advisoryOperation{phase, "lifecycle"}, "stage_inclusive", "lifecycle", "", &elapsed, nil)
+	return reservation, "SUCCESS"
+}
+
+func TestAdvisoryProfilerRedaction(t *testing.T) {
+	tracer := &advisoryTracer{metrics: map[advisoryMetricKey]*advisoryMetric{}}
+	ctx := context.WithValue(context.Background(), advisoryOperationKey{}, advisoryOperation{"serial", "reserve"})
+	ctx = tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "synthetic-raw-query-never-output", Args: []any{"synthetic-secret-argument"}})
+	tracer.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: errors.New("synthetic-error-never-output")})
+	encoded, err := json.Marshal(tracer.summaries())
+	if err != nil || strings.Contains(string(encoded), "synthetic") {
+		t.Fatal("profiler redaction failed")
+	}
+	if len(tracer.summaries()) != 1 || tracer.summaries()[0].Errors != 1 {
+		t.Fatal("profiler fixed error count missing")
+	}
+}
+
+func TestAdvisoryQuotaSQLProfile(t *testing.T) {
+	if os.Getenv("LATCHWAY_ADVISORY_SQL_PROFILE") != "1" {
+		t.Skip("explicit advisory profile opt-in required")
+	}
+	parsed, err := url.Parse(os.Getenv("LATCHWAY_TEST_DATABASE_URL"))
+	if err != nil || parsed.Scheme != "postgres" || parsed.Host != "postgres:5432" || parsed.Path != "/latchway" || parsed.RawQuery != "sslmode=disable" || parsed.User.Username() != "latchway" {
+		t.Fatal("profile requires exact disposable loopback database")
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || os.Getenv("LATCHWAY_ADVISORY_SOURCE_COMMIT") != advisorySourceCommit {
+		t.Fatal("native AMD64 pinned source required")
+	}
+	progress := func(phase, event string, completed, failed int) {
+		encoded, _ := json.Marshal(map[string]any{"phase": phase, "event": event, "completed": completed, "failed": failed})
+		fmt.Println("ADVISORY_PROGRESS=" + string(encoded))
+	}
+	progress("setup", "started", 0, 0)
+	fixture := newQuotaPostgreSQLFixture(t)
+	tracer := &advisoryTracer{metrics: map[advisoryMetricKey]*advisoryMetric{}}
+	cfg := fixture.pool.Config()
+	if cfg.MaxConns != 20 {
+		t.Fatal("unexpected fixture pool cap")
+	}
+	cfg.MaxConns = 32
+	cfg.ConnConfig.RuntimeParams["application_name"] = "latchway_advisory_workload"
+	cfg.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(fixture.ctx, cfg)
+	if err != nil {
+		t.Fatal("traced pool construction failed")
+	}
+	t.Cleanup(pool.Close)
+	store, err := NewStore(StoreConfig{Pool: pool, ReservationTTL: time.Hour})
+	if err != nil {
+		t.Fatal("traced store construction failed")
+	}
+	// The original fixture pool is only used for verification outside timed work.
+	// A short warmup is excluded; caps, query mode, workload, and source are unchanged.
+	held := make([]*pgxpool.Conn, 16)
+	for index := range held {
+		held[index], err = pool.Acquire(fixture.ctx)
+		if err != nil {
+			t.Fatal("pool preconnection failed")
+		}
+	}
+	for _, conn := range held {
+		conn.Release()
+	}
+	progress("warmup", "started", 0, 0)
+	for index := 0; index < 16; index++ {
+		input := lifecycleHotPathInput(t, fixture, "advisory-warmup", 16)
+		if _, status := advisoryRunOne(fixture.ctx, store, tracer, "warmup", input); status != "SUCCESS" {
+			t.Fatal(status)
+		}
+	}
+	progress("warmup", "work_complete", 16, 0)
+	observer := newAdvisoryDatabaseObserver(t, fixture)
+	phaseWall := map[string]float64{}
+	serverPhases := make([]advisoryDatabasePhase, 0, 2)
+	for _, phase := range []string{"serial", "concurrent"} {
+		progress(phase, "started", 0, 0)
+		const requests = 200
+		inputs := make([]ReserveInput, requests)
+		for index := range inputs {
+			inputs[index] = lifecycleHotPathInput(t, fixture, "advisory-"+phase, requests)
+		}
+		results := make([]Reservation, requests)
+		statuses := make([]string, requests)
+		before := observer.snapshot(t)
+		stopSampling := observer.start(phase)
+		started := time.Now()
+		if phase == "serial" {
+			for index, input := range inputs {
+				results[index], statuses[index] = advisoryRunOne(fixture.ctx, store, tracer, phase, input)
+			}
+		} else {
+			work := make(chan int, requests)
+			for index := range inputs {
+				work <- index
+			}
+			close(work)
+			var wait sync.WaitGroup
+			for worker := 0; worker < 16; worker++ {
+				wait.Add(1)
+				go func() {
+					defer wait.Done()
+					for index := range work {
+						results[index], statuses[index] = advisoryRunOne(fixture.ctx, store, tracer, phase, inputs[index])
+					}
+				}()
+			}
+			wait.Wait()
+		}
+		phaseWall[phase] = float64(time.Since(started)) / float64(time.Millisecond)
+		stopSampling()
+		failed := 0
+		for _, status := range statuses {
+			if status != "SUCCESS" {
+				failed++
+			}
+		}
+		progress(phase, "work_complete", requests, failed)
+		serverPhases = append(serverPhases, observer.finish(t, phase, before))
+		progress(phase, "snapshot_complete", requests, failed)
+		if failed != 0 {
+			t.Fatalf("advisory lifecycle failures=%d", failed)
+		}
+		assertHotPathBucketState(t, fixture, results[0].ID(), map[string]hotPathBucketExpectation{
+			LogicalRequestsMetric: {used: requests, reserved: 0, maximum: requests},
+			InputTokensMetric:     {used: requests * 11, reserved: 0, maximum: requests * 140},
+			OutputTokensMetric:    {used: requests * 7, reserved: 0, maximum: requests * 8},
+			TotalTokensMetric:     {used: requests * 18, reserved: 0, maximum: requests * 148},
+		})
+		assertHotPathTerminalCounts(t, fixture, inputs[0].FeatureKey, requests)
+		progress(phase, "accounting_verified", requests, 0)
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"schema_version": 1, "advisory_only": true, "source_commit": advisorySourceCommit,
+		"serial_requests": 200, "concurrent_requests": 200, "concurrency": 16, "pool_max_connections": 32,
+		"calendar_buckets_per_phase": 4, "first_attempt_only": true, "exact_accounting_verified": true,
+		"whole_lifecycle_includes_auth": false, "query_timing_is_client_wall": true,
+		"batch_member_execution_time_available": false, "prepare_overlaps_query_or_batch": true,
+		"batch_auto_prepare_is_not_reported_by_prepare_tracer": true,
+		"warmup_requests_excluded":                             16, "phase_wall_ms": phaseWall, "observations": tracer.summaries(),
+		"server_phases": serverPhases, "observer_overhead_present": true, "release_evidence": false,
+	})
+	if err != nil {
+		t.Fatal("profile encoding failed")
+	}
+	fmt.Println("ADVISORY_SQL_PROFILE=" + string(encoded))
+}
