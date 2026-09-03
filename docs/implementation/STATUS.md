@@ -35,14 +35,16 @@ necessary environment-administration permission. After owner browser sign-in,
 the 13 authorized environments were created with main-only branch rules and
 their exact non-secret policy sentinels. No reviewer requirement, wait timer,
 registry credential, other secret, or strict-profile ruleset was added.
-npm 2FA is enabled in `auth-and-writes` mode. The
-inert `@latchway/client@0.0.0-bootstrap.0` namespace record is public; npm also
-materialized an unexpected `latest` alias. Fresh two-factor authentication
-succeeded, but npm rejected the audited helper's alias-removal request with
-HTTP 400; the helper stopped without publishing another package. Current
-registry behavior requires a separately reviewed bootstrap compatibility fix,
-not repeated authentication or a false success receipt. The other four namespace
-records and every stable `1.0.0` package remain unpublished.
+npm 2FA is enabled in `auth-and-writes` mode. All five inert namespace records
+(`@latchway/client`, `openai`, `vercel-ai`, `langchain`, and `react-native`) are
+public at `0.0.0-bootstrap.0`. After npm rejected removal of its unexpected
+`latest` alias with HTTP 400, the separately reviewed compatibility helper at
+JavaScript tooling commit `75721b345ee7907a7ffd0f19ecd8216fe9ae9103` completed
+publication and exact-byte registry verification for all five packages. Its
+schema-2 receipt records both observed tags and `stable_release: false`; it
+accepts `latest` only when it names the sole exact bootstrap version. These
+placeholders contain no SDK implementation. Trusted-publisher grants and every
+stable `1.0.0` package remain outstanding.
 No stable tag or `1.0.0` package, container, production documentation
 deployment, cloud proof, or protected release evidence is claimed.
 React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
@@ -65,7 +67,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
-| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. The npm owner session has `auth-and-writes` 2FA and completed a fresh second factor, but registry alias-removal behavior blocked namespace bootstrap. The existing CocoaPods Trunk session and Maven signing key/passphrase are present locally; scoped GitHub secret installation, verified Sonatype namespace/Portal credentials, npm trusted publishers, and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
+| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. The npm owner session completed second-factor authentication and all five namespace publications; scoped trusted-publisher grants remain outstanding. The existing CocoaPods Trunk session and Maven signing key/passphrase are present locally, but no release-environment secrets have been installed. Sonatype sign-in succeeded and `dev.latchway` is registered but unverified: `latchway.dev` returns NXDOMAIN and domain control has not been established. Verified Sonatype namespace/Portal credentials and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
 | Next executable task | Bootstrap/publish the registry coordinates and candidate GHCR image, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
 
 ### Validated version 1 source coordinates
@@ -94,9 +96,11 @@ The five product-source remote `main` heads match their intended final source
 histories at the recorded delivery checkpoint. The current local JavaScript
 checkout has a pre-existing unresolved merge and is not a new validated
 release coordinate; it is preserved without resolution or abort. Namespace
-bootstrap instead uses a clean isolated checkout of the audited JavaScript
-coordinate above, with all five regenerated inert tarball hashes matching the
-reviewed bytes. The mirror/source manifest and six-repository source-conformance
+bootstrap instead used a clean isolated checkout of the separately reviewed
+tooling commit `75721b345ee7907a7ffd0f19ecd8216fe9ae9103`, with all five
+regenerated and registry-downloaded inert tarball hashes matching the reviewed
+bytes. That tooling branch does not change the validated SDK source tuple.
+The mirror/source manifest and six-repository source-conformance
 gates must match the canonical source. This is source delivery only. No version 1 tag, GitHub
 release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud
 deployment, or protected production-documentation receipt is verified.
@@ -175,7 +179,7 @@ lock-order suites also pass against the frozen implementation checkpoint.
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Schema `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains the preceding schema-27 coordinate |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| Product release state | `unpublished` and not release-qualified; no local version 1 tags exist, and no package, image, or product-runtime cloud deployment is verified. A Mintlify preview exists, but no protected production deployment receipt is claimed and `docs.latchway.dev` is not routed. |
+| Product release state | `unpublished` and not release-qualified; no local version 1 tags exist, and no stable package, image, or product-runtime cloud deployment is verified. Five inert npm namespace placeholders are public at `0.0.0-bootstrap.0`, not usable SDK releases. A Mintlify preview exists, but no protected production deployment receipt is claimed and `docs.latchway.dev` is not routed. |
 
 The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate bundle
 hashes are not release coordinates. All four SDK successor locks name the
@@ -201,6 +205,31 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- Candidate run `33714186880` at
+  `056fba2030b6573cfef69514a027a002a54d5eb6` passed contract/release-tooling,
+  core/race/fuzz, Console, and deterministic failure/replica gates, then failed
+  before load execution because the isolated PostgreSQL readiness probe
+  accepted its temporary initialization server before the `latchway` database
+  existed. Image building, publication, and signing were skipped. The harness
+  now requires five consecutive authenticated TCP `SELECT 1` successes, uses
+  the same bounded TCP path for settings queries, and retains only bounded,
+  fixed-label PostgreSQL startup diagnostics on failure. All 62 relevant
+  CI/release/resilience tests pass, including 12 new behavioral regressions;
+  the candidate tooling suite also passed its 88 tests before the two final
+  additive regressions. Fresh pinned PostgreSQL 18 verification passed with
+  five successful TCP probes, the expected connection limit, preserved caller
+  credentials, and missing-database rejection; only the disposable test
+  container and its volume were removed. Performance thresholds
+  and resource limits are unchanged. A new exact-source candidate run is
+  required; the prior run supplies no passing load or container evidence.
+- All five npm namespace bootstrap publications completed on 2026-09-03 from
+  isolated JavaScript tooling commit
+  `75721b345ee7907a7ffd0f19ecd8216fe9ae9103`. The helper SHA-256 is
+  `68427af1029ffd544467072980902f15cae214184a89cb39aa999890e7c4d1e0`.
+  The completed schema-2 receipt verifies registry metadata, exact archive
+  bytes, and the bootstrap/latest aliases for every package, explicitly with
+  `stable_release: false`. No npm trusted publisher or stable package is
+  implied by this namespace reservation.
 - Core CI run `33676007601` passed all eight jobs at
   `5ae5bcf7862a3315bada388ae41974d87bf13ef8`: contracts, lint, Console,
   PostgreSQL 15, PostgreSQL 18, reliability, deployment validation, and

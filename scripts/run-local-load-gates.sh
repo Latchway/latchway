@@ -150,6 +150,37 @@ postgres_memory_swap_bytes=4294967296
 postgres_max_connections=100
 gateway_db_pool_max_connections=32
 
+capture_postgres_startup_events() {
+  # Database logs can contain SQL and parameters. Keep only fixed, allowlisted
+  # startup-event labels, never raw lines, and bound both input lines and bytes.
+  docker logs --tail 200 "$postgres" 2>&1 | head -c 32768 | awk '
+    /PostgreSQL init process complete; ready for start up/ {
+      print "postgres: initialization complete"; events++; next
+    }
+    /database system is ready to accept connections/ {
+      print "postgres: accepting connections"; events++; next
+    }
+    /database system is shut down/ {
+      print "postgres: shut down"; events++; next
+    }
+    /database system is starting up/ {
+      print "postgres: starting up"; events++; next
+    }
+    /FATAL:  database "latchway" does not exist/ {
+      print "postgres: expected database absent"; events++; next
+    }
+    /FATAL:  password authentication failed/ {
+      print "postgres: authentication failed"; events++; next
+    }
+    /FATAL:/ {
+      print "postgres: fatal error (details withheld)"; events++; next
+    }
+    END {
+      if (events == 0) print "postgres: no allowlisted event in bounded log tail"
+    }
+  '
+}
+
 cleanup() {
   status=$?
   trap - EXIT HUP INT TERM
@@ -159,6 +190,9 @@ cleanup() {
   fi
   if docker inspect "$fixture" >/dev/null 2>&1; then
     docker logs "$fixture" >"$evidence_dir/fixture.log" 2>&1
+  fi
+  if [ "$status" -ne 0 ] && docker inspect "$postgres" >/dev/null 2>&1; then
+    capture_postgres_startup_events >"$evidence_dir/postgres-startup.log"
   fi
   docker rm --force "$gateway" >/dev/null 2>&1
   docker rm --force "$fixture" >/dev/null 2>&1
@@ -275,18 +309,46 @@ docker run --detach \
   "$postgres_runtime_image" \
   -c "max_connections=$postgres_max_connections" >/dev/null
 
+postgres_query() (
+  # Keep the password out of Docker's argument list and out of the caller's
+  # environment after the query. TCP excludes the socket-only init server.
+  export PGPASSWORD=$POSTGRES_PASSWORD
+  docker exec --user postgres \
+    --env PGPASSWORD \
+    --env PGCONNECT_TIMEOUT=2 \
+    --env 'PGOPTIONS=-c statement_timeout=2000' \
+    "$postgres" \
+    psql --host 127.0.0.1 \
+    --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    --no-password --no-psqlrc --set ON_ERROR_STOP=1 \
+    --tuples-only --no-align --command "$1"
+)
+
 postgres_ready=false
+postgres_tcp_ready_streak=0
+postgres_required_ready_streak=5
 attempt=0
 while [ "$attempt" -lt 90 ]; do
-  if docker exec "$postgres" pg_isready --username latchway --dbname latchway >/dev/null 2>&1; then
-    postgres_ready=true
+  if [ "$(docker inspect --format '{{.State.Running}}' "$postgres" 2>/dev/null || true)" != true ]; then
     break
+  fi
+  # pg_isready accepts a missing database and can observe the temporary init
+  # postmaster. Require successful authenticated SQL on the final TCP listener,
+  # then a stable streak so a short-lived postmaster cannot pass startup.
+  if postgres_query 'SELECT 1' >/dev/null 2>&1; then
+    postgres_tcp_ready_streak=$((postgres_tcp_ready_streak + 1))
+    if [ "$postgres_tcp_ready_streak" -ge "$postgres_required_ready_streak" ]; then
+      postgres_ready=true
+      break
+    fi
+  else
+    postgres_tcp_ready_streak=0
   fi
   attempt=$((attempt + 1))
   sleep 1
 done
 if [ "$postgres_ready" != true ]; then
-  echo "isolated PostgreSQL did not become ready" >&2
+  echo "isolated PostgreSQL did not become ready for authenticated TCP queries" >&2
   exit 1
 fi
 
@@ -295,8 +357,7 @@ postgres_observed_nano_cpus=$(docker inspect --format '{{.HostConfig.NanoCpus}}'
 postgres_observed_memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$postgres")
 postgres_observed_memory_swap_bytes=$(docker inspect --format '{{.HostConfig.MemorySwap}}' "$postgres")
 postgres_observed_ip=$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$postgres")
-postgres_observed_max_connections=$(docker exec --user postgres "$postgres" \
-  psql --username latchway --dbname latchway --tuples-only --no-align --command 'SHOW max_connections')
+postgres_observed_max_connections=$(postgres_query 'SHOW max_connections')
 case "$postgres_image_id" in
   sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "PostgreSQL did not resolve to an immutable sha256 image ID" >&2; exit 1 ;;

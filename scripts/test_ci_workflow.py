@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -234,6 +237,215 @@ class MakefileFormattingTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+
+
+class LocalLoadPostgresReadinessTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.source = (ROOT / "scripts/run-local-load-gates.sh").read_text(
+            encoding="utf-8"
+        )
+        start = cls.source.index("postgres_query() (\n")
+        end = cls.source.index("\npostgres_image_id=", start)
+        cls.readiness = cls.source[start:end]
+        cls.show = next(
+            line for line in cls.source.splitlines()
+            if line.startswith("postgres_observed_max_connections=")
+        )
+        start = cls.source.index("capture_postgres_startup_events() {\n")
+        end = cls.source.index("\ncleanup() {", start)
+        cls.diagnostics = cls.source[start:end]
+
+    def run_probe(self, outcomes, *, show="ready", diagnostics=None):
+        # Execute the production shell blocks with fake Docker responses. In
+        # particular, the fake socket-only server accepts pg_isready but rejects
+        # authenticated TCP SQL, matching the image initialization race.
+        with tempfile.TemporaryDirectory(prefix="latchway-readiness-test-") as root:
+            directory = Path(root)
+            state_path = directory / "state.json"
+            state_path.write_text(
+                json.dumps({"probes": 0, "inspections": 0, "queries": [],
+                            "invalid_connection": False, "pg_isready": 0,
+                            "password_in_arguments": False,
+                            "log_arguments": []}),
+                encoding="utf-8",
+            )
+            mock = "#!" + sys.executable + r'''
+import json, os, pathlib, sys
+path = pathlib.Path(os.environ["MOCK_STATE"])
+state = json.loads(path.read_text())
+arguments = sys.argv[1:]
+outcomes = json.loads(os.environ["MOCK_OUTCOMES"])
+result = outcomes[min(state["probes"], len(outcomes) - 1)]
+status = 0
+if pathlib.Path(sys.argv[0]).name == "sleep":
+    pass
+elif arguments[0] == "inspect":
+    state["inspections"] += 1
+    if result == "missing_container":
+        status = 1
+    else:
+        print("false" if result == "stopped" else "true")
+elif arguments[0] == "logs":
+    state["log_arguments"] = arguments
+    sys.stdout.write(os.environ["MOCK_LOGS"])
+elif arguments[0] == "exec":
+    state["password_in_arguments"] = state["password_in_arguments"] or any(
+        "load-readiness-test-password" in argument for argument in arguments)
+    if "pg_isready" in arguments:
+        state["pg_isready"] += 1
+        print("accepting connections")
+    else:
+        command = arguments[arguments.index("--command") + 1]
+        pairs = [("--host", "127.0.0.1"), ("--username", "latchway"),
+                 ("--dbname", "latchway"), ("--set", "ON_ERROR_STOP=1")]
+        valid = all(flag in arguments and arguments[arguments.index(flag)+1] == value
+                    for flag, value in pairs)
+        valid = valid and all(value in arguments for value in [
+            "PGPASSWORD", "PGCONNECT_TIMEOUT=2",
+            "PGOPTIONS=-c statement_timeout=2000", "--no-password", "--no-psqlrc"])
+        valid = valid and os.environ.get("PGPASSWORD") == "load-readiness-test-password"
+        state["invalid_connection"] = state["invalid_connection"] or not valid
+        state["queries"].append(command)
+        if not valid:
+            status = 87
+        elif command == "SELECT 1":
+            state["probes"] += 1
+            status = 0 if result == "ready" else 2
+            if status == 0: print("1")
+        elif command == "SHOW max_connections":
+            status = 0 if os.environ["MOCK_SHOW"] == "ready" else 2
+            if status == 0: print("100")
+        else:
+            status = 88
+else:
+    status = 89
+path.write_text(json.dumps(state))
+sys.exit(status)
+'''
+            for name in ("docker", "sleep"):
+                executable = directory / name
+                executable.write_text(mock, encoding="utf-8")
+                executable.chmod(0o700)
+            script = """set -eu
+postgres=load-test-postgres
+export POSTGRES_USER=latchway POSTGRES_DB=latchway
+export POSTGRES_PASSWORD=load-readiness-test-password
+export PGPASSWORD=caller-existing-password
+"""
+            if diagnostics is None:
+                script += self.readiness + "\n" + self.show + "\n"
+                script += 'test "$PGPASSWORD" = caller-existing-password\n'
+                script += 'printf "ready=%s;max=%s\\n" "$postgres_ready" "$postgres_observed_max_connections"\n'
+            else:
+                script += self.diagnostics + "\ncapture_postgres_startup_events\n"
+            completed = subprocess.run(
+                ["/bin/sh", "-c", script],
+                env={
+                    **os.environ,
+                    "PATH": str(directory) + os.pathsep + os.environ["PATH"],
+                    "MOCK_STATE": str(state_path),
+                    "MOCK_OUTCOMES": json.dumps(outcomes),
+                    "MOCK_SHOW": show,
+                    "MOCK_LOGS": diagnostics or "",
+                },
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+            return completed, json.loads(state_path.read_text(encoding="utf-8"))
+
+    def test_socket_only_initialization_cannot_satisfy_readiness(self) -> None:
+        result, state = self.run_probe(["socket_only", "socket_only"] + ["ready"] * 5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(state["probes"], 7)
+        self.assertEqual(state["pg_isready"], 0)
+        self.assertFalse(state["invalid_connection"])
+
+    def test_absent_database_cannot_satisfy_readiness(self) -> None:
+        result, state = self.run_probe(["missing_database"] * 2 + ["ready"] * 5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(state["probes"], 7)
+        self.assertFalse(state["invalid_connection"])
+
+    def test_failed_probe_resets_the_five_success_streak(self) -> None:
+        result, state = self.run_probe(["ready"] * 4 + ["missing_database"] + ["ready"] * 5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(state["probes"], 10)
+
+    def test_authentication_failure_exhausts_bounded_attempts(self) -> None:
+        result, state = self.run_probe(["authentication_failed"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not become ready for authenticated TCP queries", result.stderr)
+        self.assertEqual(state["probes"], 90)
+        self.assertFalse(state["invalid_connection"])
+        self.assertNotIn("SHOW max_connections", state["queries"])
+
+    def test_exited_container_stops_without_exhausting_attempts(self) -> None:
+        result, state = self.run_probe(["ready", "stopped"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(state["probes"], 1)
+        self.assertEqual(state["inspections"], 2)
+
+    def test_missing_container_inspect_failure_stops_early(self) -> None:
+        result, state = self.run_probe(["ready", "missing_container"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(state["probes"], 1)
+        self.assertEqual(state["inspections"], 2)
+
+    def test_password_is_not_in_arguments_and_caller_environment_is_preserved(self) -> None:
+        result, state = self.run_probe(["ready"] * 5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(state["password_in_arguments"])
+        self.assertFalse(state["invalid_connection"])
+
+    def test_settings_query_uses_the_same_authenticated_tcp_path(self) -> None:
+        result, state = self.run_probe(["ready"] * 5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "ready=true;max=100")
+        self.assertEqual(state["queries"], ["SELECT 1"] * 5 + ["SHOW max_connections"])
+        self.assertFalse(state["invalid_connection"])
+
+    def test_failed_settings_query_remains_fatal(self) -> None:
+        result, state = self.run_probe(["ready"] * 5, show="missing_database")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(state["queries"][-1], "SHOW max_connections")
+        self.assertNotIn("ready=true", result.stdout)
+
+    def test_postgres_diagnostics_never_copy_raw_log_content(self) -> None:
+        logs = "\n".join([
+            "database system is ready to accept connections secret=sentinel-private-value",
+            'FATAL:  database "latchway" does not exist',
+            'FATAL:  password authentication failed for user "sentinel-private-value"',
+            "DETAIL: SQL parameter bearer=sentinel-private-value",
+            "FATAL: unknown secret-bearing error sentinel-private-value",
+            "PostgreSQL init process complete; ready for start up.",
+        ])
+        result, state = self.run_probe(["ready"], diagnostics=logs)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("sentinel-private-value", result.stdout + result.stderr)
+        self.assertNotIn("DETAIL", result.stdout)
+        self.assertIn("postgres: expected database absent", result.stdout)
+        self.assertIn("postgres: authentication failed", result.stdout)
+        self.assertEqual(state["log_arguments"], ["logs", "--tail", "200", "load-test-postgres"])
+
+    def test_postgres_diagnostics_have_a_byte_limit(self) -> None:
+        logs = "x" * 32768 + "\ndatabase system is ready to accept connections\n"
+        result, _ = self.run_probe(["ready"], diagnostics=logs)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "postgres: no allowlisted event in bounded log tail")
+        self.assertLess(len(result.stdout), 100)
+
+    def test_cleanup_retains_only_sanitized_postgres_failure_events(self) -> None:
+        self.assertIn(
+            'if [ "$status" -ne 0 ] && docker inspect "$postgres" >/dev/null 2>&1; then',
+            self.source,
+        )
+        self.assertIn(
+            'capture_postgres_startup_events >"$evidence_dir/postgres-startup.log"',
+            self.source,
+        )
 
 
 if __name__ == "__main__":
