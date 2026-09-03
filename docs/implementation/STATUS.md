@@ -209,6 +209,49 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
+- A separate no-input native AMD64 streaming-memory diagnostic now compares one
+  unchanged-source A/B pair, with only `GODEBUG=disablethp=1` differing in B.
+  Both arms use one instrumented gateway image, fresh databases, the original
+  resource caps, and unchanged preflight/idle/overhead/nonstream/stream workloads.
+  The numeric-only sampler exposes no endpoint and forces no collection; missing
+  Go/OS readings produce an explicitly inconclusive comparison. The main-only,
+  attempt-1 workflow has read-only permissions and eleven literal redacted
+  artifact paths, with no release credentials or publication capability. Its
+  25-minute dual-clock resource window includes a two-minute cleanup reserve.
+  All `28` offline safety tests passed independently with warnings treated as
+  errors; four sampler tests and a Linux/AMD64 cross-compile also passed. This
+  tooling preparation is not a hosted result or evidence that disabling THP
+  fixes the failed streaming-memory gate. Production source remains unchanged.
+- The isolated lookup-first bucket experiment completed one local A/B/B/A
+  comparison on 2026-09-03: baseline
+  `568f4f6950acec79c65ca59b3f829d7612242a11`, private variant
+  `132d1612b94d9f2093f984f0c653f853a5cfe2a2`. All `1,600` measured lifecycles
+  and `64` excluded warmups retained exact accounting, with zero traced errors.
+  Balanced serial lifecycle means improved from `14.160` to `12.564 ms`, but
+  concurrent means were effectively unchanged (`140.358 / 140.156 ms`) and both
+  variant samples had materially worse concurrent p95/max latency. Missing-only
+  materialization worked, while observed shared-lock waiting shifted from
+  Reserve to Settle. The variant remains unintegrated: this does not solve the
+  failed throughput gate. These are mixed-start, native Darwin/ARM64 client
+  measurements against a fixed 4-CPU/4-GiB PostgreSQL fixture, not hosted AMD64
+  release evidence. Exact fixture-container and volume absence were independently
+  verified after `26.294` seconds; all six existing preview containers remained
+  running. No candidate or release was dispatched from this comparison.
+- Native AMD64 advisory run `33737776209`, attempt `1`, at tooling
+  `eca09c6cff5961b8cefff2312af9705fdee35a5c` completed on 2026-09-03 against
+  unchanged production source `568f4f6950acec79c65ca59b3f829d7612242a11`.
+  All `200` serial and `200` concurrency-16 database lifecycles had exact
+  accounting. Mean lifecycle time was `19.852 / 320.362 ms`, with the concurrent
+  Reserve bucket-lock and settlement-lock batches consuming `153.139 / 123.884 ms`
+  respectively (included times, not additional latency). Pool acquisition
+  means were at most `0.051 ms`. Tuple/transaction-ID waits were observed;
+  workload-container CPU throttling was zero, but database/host CPU utilization
+  was not measured. The materialization batch averaged `1.553 / 6.444 ms`.
+  Each measured phase starts with fresh buckets, so this is mixed-start rather
+  than a purely prewarmed workload. The retained redacted report passed the same
+  closed validator locally, and exact owned-container/image/network/volume
+  absence was confirmed. This diagnostic does not replace the failed protected
+  full-load gate or prove an optimization's benefit. No release was published.
 - A manually dispatched native AMD64 advisory diagnostic now profiles the
   quota lifecycle against the unchanged failed-candidate production source
   `568f4f6950acec79c65ca59b3f829d7612242a11`. Its separate test overlays record

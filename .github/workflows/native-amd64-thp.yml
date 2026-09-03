@@ -1,0 +1,69 @@
+name: Native AMD64 streaming memory comparison (advisory only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-amd64-streaming-memory-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    if: >-
+      github.repository == 'Latchway/latchway' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - name: Check out the reviewed tooling revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check comparison safety and redaction without a database
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: >-
+          python3 -W error::ResourceWarning -m unittest discover
+          -s tests/diagnostics/native-amd64-thp -p test_run.py
+
+      - name: Measure one fixed-source streaming memory pair
+        id: pair
+        timeout-minutes: 26
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/diagnostics/native-amd64-thp/run.py --run
+
+      - name: Recheck removal of this comparison's resources
+        if: always() && steps.pair.outcome != 'skipped'
+        timeout-minutes: 3
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/diagnostics/native-amd64-thp/run.py --cleanup
+
+      - name: Retain only redacted comparison records
+        if: always() && steps.pair.outcome != 'skipped'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-native-amd64-thp-${{ github.run_id }}-1
+          path: |
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/manifest.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/failure.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/cleanup.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/A-load.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/A-environment.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/A-runtime.jsonl
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/A-cleanup.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/B-load.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/B-environment.json
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/B-runtime.jsonl
+            ${{ runner.temp }}/latchway-sse-thp-${{ github.run_id }}-1/artifacts/B-cleanup.json
+          if-no-files-found: warn
+          retention-days: 30

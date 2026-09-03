@@ -1,0 +1,129 @@
+package main
+
+// Private diagnostic overlay only. It adds no endpoint, configuration option,
+// forced collection, memory limit, logging payload or runtime setting mutation.
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime/metrics"
+	"syscall"
+	"time"
+)
+
+const advisoryMemoryPath = "/tmp/latchway-advisory-memory.json"
+const advisoryMemoryMaximum = 4096
+
+var advisoryMemoryMetrics = []struct{ key, name string }{
+	{"heap_objects_bytes", "/memory/classes/heap/objects:bytes"},
+	{"heap_free_bytes", "/memory/classes/heap/free:bytes"},
+	{"heap_released_bytes", "/memory/classes/heap/released:bytes"},
+	{"heap_unused_bytes", "/memory/classes/heap/unused:bytes"},
+	{"heap_stacks_bytes", "/memory/classes/heap/stacks:bytes"},
+	{"runtime_total_bytes", "/memory/classes/total:bytes"},
+	{"heap_live_last_gc_bytes", "/gc/heap/live:bytes"},
+	{"gc_cycles", "/gc/cycles/total:gc-cycles"},
+	{"heap_allocated_total_bytes", "/gc/heap/allocs:bytes"},
+	{"heap_freed_total_bytes", "/gc/heap/frees:bytes"},
+	{"goroutines", "/sched/goroutines:goroutines"},
+	{"gogc_percent", "/gc/gogc:percent"},
+	{"gomemlimit_bytes", "/gc/gomemlimit:bytes"},
+}
+
+func advisoryMemoryServeArgs(args []string) bool {
+	return len(args) == 4 && args[1] == "serve" && args[2] == "--role" && args[3] == "all"
+}
+
+func init() {
+	if !advisoryMemoryServeArgs(os.Args) {
+		return
+	}
+	// The exact existing image CMD activates this private overlay. Tests, CLI
+	// commands, worker-only launches and other arguments cannot activate it.
+	writer, ok := newAdvisoryMemoryWriter(advisoryMemoryPath)
+	if !ok {
+		return // Collector treats absent/stale snapshots as unavailable, not zero.
+	}
+	started := time.Now()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for sequence := uint64(1); sequence <= 180; sequence++ {
+			if time.Since(started) >= 15*time.Minute || !writer.sample(sequence, started) {
+				return
+			}
+			<-ticker.C
+		}
+	}()
+}
+
+type advisoryMemoryWriter struct {
+	path     string
+	identity os.FileInfo
+	samples  []metrics.Sample
+}
+
+func newAdvisoryMemoryWriter(path string) (*advisoryMemoryWriter, bool) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, false
+	}
+	info, statErr := file.Stat()
+	closeErr := file.Close()
+	if statErr != nil || closeErr != nil {
+		return nil, false
+	}
+	samples := make([]metrics.Sample, len(advisoryMemoryMetrics))
+	for index, field := range advisoryMemoryMetrics {
+		samples[index].Name = field.name
+	}
+	return &advisoryMemoryWriter{path: path, identity: info, samples: samples}, true
+}
+
+func (writer *advisoryMemoryWriter) sample(sequence uint64, started time.Time) bool {
+	metrics.Read(writer.samples)
+	values := map[string]uint64{"schema": 1, "sequence": sequence, "unix_nano": uint64(time.Now().UnixNano()), "elapsed_nano": uint64(time.Since(started))}
+	for index, field := range advisoryMemoryMetrics {
+		if writer.samples[index].Value.Kind() != metrics.KindUint64 {
+			return false
+		}
+		values[field.key] = writer.samples[index].Value.Uint64()
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil || len(encoded)+1 > advisoryMemoryMaximum {
+		return false
+	}
+	return writer.replace(append(encoded, '\n'))
+}
+
+func (writer *advisoryMemoryWriter) replace(encoded []byte) bool {
+	if len(encoded) == 0 || len(encoded) > advisoryMemoryMaximum {
+		return false
+	}
+	current, err := os.Lstat(writer.path)
+	if err != nil || !current.Mode().IsRegular() || current.Mode().Perm() != 0600 || !os.SameFile(current, writer.identity) {
+		return false
+	}
+	next := filepath.Join(filepath.Dir(writer.path), ".latchway-advisory-memory.next")
+	file, err := os.OpenFile(next, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return false
+	}
+	info, statErr := file.Stat()
+	written, writeErr := file.Write(encoded)
+	closeErr := file.Close()
+	if statErr != nil || writeErr != nil || closeErr != nil || written != len(encoded) {
+		return false
+	}
+	// Never replace an independently changed target. A private fresh container
+	// and same-user file ownership remain assumptions of this diagnostic.
+	current, err = os.Lstat(writer.path)
+	if err != nil || !os.SameFile(current, writer.identity) {
+		return false
+	}
+	if err = os.Rename(next, writer.path); err != nil {
+		return false
+	}
+	writer.identity = info
+	return true
+}

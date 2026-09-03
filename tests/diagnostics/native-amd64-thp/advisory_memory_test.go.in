@@ -1,0 +1,95 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestAdvisoryMemoryActivation(t *testing.T) {
+	if !advisoryMemoryServeArgs([]string{"/latchway", "serve", "--role", "all"}) {
+		t.Fatal("exact image CMD rejected")
+	}
+	for _, args := range [][]string{nil, {"latchway"}, {"latchway", "migrate"}, {"latchway", "serve"}, {"latchway", "serve", "--role", "gateway"}, {"latchway.test", "-test.v"}} {
+		if advisoryMemoryServeArgs(args) {
+			t.Fatal("unexpected command activated sampler")
+		}
+	}
+}
+
+func TestAdvisoryMemoryNumericSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	writer, ok := newAdvisoryMemoryWriter(path)
+	if !ok || !writer.sample(1, time.Now()) {
+		t.Fatal("snapshot unavailable")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) > advisoryMemoryMaximum {
+		t.Fatal("snapshot size")
+	}
+	var values map[string]uint64
+	if json.Unmarshal(raw, &values) != nil || len(values) != len(advisoryMemoryMetrics)+4 || values["schema"] != 1 || values["sequence"] != 1 {
+		t.Fatal("numeric closed schema")
+	}
+	if values["runtime_total_bytes"] == 0 || values["unix_nano"] == 0 || !writer.sample(2, time.Now()) {
+		t.Fatal("invalid numeric counters or replacement")
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("snapshot mode")
+	}
+	if _, ok := newAdvisoryMemoryWriter(path); ok {
+		t.Fatal("preexisting snapshot adopted")
+	}
+}
+
+func TestAdvisoryMemoryRefusesChangedOrOversizedTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	writer, ok := newAdvisoryMemoryWriter(path)
+	if !ok {
+		t.Fatal("writer unavailable")
+	}
+	if writer.replace(make([]byte, advisoryMemoryMaximum+1)) {
+		t.Fatal("oversized snapshot")
+	}
+	if err := os.Rename(path, path+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("foreign"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if writer.sample(1, time.Now()) {
+		t.Fatal("replaced file adopted")
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != "foreign" {
+		t.Fatal("foreign content overwritten")
+	}
+}
+
+func TestAdvisoryMemoryRefusesSymlinkAndExistingTemporaryFile(t *testing.T) {
+	directory := t.TempDir()
+	foreign := filepath.Join(directory, "foreign")
+	if err := os.WriteFile(foreign, []byte("foreign"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "link")
+	if err := os.Symlink(foreign, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := newAdvisoryMemoryWriter(link); ok {
+		t.Fatal("symlink followed")
+	}
+	writer, ok := newAdvisoryMemoryWriter(filepath.Join(directory, "snapshot.json"))
+	if !ok {
+		t.Fatal("writer unavailable")
+	}
+	if err := os.WriteFile(filepath.Join(directory, ".latchway-advisory-memory.next"), []byte("foreign"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if writer.sample(1, time.Now()) {
+		t.Fatal("existing temporary file overwritten")
+	}
+}
