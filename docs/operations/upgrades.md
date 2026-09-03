@@ -1,9 +1,11 @@
 # Upgrades and rollback
 
 Latchway database migrations are transactional, advisory-lock protected, and
-forward-only. Application rollback and schema rollback are therefore different
-operations: a previous image may be redeployed only when its documented schema
-range includes the current database; otherwise restore a tested backup.
+forward-only. Application rollback and schema recovery are different
+operations. The binary has no declared schema range: readiness requires the
+database's current migration version to equal its bundled available version.
+Verify a previous image against that database before routing traffic to it;
+otherwise restore a tested pre-upgrade backup into a fresh database.
 
 ## Preflight
 
@@ -78,11 +80,34 @@ existing confidentiality classification.
 
 ## Application rollback
 
-Stop the rollout and route traffic to the previous digest when readiness,
-latency, error rate, or correctness gates regress. Confirm that the previous
-binary supports the current schema before starting it. Preserve failed replica
-logs and traces, and let workers reclaim expired reservations rather than
-editing quota tables manually.
+Stop the rollout when readiness, latency, error rate, or correctness gates
+regress. Before routing traffic back, run the exact previous binary's migration
+status, doctor, and readiness checks against an isolated copy of the current
+database; current and bundled available migration versions must match.
+Preserve failed replica logs and traces, and let workers reclaim expired
+reservations rather than editing quota tables manually.
+
+## Schema 29: Terminal-attempt validation
+
+Migration `29` replaces only the deferred terminal-validator function body,
+consolidating its reads without changing check outcomes, error precedence,
+legacy settlement repair, trigger timing, locking, tables, indexes, or
+constraints. Historical migration `28` remains unchanged. Wire `2`, the frozen
+schema-28 contract bundle, and SDK locks do not change.
+
+A schema-28 binary becomes unready once migration `29` commits, even though
+the table layout is unchanged. Do not assume schema-28 and schema-29 replicas
+can maintain a ready rolling overlap. Rehearse the migration and traffic
+transition with the exact images before deployment.
+
+For application rollback, retain and verify a compatible schema-29 release
+candidate before promoting a schema-29 stable image. The RC-to-stable-to-RC
+drill must keep current and available schema equal to `29` for both binaries;
+an older schema-28 image does not qualify. To recover schema `28`, restore a
+pre-29 backup/PITR point into a fresh database and start the matching previous
+image and master key. That is schema recovery, not application rollback.
+Never remove migration-ledger rows, edit migration `28`, or weaken readiness
+to make an incompatible image appear usable.
 
 ## Schema recovery
 

@@ -28,7 +28,7 @@ deployments, or protected evidence that does not exist.
 | --- | --- |
 | Contract | Released `1.0.0`; `released_at: 2026-09-01T20:25:00Z` |
 | Wire | Current `2`; discovery range `[1, 2]` |
-| Database | Schema `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Database | Current runtime source includes schema `29`, a terminal-validator function-body replacement; the frozen contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` remains schema `28`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Contract bundle | Reproducible SHA-256 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` at contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Core implementation source | `8bf4d9dede1490c3129f7f745f1017875bd4a005`, a contract-preserving descendant of the frozen contract checkpoint |
 | SDK source tuple | JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
@@ -45,7 +45,7 @@ authorize version 1.
 
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
-| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 28, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, retry-cost treatment, physical-attempt quota accounting, and the deterministic released contract bundle at the exact checkpoint above | Protected exact-candidate evidence |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 29 with consolidated terminal-validation reads, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, retry-cost treatment, physical-attempt quota accounting, and the deterministic released contract bundle at the exact checkpoint above | Protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter plus local load/failure checks pass against the current source gateway | Protected immutable-image provider, load, and destructive-failure evidence |
 | Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. Complete local core gates pass. | Deployment operator acceptance on the final image |
@@ -55,6 +55,23 @@ authorize version 1.
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
 | Documentation | This canonical tree imports all four final SDK bundles and retains the task-oriented deployment and release-image guidance. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Route `docs.latchway.dev`, deploy through protected controls, then collect production-deployment and post-deploy receipts |
 | Release controls and npm | Strict desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. The explicit lower-assurance profile permits single-maintainer v1 without marking deferred review as passed. npm 2FA is `auth-and-writes`; the inert client bootstrap is public. | Apply and verify the selected live profile, clean the accidental bootstrap `latest` alias, bootstrap the other four namespace coordinates, and install exact trusted publishers; add a distinct reviewer later to complete strict assurance |
+
+## Schema-29 runtime validation boundary
+
+Schema `29` replaces only the deferred terminal-validator function body;
+trigger timing, locks, constraints, check precedence, and legacy repair remain
+unchanged. The schema-28 contract checkpoint, wire `2`, bundle, and SDK locks
+are not rewritten. Local PostgreSQL 15/18 correctness and advisory performance
+results are recorded in [STATUS.md](STATUS.md); they do not establish a passing
+full-candidate load gate or a release.
+
+Readiness requires current schema to equal the binary's bundled available
+schema. A schema-28 binary therefore cannot be rolled back onto a schema-29
+database. Application rollback needs an independently verified compatible
+schema-29 release-candidate/stable pair. Recovering schema `28` instead requires
+a pre-29 backup/PITR restore into a fresh database with the matching image; it
+is not application-rollback evidence. Follow the
+[upgrade runbook](../operations/upgrades.md#schema-29-terminal-attempt-validation).
 
 ## Schema-23 direct component App Attest step-up
 

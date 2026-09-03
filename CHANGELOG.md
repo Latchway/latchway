@@ -4,6 +4,18 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Add schema 29 as a function-body-only consolidation of deferred
+  terminal-attempt validation reads, preserving validation outcomes, error
+  precedence, legacy settlement repair, trigger timing, and locking. Wire 2,
+  the frozen schema-28 contract bundle, and SDK locks are unchanged.
+- Document the exact-schema readiness boundary: schema-28 binaries are not
+  application-rollback targets after migration 29. Use a verified compatible
+  schema-29 release-candidate/stable pair for application rollback, or restore
+  a pre-29 backup/PITR point into a fresh database for schema recovery. This
+  change does not claim a passing release or load gate.
+
 ## [1.0.0] - 2026-09-01
 
 ### Added

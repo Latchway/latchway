@@ -6,13 +6,15 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-03"
 owner: "core-operations"
 ---
 
 Latchway migrations are transactional, advisory-lock protected, and
-forward-only. Application rollback is safe only when the previous binary
-supports the current schema; otherwise recover the pre-upgrade database backup.
+forward-only. Readiness requires the database's current migration version to
+equal the binary's bundled available version. Application rollback needs a
+verified compatible image; otherwise restore a tested pre-upgrade backup into
+a fresh database.
 
 ## Preflight
 
@@ -48,12 +50,39 @@ rollout.
 
 ## Application rollback
 
-Route traffic back to the previous digest when readiness, latency, error rate,
-or correctness regresses. The binary has no declared schema range. Before
-routing production traffic, run that exact previous binary's migration status,
-doctor, and readiness checks against an isolated copy of the current database.
+Stop the rollout when readiness, latency, error rate, or correctness regresses.
+The binary has no declared schema range. Before routing traffic back, run that
+exact previous binary's migration status, doctor, and readiness checks against
+an isolated copy of the current database. Current and bundled available
+migration versions must match.
 Preserve failed replica telemetry and let workers reclaim reservations; never
 edit quota tables manually.
+
+## Schema 29: Terminal-attempt validation
+
+Migration `29` replaces only the deferred terminal-validator function body.
+It consolidates validation reads while preserving check outcomes, error
+precedence, legacy settlement repair, trigger timing, locks, tables, indexes,
+and constraints. Historical migration `28`, wire `2`, the frozen schema-28
+contract bundle, and SDK locks remain unchanged.
+
+<Warning>
+  A schema-28 binary becomes unready after migration `29`, even though the
+  table layout is unchanged. It is not an application-rollback target. Do not
+  rely on a ready rolling overlap of schema-28 and schema-29 replicas.
+</Warning>
+
+Rehearse the exact migration and traffic transition before deployment. For
+application rollback, retain and verify a compatible schema-29 release
+candidate before promoting a schema-29 stable image. Both binaries must report
+current and available schema `29` and pass doctor and readiness in the
+RC-to-stable-to-RC drill.
+
+To recover schema `28`, restore a pre-29 backup/PITR point into a fresh database
+and start the matching previous image with its matching master key. This is
+schema recovery, not application-rollback evidence. Never delete migration
+ledger rows, edit migration `28`, or relax readiness to permit an incompatible
+image.
 
 ## Schema recovery
 

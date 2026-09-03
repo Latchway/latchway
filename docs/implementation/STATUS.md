@@ -67,7 +67,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Current objective | Execute the explicit `single_maintainer_v1` launch profile: publish the exact GHCR/npm/SwiftPM/CocoaPods/Maven coordinates, pass supply-chain verification, and verify Docker Compose plus Google Cloud Run. Strict independent review and the other external domains remain deferred and unverified. |
 | Validated implementation coordinates | Contract `cd47229eac32f4a93a0779903d927526b77817d6`; core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005`; JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
-| Database schema version | `28` at contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6`; historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains schema `27` |
+| Database schema version | Current runtime source includes `29`; the frozen contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` remains `28`, and historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains `27` |
 | Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
@@ -209,11 +209,12 @@ released checkpoint and reproducible bundle above.
 
 ## Local source evidence
 
-- Private terminal-validator candidate `ec177decc80f2439f7874e365ee22a27c3dd391b`
+- Terminal-validator candidate `ec177decc80f2439f7874e365ee22a27c3dd391b`
   (parent `568f4f6950acec79c65ca59b3f829d7612242a11`) consolidates repeated reads
   in the existing deferred function without changing its trigger timing,
-  constraints, indexes, locks, error ordering or legacy repair. It is not
-  integrated into main and has no measured speedup yet. On native local
+  constraints, indexes, locks, error ordering or legacy repair. It is now
+  included in the current core source as forward migration `29`, with its
+  four test-file changes byte-identical to the private candidate. On native local
   PostgreSQL 18, all `48` differential cases passed in both query protocols,
   including named real-COMMIT cases; the exact schema `28` to `29` catalog/OID
   check, full quota suite (`114` roots), and focused race suite (`5` roots)
@@ -222,8 +223,51 @@ released checkpoint and reproducible bundle above.
   ledgers, and the original failed-attempt receipt remains preserved. The
   successful fixture completed and cleaned up in `36.267` seconds. Exact
   container/volume absence and all six running previews were independently
-  verified. PostgreSQL 15, performance, full-candidate and release evidence are
-  not claimed by this local correctness result.
+  verified. A separate native local PostgreSQL 15 run reused the same three
+  unchanged binaries and verified the runtime major before testing. All three
+  phases passed without failures, skips or race warnings: database `6` roots /
+  `112` nodes in `4.066` seconds, full quota `114` roots / `495` nodes in
+  `26.926` seconds, and focused race `5` roots / `45` nodes in `8.926` seconds.
+  That fixture completed in `44.851` seconds with zero owned test schemas
+  remaining; exact container/volume cleanup and preservation of all six running
+  previews were independently verified. These remain local correctness results,
+  not full-candidate or release evidence. Contract validation and regenerated
+  database bindings pass; generated query bindings remain unchanged. The
+  schema-28 contract bundle and SDK locks remain frozen, and schema-28 binaries
+  are not application-rollback targets after migration `29` because readiness
+  requires the database version to equal the binary's available version.
+- One fixed local ARM64 terminal-validator A/B/B/A comparison completed all
+  `1,600` measured lifecycles and `64` excluded warmups with exact accounting,
+  zero traced errors and exact terminal-function counters `16 → 216 → 416`
+  in every leg. It used one persistent pool per leg and the same four shared
+  quota buckets, native PostgreSQL 18, `4` database CPUs and `4 GiB` memory.
+  Balanced concurrent lifecycle means fell `139.098 → 116.217 ms` (`16.45%`),
+  Settle COMMIT means fell `2.238 → 1.224 ms` (`45.30%`), and observed terminal
+  function elapsed means fell `1.637 → 0.693 ms` (`57.66%`). These overlapping
+  elapsed intervals are not additive and are not PostgreSQL CPU measurements.
+  The result is mixed: serial lifecycle means increased `14.431 → 15.081 ms`
+  (`4.51%`), and concurrent Settle p95 worsened from `119.961 / 115.838 ms`
+  in A to `126.970 / 129.078 ms` in B. Concurrent lifecycle p95 improved from
+  `223.055 / 225.358 ms` to `218.970 / 207.129 ms`; these are individual-leg
+  percentiles, not pooled percentiles. Natural-statistics-flush waits were
+  recorded separately after measured timing and the original database snapshots.
+  Exact container/volume removal and all six existing previews were independently
+  verified; total fixture lifetime was `141.962` seconds. The bounded concurrent
+  benefit supports broader candidate verification, not a universal latency gain
+  or a fix for the failed hosted load gate. No extra run or threshold relaxation
+  was used; full protected verification and publication remain pending.
+- After integrating the exact five candidate files, current source passed
+  `go vet ./...`, uncached `go test -count=1 ./...`, and uncached
+  `go test -race -count=1 ./...` in `11.094 / 25.026 / 49.896` seconds with
+  database/profile/fixture variables absent and module network lookup disabled.
+  These are non-database gates; the separate PostgreSQL 15/18 correctness
+  receipts bind the same five file hashes. The complete Python script suite
+  ran `474` tests: `473` passed and one loopback HTTP fixture was blocked by
+  the local socket sandbox. That unchanged test subsequently passed in isolation
+  with loopback permission (`0.558` seconds); no source or assertion was changed.
+  The canonical public documentation's full `pnpm check` also passed: generated
+  references, structure/metadata, prose, build, links, and MDX accessibility;
+  existing optional AAA color advisories remain, with AA contrast passing.
 - Corrected native streaming-memory diagnostic `33743262556`, attempt `1`, at
   tooling `8cbd8ee104d4c51c165ab11a4e78dbb88614021c` completed one unchanged-source
   A/B pair in `820.328` seconds. Its exact archive digest and ten allowlisted

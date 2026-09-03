@@ -56,7 +56,7 @@ mirror.
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Core implementation checkpoint | `8bf4d9dede1490c3129f7f745f1017875bd4a005`, a contract-preserving descendant of the frozen contract checkpoint |
 | Canonical SDK-bundle/public-doc source | This checked-in `docs/public` tree imports the final bundles based on core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005` |
-| Database | Schema `28` at contract checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` and current implementation checkpoint `8bf4d9dede1490c3129f7f745f1017875bd4a005`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
+| Database | Current runtime source includes schema `29`, a terminal-validator function-body replacement; the frozen contract checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` and recorded implementation checkpoint `8bf4d9dede1490c3129f7f745f1017875bd4a005` remain schema `28`; schema `27` remains at prior performance checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | JavaScript source | `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` |
 | Swift source | `92a394acbc00d1af6d258372f22b11ddae8e1750` |
@@ -161,6 +161,17 @@ generation from iOS app extensions.
   retention, and audit component-aware.
 - [x] Pass complete unit, PostgreSQL integration, migration, race, replay,
   multi-replica, and browser-backed first-run tests locally.
+
+Schema `29` consolidates deferred terminal-validation reads without changing
+the trigger, locks, constraints, or legacy repair. Wire `2`, the schema-28
+contract bundle, and SDK locks stay frozen. Its local PostgreSQL 15/18
+correctness results and advisory comparison do not replace the unchanged
+full-candidate verification gates. Readiness still requires current schema to
+equal the binary's available schema: schema-28 binaries cannot serve as
+application-rollback targets after this migration. Plan a verified compatible
+schema-29 release-candidate/stable pair for application rollback, or a pre-29
+backup/PITR restore into a fresh database for schema recovery; see the
+[upgrade runbook](../operations/upgrades.md#schema-29-terminal-attempt-validation).
 
 The direct-step-up configuration deliberately references a component-only App
 Attest policy in `preferred` mode so it cannot satisfy initial delegated-session

@@ -49,6 +49,25 @@ infrastructure-cost bound. The deterministic
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`
 bundle and all four SDK successor locks already bind that schema-28 contract.
 
+## Current runtime schema
+
+Current source adds schema `29`, a function-body-only replacement of the
+deferred terminal-attempt validator. It consolidates validation reads while
+preserving check outcomes and precedence, legacy settlement repair, trigger
+timing, locking, tables, indexes, and constraints. Historical migration `28`
+is unchanged. Wire `2`, the frozen schema-28 contract checkpoint and bundle,
+and all four SDK locks remain unchanged; a runtime migration does not rewrite
+those contract coordinates.
+
+Readiness requires the database's current migration version to equal the
+binary's bundled available version. After schema `29`, a schema-28 binary is
+not an application-rollback target. Retain a verified compatible schema-29
+release candidate for stable-image rollback, or restore a pre-29 backup/PITR
+point into a fresh database for schema recovery. See the
+[upgrade runbook](../operations/upgrades.md#schema-29-terminal-attempt-validation).
+Local correctness and advisory measurements do not establish full-candidate
+load, release, or production readiness.
+
 ## Admin capability negotiation
 
 The current local server source advertises a stable ordered
