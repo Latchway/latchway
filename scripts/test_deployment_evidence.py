@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import http.server
 import importlib.util
 import json
 from pathlib import Path
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import tomllib
 import unittest
 from unittest import mock
@@ -776,6 +778,164 @@ jq -e --arg first_id "$FIRST_ID" --arg second_id "$SECOND_ID" --arg image "$MIRR
             "latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
             workflow_path.read_text(encoding="utf-8"),
         )
+
+    def test_compose_http_capture_precedes_retention_and_teardown(self) -> None:
+        jobs = deployment.yaml_as_json(SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml")["jobs"]
+        names = [step.get("name") for step in jobs["capture_compose"]["steps"]]
+        self.assertLess(names.index("Capture Compose migration, runtime, and SIGTERM evidence without OIDC"), names.index("Capture bounded Compose health and readiness before teardown"))
+        self.assertLess(names.index("Capture bounded Compose health and readiness before teardown"), names.index("Retain raw Compose observations for fresh validation"))
+        self.assertLess(names.index("Retain raw Compose observations for fresh validation"), names.index("Tear down the ephemeral Compose deployment"))
+        probe = next(step for step in jobs["finalize"]["steps"] if step.get("name") == "Capture bounded HTTPS health and readiness responses")
+        self.assertEqual(probe["if"], "inputs.platform != 'compose'")
+        self.assertIn("observe-http", probe["run"])
+
+    def test_compose_inline_http_collector_retains_real_responses_and_fails_closed(self) -> None:
+        jobs = deployment.yaml_as_json(SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml")["jobs"]
+        step = next(step for step in jobs["capture_compose"]["steps"] if step.get("name") == "Capture bounded Compose health and readiness before teardown")
+        collector = self.embedded_python(step["run"])
+        self.assertIn("signal.setitimer(signal.ITIMER_REAL, 15)", collector)
+        responses = {
+            "/healthz": {"status": "ok", "observed_marker": "real-loopback-health"},
+            "/readyz": {"status": "ready", "observed_marker": "real-loopback-readiness"},
+        }
+        requested = []
+        scenario = {"status": 200, "payload": None}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                requested.append(self.path)
+                payload = scenario["payload"]
+                if payload is None:
+                    payload = json.dumps(responses[self.path]).encode()
+                self.send_response(scenario["status"])
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                if scenario["status"] == 302:
+                    self.send_header("Location", "/readyz")
+                self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        worker.start()
+        try:
+            endpoint = f"http://127.0.0.1:{server.server_port}"
+            for label, status, payload, success in (
+                ("actual", 200, None, True),
+                ("redirect", 302, b"{}", False),
+                ("unready", 503, b"{}", False),
+                ("duplicate", 200, b'{"status":"ok","status":"other"}', False),
+                ("nonfinite", 200, b'{"value":NaN}', False),
+                ("invalid", 200, b"not JSON", False),
+                ("array", 200, b"[]", False),
+                ("oversized", 200, b" " * (1024 * 1024 + 1), False),
+            ):
+                with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    # Redirect only the fixed artifact directory; execute the
+                    # workflow's HTTP collector unchanged against a real socket.
+                    code = collector.replace('Path("/tmp/latchway-deployment-capture")', f"Path({str(root)!r})")
+                    scenario.update(status=status, payload=payload)
+                    requested.clear()
+                    result = subprocess.run([sys.executable, "-c", code], env={"ENDPOINT": endpoint, "HTTP_PROXY": "http://unreachable.invalid:1"}, capture_output=True, text=True, timeout=20)
+                    self.assertEqual(result.returncode == 0, success, result.stderr)
+                    if success:
+                        self.assertEqual(requested, ["/healthz", "/readyz"])
+                        for name, suffix in (("health", "/healthz"), ("readiness", "/readyz")):
+                            retained = json.loads((root / f"{name}.json").read_text())
+                            self.assertEqual(retained["body"], responses[suffix])
+                            self.assertEqual(retained["url"], endpoint + suffix)
+                            self.assertEqual(retained["status_code"], 200)
+                            self.assertFalse(retained["tls"])
+                    else:
+                        self.assertEqual(requested, ["/healthz"])
+                        self.assertFalse((root / "health.json").exists())
+                        self.assertNotIn("observed_marker", result.stderr)
+            for endpoint in ("https://127.0.0.1:18080", "http://example.com:18080", "http://127.0.0.1:0", "http://127.0.0.1:65536", "http://127.0.0.1:18080/path"):
+                with self.subTest(endpoint=endpoint):
+                    result = subprocess.run([sys.executable, "-c", collector], env={"ENDPOINT": endpoint}, capture_output=True, text=True, timeout=20)
+                    self.assertNotEqual(result.returncode, 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=5)
+
+    def test_compose_signer_requires_and_byte_binds_both_raw_http_observations(self) -> None:
+        jobs = deployment.yaml_as_json(SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml")["jobs"]
+        step = next(step for step in jobs["sign"]["steps"] if step.get("name") == "Independently bind the deterministic archive to authenticated raw capture")
+        signer = self.embedded_python(step["run"])
+        for platform, mutation in (("compose", None), ("cloud_run", None), ("compose", "missing_health"), ("compose", "missing_readiness"), ("compose", "tampered_health"), ("compose", "tampered_readiness")):
+            with self.subTest(platform=platform, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                capture_root = root / "capture"
+                capture_root.mkdir()
+                manifest = capture(capture_root, platform)
+                manifest["collector"]["sha"] = COMMIT
+                dump(capture_root / "manifest.json", manifest)
+                validated = root / "validated"
+                validated.mkdir()
+                deployment.seal_capture(capture_root, validated / f"{platform}.tar.gz")
+                dump(validated / "latchway-deployment-validation.json", {"verdict": "passed", "platform": platform, "oci_image_digest": IMAGE})
+                (validated / "latchway-deployment-validation.json.junit.xml").write_text("<testsuites/>\n")
+                raw_root = root / "raw"
+                raw = raw_root / "latchway-deployment-capture"
+                raw.mkdir(parents=True)
+                raw_names = deployment.OBSERVATIONS if platform == "compose" else ("identity", "control_plane", "migration", "secrets", "shutdown")
+                for name in raw_names:
+                    (raw / f"{name}.json").write_bytes((capture_root / f"{name}.json").read_bytes())
+                (raw_root / "latchway-deployment-started-at").write_text(STARTED + "\n")
+                (raw_root / "latchway-provider-resource-id").write_text(manifest["provider_resource_id"] + "\n")
+                if mutation:
+                    kind, name = mutation.split("_")
+                    if kind == "missing":
+                        (raw / f"{name}.json").unlink()
+                    else:
+                        altered = json.loads((raw / f"{name}.json").read_text())
+                        altered["body"]["unexpected"] = "tampered-response"
+                        dump(raw / f"{name}.json", altered)
+                candidate = root / "candidate.json"
+                dump(candidate, {"image": {"repository": "ghcr.io/latchway/latchway", "index_digest": f"sha256:{DIGEST}"}, "candidate_commit": COMMIT, "intended_tag": "v1.0.0", "status": "passed"})
+                result = subprocess.run([sys.executable, "-c", signer, str(validated), str(raw_root), str(candidate)], env={"PLATFORM": platform, "CANDIDATE_COMMIT": COMMIT, "INTENDED_TAG": "v1.0.0", "RELEASE_IMAGE": IMAGE, "ENDPOINT": manifest["endpoint"], "GITHUB_REPOSITORY": "Latchway/latchway", "GITHUB_RUN_ID": "12345", "GITHUB_RUN_ATTEMPT": "1", "DEPLOYMENT_ENVIRONMENT": f"deployment-evidence-{platform}"}, capture_output=True, text=True, timeout=20)
+                if mutation is None:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    with tarfile.open(validated / f"{platform}.tar.gz") as archive:
+                        binding = json.load(archive.extractfile("latchway-deployment-binding.json"))
+                    retained = {item["path"] for item in binding["raw_capture"]["files"]}
+                    self.assertEqual("latchway-deployment-capture/health.json" in retained, platform == "compose")
+                    self.assertEqual("latchway-deployment-capture/readiness.json" in retained, platform == "compose")
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("raw provider artifact closure is invalid" if mutation.startswith("missing_") else "normalized capture is not byte-bound to provider raw data", result.stderr)
+
+    def test_all_compose_postgres_probes_match_and_require_authenticated_tcp_sql(self) -> None:
+        jobs = deployment.yaml_as_json(SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml")["jobs"]
+        run = next(step["run"] for step in jobs["capture_compose"]["steps"] if step.get("name") == "Capture Compose migration, runtime, and SIGTERM evidence without OIDC")
+        model = run.split("jq -n '", 1)[1].split("' > \"$RUNNER_TEMP/trusted-compose.json\"", 1)[0]
+        rendered = subprocess.run(["jq", "-n", model], capture_output=True, text=True, check=True)
+        expected = {"test": ["CMD-SHELL", deployment.COMPOSE_POSTGRES_HEALTHCHECK], "interval": "2s", "timeout": "5s", "retries": 30}
+        self.assertEqual(json.loads(rendered.stdout)["services"]["postgres"]["healthcheck"], expected)
+        for relative in ("compose.yaml", "deploy/compose/compose.release.yaml"):
+            self.assertEqual(deployment.yaml_as_json(SCRIPT.parent.parent / relative)["services"]["postgres"]["healthcheck"], expected)
+        probe = deployment.COMPOSE_POSTGRES_HEALTHCHECK.replace("$$", "$")
+        wrapper = '''psql() {
+  [[ "$PGPASSWORD" == "$POSTGRES_PASSWORD" && "$PGCONNECT_TIMEOUT" == 2 && "$PGOPTIONS" == "-c statement_timeout=2000" ]] || return 81
+  [[ "$*" != *"$POSTGRES_PASSWORD"* ]] || return 82
+  [[ "$*" == "-X -w -h 127.0.0.1 -p 5432 -U $POSTGRES_USER -d $POSTGRES_DB -At -v ON_ERROR_STOP=1 -c SELECT 1" ]] || return 83
+  printf '%s\\n' "$PROBE_OUTPUT"
+  return "$PROBE_EXIT"
+}
+'''
+        for output, exit_code, success in (("1", "0", True), ("", "1", False), ("0", "0", False), ("1", "1", False)):
+            with self.subTest(output=output, exit_code=exit_code):
+                result = subprocess.run(["bash", "-c", wrapper + probe], env={"POSTGRES_USER": "latchway", "POSTGRES_DB": "latchway", "POSTGRES_PASSWORD": "test-authenticated-password", "PROBE_OUTPUT": output, "PROBE_EXIT": exit_code}, capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, success)
+                self.assertNotIn("test-authenticated-password", result.stdout + result.stderr)
 
     def test_static_assets_pass(self) -> None:
         checks = deployment.static_checks()

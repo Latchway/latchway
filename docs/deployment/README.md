@@ -97,9 +97,12 @@ Compose runs on another fresh runner with no OIDC, provider, or registry
 credential. It imports the authenticated image archive into an empty Docker
 credential store and uses a fixed workflow-owned Compose model with
 `pull_policy: never`; the reviewed candidate Compose file is never executed on
-that runner. A fresh runner without provider credentials normalizes the
-pre-captured provider responses, revalidates the candidate, probes `/healthz`
-and `/readyz`, validates provider identity and resource ID, resolved image
+that runner. While the restored Compose deployment is still alive, the fixed
+wrapper captures bounded `/healthz` and `/readyz` responses through IPv4
+loopback, then retains them with the other raw observations before teardown.
+A fresh runner without provider credentials normalizes the pre-captured
+provider responses, revalidates the candidate, probes `/healthz` and `/readyz`
+for cloud platforms only, validates provider identity and resource ID, resolved image
 digest, remote `migrate status`, secret references, and SIGTERM replacement,
 and seals the deterministic archive. Finally, a no-checkout signer downloads
 only that validated archive and receives GitHub OIDC permission to attest it.
@@ -146,7 +149,8 @@ gh workflow run deployment-evidence.yml --ref main \
 Run the equivalent dispatch for `compose`, `aws`, `fly_io`, and
 `cloudflare_containers`; their exact provider inputs and permissions are
 documented in the platform READMEs.
-Compose accepts only a loopback HTTP endpoint. Cloud platforms require a
+The Compose workflow accepts `http://127.0.0.1:<port>` with an explicit valid
+port, matching its fixed IPv4 loopback listener. Cloud platforms require a
 public HTTPS origin; private, loopback, link-local, and redirect targets are
 rejected by the observer.
 
@@ -155,7 +159,9 @@ normalization and validation run later without provider credentials or OIDC.
 Before any attestation is issued, a fresh no-checkout signer downloads the raw
 artifact directly, authenticates the candidate/run/platform/resource binding,
 requires the deterministic eight-entry candidate archive closure, and compares
-the normalized observations with the raw provider bytes. Cloudflare's signer
+the normalized observations with the raw provider bytes. For Compose, this includes
+both HTTP observations; a missing or altered response fails signing.
+Cloudflare's signer
 independently reduces its exact 18-file raw response closure with fixed inline
 code. The signer adds `latchway-deployment-binding.json`, deterministically
 reseals the nine-entry archive, and attests that signer-produced archive. The

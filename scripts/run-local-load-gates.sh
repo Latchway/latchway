@@ -333,8 +333,9 @@ while [ "$attempt" -lt 90 ]; do
     break
   fi
   # pg_isready accepts a missing database and can observe the temporary init
-  # postmaster. Require successful authenticated SQL on the final TCP listener,
-  # then a stable streak so a short-lived postmaster cannot pass startup.
+  # postmaster. Require successful SQL on the final TCP listener using the
+  # configured role/database, then a stable streak. Password verification still
+  # follows pg_hba.conf; loopback trust is not a password-policy audit.
   if postgres_query 'SELECT 1' >/dev/null 2>&1; then
     postgres_tcp_ready_streak=$((postgres_tcp_ready_streak + 1))
     if [ "$postgres_tcp_ready_streak" -ge "$postgres_required_ready_streak" ]; then

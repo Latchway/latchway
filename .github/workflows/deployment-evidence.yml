@@ -1728,7 +1728,7 @@ jobs:
                 image:"${POSTGRES_IMAGE:?}",pull_policy:"never",restart:"unless-stopped",stop_grace_period:"30s",
                 security_opt:["no-new-privileges:true"],
                 environment:{POSTGRES_DB:"${POSTGRES_DB:-latchway}",POSTGRES_USER:"${POSTGRES_USER:-latchway}",POSTGRES_PASSWORD:"${POSTGRES_PASSWORD:?}"},
-                healthcheck:{test:["CMD-SHELL","pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"],interval:"2s",timeout:"3s",retries:30},
+                healthcheck:{test:["CMD-SHELL","result=$$(PGPASSWORD=\"$${POSTGRES_PASSWORD}\" PGCONNECT_TIMEOUT=2 PGOPTIONS=\"-c statement_timeout=2000\" psql -X -w -h 127.0.0.1 -p 5432 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -At -v ON_ERROR_STOP=1 -c \"SELECT 1\" 2>/dev/null) && [ \"$$result\" = 1 ]"],interval:"2s",timeout:"5s",retries:30},
                 volumes:["postgres-data:/var/lib/postgresql"]
               },
               migrate:{
@@ -1835,6 +1835,72 @@ jobs:
           })
           PY
           printf '%s\n' "$COMPOSE_PROJECT_NAME" > /tmp/latchway-provider-resource-id
+      - name: Capture bounded Compose health and readiness before teardown
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          python3 - <<'PY'
+          import http.client, json, os, re, signal
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          # The fixed Compose model exposes IPv4 loopback only. A direct
+          # connection ignores ambient proxies and never follows redirects.
+          endpoint = os.environ["ENDPOINT"]
+          match = re.fullmatch(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})", endpoint)
+          if match is None or int(match[1]) > 65535:
+              raise SystemExit("Compose evidence requires an explicit IPv4 loopback port")
+          output = Path("/tmp/latchway-deployment-capture")
+          output.mkdir(parents=True, exist_ok=True)
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("duplicate JSON member")
+                  result[key] = value
+              return result
+
+          def reject_constant(value):
+              raise ValueError("non-finite JSON value")
+
+          def deadline_expired(signum, frame):
+              raise TimeoutError("HTTP observation deadline")
+
+          previous_handler = signal.signal(signal.SIGALRM, deadline_expired)
+          try:
+              for name, suffix in (("health", "/healthz"), ("readiness", "/readyz")):
+                  connection = http.client.HTTPConnection("127.0.0.1", int(match[1]), timeout=15)
+                  signal.setitimer(signal.ITIMER_REAL, 15)
+                  try:
+                      connection.request("GET", suffix, headers={"Accept": "application/json", "User-Agent": "latchway-deployment-evidence/1"})
+                      response = connection.getresponse()
+                      if response.status != 200:
+                          raise ValueError("HTTP status is not 200")
+                      payload = response.read(1024 * 1024 + 1)
+                      if len(payload) > 1024 * 1024:
+                          raise ValueError("HTTP observation is too large")
+                      body = json.loads(payload.decode("utf-8"), object_pairs_hook=reject_duplicates, parse_constant=reject_constant)
+                      if not isinstance(body, dict):
+                          raise ValueError("HTTP observation is not an object")
+                  except (OSError, ValueError, http.client.HTTPException):
+                      raise SystemExit(f"Compose {name} HTTP observation failed") from None
+                  finally:
+                      signal.setitimer(signal.ITIMER_REAL, 0)
+                      connection.close()
+                  observation = {
+                      "url": endpoint + suffix, "status_code": response.status,
+                      "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                      "tls": False, "body": body,
+                  }
+                  (output / f"{name}.json").write_text(json.dumps(observation, sort_keys=True) + "\n", encoding="utf-8")
+          finally:
+              signal.setitimer(signal.ITIMER_REAL, 0)
+              signal.signal(signal.SIGALRM, previous_handler)
+          PY
       - name: Retain raw Compose observations for fresh validation
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -1954,6 +2020,7 @@ jobs:
             --output-dir "$RUNNER_TEMP/provider/latchway-deployment-capture" \
             --resource-id-output "$RUNNER_TEMP/provider/latchway-provider-resource-id"
       - name: Capture bounded HTTPS health and readiness responses
+        if: inputs.platform != 'compose'
         run: >-
           python3 scripts/deployment-evidence.py observe-http
           --endpoint "$ENDPOINT"
@@ -2199,6 +2266,8 @@ jobs:
                   "shutdown.json", "versions.json", "whoami.json", "wrangler-version.txt",
               ]
               expected_raw = sorted(base_names + [f"cloudflare-provider-raw/{name}" for name in provider_names])
+          elif platform == "compose":
+              expected_raw = sorted(base_names + [f"latchway-deployment-capture/{name}.json" for name in observation_names])
           else:
               expected_raw = sorted(base_names + [f"latchway-deployment-capture/{name}.json" for name in ("identity", "control_plane", "migration", "secrets", "shutdown")])
           if raw_names != expected_raw:
@@ -2211,7 +2280,8 @@ jobs:
               fail("raw provider identity is not bound to the manifest")
 
           if platform != "cloudflare_containers":
-              for name in ("identity", "control_plane", "migration", "secrets", "shutdown"):
+              raw_observation_names = observation_names if platform == "compose" else ("identity", "control_plane", "migration", "secrets", "shutdown")
+              for name in raw_observation_names:
                   if (raw_root / "latchway-deployment-capture" / f"{name}.json").read_bytes() != extracted[f"{name}.json"]:
                       fail("normalized capture is not byte-bound to provider raw data")
           else:

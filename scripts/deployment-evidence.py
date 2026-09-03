@@ -54,6 +54,14 @@ OBSERVATIONS = (
     "shutdown",
 )
 REQUIRED_SECRET_NAMES = frozenset(("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"))
+# Prove target-database readiness, not the server's password policy: PostgreSQL
+# may use loopback trust, while supplied credentials are checked under SCRAM.
+COMPOSE_POSTGRES_HEALTHCHECK = (
+    'result=$$(PGPASSWORD="$${POSTGRES_PASSWORD}" PGCONNECT_TIMEOUT=2 '
+    'PGOPTIONS="-c statement_timeout=2000" psql -X -w -h 127.0.0.1 -p 5432 '
+    '-U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -At -v ON_ERROR_STOP=1 '
+    '-c "SELECT 1" 2>/dev/null) && [ "$$result" = 1 ]'
+)
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 SEMVER = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
@@ -413,6 +421,11 @@ def validate_compose() -> Mapping[str, Any]:
         raise EvidenceError("compose_postgres_image_not_pinned")
     if postgres.get("volumes") != ["postgres-data:/var/lib/postgresql"]:
         raise EvidenceError("compose_postgres_18_volume_layout_invalid")
+    if postgres.get("healthcheck") != {
+        "test": ["CMD-SHELL", COMPOSE_POSTGRES_HEALTHCHECK],
+        "interval": "2s", "timeout": "5s", "retries": 30,
+    }:
+        raise EvidenceError("compose_postgres_authenticated_readiness_required")
     if "build" in gateway or "build" in migrate:
         raise EvidenceError("compose_build_fallback_forbidden")
     for service in (gateway, migrate):

@@ -68,7 +68,12 @@ gh workflow run deployment-evidence.yml --ref main \
 The workflow generates ephemeral database/bootstrap material, pulls rather
 than builds the exact image, waits for the migration service and health check,
 captures `migrate status`, sends SIGTERM with a 35-second platform grace around
-the application's 30-second drain, recreates the healthy service, and removes
-the entire Compose project and volume. Its provider identity is the
+the application's 30-second drain, recreates the healthy service, captures its
+bounded health/readiness responses on the same runner, and removes the entire
+Compose project and volume. PostgreSQL readiness runs a TCP SQL query against
+the intended database with the configured role and password, so its socket-only
+initialization server cannot release the migration dependency early. Password
+validation follows the database's existing authentication policy; this probe
+does not replace a password-policy audit. Its provider identity is the
 GitHub-hosted Docker engine and the Compose project label returned by Docker.
 The signed archive contains no generated secret values.

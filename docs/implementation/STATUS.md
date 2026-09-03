@@ -33,8 +33,10 @@ non-secret policy sentinels for that profile, plus public visibility for
 request returned GitHub HTTP 403 because the stored credential lacks the
 necessary environment-administration permission. After owner browser sign-in,
 the 13 authorized environments were created with main-only branch rules and
-their exact non-secret policy sentinels. No reviewer requirement, wait timer,
-registry credential, other secret, or strict-profile ruleset was added.
+their exact non-secret policy sentinels. That policy-configuration step added
+no reviewer requirement, wait timer, registry credential, other secret, or
+strict-profile ruleset. The owner subsequently authorized and completed the
+separate, scoped CocoaPods/signing credential installation recorded below.
 npm 2FA is enabled in `auth-and-writes` mode. All five inert namespace records
 (`@latchway/client`, `openai`, `vercel-ai`, `langchain`, and `react-native`) are
 public at `0.0.0-bootstrap.0`. After npm rejected removal of its unexpected
@@ -43,8 +45,10 @@ JavaScript tooling commit `75721b345ee7907a7ffd0f19ecd8216fe9ae9103` completed
 publication and exact-byte registry verification for all five packages. Its
 schema-2 receipt records both observed tags and `stable_release: false`; it
 accepts `latest` only when it names the sole exact bootstrap version. These
-placeholders contain no SDK implementation. Trusted-publisher grants and every
-stable `1.0.0` package remain outstanding.
+placeholders contain no SDK implementation. After explicit owner authorization,
+all five npm trusted publishers were configured and read back with the exact
+repository, `single-maintainer-release.yml`, `single-maintainer-v1`, and sole
+`createPackage` permission. Every stable `1.0.0` package remains outstanding.
 No stable tag or `1.0.0` package, container, production documentation
 deployment, cloud proof, or protected release evidence is claimed.
 React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
@@ -67,7 +71,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
-| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. The npm owner session completed second-factor authentication and all five namespace publications; scoped trusted-publisher grants remain outstanding. The existing CocoaPods Trunk session and Maven signing key/passphrase are present locally, but no release-environment secrets have been installed. Sonatype sign-in succeeded and `dev.latchway` is registered but unverified: `latchway.dev` returns NXDOMAIN and domain control has not been established. Verified Sonatype namespace/Portal credentials and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
+| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. All five npm namespace publications and exact trusted-publisher grants are complete. The approved CocoaPods token is installed only in the iOS `single-maintainer-v1` environment; the Maven signing key/passphrase are installed only in Android `single-maintainer-v1-signing`, with the public fingerprint bound in Android's signing, Maven, and verification environments. Upload acknowledgments and exact metadata read-back passed. Sonatype sign-in succeeded and `dev.latchway` is registered but unverified: `latchway.dev` returns NXDOMAIN and domain control has not been established. No Sonatype token has been created. Verified Sonatype namespace/Portal credentials and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
 | Next executable task | Bootstrap/publish the registry coordinates and candidate GHCR image, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
 
 ### Validated version 1 source coordinates
@@ -200,7 +204,7 @@ released checkpoint and reproducible bundle above.
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
-| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. | Complete registry credentials and package bootstrap/trusted publishers; no secret installation or strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
+| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. The five npm namespaces and exact selected-profile trusted publishers are verified, and the separately authorized CocoaPods/signing secrets and public fingerprint variables are installed only in their approved environments. | Verified Sonatype namespace/Portal credentials and protected exact-candidate publication remain open. No strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
 | Mintlify public docs | This canonical tree imports the four final reproducible bundles and retains task-oriented deployment comparison, release-image verification, and the completed Cloud Run/Cloudflare runbooks. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Configure `docs.latchway.dev`, deploy through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
@@ -211,7 +215,8 @@ released checkpoint and reproducible bundle above.
   before load execution because the isolated PostgreSQL readiness probe
   accepted its temporary initialization server before the `latchway` database
   existed. Image building, publication, and signing were skipped. The harness
-  now requires five consecutive authenticated TCP `SELECT 1` successes, uses
+  now requires five consecutive TCP `SELECT 1` successes against the configured
+  role/database, uses
   the same bounded TCP path for settings queries, and retains only bounded,
   fixed-label PostgreSQL startup diagnostics on failure. All 62 relevant
   CI/release/resilience tests pass, including 12 new behavioral regressions;
@@ -220,16 +225,53 @@ released checkpoint and reproducible bundle above.
   five successful TCP probes, the expected connection limit, preserved caller
   credentials, and missing-database rejection; only the disposable test
   container and its volume were removed. Performance thresholds
-  and resource limits are unchanged. A new exact-source candidate run is
-  required; the prior run supplies no passing load or container evidence.
+  and resource limits are unchanged. Candidate run `33716493748` at
+  `1adb8566aad1ba1f928da1e524edfefaae7fb3b6` passed core, Console, and
+  deterministic failure/replica gates and reached the isolated load gate, but
+  is superseded by the Compose workflow correction below. No passing load or
+  container evidence is claimed from either prior run.
+- The Compose evidence workflow had a separate runner-lifetime defect: its
+  finalizer probed a loopback endpoint only after the capture runner had removed
+  the deployment. It now captures bounded health/readiness responses while the
+  restored service is alive, retains them before teardown, and requires the
+  fresh signer to byte-bind all seven raw observations. Cloud probes remain on
+  the finalizer. Source-build, release, and workflow-owned Compose models now
+  share the target-database TCP readiness probe. The 24 deployment tests and
+  38 broader release tests pass, as do actionlint, all 37 workflow shell
+  fragments, both Compose model renders, independent diff review, and a fresh
+  PostgreSQL initialization-race proof. The final combined 87-test release
+  suite also passes. The probe supplies credentials, but
+  the default image's loopback trust policy does not validate passwords; no
+  production authentication policy was changed. A separate disposable SCRAM
+  fixture proved wrong-password failures propagate without probe output.
+  This workflow correction
+  requires a replacement exact-source candidate before Compose evidence can
+  qualify the release.
 - All five npm namespace bootstrap publications completed on 2026-09-03 from
   isolated JavaScript tooling commit
   `75721b345ee7907a7ffd0f19ecd8216fe9ae9103`. The helper SHA-256 is
   `68427af1029ffd544467072980902f15cae214184a89cb39aa999890e7c4d1e0`.
   The completed schema-2 receipt verifies registry metadata, exact archive
   bytes, and the bootstrap/latest aliases for every package, explicitly with
-  `stable_release: false`. No npm trusted publisher or stable package is
-  implied by this namespace reservation.
+  `stable_release: false`. Namespace reservation does not imply a stable SDK
+  package release.
+- The owner separately approved all five npm trusted publishers. Read-back
+  confirms the four JavaScript packages trust `Latchway/latchway-js` and
+  React Native trusts `Latchway/latchway-react-native-sdk`, each bound to
+  `single-maintainer-release.yml`, `single-maintainer-v1`, and only the
+  `createPackage` permission. Main-only enforcement is supplied by the already
+  verified GitHub environment policy. No npm token was installed in GitHub.
+- After separate explicit owner authorization, GitHub acknowledged installation
+  of `COCOAPODS_TRUNK_TOKEN` only in iOS `single-maintainer-v1`, plus
+  `LATCHWAY_SIGNING_KEY` and `LATCHWAY_SIGNING_PASSWORD` only in Android
+  `single-maintainer-v1-signing`. `LATCHWAY_MAVEN_SIGNING_FINGERPRINT` was
+  created in Android's `single-maintainer-v1-signing`,
+  `single-maintainer-v1-maven`, and `single-maintainer-v1-verification`
+  environments. Exact policy/inventory checks preceded every write, existing
+  values were not overwritten, and post-write metadata verification passed.
+  Secret material was read only from the approved local sources, retained in
+  process memory, and passed through standard input rather than arguments or
+  logs. No Sonatype token was created or installed.
 - Core CI run `33676007601` passed all eight jobs at
   `5ae5bcf7862a3315bada388ae41974d87bf13ef8`: contracts, lint, Console,
   PostgreSQL 15, PostgreSQL 18, reliability, deployment validation, and
