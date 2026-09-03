@@ -219,7 +219,8 @@ released checkpoint and reproducible bundle above.
   Tests cover rollback after the third allocation fails, exact attribution
   and counts, zero allocations, pending and terminal replay without a new
   identifier, and the existing 48 overlapping lifecycles. Independent review
-  found no remaining issues. Full load verification remains outstanding.
+  found no remaining issues. The complete subsequent local load suite is
+  recorded below; it is not a passing release result.
 - Integrated source `b6da040f22b8f9a67cc86c6486d2b533f6cd58f5` passed
   full uncached Go tests and vet, all 474 release/tool tests, Go formatting,
   workflow lint, and normative contract validation. Canonical public docs
@@ -227,6 +228,17 @@ released checkpoint and reproducible bundle above.
   generated references, pinned prose checks, and accessibility. Initial
   sandbox-only cache/loopback restrictions were resolved by rerunning the
   same checks with the required local permissions; no tests were disabled.
+- The subsequent unchanged full local load run at clean source
+  `e064e671a8baa34bf0b559c7c8f3fccbcd6a1959` again passed five of six gates.
+  Gateway overhead now passed all limits at `14.323833`/`18.296501`/
+  `25.119375 ms` p50/p95/p99. All 6,000 non-stream requests returned HTTP
+  200 with exact terminal accounting and zero pending reservations, but
+  maximum request-start lag was `50.959086 ms`, exceeding the `25 ms`
+  workload-pacing requirement; scheduler lag was `46.333253 ms`. Non-stream
+  p99 latency was `625.838834 ms`. All 500 SSE streams held with a flat
+  `158.695 MiB` plateau; preflight, idle memory, and contention also passed.
+  The overall result remains failed. This run does not establish the cause
+  of the scheduling/latency spike or a controlled before/after speedup.
 - The complete unchanged local load suite at
   `ed0dfa345c8a4bf2fcf57bc3cc0794220f36b3f6` passed five of six gates.
   Gateway-overhead p50 was `15.070375 ms`, above the `15 ms` limit;
