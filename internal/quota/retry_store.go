@@ -1569,6 +1569,39 @@ func reserveRetryConcurrency(
 	return nil
 }
 
+const insertAttemptQuotaEntrySQL = `
+			INSERT INTO upstream_attempt_quota_entries (
+				organization_id, application_id, environment_id,
+				logical_request_id, upstream_attempt_id, quota_reservation_id,
+				quota_reservation_entry_id, quota_bucket_id, metric, allocated_units
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`
+
+// queueAttemptQuotaEntries preserves reservation-entry order and includes only
+// the metrics allocated to this attempt. The caller consumes one result per
+// returned entry and retains ownership of the enclosing transaction.
+func queueAttemptQuotaEntries(
+	batch *pgx.Batch,
+	reservation lockedReservation,
+	attemptID string,
+	entries []lockedEntry,
+	allocations map[string]int64,
+) int {
+	count := 0
+	for _, entry := range entries {
+		units, allocated := allocations[entry.metric]
+		if !allocated {
+			continue
+		}
+		batch.Queue(insertAttemptQuotaEntrySQL,
+			reservation.organizationID, reservation.applicationID,
+			reservation.environmentID, reservation.logicalRequestID, attemptID,
+			reservation.reservationID, entry.id, entry.bucketID, entry.metric, units)
+		count++
+	}
+	return count
+}
+
 func insertAttemptQuotaEntries(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -1582,13 +1615,7 @@ func insertAttemptQuotaEntries(
 		if !allocated {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO upstream_attempt_quota_entries (
-				organization_id, application_id, environment_id,
-				logical_request_id, upstream_attempt_id, quota_reservation_id,
-				quota_reservation_entry_id, quota_bucket_id, metric, allocated_units
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, reservation.organizationID, reservation.applicationID,
+		if _, err := tx.Exec(ctx, insertAttemptQuotaEntrySQL, reservation.organizationID, reservation.applicationID,
 			reservation.environmentID, reservation.logicalRequestID, attemptID,
 			reservation.reservationID, entry.id, entry.bucketID, entry.metric, units); err != nil {
 			return mapWriteError("insert upstream attempt quota entry", err)

@@ -1887,7 +1887,11 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	if err != nil {
 		return Attempt{}, false, err
 	}
-	if _, err := tx.Exec(ctx, `
+	// All classifiers, identifier generation, the fresh expiry check, and the
+	// checked logical-dispatch update have completed. Only the ordered attempt
+	// and allocation inserts share this batch; any failure rolls back all of it.
+	batch := &pgx.Batch{}
+	batch.Queue(`
 		INSERT INTO upstream_attempts (
 			upstream_attempt_id, organization_id, application_id, environment_id,
 			logical_request_id, attempt_number, route_key, upstream_key,
@@ -1917,13 +1921,21 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		inputBound, outputBound, totalBound,
 		decisionAttempt.requestMeasurementSHA256,
 		decisionAttempt.measuredRequestBytes, decisionAttempt.measuredImageUnits,
-		decisionAttempt.measuredToolCalls); err != nil {
+		decisionAttempt.measuredToolCalls)
+	entryCount := queueAttemptQuotaEntries(batch, lockedReservation, attemptID, entries, initialAllocations)
+	results := tx.SendBatch(ctx, batch)
+	if _, err := results.Exec(); err != nil {
+		_ = results.Close()
 		return Attempt{}, false, mapWriteError("insert upstream attempt", err)
 	}
-	if err := insertAttemptQuotaEntries(
-		ctx, tx, lockedReservation, attemptID, entries, initialAllocations,
-	); err != nil {
-		return Attempt{}, false, err
+	for range entryCount {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return Attempt{}, false, mapWriteError("insert upstream attempt quota entry", err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return Attempt{}, false, persistenceFailure("complete upstream attempt inserts", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Attempt{}, false, persistenceFailure("commit upstream attempt", err)
