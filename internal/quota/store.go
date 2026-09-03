@@ -261,6 +261,8 @@ func persistAcceptedReservation(
 	reservationKey string,
 	decisionAt time.Time,
 	expiresAt time.Time,
+	nextStage int32,
+	stages []DecisionStage,
 ) error {
 	commands := make([]reservationBatchCommand, 0, 2*len(plans)+2)
 	for index := range plans {
@@ -327,10 +329,19 @@ func persistAcceptedReservation(
 	}
 
 	batch := &pgx.Batch{}
+	if err := queueDecisionStages(batch, requestHandleForPrepared(prepared), nextStage, stages); err != nil {
+		return err
+	}
 	for _, command := range commands {
 		batch.Queue(command.query, command.arguments...)
 	}
 	results := tx.SendBatch(ctx, batch)
+	for range stages {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return mapWriteError("append request decision stage", err)
+		}
+	}
 	for _, command := range commands {
 		tag, err := results.Exec()
 		if err != nil {
@@ -483,17 +494,15 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	if err := materializePlannedBuckets(ctx, tx, prepared, plans, requestedAt); err != nil {
 		return Reservation{}, err
 	}
-	if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
+	var decision reservationDecision
+	if err := lockPlannedBuckets(ctx, tx, prepared, plans, &decision); err != nil {
 		return Reservation{}, err
 	}
 	// The request stays attributed to the calendar window in which it arrived,
 	// but lock contention must not consume its reservation lifetime or backdate
 	// the quota decision. Capture a fresh database time only after ownership of
 	// the bucket state is established.
-	decisionAt, err := statementTime(ctx, tx)
-	if err != nil {
-		return Reservation{}, err
-	}
+	decisionAt := decision.at
 	expiresAt := decisionAt.Add(store.reservationTTL)
 	if !expiresAt.After(decisionAt) {
 		return Reservation{}, ErrInvalidInput
@@ -580,9 +589,10 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		if stageErr != nil {
 			return Reservation{}, stageErr
 		}
-		if stageErr := appendQuotaDecisionStages(
-			ctx, tx, prepared, requestedAt, decisionAt,
-			evaluatedReservationRuleKeySet(prepared.rules, plans), deniedKeys, failureCode,
+		if stageErr := appendDecisionStagesAt(
+			ctx, tx, requestHandleForPrepared(prepared), decision.nextStage,
+			quotaDecisionStages(prepared, requestedAt, decisionAt,
+				evaluatedReservationRuleKeySet(prepared.rules, plans), deniedKeys, failureCode),
 		); stageErr != nil {
 			return Reservation{}, stageErr
 		}
@@ -614,15 +624,11 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		return Reservation{}, concurrencyExceededError(logicalRequestID, plans, concurrencyExceeded)
 	}
 
-	if err := appendQuotaDecisionStages(
-		ctx, tx, prepared, requestedAt, decisionAt,
-		evaluatedReservationRuleKeySet(prepared.rules, plans), nil, "",
-	); err != nil {
-		return Reservation{}, err
-	}
+	stages := quotaDecisionStages(prepared, requestedAt, decisionAt,
+		evaluatedReservationRuleKeySet(prepared.rules, plans), nil, "")
 	if err := persistAcceptedReservation(
 		ctx, tx, prepared, plans, identifiers.reservation, logicalRequestID,
-		reservationKey, decisionAt, expiresAt,
+		reservationKey, decisionAt, expiresAt, decision.nextStage, stages,
 	); err != nil {
 		return Reservation{}, err
 	}
@@ -765,7 +771,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		if len(plans) == 0 {
 			return Reservation{}, ErrInvalidState
 		}
-		if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
+		if err := lockPlannedBuckets(ctx, tx, prepared, plans, nil); err != nil {
 			return Reservation{}, err
 		}
 		replayAt, err := statementTime(ctx, tx)
@@ -1371,7 +1377,7 @@ func plannedBucketIdentity(ruleKey, scopeKey string) string {
 // lockPlannedBuckets first resolves immutable bucket identifiers without
 // locking, then acquires every row lock in quota_bucket_id order. All reserve,
 // settle, release, replay, and recovery paths use that same global order.
-func lockPlannedBuckets(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plans []plannedBucket) error {
+func lockPlannedBuckets(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plans []plannedBucket, decision *reservationDecision) error {
 	if len(plans) > maximumRulesPerRequest {
 		return ErrInvalidInput
 	}
@@ -1384,7 +1390,7 @@ func lockPlannedBuckets(ctx context.Context, tx pgx.Tx, prepared preparedRequest
 			return ErrInvalidState
 		}
 	}
-	return lockPlannedBucketRows(ctx, tx, prepared, plans)
+	return lockPlannedBucketRows(ctx, tx, prepared, plans, decision)
 }
 
 const findQuotaBucketIDSQL = `
@@ -1476,13 +1482,22 @@ const lockQuotaBucketSQL = `
 	FOR UPDATE
 `
 
+// reservationDecision is read in queued commands after all bucket locks. The
+// live clock remains fresh even when simple protocol combines the batch into
+// one query message. The logical-request lock serializes stage numbering.
+type reservationDecision struct {
+	at        time.Time
+	nextStage int32
+}
+
 func lockPlannedBucketRows(
 	ctx context.Context,
 	tx pgx.Tx,
 	prepared preparedRequest,
 	plans []plannedBucket,
+	decision *reservationDecision,
 ) error {
-	if len(plans) == 0 {
+	if len(plans) == 0 && decision == nil {
 		return nil
 	}
 	batch := &pgx.Batch{}
@@ -1495,6 +1510,10 @@ func lockPlannedBucketRows(
 			plan.period.key, plan.rule.scopeKey,
 		)
 	}
+	if decision != nil {
+		batch.Queue("SELECT clock_timestamp()")
+		batch.Queue(nextDecisionStageSQL, prepared.LogicalRequestID.String())
+	}
 	results := tx.SendBatch(ctx, batch)
 	for index := range plans {
 		bucket, err := scanLockedBucket(results.QueryRow(), prepared, plans[index])
@@ -1503,6 +1522,21 @@ func lockPlannedBucketRows(
 			return err
 		}
 		plans[index].locked = bucket
+	}
+	if decision != nil {
+		if err := results.QueryRow().Scan(&decision.at); err != nil {
+			_ = results.Close()
+			return persistenceFailure("read PostgreSQL statement time", err)
+		}
+		if err := results.QueryRow().Scan(&decision.nextStage); err != nil {
+			_ = results.Close()
+			return persistenceFailure("select next request decision stage", err)
+		}
+		decision.at = decision.at.UTC()
+		if decision.at.IsZero() {
+			_ = results.Close()
+			return ErrInvalidState
+		}
 	}
 	if err := results.Close(); err != nil {
 		return persistenceFailure("lock quota bucket", err)

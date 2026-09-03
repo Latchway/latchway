@@ -583,6 +583,12 @@ func projectDecisionStage(
 	return nil
 }
 
+const nextDecisionStageSQL = `
+	SELECT COALESCE(max(stage_number), 0) + 1
+	FROM logical_request_decision_stages
+	WHERE logical_request_id = $1
+`
+
 func appendDecisionStages(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -593,11 +599,7 @@ func appendDecisionStages(
 		return nil
 	}
 	var next int32
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(max(stage_number), 0) + 1
-		FROM logical_request_decision_stages
-		WHERE logical_request_id = $1
-	`, request.logicalRequestID).Scan(&next); err != nil {
+	if err := tx.QueryRow(ctx, nextDecisionStageSQL, request.logicalRequestID).Scan(&next); err != nil {
 		return persistenceFailure("select next request decision stage", err)
 	}
 	return appendDecisionStagesAt(ctx, tx, request, next, stages)
@@ -613,10 +615,39 @@ func appendDecisionStagesAt(
 	if len(stages) == 0 {
 		return nil
 	}
+	batch := &pgx.Batch{}
+	if err := queueDecisionStages(batch, request, next, stages); err != nil {
+		return err
+	}
+	results := tx.SendBatch(ctx, batch)
+	for range stages {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return mapWriteError("append request decision stage", err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return mapWriteError("append request decision stages", err)
+	}
+	return nil
+}
+
+// queueDecisionStages preserves the ordinary stage inserts while allowing a
+// reservation to commit its decision provenance and capacity writes in one
+// ordered batch. Its caller owns the logical-request row lock and must consume
+// every queued result before committing the transaction.
+func queueDecisionStages(
+	batch *pgx.Batch,
+	request AuthenticatedRequest,
+	next int32,
+	stages []DecisionStage,
+) error {
+	if len(stages) == 0 {
+		return nil
+	}
 	if next < 1 || int64(next)+int64(len(stages))-1 > maximumDecisionStages {
 		return ErrInvalidState
 	}
-	batch := &pgx.Batch{}
 	for index, stage := range stages {
 		batch.Queue(`
 			INSERT INTO logical_request_decision_stages (
@@ -638,16 +669,6 @@ func appendDecisionStagesAt(
 			nullableString(stage.RouteKey), nullableString(stage.UpstreamKey),
 			nullableString(stage.ModelKey), nullableString(stage.PhysicalModel),
 			stage.StartedAt, stage.CompletedAt)
-	}
-	results := tx.SendBatch(ctx, batch)
-	for range stages {
-		if _, err := results.Exec(); err != nil {
-			_ = results.Close()
-			return mapWriteError("append request decision stage", err)
-		}
-	}
-	if err := results.Close(); err != nil {
-		return mapWriteError("append request decision stages", err)
 	}
 	return nil
 }
@@ -689,7 +710,18 @@ func appendQuotaDecisionStages(
 	deniedRuleKeys map[string]struct{},
 	failureCode string,
 ) error {
-	request := requestHandleForPrepared(input)
+	return appendDecisionStages(ctx, tx, requestHandleForPrepared(input),
+		quotaDecisionStages(input, startedAt, completedAt, evaluatedRuleKeys, deniedRuleKeys, failureCode))
+}
+
+func quotaDecisionStages(
+	input preparedRequest,
+	startedAt time.Time,
+	completedAt time.Time,
+	evaluatedRuleKeys map[string]struct{},
+	deniedRuleKeys map[string]struct{},
+	failureCode string,
+) []DecisionStage {
 	stages := make([]DecisionStage, 0, len(input.rules)+1)
 	for _, rule := range input.rules {
 		if _, evaluated := evaluatedRuleKeys[rule.ruleKey]; !evaluated {
@@ -719,7 +751,7 @@ func appendQuotaDecisionStages(
 		RouteKey: input.RouteKey, UpstreamKey: input.UpstreamKey,
 		ModelKey: input.ModelKey, PhysicalModel: input.PhysicalModel,
 	})
-	return appendDecisionStages(ctx, tx, request, stages)
+	return stages
 }
 
 func requestBoundEvaluatedRuleKeySet(rules []preparedRule) map[string]struct{} {
