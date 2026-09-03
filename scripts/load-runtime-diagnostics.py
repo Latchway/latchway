@@ -52,6 +52,82 @@ FAILURE_CODES = {
     "client_cancelled", "reservation_expired", "quota_exceeded", "configuration_invalid",
 }
 
+# Advisory metadata, not runtime tuning or proof that THP caused an RSS change.
+# Kernel documentation: admin-guide/mm/transhuge.html and filesystems/proc.html.
+THP_ENABLED = {"always", "madvise", "never"}
+THP_DEFRAG = THP_ENABLED | {"defer", "defer+madvise"}
+PROCESS_MEMORY_FIELDS = {
+    "smaps_rss_kib": ("smaps_rollup", "rss_bytes"),
+    "smaps_pss_kib": ("smaps_rollup", "pss_bytes"),
+    "smaps_anon_huge_pages_kib": ("smaps_rollup", "anon_huge_pages_bytes"),
+    "status_vm_rss_kib": ("status", "vm_rss_bytes"),
+    "status_rss_anon_kib": ("status", "rss_anon_bytes"),
+    "status_rss_file_kib": ("status", "rss_file_bytes"),
+}
+THP_INTEGER_FIELDS = {"scan_sleep_millisecs", "max_ptes_none"}
+PROCESS_MEMORY_CAPTURE_BYTES = 2048
+PROCESS_MEMORY_AWK = r'''
+function discard_proc(path) {
+    if (path == "/proc/1/smaps_rollup") {
+        delete values["smaps_rss_kib"]; delete values["smaps_pss_kib"]; delete values["smaps_anon_huge_pages_kib"]
+    }
+    if (path == "/proc/1/status") {
+        delete values["status_vm_rss_kib"]; delete values["status_rss_anon_kib"]; delete values["status_rss_file_kib"]
+    }
+}
+function bounded_read(path, lines, bytes, line, status, first) {
+    lines = bytes = 0
+    while ((status = (getline line < path)) > 0) {
+        bytes += length(line) + 1
+        if (++lines > 256 || bytes > 16384) { discard_proc(path); close(path); return "" }
+        if (path == "/proc/1/smaps_rollup" && line ~ /^(Rss|Pss|AnonHugePages):[ \t]+[0-9]+[ \t]+kB$/) {
+            split(line, a, /[ \t]+/)
+            if (a[1] == "Rss:") values["smaps_rss_kib"] = a[2]
+            if (a[1] == "Pss:") values["smaps_pss_kib"] = a[2]
+            if (a[1] == "AnonHugePages:") values["smaps_anon_huge_pages_kib"] = a[2]
+        }
+        if (path == "/proc/1/status" && line ~ /^(VmRSS|RssAnon|RssFile):[ \t]+[0-9]+[ \t]+kB$/) {
+            split(line, a, /[ \t]+/)
+            if (a[1] == "VmRSS:") values["status_vm_rss_kib"] = a[2]
+            if (a[1] == "RssAnon:") values["status_rss_anon_kib"] = a[2]
+            if (a[1] == "RssFile:") values["status_rss_file_kib"] = a[2]
+        }
+        # Only one short selected enum or integer from these fixed sysfs files.
+        if (path != "/proc/1/smaps_rollup" && path != "/proc/1/status" && lines == 1 && length(line) <= 256)
+            first = line
+    }
+    close(path)
+    if (status < 0) discard_proc(path)
+    return status < 0 || (path != "/proc/1/smaps_rollup" && path != "/proc/1/status" && lines != 1) ? "" : first
+}
+function selected(line, allowed, count, i, tokens, candidate, found, choice) {
+    count = split(line, tokens, /[ \t]+/); found = 0
+    for (i = 1; i <= count; i++) {
+        if (tokens[i] ~ /^\[[a-z+]+\]$/) {
+            candidate = substr(tokens[i], 2, length(tokens[i]) - 2)
+            if (candidate !~ allowed) return ""
+            found++; choice = candidate
+        } else if (tokens[i] != "" && tokens[i] !~ allowed) return ""
+    }
+    return found == 1 ? choice : ""
+}
+BEGIN {
+    bounded_read("/proc/1/smaps_rollup")
+    bounded_read("/proc/1/status")
+    enabled = selected(bounded_read("/sys/kernel/mm/transparent_hugepage/enabled"), "^(always|madvise|never)$")
+    defrag = selected(bounded_read("/sys/kernel/mm/transparent_hugepage/defrag"), "^(always|defer|defer[+]madvise|madvise|never)$")
+    scan = bounded_read("/sys/kernel/mm/transparent_hugepage/khugepaged/scan_sleep_millisecs")
+    none = bounded_read("/sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none")
+    print "schema 1"
+    for (key in values) print key " " values[key]
+    if (enabled != "") print "enabled " enabled
+    if (defrag != "") print "defrag " defrag
+    if (scan ~ /^[0-9]+$/) print "scan_sleep_millisecs " scan
+    if (none ~ /^[0-9]+$/) print "max_ptes_none " none
+    print "complete 1"
+}
+'''
+
 
 def sql_enum(column: str, allowed: set[str]) -> str:
     # All arguments are module-owned constants, never CLI or database values.
@@ -344,6 +420,48 @@ def resource_sample(postgres, gateway):
     return result
 
 
+def process_memory_sample(tools_runner):
+    """Same-UID read in the existing runner's gateway PID namespace, no privilege."""
+    started = time.monotonic()
+    arguments = ["docker", "exec", "--user", "65532:65532", tools_runner,
+                 "timeout", "-s", "KILL", "2", "awk", PROCESS_MEMORY_AWK]
+    status, output = capture(arguments, limit=PROCESS_MEMORY_CAPTURE_BYTES, timeout=3)
+    result = {"kind": "process_memory", "status": status, "advisory_only": True,
+              "smaps_read_can_add_sampling_overhead": True,
+              "thp_controls_are_metadata_not_causal_proof": True}
+    if status == "ok":
+        try:
+            # Strict second boundary: even a malicious dependency cannot append
+            # unknown keys, raw mappings, strings, or duplicate observations.
+            fields = {}
+            for line in output.decode("ascii").splitlines():
+                parts = line.split(" ")
+                if len(parts) != 2 or not parts[0] or parts[0] in fields:
+                    raise ValueError("invalid process diagnostics")
+                fields[parts[0]] = parts[1]
+            allowed = set(PROCESS_MEMORY_FIELDS) | THP_INTEGER_FIELDS | {"enabled", "defrag", "schema", "complete"}
+            if set(fields) - allowed or fields.pop("schema", None) != "1" or fields.pop("complete", None) != "1":
+                raise ValueError("invalid process diagnostics")
+            metrics = {"smaps_rollup": {}, "status": {}}
+            for key, (group, field) in PROCESS_MEMORY_FIELDS.items():
+                raw = fields.get(key)
+                number = int(raw) if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,19}", raw) else None
+                metrics[group][field] = integer(number * 1024) if number is not None else None
+            thp = {}
+            for key in sorted(THP_INTEGER_FIELDS):
+                raw = fields.get(key)
+                thp[key] = integer(int(raw)) if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,19}", raw) else None
+            thp["enabled"] = fields.get("enabled") if fields.get("enabled") in THP_ENABLED else None
+            thp["defrag"] = fields.get("defrag") if fields.get("defrag") in THP_DEFRAG else None
+            result["metrics"], result["host_thp_controls"] = metrics, thp
+            values = [value for group in metrics.values() for value in group.values()] + list(thp.values())
+            result["status"] = "ok" if all(value is not None for value in values) else "partial" if any(value is not None for value in values) else "unavailable"
+        except (ValueError, UnicodeError):
+            result["status"] = "invalid_response"
+    result["duration_ms"] = round((time.monotonic()-started)*1000)
+    return result
+
+
 PG_ERROR_PREFIX = re.compile(rb"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ [A-Za-z0-9+:/-]+ \[[0-9]+\] )?(?:ERROR|FATAL):\s+")
 PG_ERROR_LABELS = {
     b"deadlock detected": "deadlock_detected",
@@ -383,7 +501,7 @@ def write_record(writer, record):
     writer.flush()
 
 
-def collect(writer, postgres, gateway, stop_file, pool_maximum, *, maximum_seconds=MAXIMUM_SECONDS):
+def collect(writer, postgres, gateway, stop_file, pool_maximum, *, tools_runner=None, maximum_seconds=MAXIMUM_SECONDS):
     write_record(writer, host_metadata(pool_maximum))
     deadline = time.monotonic() + maximum_seconds
     index = 0
@@ -392,6 +510,9 @@ def collect(writer, postgres, gateway, stop_file, pool_maximum, *, maximum_secon
         if index % LIFECYCLE_EVERY == 0:
             write_record(writer, database_sample(postgres, lifecycle=True))
             write_record(writer, resource_sample(postgres, gateway))
+            if tools_runner is not None and time.monotonic() < deadline and not stop_file.exists():
+                # smaps walks page tables: never sample it at the 5s SQL cadence.
+                write_record(writer, process_memory_sample(tools_runner))
         index += 1
         until = min(deadline, time.monotonic() + INTERVAL_SECONDS)
         while time.monotonic() < until and not stop_file.exists():
@@ -407,19 +528,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--postgres", required=True)
     parser.add_argument("--gateway", required=True)
+    parser.add_argument("--tools-runner", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stop-file", type=Path, required=True)
     parser.add_argument("--pool-max-connections", type=int, required=True)
     args = parser.parse_args()
     if (not re.fullmatch(r"latchway-load-postgres-[0-9]+-[0-9]{14}", args.postgres)
             or not re.fullmatch(r"latchway-load-gateway-[0-9]+-[0-9]{14}", args.gateway)
+            or args.tools_runner != "latchway-load-runner-" + args.postgres.removeprefix("latchway-load-postgres-")
+            or args.gateway != "latchway-load-gateway-" + args.postgres.removeprefix("latchway-load-postgres-")
             or not args.output.is_absolute() or not args.stop_file.is_absolute()
             or not 1 <= args.pool_max_connections <= 500):
         return 2
     try:
         descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as writer:
-            collect(writer, args.postgres, args.gateway, args.stop_file, args.pool_max_connections)
+            collect(writer, args.postgres, args.gateway, args.stop_file, args.pool_max_connections, tools_runner=args.tools_runner)
     except (OSError, ValueError):
         # The launcher retains the gate status and records a fixed unavailable
         # marker. Never copy dependency exceptions, argv or environment values.

@@ -138,11 +138,13 @@ network="latchway-load-network-$suffix"
 postgres="latchway-load-postgres-$suffix"
 fixture="latchway-load-fixture-$suffix"
 gateway="latchway-load-gateway-$suffix"
+tools_runner="latchway-load-runner-$suffix"
 gateway_tag="latchway-load-gateway:$suffix"
 tools_tag="latchway-load-tools:$suffix"
 network_created=false
 gateway_image_created=false
 tools_image_created=false
+tools_runner_create_intended=false
 diagnostics_pid=
 postgres_cpu_millicores=4000
 postgres_nano_cpus=4000000000
@@ -218,6 +220,14 @@ cleanup() {
   fi
   if [ "$status" -ne 0 ] && docker inspect "$postgres" >/dev/null 2>&1; then
     capture_postgres_startup_events >"$evidence_dir/postgres-startup.log"
+  fi
+  # The foreground runner normally removes itself. On interruption, remove
+  # only the exact name with this invocation's label and immutable tools image.
+  if [ "${tools_runner_create_intended:-false}" = true ] && \
+     [ -n "${tools_runner:-}" ] && [ -n "${tools_image_id:-}" ] && \
+     [ "$(docker inspect --format '{{index .Config.Labels "dev.latchway.load-run"}}' "$tools_runner" 2>/dev/null)" = "$suffix" ] && \
+     [ "$(docker inspect --format '{{.Image}}' "$tools_runner" 2>/dev/null)" = "$tools_image_id" ]; then
+    docker rm --force "$tools_runner" >/dev/null 2>&1
   fi
   docker rm --force "$gateway" >/dev/null 2>&1
   docker rm --force "$fixture" >/dev/null 2>&1
@@ -523,9 +533,13 @@ docker run --rm \
 cp "$run_dir/runtime/provision.json" "$evidence_dir/provision.json"
 cp "$run_dir/runtime/load-config.json" "$evidence_dir/load-config.json"
 
+if docker inspect "$tools_runner" >/dev/null 2>&1; then
+  echo "refusing to reuse an existing load runner name" >&2
+  exit 1
+fi
 if command -v python3 >/dev/null 2>&1; then
   python3 "$run_dir/source/scripts/load-runtime-diagnostics.py" \
-    --postgres "$postgres" --gateway "$gateway" \
+    --postgres "$postgres" --gateway "$gateway" --tools-runner "$tools_runner" \
     --pool-max-connections "$gateway_db_pool_max_connections" \
     --output "$evidence_dir/runtime-diagnostics.jsonl" \
     --stop-file "$run_dir/runtime-diagnostics.stop" >/dev/null 2>&1 &
@@ -534,7 +548,10 @@ else
   printf '%s\n' '{"kind":"collector","status":"python_unavailable"}' >"$evidence_dir/runtime-diagnostics.jsonl"
 fi
 
+tools_runner_create_intended=true
 docker run --rm \
+  --name "$tools_runner" \
+  --label "dev.latchway.load-run=$suffix" \
   --network "container:$gateway" \
   --pid "container:$gateway" \
   --user "$tools_user" \

@@ -22,6 +22,7 @@ SPEC.loader.exec_module(DIAGNOSTICS)
 SECRET = "sentinel-private-value"
 POSTGRES = "latchway-load-postgres-1234-20260903060000"
 GATEWAY = "latchway-load-gateway-1234-20260903060000"
+TOOLS_RUNNER = "latchway-load-runner-1234-20260903060000"
 
 
 def activity():
@@ -236,6 +237,111 @@ class LogTests(unittest.TestCase):
         self.assertEqual(json.loads(writer.getvalue())["status"], "record_too_large")
 
 
+class ProcessMemoryTests(unittest.TestCase):
+    @staticmethod
+    def payload():
+        return (b"schema 1\nsmaps_rss_kib 4096\nsmaps_pss_kib 2048\n"
+                b"smaps_anon_huge_pages_kib 2048\nstatus_vm_rss_kib 4096\n"
+                b"status_rss_anon_kib 3072\nstatus_rss_file_kib 1024\n"
+                b"enabled always\ndefrag defer+madvise\nscan_sleep_millisecs 10000\n"
+                b"max_ptes_none 511\ncomplete 1\n")
+
+    def test_same_uid_existing_runner_fixed_read_only_script_and_bounds(self):
+        with patch.object(DIAGNOSTICS, "capture", return_value=("ok", self.payload())) as captured:
+            result = DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)
+        command = captured.call_args.args[0]
+        self.assertEqual(command[:10], ["docker", "exec", "--user", "65532:65532", TOOLS_RUNNER,
+                                      "timeout", "-s", "KILL", "2", "awk"])
+        self.assertEqual(command[10], DIAGNOSTICS.PROCESS_MEMORY_AWK)
+        self.assertEqual(captured.call_args.kwargs, {"limit": 2048, "timeout": 3})
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["metrics"]["smaps_rollup"]["anon_huge_pages_bytes"], 2 * 1024**2)
+        self.assertEqual(result["metrics"]["status"]["rss_file_bytes"], 1024**2)
+        self.assertEqual(result["host_thp_controls"]["scan_sleep_millisecs"], 10000)
+        self.assertEqual(result["host_thp_controls"]["defrag"], "defer+madvise")
+        self.assertTrue(result["advisory_only"])
+        self.assertTrue(result["thp_controls_are_metadata_not_causal_proof"])
+        for forbidden in ("--privileged", "--cap-add", "--network", "GOGC", "GOMEMLIMIT", "disablethp"):
+            self.assertNotIn(forbidden, command)
+        self.assertNotIn(TOOLS_RUNNER, json.dumps(result))
+        self.assertNotIn("/proc/", json.dumps(result))
+
+    def test_malicious_raw_fields_and_duplicate_records_are_discarded(self):
+        for payload in (SECRET.encode(), self.payload() + b"query " + SECRET.encode() + b"\n",
+                        self.payload() + b"smaps_rss_kib 1\n", b"schema 1\n",
+                        self.payload() + b"7f123400-7f123500 rw-p /private/path\n"):
+            with patch.object(DIAGNOSTICS, "capture", return_value=("ok", payload)):
+                result = DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)
+            self.assertEqual(result["status"], "invalid_response")
+            self.assertNotIn(SECRET, json.dumps(result))
+            self.assertNotIn("metrics", result)
+
+    def test_non_numeric_and_unknown_enum_values_are_never_emitted(self):
+        payload = self.payload().replace(b"4096", SECRET.encode()).replace(b"10000", b"-1")
+        payload = payload.replace(b"always", SECRET.encode()).replace(b"defer+madvise", b"[unknown]")
+        with patch.object(DIAGNOSTICS, "capture", return_value=("ok", payload)):
+            result = DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)
+        self.assertEqual(result["status"], "partial")
+        self.assertNotIn(SECRET, json.dumps(result))
+        self.assertIsNone(result["metrics"]["smaps_rollup"]["rss_bytes"])
+        self.assertIsNone(result["host_thp_controls"]["enabled"])
+        self.assertIsNone(result["host_thp_controls"]["scan_sleep_millisecs"])
+
+    def test_missing_or_denied_read_is_unavailable_not_zero(self):
+        for capture_status in ("failed", "timeout", "truncated", "unavailable"):
+            with patch.object(DIAGNOSTICS, "capture", return_value=(capture_status, SECRET.encode())):
+                result = DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)
+            self.assertEqual(result["status"], capture_status)
+            self.assertNotIn(SECRET, json.dumps(result))
+            self.assertNotIn("metrics", result)
+        with patch.object(DIAGNOSTICS, "capture", return_value=("ok", b"schema 1\ncomplete 1\n")):
+            result = DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertTrue(all(value is None for fields in result["metrics"].values() for value in fields.values()))
+
+    def test_real_awk_filters_fixed_fixture_reads_before_capture(self):
+        fixtures = {
+            "/proc/1/smaps_rollup": "7f0000-7fffff rw-p /private/" + SECRET + "\nRss: 4096 kB\nPss: 2048 kB\nAnonHugePages: 2048 kB\n",
+            "/proc/1/status": "Name:\t" + SECRET + "\nVmRSS: 4096 kB\nRssAnon: 3072 kB\nRssFile: 1024 kB\nUid: 65532\n",
+            "/sys/kernel/mm/transparent_hugepage/enabled": "[always] madvise never\n",
+            "/sys/kernel/mm/transparent_hugepage/defrag": "always defer [defer+madvise] madvise never\n",
+            "/sys/kernel/mm/transparent_hugepage/khugepaged/scan_sleep_millisecs": "10000\n",
+            "/sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none": "511\n",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            script = DIAGNOSTICS.PROCESS_MEMORY_AWK
+            for index, (source_path, contents) in enumerate(fixtures.items()):
+                destination = Path(directory) / str(index)
+                destination.write_text(contents)
+                script = script.replace(source_path, str(destination))
+            completed = subprocess.run(["awk", script], capture_output=True, timeout=2)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn(SECRET.encode(), completed.stdout)
+        self.assertNotIn(b"/private", completed.stdout)
+        self.assertIn(b"enabled always\n", completed.stdout)
+        self.assertIn(b"defrag defer+madvise\n", completed.stdout)
+        self.assertIn(b"scan_sleep_millisecs 10000\n", completed.stdout)
+        with patch.object(DIAGNOSTICS, "capture", return_value=("ok", completed.stdout)):
+            self.assertEqual(DIAGNOSTICS.process_memory_sample(TOOLS_RUNNER)["status"], "ok")
+
+    def test_smaps_uses_only_existing_lifecycle_cadence(self):
+        now = [0.0]
+        def sleep(seconds): now[0] += seconds
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(DIAGNOSTICS.time, "monotonic", side_effect=lambda: now[0]), \
+             patch.object(DIAGNOSTICS.time, "sleep", side_effect=sleep), \
+             patch.object(DIAGNOSTICS, "host_metadata", return_value={"kind": "host"}), \
+             patch.object(DIAGNOSTICS, "database_sample", return_value={"kind": "db"}), \
+             patch.object(DIAGNOSTICS, "resource_sample", return_value={"kind": "resources"}) as resource_sample, \
+             patch.object(DIAGNOSTICS, "process_memory_sample", return_value={"kind": "process_memory"}) as memory_sample, \
+             patch.object(DIAGNOSTICS, "postgres_error_labels", return_value={"kind": "postgres_error_labels"}):
+            DIAGNOSTICS.collect(io.StringIO(), POSTGRES, GATEWAY, Path(directory)/"stop", 32,
+                                tools_runner=TOOLS_RUNNER, maximum_seconds=31)
+        self.assertEqual(memory_sample.call_count, 3)  # T+0,15,30; never T+5 or T+10.
+        self.assertEqual(resource_sample.call_count, memory_sample.call_count)
+        self.assertTrue(all(call.args == (TOOLS_RUNNER,) for call in memory_sample.call_args_list))
+
+
 class LifecycleTests(unittest.TestCase):
     def test_collector_has_a_time_bound_and_final_snapshot(self):
         now = [0.0]
@@ -272,6 +378,7 @@ class LifecycleTests(unittest.TestCase):
             link.symlink_to(existing)
             for output in (existing, link):
                 arguments = ["diagnostics", "--postgres", POSTGRES, "--gateway", GATEWAY,
+                             "--tools-runner", TOOLS_RUNNER,
                              "--pool-max-connections", "32", "--output", str(output), "--stop-file", str(root/"stop")]
                 with patch.object(sys, "argv", arguments):
                     self.assertEqual(DIAGNOSTICS.main(), 1)
@@ -330,11 +437,47 @@ class HarnessTests(unittest.TestCase):
         self.assertLess(self.source.index('cp "$run_dir/runtime/load-config.json"'), self.source.index('python3 "$run_dir/source/scripts/load-runtime-diagnostics.py"'))
         self.assertLess(self.source.index('wait "$diagnostics_pid"'), self.source.index('docker rm --force "$gateway"'))
         self.assertIn('--pool-max-connections "$gateway_db_pool_max_connections"', self.source)
+        self.assertIn('--tools-runner "$tools_runner"', self.source)
         self.assertIn('--stop-file "$run_dir/runtime-diagnostics.stop" >/dev/null 2>&1 &', self.source)
         self.assertNotIn("-mode ", self.source)
         for value in ("--cpus 4", "--cpus 2", "--memory 4g", "--memory 2g",
                       "gateway_db_pool_max_connections=32", "postgres_max_connections=100"):
             self.assertIn(value, self.source)
+
+    def test_existing_runner_is_named_and_cleanup_requires_ownership(self):
+        self.assertIn('tools_runner="latchway-load-runner-$suffix"', self.source)
+        self.assertEqual(self.source.count('--name "$tools_runner"'), 1)
+        self.assertIn('--label "dev.latchway.load-run=$suffix"', self.source)
+        self.assertIn('refusing to reuse an existing load runner name', self.source)
+        cleanup = self.source[self.source.index("cleanup() {\n"):self.source.index("\ntrap cleanup EXIT HUP INT TERM")]
+        self.assertIn('.Config.Labels "dev.latchway.load-run"', cleanup)
+        self.assertIn('= "$tools_image_id"', cleanup)
+        self.assertIn('"${tools_runner_create_intended:-false}" = true', cleanup)
+        self.assertIn('docker rm --force "$tools_runner"', cleanup)
+        self.assertIn('--pid "container:$gateway"', self.source)
+
+    def test_runner_cleanup_skips_preexisting_or_mismatching_ownership(self):
+        cleanup = self.source[self.source.index("cleanup() {\n"):self.source.index("\ntrap cleanup EXIT HUP INT TERM")]
+        for intended, matching_label, expected in (("false", True, False), ("true", False, False), ("true", True, True)):
+            with tempfile.TemporaryDirectory() as directory:
+                script = "\n".join([
+                    "set -eu", "rm() { return 0; }",
+                    "docker() { if [ \"$1\" = inspect ] && [ \"${2:-}\" = --format ]; then case \"$3\" in *'.Image'*) printf '%s\\n' \"$tools_image_id\";; *) printf '%s\\n' \"$observed_label\";; esac; elif [ \"$1\" = rm ] && [ \"${3:-}\" = \"$tools_runner\" ]; then printf '%s\\n' runner_removed >> \"$removal_receipt\"; fi; return 0; }",
+                    "gateway=diagnostic-gateway", "fixture=diagnostic-fixture", "postgres=diagnostic-postgres",
+                    "tools_runner=diagnostic-runner", "tools_image_id=sha256:synthetic-tools-image",
+                    "suffix=owned-suffix", "diagnostics_pid=", "network_created=false",
+                    "gateway_image_created=false", "tools_image_created=false",
+                    "tools_runner_create_intended=" + intended,
+                    "observed_label=" + ("owned-suffix" if matching_label else "other-run"),
+                    "capture_postgres_startup_events() { return 0; }", cleanup,
+                    "trap cleanup EXIT", "exit 23",
+                ])
+                receipt = Path(directory)/"removal"
+                result = subprocess.run(["/bin/sh", "-c", script], env={**os.environ, "run_dir": directory,
+                                        "evidence_dir": directory, "removal_receipt": str(receipt)},
+                                        capture_output=True, text=True, timeout=2)
+                self.assertEqual(result.returncode, 23, result.stderr)
+                self.assertEqual(receipt.exists(), expected)
 
     def test_candidate_runs_the_new_regressions(self):
         self.assertIn("scripts/test_load_runtime_diagnostics.py", (ROOT/".github/workflows/release.yml").read_text())
