@@ -17,7 +17,7 @@ SPEC.loader.exec_module(metadata)
 class MetadataChecks(unittest.TestCase):
     def test_every_canonical_route_resolves_every_required_field(self) -> None:
         root = SCRIPT.parents[1]
-        errors = metadata.validate_repository(root, today=date(2026, 9, 2))
+        errors = metadata.validate_repository(root, today=date.today())
         self.assertEqual(errors, [])
         overlay = metadata.load_overlay(root / "config/generated-page-metadata.json")
         for route, path in metadata.page_files(root).items():
@@ -39,6 +39,9 @@ class MetadataChecks(unittest.TestCase):
         }
         stale = metadata.validate_fields("page", complete, date(2026, 9, 2))
         self.assertTrue(any("more than 183 days old" in error for error in stale))
+        complete["lastVerified"] = "2026-09-03"
+        future = metadata.validate_fields("page", complete, date(2026, 9, 2))
+        self.assertTrue(any("lastVerified is in the future" in error for error in future))
         del complete["owner"]
         missing = metadata.validate_fields("page", complete, date(2026, 9, 2))
         self.assertEqual(missing, ["page lacks effective metadata: owner"])

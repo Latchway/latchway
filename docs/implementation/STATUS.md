@@ -22,15 +22,26 @@ The canonical tree imports the four final SDK bundles. Its generated mirror is
 accepted only when `.latchway-docs-source.json` identifies the exact canonical
 source. The six-repository
 release-control desired state is
-implemented locally, including the docs-only code-owner/reviewer policy, but it
-has not been applied live because no distinct reviewer is available. The
+implemented locally, including the docs-only code-owner/reviewer policy. The
 explicit `single_maintainer_v1` publication profile now permits a lower-
 assurance launch without that reviewer while retaining `strict_full` unchanged;
 it keeps every deferred control visibly `unverified` and forbids a
-`release-qualified` claim. npm 2FA is enabled in `auth-and-writes` mode. The
+`release-qualified` claim. On 2026-09-03 the owner authorized the exact
+reviewer-free, self-review-permitted, main-only environments and audited
+non-secret policy sentinels for that profile, plus public visibility for
+`ghcr.io/latchway/latchway` when created. The first environment creation
+request returned GitHub HTTP 403 because the stored credential lacks the
+necessary environment-administration permission. After owner browser sign-in,
+the 13 authorized environments were created with main-only branch rules and
+their exact non-secret policy sentinels. No reviewer requirement, wait timer,
+registry credential, other secret, or strict-profile ruleset was added.
+npm 2FA is enabled in `auth-and-writes` mode. The
 inert `@latchway/client@0.0.0-bootstrap.0` namespace record is public; npm also
-materialized an unexpected `latest` alias that the fail-closed bootstrap helper
-must remove after a fresh two-factor authorization. The other four namespace
+materialized an unexpected `latest` alias. Fresh two-factor authentication
+succeeded, but npm rejected the audited helper's alias-removal request with
+HTTP 400; the helper stopped without publishing another package. Current
+registry behavior requires a separately reviewed bootstrap compatibility fix,
+not repeated authentication or a false success receipt. The other four namespace
 records and every stable `1.0.0` package remain unpublished.
 No stable tag or `1.0.0` package, container, production documentation
 deployment, cloud proof, or protected release evidence is claimed.
@@ -46,7 +57,7 @@ supply-chain, publication, and post-publication domains remain open.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; live release controls, publication, and protected exact-candidate execution remain open |
+| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; the selected profile's 13 authorized environment policies are configured, while registry identities, publication, and protected exact-candidate execution remain open |
 | Current objective | Execute the explicit `single_maintainer_v1` launch profile: publish the exact GHCR/npm/SwiftPM/CocoaPods/Maven coordinates, pass supply-chain verification, and verify Docker Compose plus Google Cloud Run. Strict independent review and the other external domains remain deferred and unverified. |
 | Validated implementation coordinates | Contract `cd47229eac32f4a93a0779903d927526b77817d6`; core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005`; JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
@@ -54,7 +65,7 @@ supply-chain, publication, and post-publication domains remain open.
 | Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
-| External credentials still required | Repository-administrator access and an npm owner session with `auth-and-writes` 2FA are available; completing namespace bootstrap requires a fresh second factor. Registry publisher identities and a sufficiently authorized GCP deployment identity remain required for the selected profile. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
+| External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. The npm owner session has `auth-and-writes` 2FA and completed a fresh second factor, but registry alias-removal behavior blocked namespace bootstrap. The existing CocoaPods Trunk session and Maven signing key/passphrase are present locally; scoped GitHub secret installation, verified Sonatype namespace/Portal credentials, npm trusted publishers, and a sufficiently authorized GCP deployment identity remain required. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
 | Next executable task | Bootstrap/publish the registry coordinates and candidate GHCR image, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
 
 ### Validated version 1 source coordinates
@@ -80,7 +91,12 @@ The deterministic
 contract bundle SHA-256 is
 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`.
 The five product-source remote `main` heads match their intended final source
-histories. The mirror/source manifest and six-repository source-conformance
+histories at the recorded delivery checkpoint. The current local JavaScript
+checkout has a pre-existing unresolved merge and is not a new validated
+release coordinate; it is preserved without resolution or abort. Namespace
+bootstrap instead uses a clean isolated checkout of the audited JavaScript
+coordinate above, with all five regenerated inert tarball hashes matching the
+reviewed bytes. The mirror/source manifest and six-repository source-conformance
 gates must match the canonical source. This is source delivery only. No version 1 tag, GitHub
 release, npm/CocoaPods/Maven package, GHCR image, product-runtime cloud
 deployment, or protected production-documentation receipt is verified.
@@ -180,11 +196,27 @@ released checkpoint and reproducible bundle above.
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
-| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes, but no live ruleset/environment apply is claimed. | For the selected profile, explicitly authorize and apply the reviewer-free environment policy, complete package bootstrap/trusted publishers, and verify the live sentinels. A distinct reviewer and strict two-stage reconciliation remain deferred. |
+| Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. | Complete registry credentials and package bootstrap/trusted publishers; no secret installation or strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
 | Mintlify public docs | This canonical tree imports the four final reproducible bundles and retains task-oriented deployment comparison, release-image verification, and the completed Cloud Run/Cloudflare runbooks. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Configure `docs.latchway.dev`, deploy through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
 
+- Core CI run `33676007601` passed all eight jobs at
+  `5ae5bcf7862a3315bada388ae41974d87bf13ef8`: contracts, lint, Console,
+  PostgreSQL 15, PostgreSQL 18, reliability, deployment validation, and
+  multi-architecture image build. This is CI validation, not GHCR publication.
+- The GCP deployment documentation now provides manual-first Cloud Run:
+  choose the published image digest, connect PostgreSQL, set runtime secrets,
+  migrate, and finish Console setup. Terraform remains optional. No GCP
+  resources, IAM bindings, WIF configuration, API enablement, or billing
+  changes were authorized or applied by this documentation request. Full
+  canonical documentation validation passed for 233 routes, including build,
+  links, metadata, prose, and accessibility; 20 deployment-evidence tests and
+  shell syntax checks also passed. The live metadata test now uses the
+  validator's current date, while an explicit future-date rejection regression
+  remains deterministic. The
+  selected release profile still requires actual exact-image Cloud Run
+  evidence; manual deployment instructions do not satisfy that gate.
 - The loopback Console preview at `http://127.0.0.1:18082` runs local image
   `latchway:local-d4693ee-arm64`, whose embedded version reports core
   `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, contract `1.0.0`, and wire `2`.

@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-03"
 owner: "core-operations"
 ---
 
@@ -78,7 +78,7 @@ the matching master key rather than an in-place key replacement.
 | Platform | Application and data shape |
 | --- | --- |
 | [Docker Compose](/operations/deploy-docker-compose) | Immutable release image, explicit migration service, and PostgreSQL |
-| [Google Cloud Run](/operations/deploy-google-cloud-run) | Private Cloud SQL, Secret Manager, HTTPS service, and migration job |
+| [Google Cloud Run](/operations/deploy-google-cloud-run) | Manual image deployment, existing TLS PostgreSQL or Cloud SQL, Secret Manager, HTTPS service, and migration job; Terraform optional |
 | [AWS](/operations/deploy-aws-ecs) | ECS/Fargate, private RDS, Secrets Manager, and HTTPS ALB |
 | [Fly.io](/operations/deploy-fly-io) | Fly Machines, attached PostgreSQL, and release-command migrations |
 | [Cloudflare](/operations/deploy-cloudflare-containers) | Streaming Worker shim around the same container application |
@@ -93,6 +93,11 @@ GHCR as the canonical release registry. Cloud Run and Fly.io can consume the
 public GHCR image directly. AWS mirrors the reviewed image into ECR, and
 Cloudflare mirrors the verified `linux/amd64` child into Cloudflare Registry,
 without rebuilding either copy.
+
+Docker Compose and manual Google Cloud Run are the initial v1 deployment
+priorities. AWS, Fly.io, and Cloudflare remain later provider-verification
+targets. An adopter does not need to run the project's release-evidence
+workflows or provision a GitHub WIF identity to deploy the published image.
 
 For the current source checkpoint, the PostgreSQL image reference is
 `docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2`.
@@ -133,7 +138,9 @@ it is DPoP protocol input, not display metadata. Terminate TLS at a trusted
 boundary, preserve the external scheme and host correctly, and reject alternate
 origins.
 
-Keep PostgreSQL private. Restrict `/metrics` to the scraper or private network.
+Prefer private PostgreSQL networking; an external managed endpoint requires
+verified TLS and provider access controls. Restrict `/metrics` to the scraper
+or private network.
 Publish `/healthz` and `/readyz` only as required by the platform. Never enable
 response buffering for SSE, and keep the platform timeout longer than the
 longest supported stream.
@@ -148,7 +155,9 @@ longest supported stream.
 4. Require `/healthz` and `/readyz`; readiness includes required worker
    heartbeat state.
 5. Keep the platform request timeout longer than the maximum supported stream.
-6. Give `SIGTERM` draining at least the configured 30-second default.
+6. Match `SIGTERM` draining to the platform deadline: normally at least the
+   configured 30-second default, or the Cloud Run guide's explicit `8s` drain
+   inside its ten-second shutdown window.
 7. Never enable response buffering for server-sent events.
 
 At higher scale, calculate the worst-case combined API and worker connection

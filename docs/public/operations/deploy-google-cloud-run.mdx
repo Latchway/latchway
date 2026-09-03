@@ -1,500 +1,373 @@
 ---
 title: "Deploy to Google Cloud Run"
-description: "Prepare Cloud Run to consume a verified GHCR image when release coordinates are available."
+description: "Run the verified GHCR image against PostgreSQL with Google Cloud Console or Cloud Shell; Terraform is optional."
 icon: "cloud"
 audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-02"
+lastVerified: "2026-09-03"
 owner: "core-operations"
 ---
 
-The checked-in Terraform stack is designed to consume a canonical Latchway
-image from GitHub Container Registry alongside a private PostgreSQL 18 Cloud
-SQL instance, Secret Manager values, a Serverless VPC Access connector, one
-HTTPS Cloud Run service, and a one-shot migration job.
+Run the Latchway image, connect PostgreSQL, and open the embedded Console. You
+do not need to fork or clone the source, build an image, learn Terraform, or
+configure GitHub Actions or Workload Identity Federation to operate Latchway.
+The default path below uses Google Cloud Console and an existing PostgreSQL
+15-or-newer database. Cloud Shell commands are included where useful.
 
 <Warning>
-  The stable `1.0.0` image has not been published yet. Keep
-  `ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST` as a
-  placeholder until the release page supplies a signed, attested digest. Do not
-  deploy an unverified local image under the stable version.
+  Stable `1.0.0` publication is pending. Replace
+  `ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST` only with the
+  signed digest from the release record. Check [Release status](/release-status)
+  and [verify the image](/operations/verify-release-image) before deploying.
+  These instructions are not a claim that live GCP verification has passed.
 </Warning>
 
-When a stable digest exists, complete
-[release-image verification](/operations/verify-release-image) before placing
-that digest in Terraform state or an Artifact Registry remote repository.
+## Before you start
 
-Cloud Run accepts public GHCR images directly and imports an immutable copy at
-deployment. Google recommends an Artifact Registry remote repository in front
-of GHCR when higher registry availability is required. In either case, deploy
-by digest, not by tag. The image must contain a `linux/amd64` manifest.
+- Select a Google Cloud project with billing enabled and a region close to the
+  database. Cloud Run, the database, secrets, logs, and network traffic can all
+  incur charges; this guide does not provision anything on your behalf.
+- Obtain a verified public GHCR image digest with a `linux/amd64` manifest.
+- Prepare a PostgreSQL 15+ database, a dedicated database user, and a connection
+  URL. Use a direct connection for migrations, not a transaction-pooling URL.
+- Use an operator account permitted to create Cloud Run services/jobs, service
+  accounts, and secrets, grant their narrow access, and enable required APIs.
+  Runtime accounts must not inherit your operator privileges.
 
-## Prerequisites
+Cloud Run accepts public GHCR images directly. An Artifact Registry remote
+repository is an optional availability measure, not a prerequisite; never
+rebuild the release to change registries. See Google's
+[supported image sources](https://docs.cloud.google.com/run/docs/deploying).
 
-- a Google Cloud project with billing enabled;
-- `gcloud`, Terraform, and access to create Cloud Run, Cloud SQL, VPC, IAM, and
-  Secret Manager resources;
-- a tightly scoped, versioned GCS bucket for the encrypted remote Terraform
-  backend declared by the stack;
-- a DNS name for the final HTTPS origin; and
-- the verified `ghcr.io/latchway/latchway@sha256:...` release digest.
+## 1. Choose the database and public origin
 
-Authenticate and select the project before running Terraform:
+### Existing PostgreSQL: fewest new resources
 
-```bash
-gcloud auth application-default login
-gcloud config set project PROJECT_ID
-gcloud services enable \
-  artifactregistry.googleapis.com \
-  cloudresourcemanager.googleapis.com \
-  compute.googleapis.com \
-  iam.googleapis.com \
-  run.googleapis.com \
-  secretmanager.googleapis.com \
-  servicenetworking.googleapis.com \
-  sqladmin.googleapis.com \
-  storage.googleapis.com \
-  vpcaccess.googleapis.com
+Use an existing PostgreSQL endpoint reachable from both the Cloud Run service
+and migration job. Store a URL shaped like this in Secret Manager, not in
+source control or a shell command:
+
+```text
+postgresql://latchway:URL_ENCODED_PASSWORD@DB_HOST:5432/latchway?sslmode=verify-full
 ```
 
-Create the state bucket once if your platform team has not already supplied
-one. Bucket names are globally unique:
+Require certificate and hostname verification. If your provider uses a private
+CA, mount its certificate into both containers and add
+`sslrootcert=/etc/latchway-db-ca/ca.pem` to the URL; do not disable TLS to make
+the connection work. The release image includes public CA roots. The database
+user must be able to create and update the Latchway schema, but must not be a
+server-wide superuser. Prefer a dedicated database with no unrelated tables.
 
-```bash
-export LATCHWAY_TF_STATE_BUCKET='PROJECT_ID-latchway-tfstate-UNIQUE_SUFFIX'
-gcloud storage buckets create "gs://$LATCHWAY_TF_STATE_BUCKET" \
-  --location=REGION \
-  --uniform-bucket-level-access
-gcloud storage buckets update "gs://$LATCHWAY_TF_STATE_BUCKET" --versioning
+Keep the database private where your network permits. For a public managed
+endpoint, retain the provider's access controls. Cloud Run's default outbound
+addresses are not fixed: a database IP allowlist requires controlled egress,
+such as VPC egress and Cloud NAT. Do not open PostgreSQL to every address to
+avoid setting up that network. Google's
+[static outbound IP guide](https://docs.cloud.google.com/run/docs/configuring/static-outbound-ip)
+describes that optional setup. Private endpoints need a matching VPC route on
+both the service and job.
+
+### Cloud SQL alternative
+
+If you need a new database, create Cloud SQL for PostgreSQL 15+ in the same
+region, create the `latchway` database/user, and enable backups and point-in-time
+recovery. Choose HA and capacity deliberately; a database remains billable
+without application traffic.
+
+For Cloud SQL's managed Unix-socket connection, enable the Cloud SQL Admin API,
+grant both service accounts Cloud SQL Client, and attach the same instance
+under **Cloud SQL connections** on the service and migration job. Store:
+
+```text
+postgresql://latchway:URL_ENCODED_PASSWORD@/latchway?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_ID&sslmode=disable
 ```
 
-Enforce public-access prevention and grant state-object access only to the
-deployment principals that require it. Prefer an organization-managed bucket
-with retention, audit logging, and recovery policy over an operator-created
-bucket.
+Here `sslmode=disable` applies only to the local Unix socket: the managed
+connector encrypts and authenticates the network connection. Never use that
+setting for a direct TCP URL. A public-IP Cloud SQL instance can use this
+connector without an open authorized-network rule; private-IP connectivity
+requires the corresponding VPC setup. Follow Google's
+[Cloud Run to Cloud SQL guide](https://docs.cloud.google.com/sql/docs/postgres/connect-run)
+for the chosen network and certificate mode.
 
-## Choose the image source
+### Use the built-in HTTPS URL
 
-For a public stable release, the simplest source is the canonical GHCR digest:
+You do not need a custom domain or load balancer for initial setup. Choose the
+short service name `latchway` and find the project number on the project's
+dashboard. The initial canonical origin is:
 
-```bash
-export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+```text
+https://latchway-PROJECT_NUMBER.REGION.run.app
 ```
 
-For higher registry availability, create an Artifact Registry remote Docker
-repository backed by `https://ghcr.io`, request the same image through that
-repository, and still pin the resulting reference by digest. Do not copy or
-rebuild the image merely to change registries. See Google's
-[Cloud Run image guidance](https://docs.cloud.google.com/run/docs/deploying)
-and [remote repository guide](https://docs.cloud.google.com/artifact-registry/docs/repositories/remote-repo).
+Use the project **number**, not the project ID. This predictable URL is
+available when the hostname's first segment is at most 63 characters; verify
+the displayed URL after deployment. Google documents the
+[deterministic service URL](https://docs.cloud.google.com/run/docs/triggering/https-request).
 
-## Configure Terraform
+Set `LATCHWAY_PUBLIC_ORIGIN` to this exact HTTPS origin, without a path. Use the
+same origin for the Console and SDKs. Do not issue sessions on a temporary or
+tagged revision URL. Moving to a custom domain later is a planned origin
+change, not a cosmetic rename.
 
-Start from the checked-in example:
+## 2. Store three values and scope their access
 
-```bash
-cd deploy/cloud-run/terraform
-cp terraform.tfvars.example terraform.tfvars
-```
+In **APIs & Services**, enable Cloud Run, Secret Manager, and IAM. In
+**IAM & Admin → Service Accounts**, create `latchway-runtime` and
+`latchway-migrator`. Do not create or download JSON keys.
 
-Set these values in the untracked `terraform.tfvars` file:
+In **Secret Manager**, create these secrets. Generate the master key as 32
+cryptographically random bytes encoded as base64, and a separate random
+bootstrap token of at least 32 characters. Save the master key in a password
+manager independently of database backups. Changing it later is not rotation.
 
-```hcl
-project_id    = "PROJECT_ID"
-region        = "asia-southeast1"
-service_name  = "latchway"
-service_image                    = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
-migration_image                  = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
-migration_approved_service_image = "ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST"
-service_revision_name            = "latchway-release-id"
-previous_service_revision_name   = null
-service_traffic_percent          = 100
-public_origin = "https://ai.example.com"
-database_edition = "ENTERPRISE"
-```
-
-Use a new, explicit `service_revision_name` for every image digest. The
-migration approval is an exact digest acknowledgement: Terraform refuses to
-create or route to a service image that does not equal it.
-
-PostgreSQL 18 with the checked-in `db-custom-2-7680` tier requires Cloud SQL
-Enterprise edition; keep `database_edition = "ENTERPRISE"` unless the tier and
-its validation are changed together. Use `REGIONAL` database availability for
-production. The default maximum
-database pool is `max_instances × db_connections_per_instance`, or 200
-connections. Reserve additional capacity for migrations, administration,
-backups, and failover before raising either value.
-
-<Warning>
-  Terraform state contains generated database, master-key, and first-owner
-  bootstrap material. Store it in the configured encrypted remote backend with
-  tightly scoped access. Never upload a state file to the repository or attach
-  it to a support request.
-</Warning>
-
-## Capacity, cost, and platform limits
-
-The checked-in defaults are a production-oriented starting point, not a
-low-cost evaluation profile:
-
-| Resource | Checked-in default | Operating consequence |
+| Secret | Value | Secret Accessor grant |
 | --- | --- | --- |
-| Cloud Run service | 2 vCPU, 2 GiB, concurrency 100 | The combined API/worker process shares one instance budget |
-| Service scaling | Minimum 1, maximum 10 | The worker does not scale to zero; the minimum instance remains billable |
-| CPU allocation | CPU idling disabled | Background jobs and heartbeats can run without a request; use instance-based cost assumptions |
-| Cloud SQL | PostgreSQL 18, `db-custom-2-7680`, `REGIONAL`, 20 GiB SSD | Regional HA database capacity is a steady cost before application traffic |
-| VPC connector | Minimum 2, maximum 3 connector instances | The connector adds steady compute cost and its own scaling ceiling |
-| Database pool | 20 connections per service instance | The service can reserve 200 application connections at the maximum instance count |
-| Request lifecycle | 60-minute request timeout; 8-second application drain inside Cloud Run's 10-second shutdown window | SSE clients must reconnect and long shutdown work cannot be deferred |
+| `latchway-database-url` | PostgreSQL connection URL | Runtime and migrator accounts |
+| `latchway-master-key` | One stable base64-encoded 32-byte key | Runtime account only |
+| `latchway-admin-bootstrap-token` | Temporary first-owner setup key | Runtime account until bootstrap is removed |
 
-The production frontend described below adds a global external Application Load
-Balancer, managed certificate, DNS, and logging that the Terraform stack does
-not create. Secret Manager versions, the versioned Terraform backend, Cloud SQL
-backups, observability, and network egress also contribute to the bill.
+Grant **Secret Manager Secret Accessor** on each named secret, not on the
+whole project. Select an explicit secret version, such as `1`, for each
+environment binding. If you already have different versions, substitute their
+numbers in every service/job binding. Do not use `latest` for a repeatable
+rollout. See Google's [secret binding guidance](https://docs.cloud.google.com/run/docs/configuring/services/secrets).
 
-Review the current [Cloud Run pricing](https://cloud.google.com/run/pricing),
-[Cloud SQL pricing](https://cloud.google.com/sql/pricing),
-[Serverless VPC Access pricing](https://cloud.google.com/vpc/network-pricing#serverless-vpc),
-and [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator)
-before applying. Prices and quotas are provider state; this guide does not pin
-numeric rates.
+Replication and retention are separate choices: place secrets, logs, and
+backups within the required residency policy. Selecting a Cloud Run region
+alone does not establish data residency.
 
-For a temporary evaluation, reducing database availability, minimum instances,
-or other resources changes the failure model. Record those changes and do not
-describe the result as the production template.
+## 3. Run migrations before starting the service
 
-## Region and data residency
+In **Cloud Run → Jobs**, create `latchway-migrate` in the chosen region with the
+same verified GHCR digest you will use for the service:
 
-Cloud Run, Cloud SQL, and the VPC connector use one selected region, and the
-database has no public IP. The application still sends requests to configured
-upstreams, receives clients through a public HTTPS frontend, and can emit logs
-or traces outside that database boundary.
+| Setting | Value |
+| --- | --- |
+| Service account | `latchway-migrator@PROJECT_ID.iam.gserviceaccount.com` |
+| Container command | `/latchway` |
+| Container arguments | `migrate`, `up` as separate arguments |
+| Tasks / parallelism / retries | `1` / `1` / `0` |
+| Task timeout | `900` seconds |
+| Secret environment variable | `LATCHWAY_DATABASE_URL` → `latchway-database-url`, version `1` |
 
-The checked-in Secret Manager resources use automatic replication, and the GCS
-backend location is chosen when its bucket is created. The template therefore
-does not establish single-region secret or Terraform-state residency. If policy
-requires a fixed residency boundary, use reviewed user-managed secret
-replication, a compliant state-bucket location, matching log sinks, regional
-upstreams where available, and organization policy before deployment. Verify
-the resulting provider configuration; a shared region name alone is not proof
-of residency.
+For Cloud SQL or private PostgreSQL, attach the database connection/network
+from step 1. A custom CA mount must also exist on this job. The job needs no
+master key or administrator bootstrap token.
 
-## Plan and apply
+Execute the job and require a successful exit. Then execute it again with the
+argument override `--output`, `json`, `migrate`, `status`. In that execution's
+logs, require the status object to report `up_to_date: true` and equal
+`current` and `available` values. Check the specific execution, not an older
+success from the same job. Do not deploy on failure or delete migration-ledger
+rows to force success.
 
-```bash
-export LATCHWAY_TF_STATE_BUCKET='EXISTING_VERSIONED_STATE_BUCKET'
-terraform init \
-  -backend-config="bucket=$LATCHWAY_TF_STATE_BUCKET" \
-  -backend-config='prefix=latchway/cloud-run'
-terraform fmt -check
-terraform validate
-umask 077
-latchway_plan=$(mktemp "${TMPDIR:-/tmp}/latchway.tfplan.XXXXXX")
-trap 'rm -f "$latchway_plan"' EXIT
-terraform plan -out="$latchway_plan"
-terraform apply "$latchway_plan"
-rm -f "$latchway_plan"
-unset latchway_plan
-trap - EXIT
-```
-
-The partial GCS backend fails initialization unless a bucket is supplied. The
-temporary plan is mode-restricted because it can contain generated secret
-material; delete it immediately after apply. The scoped `.gitignore` rejects
-Terraform state, variables, plans, crash logs, overrides, and provider caches,
-but ignore rules are not a substitute for encrypted storage.
-
-The first revision uses `LATCHWAY_MIGRATE_ON_START=true` as a guarded bootstrap
-fallback. Migrations use a PostgreSQL advisory lock, but production upgrades
-should use the dedicated job.
-
-Record the service URL and configured image without printing secret values:
+Cloud Shell equivalent, after creating the identities and secrets above:
 
 ```bash
-terraform output -raw service_url
-terraform output -raw configured_image
-terraform output -raw configured_migration_image
-terraform output -raw configured_service_revision
-terraform output -raw maximum_application_database_connections
-```
-
-## Verify initial migration status
-
-Run the dedicated job with the status command after the first apply and after
-every migration. Capture only the matching execution's stdout and require the
-three-field status object to be current:
-
-```bash
-set -Eeuo pipefail
 export LATCHWAY_GCP_PROJECT='PROJECT_ID'
-export LATCHWAY_GCP_REGION='REGION'
-export LATCHWAY_MIGRATION_JOB='latchway-migrate'
+export LATCHWAY_GCP_REGION='asia-southeast1'
+export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+export LATCHWAY_PUBLIC_ORIGIN='https://latchway-PROJECT_NUMBER.asia-southeast1.run.app'
 
-latchway_migration_dir=$(mktemp -d "${TMPDIR:-/tmp}/latchway-cloud-run-migration.XXXXXX")
-trap 'rm -rf "$latchway_migration_dir"' EXIT HUP INT TERM
-latchway_migration_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gcloud run jobs create latchway-migrate \
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
+  --image "$LATCHWAY_IMAGE" \
+  --service-account "latchway-migrator@$LATCHWAY_GCP_PROJECT.iam.gserviceaccount.com" \
+  --command /latchway --args=migrate,up \
+  --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 900s \
+  --set-secrets=LATCHWAY_DATABASE_URL=latchway-database-url:1
 
-gcloud run jobs execute "$LATCHWAY_MIGRATION_JOB" \
-  --project "$LATCHWAY_GCP_PROJECT" \
-  --region "$LATCHWAY_GCP_REGION" \
-  --args=--output,json,migrate,status \
-  --wait \
-  --format=json \
-  > "$latchway_migration_dir/execution.json"
-
-latchway_execution=$(jq -er \
-  '(.metadata.name // .name) | split("/")[-1]' \
-  "$latchway_migration_dir/execution.json")
-latchway_status_found=false
-for _ in {1..12}; do
-  gcloud logging read \
-    "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$LATCHWAY_MIGRATION_JOB\" AND logName=\"projects/$LATCHWAY_GCP_PROJECT/logs/run.googleapis.com%2Fstdout\" AND timestamp>=\"$latchway_migration_started\"" \
-    --project "$LATCHWAY_GCP_PROJECT" \
-    --order=asc \
-    --limit=100 \
-    --format=json \
-    > "$latchway_migration_dir/logs.json"
-
-  if jq --exit-status --arg execution "$latchway_execution" '
-    [ .[]
-      | select((.labels.execution_name //
-                .labels["run.googleapis.com/execution_name"]) == $execution)
-      | (.jsonPayload // ((.textPayload // "") | fromjson?))
-      | select(type == "object" and
-               (keys | sort) == ["available", "current", "up_to_date"])
-    ]
-    | if length == 1 then .[0] else empty end
-  ' "$latchway_migration_dir/logs.json" \
-    > "$latchway_migration_dir/status.json"; then
-    latchway_status_found=true
-    break
-  fi
-  sleep 5
-done
-
-test "$latchway_status_found" = true
-jq --exit-status \
-  '.up_to_date == true and .current == .available' \
-  "$latchway_migration_dir/status.json" >/dev/null
-rm -rf "$latchway_migration_dir"
-trap - EXIT HUP INT TERM
-```
-
-The operator needs permission to execute the job and read its Cloud Logging
-stdout. A successful job execution without the exact status assertion is not a
-migration proof.
-
-## Bind the public origin
-
-The checked-in Terraform stack intentionally stops at the Cloud Run service; it
-does not create a DNS name, certificate, or domain frontend. Bind the exact
-hostname used by `public_origin` before creating the first owner.
-
-For production, use Google's recommended
-[global external Application Load Balancer](https://docs.cloud.google.com/run/docs/mapping-custom-domains)
-with a serverless NEG, managed certificate, and the final DNS record. Keep
-response buffering and CDN caching disabled for Latchway API and SSE paths. If
-your platform stack restricts ingress to the load balancer, apply that policy as
-an explicitly reviewed change to the checked-in `INGRESS_TRAFFIC_ALL` setting.
-
-Native Cloud Run domain mapping is limited-availability Preview, is not
-production-ready, and is available only in selected regions. It is suitable for
-an evaluation deployment when those constraints are acceptable:
-
-```bash
-gcloud domains list-user-verified
-gcloud domains verify example.com
-gcloud beta run domain-mappings create \
-  --service latchway \
-  --domain ai.example.com \
-  --project PROJECT_ID \
-  --region REGION
-gcloud beta run domain-mappings describe \
-  --domain ai.example.com \
-  --project PROJECT_ID \
-  --region REGION \
-  --format='yaml(status,resourceRecords)'
-```
-
-Add every returned `resourceRecords` entry at the authoritative DNS provider,
-wait for the managed certificate, and do not continue until
-`https://ai.example.com/readyz` succeeds. See Google's current
-[Cloud Run domain-mapping limitations](https://docs.cloud.google.com/run/docs/mapping-custom-domains).
-
-## Create the first owner
-
-Terraform creates a random one-use administrator bootstrap token and grants the
-runtime identity temporary access to it. Read it directly into a password
-manager, open the Console at the service URL, and create the first owner.
-
-After owner creation, create a new post-bootstrap revision at 0% traffic. Keep
-the same approved image digest, name the current revision as previous, and set:
-
-```hcl
-inject_admin_bootstrap_token   = false
-migrate_on_start               = false
-service_revision_name          = "latchway-post-bootstrap-id"
-previous_service_revision_name = "latchway-release-id"
-service_traffic_percent        = 0
-```
-
-Apply with the protected plan procedure, probe the tagged candidate as shown
-below, then set `service_traffic_percent=100` and apply again. The promoted
-revision no longer references the bootstrap secret, its secret-level access
-grant is removed, and future upgrades use the explicit migration job. Retire
-the unused secret according to the organization's recorded secret-retention
-policy.
-
-## Run a controlled upgrade
-
-Never update the migration job and service traffic in one plan. Use the same
-mode-restricted plan/apply procedure above for each phase.
-
-### Phase A: migrate while service traffic is unchanged
-
-Set only `migration_image` to the next verified digest. Keep
-`service_image`, `migration_approved_service_image`, the current service
-revision, and 100% traffic unchanged, then apply. Execute the updated job:
-
-```bash
-terraform output -raw migration_command
 gcloud run jobs execute latchway-migrate \
-  --project PROJECT_ID \
-  --region REGION \
-  --wait
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" --wait
+gcloud run jobs execute latchway-migrate \
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
+  --args=--output,json,migrate,status --wait
 ```
 
-Then repeat [Verify initial migration status](#verify-initial-migration-status)
-against that execution. Accept the migration only when `up_to_date` is true and
-`current` equals `available`. Do not delete migration-ledger rows or run a down
-migration; schema recovery uses a tested backup.
+These commands assume an external TLS database reachable without extra network
+flags. For the Cloud SQL socket path, add
+`--set-cloudsql-instances=PROJECT_ID:REGION:INSTANCE_ID` when creating the job
+and deploying the service. Add reviewed VPC settings when required. See Google's
+[job configuration](https://docs.cloud.google.com/sdk/gcloud/reference/run/jobs/create)
+and [execution overrides](https://docs.cloud.google.com/sdk/gcloud/reference/run/jobs/execute).
 
-### Phase B: create and probe a 0%-traffic revision
+## 4. Deploy the container
 
-Only after migration status passes, set the new `service_image`, copy that
-exact digest to `migration_approved_service_image`, give it a new
-`service_revision_name`, set the currently serving revision as
-`previous_service_revision_name`, and set `service_traffic_percent=0`. Apply,
-then resolve the tagged candidate URL and probe it without shifting user
-traffic:
+In **Cloud Run → Deploy container**, choose **Deploy one revision from an
+existing container image**. Enter the GHCR digest and use these settings:
+
+| Setting | Value |
+| --- | --- |
+| Service name / region | `latchway` / the selected database region |
+| Authentication / ingress | Allow public access / All |
+| Service account | `latchway-runtime@PROJECT_ID.iam.gserviceaccount.com` |
+| Billing / scaling | Instance-based billing, minimum `1`, maximum `3` service instances |
+| Container command / arguments | `/latchway` / `serve`, `--role`, `all` |
+| Port / CPU / memory | `8080` / `2` vCPU / `2 GiB` |
+| Concurrency / request timeout | `100` / `3600` seconds |
+| Startup HTTP probe | `/readyz`, port `8080`, initial delay `1s`, period `3s`, timeout `3s`, failure threshold `40` |
+| Liveness HTTP probe | `/healthz`, port `8080`, period `15s`, timeout `3s`, failure threshold `3` |
+
+Public Cloud Run ingress lets SDK requests reach Latchway; it does not grant
+Latchway sessions or administrator access. Latchway applies its own identity,
+attestation, DPoP, and authorization checks. Google documents the
+[public access setting](https://docs.cloud.google.com/run/docs/authenticating/public).
+
+Under **Variables and Secrets**, add the non-secret environment values:
+
+| Variable | Value |
+| --- | --- |
+| `LATCHWAY_PUBLIC_ORIGIN` | The exact `https://latchway-PROJECT_NUMBER.REGION.run.app` origin |
+| `LATCHWAY_MIGRATE_ON_START` | `false` — the explicit job already migrated |
+| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` |
+| `LATCHWAY_SHUTDOWN_TIMEOUT` | `8s` |
+| `LATCHWAY_LOG_LEVEL` | `info` |
+
+Use **Reference a secret** for `LATCHWAY_DATABASE_URL`, `LATCHWAY_MASTER_KEY`,
+and `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN`, selecting their matching secrets and
+numeric versions. Do not paste secret values as ordinary environment variables.
+Do not set `PORT` yourself; Cloud Run supplies it from the container port.
+
+The combined API/worker process requires CPU between requests and at least one
+running instance. Request-based CPU throttling or scale-to-zero can stop
+background jobs and expire the worker heartbeat. This is why this deployment
+uses [instance-based billing](https://docs.cloud.google.com/run/docs/configuring/billing-settings).
+Cloud Run permits ten seconds after `SIGTERM`; the `8s` application drain fits
+inside that [shutdown window](https://docs.cloud.google.com/run/docs/container-contract).
+
+Cloud Shell equivalent for the external TLS database path:
 
 ```bash
-latchway_candidate_url=$(gcloud run services describe latchway \
-  --project PROJECT_ID \
-  --region REGION \
-  --format='value(status.traffic[?tag=candidate].url)')
-test -n "$latchway_candidate_url"
-curl --fail --show-error "$latchway_candidate_url/healthz"
-curl --fail --show-error "$latchway_candidate_url/readyz"
+gcloud run deploy latchway \
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
+  --image "$LATCHWAY_IMAGE" \
+  --service-account "latchway-runtime@$LATCHWAY_GCP_PROJECT.iam.gserviceaccount.com" \
+  --no-invoker-iam-check --ingress all \
+  --execution-environment gen2 --no-cpu-throttling --min 1 --max 3 \
+  --cpu 2 --memory 2Gi --concurrency 100 --timeout 3600s --port 8080 \
+  --command /latchway --args=serve,--role,all \
+  --set-env-vars="LATCHWAY_PUBLIC_ORIGIN=$LATCHWAY_PUBLIC_ORIGIN,LATCHWAY_MIGRATE_ON_START=false,LATCHWAY_DB_MAX_CONNECTIONS=20,LATCHWAY_SHUTDOWN_TIMEOUT=8s,LATCHWAY_LOG_LEVEL=info" \
+  --set-secrets=LATCHWAY_DATABASE_URL=latchway-database-url:1,LATCHWAY_MASTER_KEY=latchway-master-key:1,LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=latchway-admin-bootstrap-token:1 \
+  --startup-probe=httpGet.path=/readyz,httpGet.port=8080,initialDelaySeconds=1,periodSeconds=3,timeoutSeconds=3,failureThreshold=40 \
+  --liveness-probe=httpGet.path=/healthz,httpGet.port=8080,periodSeconds=15,timeoutSeconds=3,failureThreshold=3
 ```
 
-Also exercise one authenticated non-streaming request and one SSE request on
-that URL.
+The flags are documented in the current
+[`gcloud run deploy` reference](https://docs.cloud.google.com/sdk/gcloud/reference/run/deploy).
+An organization policy may forbid public ingress; resolve that with the project
+administrator rather than weakening the organization's policy.
 
-### Phase C: shift traffic explicitly
+## 5. Verify, create the owner, and remove the setup key
 
-Set `service_traffic_percent=100`, review the plan, and apply. Terraform removes
-the previous-revision traffic allocation only in this phase. Do not combine
-Phase A, B, or C or mix unrelated infrastructure changes into their plans.
-
-### Emergency application rollback
-
-Keep `previous_service_revision_name` in `terraform.tfvars` throughout the
-observation window. To remove traffic from the new application revision without
-changing the database, leave the current `service_image`, migration image, and
-migration approval unchanged, set:
-
-```hcl
-previous_service_revision_name = "latchway-previous-release-id"
-service_traffic_percent        = 0
-```
-
-Run the protected plan/apply procedure, then prove the previous revision owns
-all traffic:
+Confirm that Cloud Run displays the expected HTTPS origin, the intended ready
+revision, and the configured immutable image. Require both probes to pass:
 
 ```bash
-export LATCHWAY_PREVIOUS_REVISION='latchway-previous-release-id'
 gcloud run services describe latchway \
-  --project PROJECT_ID \
-  --region REGION \
-  --format=json \
-  | jq --exit-status --arg previous "$LATCHWAY_PREVIOUS_REVISION" '
-      [ .status.traffic[]
-        | select((.revisionName // .revision) == $previous and .percent == 100)
-      ] | length == 1
-    ' >/dev/null
-curl --fail --show-error https://ai.example.com/readyz
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
+  --format='yaml(status.url,status.latestReadyRevisionName,spec.template.spec.containers[0].image)'
+curl --fail --show-error "$LATCHWAY_PUBLIC_ORIGIN/healthz"
+curl --fail --show-error "$LATCHWAY_PUBLIC_ORIGIN/readyz"
 ```
 
-Exercise an authenticated request and SSE stream after the shift. This is an
-application rollback only. The previous binary has no declared schema range, so
-use it against the migrated database only after isolated current-schema proof.
-If that proof fails, remove traffic and restore the tested pre-upgrade database
-with the matching master key as described in [Rollbacks](/operations/rollbacks).
+Inspect the ready revision's resolved image digest and compare it with the
+verified release record, including its `linux/amd64` manifest. An image tag or a
+healthy unrelated revision is not sufficient. Readiness checks PostgreSQL,
+schema, active-environment configuration, key material, and worker heartbeat.
+An empty installation can be ready for owner setup; this does not prove a
+client application has been configured.
 
-## Verify the deployment
+Open the exact public origin in your browser. Use the bootstrap token as the
+setup key and choose your own owner email and password. There is no default
+administrator email or password. Complete the [Console setup](/administration/console)
+and configure your identity provider, upstream secrets, features, and enabled
+platforms. Provider credentials belong in Latchway's managed secrets, never in
+an SDK or example application.
 
-Check the externally visible probes:
+After the first owner exists, edit the service and remove only the
+`LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` secret binding. Keep the same image, database
+URL, and master key; deploy and verify the new revision:
 
 ```bash
-curl --fail --show-error https://ai.example.com/healthz
-curl --fail --show-error https://ai.example.com/readyz
+gcloud run services update latchway \
+  --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
+  --remove-secrets=LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+curl --fail --show-error "$LATCHWAY_PUBLIC_ORIGIN/readyz"
 ```
 
-Readiness includes PostgreSQL, schema, active configuration, key material, and
-the worker heartbeat. A `200` from `/healthz` with a non-`200` `/readyz` is an
-unready deployment, not a successful rollout.
+Confirm all traffic is on the post-bootstrap revision and remove any old
+traffic tags before revoking the runtime account's accessor grant on that
+bootstrap secret. Retire the unused secret version under your retention policy.
+Do not remove database or master-key access. Verify owner login, an
+authenticated client request, and an SSE response through the canonical origin.
 
-Also verify the provider-resolved image and revision:
+## Limits and production decisions
 
-```bash
-latchway_revision=$(gcloud run services describe latchway \
-  --project PROJECT_ID \
-  --region REGION \
-  --format='value(status.latestReadyRevisionName)')
-test -n "$latchway_revision"
+- This is not a scale-to-zero profile. The always-on worker and database have
+  idle costs. Check [Cloud Run pricing](https://cloud.google.com/run/pricing),
+  [Cloud SQL pricing](https://cloud.google.com/sql/pricing), and your database
+  provider's price before creating resources.
+- At three instances and 20 connections each, budget 60 application database
+  connections plus migrations, administration, backup, and rollout overlap.
+  Cloud Run can temporarily exceed a configured maximum; treat it as a scaling
+  control, not a hard database-connection guarantee. See Google's
+  [maximum-instance behavior](https://docs.cloud.google.com/run/docs/configuring/max-instances).
+- Requests have a [60-minute Cloud Run ceiling](https://docs.cloud.google.com/run/docs/configuring/request-timeout). Set application stream limits
+  below it, reconnect SSE clients, and never enable buffering or CDN caching for
+  API streams. Replacement can interrupt a stream despite graceful draining.
+- The direct public endpoint also exposes `/metrics` on the same listener;
+  it is not administrator-authenticated. Metrics are redacted but contain
+  operational information. If they must be private, use a reviewed edge that
+  restricts that path and prevents bypass through `run.app` before production
+  traffic. A private database does not make this HTTP path private.
+- A custom domain is optional. If one is needed, follow Google's
+  [custom-domain guidance](https://docs.cloud.google.com/run/docs/mapping-custom-domains),
+  configure the exact origin before issuing client sessions, and preserve SSE.
+- Escrow the master key independently, enable database backups, and prove an
+  isolated restore. Complete [production readiness](/operations/production-readiness)
+  before treating the deployment as production-qualified.
 
-latchway_configured_image=$(gcloud run services describe latchway \
-  --project PROJECT_ID \
-  --region REGION \
-  --format='value(spec.template.spec.containers[0].image)')
-test "$latchway_configured_image" = "$LATCHWAY_IMAGE"
+## Upgrade without Terraform
 
-latchway_resolved_digest=$(gcloud run revisions describe "$latchway_revision" \
-  --project PROJECT_ID \
-  --region REGION \
-  --format='value(status.imageDigest)')
-test "$latchway_resolved_digest" = "${LATCHWAY_IMAGE##*@}"
-```
+1. Back up PostgreSQL and prove a restore with the matching master key. Verify
+   the next image digest and migration compatibility before changing anything.
+2. Update only the migration job to the new digest. Execute `migrate up` and
+   then `--output json migrate status`; require a current status while the old
+   service keeps traffic.
+3. Deploy the same new digest as a named candidate revision with no traffic.
+   In the Console, clear the option to serve the revision immediately, or use
+   `gcloud run deploy ... --no-traffic --tag candidate`. Preserve every runtime
+   setting and numeric secret version; do not restore the bootstrap binding.
+4. Probe `/healthz` and `/readyz` through the candidate tag URL. Keep
+   `LATCHWAY_PUBLIC_ORIGIN` on the canonical URL; do not distribute the tag URL
+   as client configuration. Use an isolated staging deployment for full
+   authenticated pre-promotion tests.
+5. Shift traffic explicitly to the verified revision, then exercise owner
+   login, a client request, and SSE at the canonical origin. Record the previous
+   revision and resolved digest for the observation window.
 
-These assertions prove both the configured immutable reference and the digest
-that Cloud Run resolved for the ready revision. Then exercise one authenticated
-non-streaming request and one SSE request. Cloud Run's template uses a
-60-minute request timeout; clients must reconnect before that boundary. Do not
-enable response buffering at a load balancer or CDN.
+Cloud Run supports [manual revision traffic control](https://docs.cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration)
+without Terraform. An application rollback changes traffic only; it does not
+undo schema changes. The previous binary must be proven against the current
+schema first. Otherwise use the tested database restore and matching master
+key described in [Rollbacks](/operations/rollbacks).
 
-## Operate and recover
+## Optional: infrastructure as code and maintainer evidence
 
-- Keep Cloud SQL on private IP with encrypted connections and point-in-time
-  recovery enabled.
-- Escrow `LATCHWAY_MASTER_KEY` independently from the database. Restoring one
-  without the matching other is not a valid recovery.
-- Prove an isolated restore before accepting production traffic.
-- Keep the previous application digest available through the observation
-  window. Migrations are forward-only; schema rollback requires a database
-  restore.
-- Restrict `/metrics` to the intended scraper or private network.
+Teams that want reproducible infrastructure can use the advanced
+[`deploy/cloud-run` Terraform stack](https://github.com/Latchway/latchway/tree/main/deploy/cloud-run).
+It creates private PostgreSQL 18 Cloud SQL, VPC connectivity, secrets, a service,
+and a migration job. Its production-oriented defaults cost more than reusing a
+database: regional HA Cloud SQL, at least two VPC connector instances, and an
+always-on Cloud Run instance. Review the plan and encrypted remote-state custody
+before applying. Terraform is an optional operator choice, not a product
+dependency or a requirement for a fork.
 
-Complete [production readiness](/operations/production-readiness),
-[backup and restore](/operations/backup-restore), and
-[upgrades and rollback](/operations/upgrades) before promotion.
-
-## Release evidence boundary
-
-A successful Terraform apply is deployment evidence, not release evidence. A
-production claim must bind the exact signed OCI index and `linux/amd64` child,
-the Cloud Run revision, migration status, secret references without values,
-health/readiness, streaming behavior, and graceful replacement in the protected
-release workflow.
+The project's GitHub deployment-evidence workflow, protected environments, and
+keyless WIF identity are maintainer release-verification machinery. Ordinary
+adopters do not need them to deploy manually. A manual deployment remains
+subject to its own operating checks; it does not automatically create the
+project's signed provider receipt or satisfy deferred external evidence.
