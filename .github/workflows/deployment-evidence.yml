@@ -96,7 +96,7 @@ jobs:
         run: scripts/validate-deployments.sh /tmp/latchway-deployment-static.json
       - name: Retain static deployment evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-static
           path: |
@@ -291,7 +291,7 @@ jobs:
         shell: bash
         run: docker logout ghcr.io >/dev/null 2>&1 || true
       - name: Retain authenticated candidate inputs for isolated consumers
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/authority
@@ -579,7 +579,7 @@ jobs:
             {schema_version:1,kind:"latchway_deployment_provider_inputs",candidate_commit:$commit,platform:$platform,artifacts:$artifacts}
           ' > "$root/provider-inputs.json"
       - name: Retain bounded provider inputs for no-checkout capture jobs
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-provider-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provider-inputs
@@ -2258,7 +2258,7 @@ jobs:
             "$RUNNER_TEMP/cloudflare-applications-api-combined.json"
 
       - name: Retain raw provider observations for fresh validation
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -2615,7 +2615,7 @@ jobs:
               signal.signal(signal.SIGALRM, previous_handler)
           PY
       - name: Retain raw Compose observations for fresh validation
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-raw-compose-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -2762,7 +2762,7 @@ jobs:
             --candidate-manifest "$candidate" \
             --output "$RUNNER_TEMP/validated/${PLATFORM}.tar.gz"
       - name: Retain validated unsigned deployment evidence for a fresh signer
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-unsigned-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/validated
@@ -3287,7 +3287,7 @@ jobs:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: cp "$BUNDLE_PATH" "$RUNNER_TEMP/validated/${PLATFORM}.attestation.json"
       - name: Upload signed provider evidence
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-deployment-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
