@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""Close exact v1 core and deployment evidence for a single-maintainer release.
+"""Close exact v1 core candidate evidence for a single-maintainer release.
 
 This tool deliberately does not verify Sigstore signatures.  The protected
-workflow verifies the candidate and deployment attestations with ``gh`` before
-and after this deterministic, semantic closure check.  The resulting record is
-only a core-publication gate; it never claims that the complete release profile
-or the stronger strict release gate passed.
+workflow verifies the candidate attestations with ``gh`` before and after this
+deterministic, semantic closure check.  Deployment evidence is explicitly
+deferred by this profile.  The resulting record is only a core-publication
+gate; it never claims that the complete release profile or the stronger strict
+release gate passed.
 """
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-import gzip
 import hashlib
 import importlib.util
-import io
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import shutil
 import stat
 import sys
-import tarfile
 from typing import Any, Iterable, Mapping
 
 
@@ -48,36 +46,6 @@ RUN_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 MAXIMUM_JSON_BYTES = 8 * 1024 * 1024
 MAXIMUM_ARCHIVE_BYTES = 32 * 1024 * 1024
-CAPTURE_FILES = (
-    "control_plane.json",
-    "health.json",
-    "identity.json",
-    "manifest.json",
-    "migration.json",
-    "readiness.json",
-    "secrets.json",
-    "shutdown.json",
-)
-SIGNED_CAPTURE_FILES = tuple(sorted((*CAPTURE_FILES, "latchway-deployment-binding.json")))
-DEPLOYMENT_ASSET_FILES = {
-    "compose": ("compose.tar.gz", "compose.attestation.json"),
-    "cloud_run": ("cloud_run.tar.gz", "cloud_run.attestation.json"),
-}
-RAW_CAPTURE_FILES = tuple(
-    sorted(
-        (
-            "latchway-deployment-started-at",
-            "latchway-provider-resource-id",
-            "latchway-deployment-capture/control_plane.json",
-            "latchway-deployment-capture/identity.json",
-            "latchway-deployment-capture/migration.json",
-            "latchway-deployment-capture/secrets.json",
-            "latchway-deployment-capture/shutdown.json",
-        )
-    )
-)
-
-
 def load_module(name: str, path: Path) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -91,10 +59,6 @@ def load_module(name: str, path: Path) -> Any:
 CANDIDATE = load_module(
     "latchway_single_maintainer_candidate",
     Path(__file__).with_name("release-candidate.py"),
-)
-DEPLOYMENT = load_module(
-    "latchway_single_maintainer_deployment",
-    Path(__file__).with_name("deployment-evidence.py"),
 )
 RELEASE_PROFILE = load_module(
     "latchway_single_maintainer_profile",
@@ -154,10 +118,6 @@ def require_regular_file(path: Path, maximum: int) -> int:
     ):
         raise ReleaseError("required_file_unsafe")
     return value.st_size
-
-
-def sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
 
 
 def sha256_file(path: Path, maximum: int = MAXIMUM_ARCHIVE_BYTES) -> str:
@@ -285,281 +245,6 @@ def verify_candidate_directory(
     return manifest
 
 
-def read_archive(path: Path) -> tuple[dict[str, bytes], bytes]:
-    require_regular_file(path, MAXIMUM_ARCHIVE_BYTES)
-    archive_bytes = path.read_bytes()
-    if archive_bytes[:8] != bytes.fromhex("1f8b080000000000"):
-        raise ReleaseError("deployment_archive_not_deterministic")
-    values: dict[str, bytes] = {}
-    total = 0
-    try:
-        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
-            members = archive.getmembers()
-            if [member.name for member in members] != list(SIGNED_CAPTURE_FILES):
-                raise ReleaseError("deployment_archive_closure_invalid")
-            for member in members:
-                relative = PurePosixPath(member.name)
-                if (
-                    not member.isfile()
-                    or relative.as_posix() != member.name
-                    or len(relative.parts) != 1
-                    or member.uid != 0
-                    or member.gid != 0
-                    or member.uname != ""
-                    or member.gname != ""
-                    or member.mode != 0o644
-                    or member.mtime != 0
-                    or member.size <= 0
-                    or member.size > MAXIMUM_JSON_BYTES
-                ):
-                    raise ReleaseError("deployment_archive_entry_unsafe")
-                total += member.size
-                if total > MAXIMUM_ARCHIVE_BYTES:
-                    raise ReleaseError("deployment_archive_too_large")
-                source = archive.extractfile(member)
-                if source is None:
-                    raise ReleaseError("deployment_archive_entry_missing")
-                payload = source.read(MAXIMUM_JSON_BYTES + 1)
-                if len(payload) != member.size:
-                    raise ReleaseError("deployment_archive_entry_size_invalid")
-                values[member.name] = payload
-    except ReleaseError:
-        raise
-    except (OSError, tarfile.TarError):
-        raise ReleaseError("deployment_archive_invalid") from None
-    return values, archive_bytes
-
-
-def deterministic_capture_archive(values: Mapping[str, bytes]) -> bytes:
-    output = io.BytesIO()
-    with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
-        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
-            for name in CAPTURE_FILES:
-                payload = values[name]
-                info = tarfile.TarInfo(name)
-                info.size = len(payload)
-                info.mode = 0o644
-                info.uid = info.gid = 0
-                info.uname = info.gname = ""
-                info.mtime = 0
-                archive.addfile(info, io.BytesIO(payload))
-    return output.getvalue()
-
-
-def decode_json_bytes(value: bytes, code: str) -> dict[str, Any]:
-    try:
-        document = json.loads(value.decode("utf-8"), object_pairs_hook=strict_object)
-    except ReleaseError:
-        raise
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ReleaseError(code) from None
-    if not isinstance(document, dict):
-        raise ReleaseError(code)
-    return document
-
-
-def validate_capture_binding(
-    values: Mapping[str, bytes],
-    *,
-    platform: str,
-    commit: str,
-    run_id: str,
-    run_attempt: str,
-    image: str,
-    bundle_sha256: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    manifest = decode_json_bytes(values["manifest.json"], "deployment_manifest_invalid")
-    binding = decode_json_bytes(
-        values["latchway-deployment-binding.json"], "deployment_binding_invalid"
-    )
-    collector = {
-        "repository": "Latchway/latchway",
-        "workflow_ref": (
-            "Latchway/latchway/.github/workflows/deployment-evidence.yml@refs/heads/main"
-        ),
-        "ref": "refs/heads/main",
-        "sha": commit,
-        "run_id": run_id,
-        "run_attempt": int(run_attempt),
-        "runner_environment": "github-hosted",
-        "environment": f"deployment-evidence-{platform}",
-    }
-    manifest_fields = {
-        "schema_version",
-        "kind",
-        "platform",
-        "started_at",
-        "finished_at",
-        "core_commit",
-        "core_release",
-        "contract_version",
-        "bundle_sha256",
-        "oci_image_digest",
-        "endpoint",
-        "provider_resource_id",
-        "collector",
-        "observations",
-    }
-    require_exact_fields(manifest, manifest_fields, "deployment_manifest_fields_invalid")
-    if (
-        manifest["schema_version"] != 1
-        or manifest["kind"] != "latchway_cloud_deployment_capture"
-        or manifest["platform"] != platform
-        or manifest["core_commit"] != commit
-        or manifest["core_release"] != TAG
-        or manifest["contract_version"] != VERSION
-        or manifest["bundle_sha256"] != bundle_sha256
-        or manifest["oci_image_digest"] != image
-        or manifest["collector"] != collector
-    ):
-        raise ReleaseError("deployment_manifest_identity_mismatch")
-    expected_observations = {
-        name.removesuffix(".json"): {
-            "path": name,
-            "sha256": sha256_bytes(values[name]),
-        }
-        for name in CAPTURE_FILES
-        if name != "manifest.json"
-    }
-    if manifest["observations"] != expected_observations:
-        raise ReleaseError("deployment_observation_binding_invalid")
-
-    binding_fields = {
-        "schema_version",
-        "kind",
-        "platform",
-        "candidate_commit",
-        "core_release",
-        "contract_version",
-        "bundle_sha256",
-        "oci_image_digest",
-        "endpoint",
-        "provider_resource_id",
-        "collector",
-        "candidate_archive",
-        "raw_capture",
-    }
-    require_exact_fields(binding, binding_fields, "deployment_binding_fields_invalid")
-    if (
-        binding["schema_version"] != 1
-        or binding["kind"] != "latchway_authenticated_deployment_capture"
-        or binding["platform"] != platform
-        or binding["candidate_commit"] != commit
-        or binding["core_release"] != TAG
-        or binding["contract_version"] != VERSION
-        or binding["bundle_sha256"] != bundle_sha256
-        or binding["oci_image_digest"] != image
-        or binding["endpoint"] != manifest["endpoint"]
-        or binding["provider_resource_id"] != manifest["provider_resource_id"]
-        or binding["collector"] != collector
-    ):
-        raise ReleaseError("deployment_binding_identity_mismatch")
-
-    unsigned_bytes = deterministic_capture_archive(values)
-    expected_entries = [
-        {
-            "path": name,
-            "sha256": sha256_bytes(values[name]),
-            "size_bytes": len(values[name]),
-        }
-        for name in CAPTURE_FILES
-    ]
-    expected_archive = {
-        "sha256": sha256_bytes(unsigned_bytes),
-        "size_bytes": len(unsigned_bytes),
-        "entries": expected_entries,
-    }
-    if binding["candidate_archive"] != expected_archive:
-        raise ReleaseError("deployment_unsigned_archive_binding_invalid")
-    raw = require_exact_fields(
-        binding["raw_capture"], {"artifact", "files"}, "deployment_raw_binding_invalid"
-    )
-    if raw["artifact"] != (
-        f"latchway-deployment-raw-{platform}-{commit}-{run_id}-{run_attempt}"
-    ):
-        raise ReleaseError("deployment_raw_artifact_identity_mismatch")
-    raw_files = raw["files"]
-    if not isinstance(raw_files, list) or len(raw_files) != len(RAW_CAPTURE_FILES):
-        raise ReleaseError("deployment_raw_file_closure_invalid")
-    observed_names: list[str] = []
-    for item in raw_files:
-        require_exact_fields(
-            item, {"path", "sha256", "size_bytes"}, "deployment_raw_file_invalid"
-        )
-        path = item["path"]
-        if (
-            not isinstance(path, str)
-            or PurePosixPath(path).as_posix() != path
-            or any(part in ("", ".", "..") for part in PurePosixPath(path).parts)
-            or not isinstance(item["sha256"], str)
-            or SHA256.fullmatch(item["sha256"]) is None
-            or not isinstance(item["size_bytes"], int)
-            or isinstance(item["size_bytes"], bool)
-            or not 0 < item["size_bytes"] <= MAXIMUM_JSON_BYTES
-        ):
-            raise ReleaseError("deployment_raw_file_invalid")
-        observed_names.append(path)
-    if tuple(sorted(observed_names)) != RAW_CAPTURE_FILES or len(set(observed_names)) != len(
-        observed_names
-    ):
-        raise ReleaseError("deployment_raw_file_closure_invalid")
-    return manifest, binding
-
-
-def validate_deployment_capture(
-    archive: Path,
-    attestation: Path,
-    *,
-    platform: str,
-    commit: str,
-    run_id: str,
-    run_attempt: str,
-    image: str,
-    bundle_sha256: str,
-    candidate_manifest: Mapping[str, Any],
-) -> dict[str, Any]:
-    if platform not in DEPLOYMENT_ASSET_FILES:
-        raise ReleaseError("deployment_platform_invalid")
-    require_run(run_id, "deployment_run_id_invalid")
-    require_run(run_attempt, "deployment_run_attempt_invalid")
-    read_json(attestation)
-    values, archive_bytes = read_archive(archive)
-    manifest, _ = validate_capture_binding(
-        values,
-        platform=platform,
-        commit=commit,
-        run_id=run_id,
-        run_attempt=run_attempt,
-        image=image,
-        bundle_sha256=bundle_sha256,
-    )
-    # Re-run the canonical platform validators over exact extracted bytes.  A
-    # private temporary directory avoids trusting tar paths or archive.extract.
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix=f"latchway-{platform}-release-") as temporary:
-        root = Path(temporary)
-        for name in CAPTURE_FILES:
-            (root / name).write_bytes(values[name])
-        try:
-            verified_manifest, checks = DEPLOYMENT.validate_capture(
-                root, candidate_manifest
-            )
-        except DEPLOYMENT.EvidenceError as error:
-            raise ReleaseError(error.code) from error
-        if verified_manifest != manifest or any(item.status != "passed" for item in checks):
-            raise ReleaseError("deployment_capture_validation_failed")
-    return {
-        "platform": platform,
-        "run_id": run_id,
-        "run_attempt": int(run_attempt),
-        "endpoint": manifest["endpoint"],
-        "provider_resource_id": manifest["provider_resource_id"],
-        "archive_sha256": sha256_bytes(archive_bytes),
-        "attestation_sha256": sha256_file(attestation, MAXIMUM_JSON_BYTES),
-    }
-
-
 def release_title() -> str:
     return f"Latchway {TAG} — {PROFILE}"
 
@@ -574,7 +259,7 @@ def release_body(commit: str, image: str) -> str:
             "Authenticated profile-wide publication readiness is not claimed by this core-only record.",
             f"Candidate commit: {commit}",
             f"Image: {image}",
-            "Required deployment evidence: Docker Compose and Google Cloud Run passed for this exact image.",
+            "Deployment evidence: deferred by this publication profile; no deployment target is claimed as verified.",
             "",
             "Deferred evidence remains unverified. This release is not release-qualified, fully evidence-gated, or independently reviewed.",
         )
@@ -624,53 +309,10 @@ def prepare_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
     for value, code in (
         (args.candidate_run_id, "candidate_run_id_invalid"),
         (args.candidate_run_attempt, "candidate_run_attempt_invalid"),
-        (args.compose_run_id, "compose_run_id_invalid"),
-        (args.compose_run_attempt, "compose_run_attempt_invalid"),
-        (args.cloud_run_run_id, "cloud_run_run_id_invalid"),
-        (args.cloud_run_run_attempt, "cloud_run_run_attempt_invalid"),
     ):
         require_run(value, code)
     manifest = verify_candidate_directory(args.candidate_dir, args.candidate_commit, now)
     image = f"{IMAGE_REPOSITORY}@{manifest['image']['index_digest']}"
-    bundle_sha256 = manifest["contract"]["bundle_sha256"]
-    deployment_roots = {
-        "compose": (args.compose_dir, args.compose_run_id, args.compose_run_attempt),
-        "cloud_run": (
-            args.cloud_run_dir,
-            args.cloud_run_run_id,
-            args.cloud_run_run_attempt,
-        ),
-    }
-    deployments: dict[str, Any] = {}
-    for platform, (root, run_id, run_attempt) in deployment_roots.items():
-        expected = {
-            f"{platform}.tar.gz",
-            f"{platform}.attestation.json",
-            "latchway-deployment-validation.json",
-            "latchway-deployment-validation.json.junit.xml",
-        }
-        require_exact_directory(root, expected, "deployment_artifact_closure_invalid")
-        diagnostic = read_json(root / "latchway-deployment-validation.json")
-        if (
-            diagnostic.get("verdict") != "passed"
-            or diagnostic.get("platform") != platform
-            or diagnostic.get("oci_image_digest") != image
-        ):
-            raise ReleaseError("deployment_diagnostic_invalid")
-        require_regular_file(
-            root / "latchway-deployment-validation.json.junit.xml", 1024 * 1024
-        )
-        deployments[platform] = validate_deployment_capture(
-            root / f"{platform}.tar.gz",
-            root / f"{platform}.attestation.json",
-            platform=platform,
-            commit=args.candidate_commit,
-            run_id=run_id,
-            run_attempt=run_attempt,
-            image=image,
-            bundle_sha256=bundle_sha256,
-            candidate_manifest=manifest,
-        )
 
     output = args.output_directory
     output.mkdir(parents=True, exist_ok=False)
@@ -683,9 +325,6 @@ def prepare_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
         }
     ):
         copied.append(copy_asset(args.candidate_dir / name, output))
-    for platform, (root, _, _) in deployment_roots.items():
-        for name in DEPLOYMENT_ASSET_FILES[platform]:
-            copied.append(copy_asset(root / name, output))
     assets = [asset_entry(path) for path in sorted(copied, key=lambda item: item.name)]
     profile = policy_profile()
     record = {
@@ -713,7 +352,7 @@ def prepare_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
             "run_id": args.candidate_run_id,
             "run_attempt": int(args.candidate_run_attempt),
         },
-        "deployment_evidence": deployments,
+        "deployment_evidence": {},
         "supply_chain": {
             "multi_arch_image_verified": True,
             "vulnerability_scan_verified": True,
@@ -797,6 +436,7 @@ def verify_record_shape(
             "run_id": args.candidate_run_id,
             "run_attempt": int(args.candidate_run_attempt),
         }
+        or record["deployment_evidence"] != {}
         or record["supply_chain"]
         != {
             "multi_arch_image_verified": True,
@@ -849,7 +489,6 @@ def verify_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
         "latchway-candidate.json",
         "latchway-candidate.attestation.sigstore.json",
         *CANDIDATE.ARTIFACT_NAMES,
-        *(name for pair in DEPLOYMENT_ASSET_FILES.values() for name in pair),
     }
     expected = {"SHA256SUMS", "latchway-single-maintainer-v1.json", *evidence_names}
     require_exact_directory(root, expected, "handoff_artifact_closure_invalid")
@@ -868,28 +507,8 @@ def verify_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
         }:
             shutil.copyfile(root / name, candidate_root / name)
         manifest = verify_candidate_directory(candidate_root, args.candidate_commit, now)
-    image = f"{IMAGE_REPOSITORY}@{manifest['image']['index_digest']}"
-    bundle_sha256 = manifest["contract"]["bundle_sha256"]
-    expected_deployments: dict[str, Any] = {}
-    for platform, run_id, run_attempt in (
-        ("compose", args.compose_run_id, args.compose_run_attempt),
-        ("cloud_run", args.cloud_run_run_id, args.cloud_run_run_attempt),
-    ):
-        expected_deployments[platform] = validate_deployment_capture(
-            root / f"{platform}.tar.gz",
-            root / f"{platform}.attestation.json",
-            platform=platform,
-            commit=args.candidate_commit,
-            run_id=run_id,
-            run_attempt=run_attempt,
-            image=image,
-            bundle_sha256=bundle_sha256,
-            candidate_manifest=manifest,
-        )
     record = read_json(root / "latchway-single-maintainer-v1.json")
     verify_record_shape(record, args, manifest)
-    if record["deployment_evidence"] != expected_deployments:
-        raise ReleaseError("release_record_deployment_evidence_invalid")
     assets = record["assets"]
     if not isinstance(assets, list) or len(assets) != len(evidence_names):
         raise ReleaseError("release_record_assets_invalid")
@@ -917,10 +536,6 @@ def common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--candidate-run-id", required=True)
     parser.add_argument("--candidate-run-attempt", required=True)
-    parser.add_argument("--compose-run-id", required=True)
-    parser.add_argument("--compose-run-attempt", required=True)
-    parser.add_argument("--cloud-run-run-id", required=True)
-    parser.add_argument("--cloud-run-run-attempt", required=True)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -929,8 +544,6 @@ def parser() -> argparse.ArgumentParser:
     prepare = commands.add_parser("prepare", help="verify inputs and build the closed mutation handoff")
     common_arguments(prepare)
     prepare.add_argument("--candidate-dir", type=Path, required=True)
-    prepare.add_argument("--compose-dir", type=Path, required=True)
-    prepare.add_argument("--cloud-run-dir", type=Path, required=True)
     prepare.add_argument("--output-directory", type=Path, required=True)
     verify = commands.add_parser("verify-handoff", help="revalidate an exact closed handoff")
     common_arguments(verify)

@@ -2639,7 +2639,7 @@ class Observer:
                     "Authenticated profile-wide publication readiness is not claimed by this core-only record.",
                     f"Candidate commit: {coordinate['commit']}",
                     f"Image: {image}",
-                    "Required deployment evidence: Docker Compose and Google Cloud Run passed for this exact image.",
+                    "Deployment evidence: deferred by this publication profile; no deployment target is claimed as verified.",
                     "",
                     "Deferred evidence remains unverified. This release is not release-qualified, fully evidence-gated, or independently reviewed.",
                 )
@@ -2655,9 +2655,9 @@ class Observer:
                 (
                     "Published with the `single_maintainer_v1` profile.",
                     "",
-                    "The exact public Latchway core v1.0.0 release, including Docker Compose and Google Cloud Run evidence, was verified before this transaction began.",
+                    "The exact registry-only public Latchway core v1.0.0 release was verified before this transaction began; cloud deployment evidence is deferred and no deployment target is claimed as verified.",
                     "npm archives are accepted only with byte-identical registry data, registry signatures, and provenance bound to this repository, workflow, source commit, and main ref.",
-                    "External platform/device/provider evidence and independent human review remain deferred.",
+                    "Cloud deployment, external platform/device/provider evidence, and independent human review remain deferred.",
                     "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.",
                     "",
                 )
@@ -2740,7 +2740,7 @@ class Observer:
                 (
                     "Published with the `single_maintainer_v1` profile.",
                     "",
-                    "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this release were verified by automation. Independent human review and external platform/device/provider evidence are deferred. Docker Compose and GCP Cloud Run evidence remain required by the global v1 profile.",
+                    "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this registry-only release were verified by automation. Independent human review, cloud deployments, and external platform/device/provider evidence are deferred. No deployment target is claimed as verified.",
                     "",
                     "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.",
                 )

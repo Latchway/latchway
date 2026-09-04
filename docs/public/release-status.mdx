@@ -51,9 +51,9 @@ protected artifact, device, registry, or deployment evidence.
 The first-publication target is the explicitly lower-assurance
 `single_maintainer_v1` profile, not the original strict A-to-Z Definition of
 Done. It requires GHCR and package publication, multi-architecture
-supply-chain evidence, and exact-image Docker Compose plus Google Cloud Run.
-Independent review, Apple/Android/browser/provider evidence, AWS, Fly.io,
-Cloudflare Containers, operational-resilience drills, and Mintlify production
+supply-chain evidence. Independent review, Apple/Android/browser/provider
+evidence, every cloud deployment (including Compose and Google Cloud Run),
+operational-resilience drills, and Mintlify production
 remain `unverified`. A passing profile may authorize those scoped public
 artifacts, but it cannot support production-ready, fully-evidence-gated,
 independently reviewed, or `release-qualified` wording.
@@ -73,14 +73,14 @@ independently reviewed, or `release-qualified` wording.
 | Firebase Web App Check | A browser-minted reCAPTCHA Enterprise token exchange and server verifier pass against the current source gateway; protected immutable-candidate rerun remains required |
 | Cloudflare Turnstile | No configured observation exists; protected exact-candidate evidence remains required |
 | Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
-| Cloud deployment and resilience evidence | Credential-free static/dry-run deployment checks plus historical local load and nine-scenario automated failure gates pass. The selected first-publication order is GHCR, Docker Compose, then manual-first Google Cloud Run in project `latchway`; Terraform is optional. No exact-image Compose/Cloud Run receipt or billable GCP verification stack exists yet. AWS, Fly.io, Cloudflare Containers, and resilience drills are deferred under this profile. |
+| Cloud deployment and resilience evidence | Credential-free static/dry-run deployment checks plus historical local load and nine-scenario automated failure gates pass. No exact-image Compose/Cloud Run receipt or billable GCP verification stack exists. Compose, Google Cloud Run, AWS, Fly.io, Cloudflare Containers, and resilience drills are all deferred under the selected profile; Terraform remains optional for a later manual GCP deployment. |
 | Image signing, provenance, and post-publication checks | Local image and multi-architecture source checks are distinct from required protected registry signing/provenance/publication receipts |
 | Independent security review | Workflow and schema implemented; protected reviewer receipt still required |
 | Client quota and diagnostics | Authenticated, redaction-safe, and locally validated |
 
 Launch is evidence-driven. The selected `single_maintainer_v1` profile requires
 authenticated public tags and releases; GHCR, npm, SwiftPM, CocoaPods, and Maven
-bytes; Docker Compose and Google Cloud Run observations; and the exact multi-
+bytes; and the exact multi-
 architecture image, scans, SBOM, signature, and provenance. Only its protected
 finalizer may set profile-scoped `publication_ready` to true, after it
 authenticates the exact producer runs and immutable certificates and

@@ -15,22 +15,6 @@ on:
         description: Exact successful Release candidate run attempt
         required: true
         type: string
-      compose_run_id:
-        description: Exact successful Compose deployment-evidence run ID
-        required: true
-        type: string
-      compose_run_attempt:
-        description: Exact successful Compose deployment-evidence run attempt
-        required: true
-        type: string
-      cloud_run_run_id:
-        description: Exact successful Cloud Run deployment-evidence run ID
-        required: true
-        type: string
-      cloud_run_run_attempt:
-        description: Exact successful Cloud Run deployment-evidence run attempt
-        required: true
-        type: string
 
 permissions: {}
 
@@ -91,18 +75,12 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
-          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
-          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
-          CLOUD_RUN_ID: ${{ inputs.cloud_run_run_id }}
-          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          for value in "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
-            "$COMPOSE_RUN_ID" "$COMPOSE_RUN_ATTEMPT" \
-            "$CLOUD_RUN_ID" "$CLOUD_RUN_ATTEMPT"; do
+          for value in "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT"; do
             [[ "$value" =~ ^[1-9][0-9]{0,19}$ ]]
           done
           version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
@@ -129,10 +107,6 @@ jobs:
           }
           verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
             .github/workflows/release.yml
-          verify_run compose "$COMPOSE_RUN_ID" "$COMPOSE_RUN_ATTEMPT" \
-            .github/workflows/deployment-evidence.yml
-          verify_run cloud-run "$CLOUD_RUN_ID" "$CLOUD_RUN_ATTEMPT" \
-            .github/workflows/deployment-evidence.yml
       - name: Download the exact immutable candidate evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -140,21 +114,7 @@ jobs:
           path: ${{ runner.temp }}/inputs/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
-      - name: Download exact Compose deployment evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: latchway-deployment-compose-${{ inputs.candidate_commit }}-${{ inputs.compose_run_id }}-${{ inputs.compose_run_attempt }}
-          path: ${{ runner.temp }}/inputs/compose
-          run-id: ${{ inputs.compose_run_id }}
-          github-token: ${{ github.token }}
-      - name: Download exact Cloud Run deployment evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: latchway-deployment-cloud_run-${{ inputs.candidate_commit }}-${{ inputs.cloud_run_run_id }}-${{ inputs.cloud_run_run_attempt }}
-          path: ${{ runner.temp }}/inputs/cloud_run
-          run-id: ${{ inputs.cloud_run_run_id }}
-          github-token: ${{ github.token }}
-      - name: Verify candidate Compose and Cloud Run attestations before candidate code
+      - name: Verify the candidate attestation before candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,43 +127,25 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$RUNNER_TEMP/inputs/$platform/$platform.tar.gz" \
-              --bundle "$RUNNER_TEMP/inputs/$platform/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
       - name: Check out the exact authenticated candidate without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.candidate_commit }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Close exact source deployment and scan evidence into a mutation handoff
+      - name: Close exact source and scan evidence into a mutation handoff
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
-          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
-          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
-          CLOUD_RUN_ID: ${{ inputs.cloud_run_run_id }}
-          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
         run: |
           set -Eeuo pipefail
           python3 scripts/single-maintainer-release.py prepare \
             --candidate-commit "$CANDIDATE_COMMIT" \
             --candidate-run-id "$CANDIDATE_RUN_ID" \
             --candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT" \
-            --compose-run-id "$COMPOSE_RUN_ID" \
-            --compose-run-attempt "$COMPOSE_RUN_ATTEMPT" \
-            --cloud-run-run-id "$CLOUD_RUN_ID" \
-            --cloud-run-run-attempt "$CLOUD_RUN_ATTEMPT" \
             --candidate-dir "$RUNNER_TEMP/inputs/candidate" \
-            --compose-dir "$RUNNER_TEMP/inputs/compose" \
-            --cloud-run-dir "$RUNNER_TEMP/inputs/cloud_run" \
             --output-directory "$RUNNER_TEMP/single-maintainer-handoff" \
             > "$RUNNER_TEMP/single-maintainer-prepare.json"
       - name: Retain only the verified source-free mutation handoff
@@ -235,26 +177,18 @@ jobs:
         with:
           name: latchway-single-maintainer-v1-handoff-${{ github.run_id }}
           path: ${{ runner.temp }}/handoff
-      - name: Re-run complete candidate and deployment semantics without publication authority
+      - name: Re-run complete candidate semantics without publication authority
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
-          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
-          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
-          CLOUD_RUN_ID: ${{ inputs.cloud_run_run_id }}
-          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
         run: |
           set -Eeuo pipefail
           python3 scripts/single-maintainer-release.py verify-handoff \
             --candidate-commit "$CANDIDATE_COMMIT" \
             --candidate-run-id "$CANDIDATE_RUN_ID" \
             --candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT" \
-            --compose-run-id "$COMPOSE_RUN_ID" \
-            --compose-run-attempt "$COMPOSE_RUN_ATTEMPT" \
-            --cloud-run-run-id "$CLOUD_RUN_ID" \
-            --cloud-run-run-attempt "$CLOUD_RUN_ATTEMPT" \
             --handoff-directory "$RUNNER_TEMP/handoff" \
             > "$RUNNER_TEMP/verified-handoff.json"
 
@@ -283,8 +217,8 @@ jobs:
           set -Eeuo pipefail
           root="$RUNNER_TEMP/handoff"
           test -z "$(find "$root" -type l -print -quit)"
-          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 15
-          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 14
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 11
+          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 10
           (cd "$root" && sha256sum --strict --check SHA256SUMS)
           manifest="$root/latchway-candidate.json"
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
@@ -333,14 +267,6 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/$platform.tar.gz" \
-              --bundle "$root/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         with:
           version: v0.36.1
@@ -442,10 +368,6 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
-          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
-          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
-          CLOUD_RUN_ID: ${{ inputs.cloud_run_run_id }}
-          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
         run: |
           set -Eeuo pipefail
           root="$RUNNER_TEMP/handoff"
@@ -453,8 +375,6 @@ jobs:
           test -z "$(find "$root" -type l -print -quit)"
           printf '%s\n' \
             SHA256SUMS \
-            cloud_run.attestation.json cloud_run.tar.gz \
-            compose.attestation.json compose.tar.gz \
             latchway-candidate.attestation.sigstore.json latchway-candidate.json \
             latchway-contract.tar.gz \
             latchway-linux-amd64-license.json latchway-linux-amd64-vulnerability.json latchway-linux-amd64.spdx.json \
@@ -462,7 +382,7 @@ jobs:
             latchway-single-maintainer-v1.json | LC_ALL=C sort > "$RUNNER_TEMP/expected-files"
           find "$root" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-files"
           diff --unified=0 "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
-          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 14
+          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 10
           (cd "$root" && sha256sum --strict --check SHA256SUMS)
           manifest="$root/latchway-candidate.json"
           record="$root/latchway-single-maintainer-v1.json"
@@ -507,9 +427,7 @@ jobs:
           done
           jq --exit-status --slurpfile candidate "$manifest" \
             --arg commit "$CANDIDATE_COMMIT" \
-            --arg candidate_run "$CANDIDATE_RUN_ID" --argjson candidate_attempt "$CANDIDATE_RUN_ATTEMPT" \
-            --arg compose_run "$COMPOSE_RUN_ID" --argjson compose_attempt "$COMPOSE_RUN_ATTEMPT" \
-            --arg cloud_run "$CLOUD_RUN_ID" --argjson cloud_attempt "$CLOUD_RUN_ATTEMPT" '
+            --arg candidate_run "$CANDIDATE_RUN_ID" --argjson candidate_attempt "$CANDIDATE_RUN_ATTEMPT" '
             (keys | sort) == ["assets","candidate_commit","candidate_run","claims","core_publication_gate","deferred_evidence","deployment_evidence","github_release","image","kind","profile","profile_status","release_policy","schema_version","supply_chain","tag","version"] and
             .schema_version == 1 and .kind == "latchway_single_maintainer_v1_core_release" and
             .profile == "single_maintainer_v1" and .profile_status == "incomplete" and
@@ -531,10 +449,7 @@ jobs:
               platforms:$candidate[0].image.platforms
             } and
             .candidate_run == {run_id:$candidate_run,run_attempt:$candidate_attempt} and
-            .deployment_evidence.compose.run_id == $compose_run and
-            .deployment_evidence.compose.run_attempt == $compose_attempt and
-            .deployment_evidence.cloud_run.run_id == $cloud_run and
-            .deployment_evidence.cloud_run.run_attempt == $cloud_attempt and
+            .deployment_evidence == {} and
             .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false} and
             .supply_chain == {license_scan_verified:true,multi_arch_image_verified:true,provenance_verified:true,sbom_verified:true,signature_verified:true,vulnerability_scan_verified:true} and
             .deferred_evidence == [
@@ -546,38 +461,23 @@ jobs:
               "firebase_app_check",
               "turnstile",
               "live_provider",
-              "cloud_deployments.aws_verified",
-              "cloud_deployments.fly_io_verified",
-              "cloud_deployments.cloudflare_containers_verified",
+              "cloud_deployments",
               "operational_resilience",
               "public_registries.documentation_production_verified",
               "mintlify_production"
             ] and
             ([.assets[].path] | sort) == [
-              "cloud_run.attestation.json","cloud_run.tar.gz",
-              "compose.attestation.json","compose.tar.gz",
               "latchway-candidate.attestation.sigstore.json","latchway-candidate.json",
               "latchway-contract.tar.gz",
               "latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json",
               "latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"
-            ] and ([.assets[].path] | unique | length) == 13 and
+            ] and ([.assets[].path] | unique | length) == 9 and
             all(.assets[]; (keys | sort) == ["path","sha256"] and (.sha256 | test("^[0-9a-f]{64}$")))
           ' "$record" >/dev/null
           jq --exit-status --raw-output '.assets[] | [.path,.sha256] | @tsv' "$record" |
             while IFS=$'\t' read -r name expected; do
               test "$(sha256sum "$root/$name" | cut -d ' ' -f 1)" = "$expected"
             done
-          for platform in compose cloud_run; do
-            archive_sha=$(sha256sum "$root/$platform.tar.gz" | cut -d ' ' -f 1)
-            attestation_sha=$(sha256sum "$root/$platform.attestation.json" | cut -d ' ' -f 1)
-            jq --exit-status --arg platform "$platform" --arg archive "$archive_sha" --arg attestation "$attestation_sha" '
-              .deployment_evidence[$platform].platform == $platform and
-              .deployment_evidence[$platform].archive_sha256 == $archive and
-              .deployment_evidence[$platform].attestation_sha256 == $attestation and
-              (.deployment_evidence[$platform].endpoint | type == "string" and length > 0) and
-              (.deployment_evidence[$platform].provider_resource_id | type == "string" and length > 0)
-            ' "$record" >/dev/null
-          done
           version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
           read -r major minor patch <<< "$version"
           [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
@@ -588,65 +488,13 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/$platform.tar.gz" \
-              --bundle "$root/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
       - name: Attest the exact source-free core publication handoff
         uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
         with:
           subject-path: ${{ runner.temp }}/handoff/*
 
-  immutable-release-settings:
-    needs: plan
-    if: github.ref == 'refs/heads/main'
-    environment: single-maintainer-v1-administration
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Verify the exact single-maintainer administration policy
-        shell: bash
-        env:
-          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}
-        run: |
-          set -Eeuo pipefail
-          test "$OBSERVED_POLICY_ID" = "latchway-release-profile-v1:latchway:single_maintainer_v1:administration"
-      - name: Preflight immutable-release settings for the complete product without a checkout
-        shell: bash
-        env:
-          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
-          read -r major minor patch <<< "$version"
-          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
-          (( major > 2 || (major == 2 && minor >= 97) ))
-          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
-          for repository in \
-            Latchway/latchway \
-            Latchway/latchway-js \
-            Latchway/latchway-ios-sdk \
-            Latchway/latchway-android \
-            Latchway/latchway-react-native-sdk; do
-            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$repository/immutable-releases" \
-              > "$RUNNER_TEMP/immutable-releases.json"
-            jq --exit-status '
-              type == "object" and
-              (keys | sort) == ["enabled","enforced_by_owner"] and
-              .enabled == true and (.enforced_by_owner | type) == "boolean"
-            ' "$RUNNER_TEMP/immutable-releases.json" >/dev/null
-          done
-
   stage-release:
-    needs: [plan, attest-handoff, immutable-release-settings]
+    needs: [plan, attest-handoff]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -676,17 +524,11 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
-          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
-          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
-          CLOUD_RUN_ID: ${{ inputs.cloud_run_run_id }}
-          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
         run: |
           set -Eeuo pipefail
           root="$RUNNER_TEMP/handoff"
           printf '%s\n' \
             SHA256SUMS \
-            cloud_run.attestation.json cloud_run.tar.gz \
-            compose.attestation.json compose.tar.gz \
             latchway-candidate.attestation.sigstore.json latchway-candidate.json \
             latchway-contract.tar.gz \
             latchway-linux-amd64-license.json latchway-linux-amd64-vulnerability.json latchway-linux-amd64.spdx.json \
@@ -695,7 +537,7 @@ jobs:
           find "$root" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-files"
           diff --unified=0 "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
           test -z "$(find "$root" -type l -print -quit)"
-          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 14
+          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 10
           (cd "$root" && sha256sum --strict --check SHA256SUMS)
           for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
             gh attestation verify "$root/$subject" \
@@ -709,9 +551,7 @@ jobs:
           index_digest=$(jq --exit-status --raw-output '.image.index_digest | select(test("^sha256:[0-9a-f]{64}$"))' "$candidate")
           image="ghcr.io/latchway/latchway@$index_digest"
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
-            --arg candidate_run "$CANDIDATE_RUN_ID" --argjson candidate_attempt "$CANDIDATE_RUN_ATTEMPT" \
-            --arg compose_run "$COMPOSE_RUN_ID" --argjson compose_attempt "$COMPOSE_RUN_ATTEMPT" \
-            --arg cloud_run "$CLOUD_RUN_ID" --argjson cloud_attempt "$CLOUD_RUN_ATTEMPT" '
+            --arg candidate_run "$CANDIDATE_RUN_ID" --argjson candidate_attempt "$CANDIDATE_RUN_ATTEMPT" '
               (keys | sort) == ["assets","candidate_commit","candidate_run","claims","core_publication_gate","deferred_evidence","deployment_evidence","github_release","image","kind","profile","profile_status","release_policy","schema_version","supply_chain","tag","version"] and
               .schema_version == 1 and .kind == "latchway_single_maintainer_v1_core_release" and
               .profile == "single_maintainer_v1" and .profile_status == "incomplete" and
@@ -727,19 +567,16 @@ jobs:
               .core_publication_gate == "passed" and .candidate_commit == $commit and
               .tag == "v1.0.0" and .version == "1.0.0" and .image.coordinate == $image and
               .candidate_run == {run_id:$candidate_run,run_attempt:$candidate_attempt} and
-              .deployment_evidence.compose.run_id == $compose_run and
-              .deployment_evidence.compose.run_attempt == $compose_attempt and
-              .deployment_evidence.cloud_run.run_id == $cloud_run and
-              .deployment_evidence.cloud_run.run_attempt == $cloud_attempt and
+              .deployment_evidence == {} and
               .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false} and
               .supply_chain == {license_scan_verified:true,multi_arch_image_verified:true,provenance_verified:true,sbom_verified:true,signature_verified:true,vulnerability_scan_verified:true} and
               (.deferred_evidence | index("independent_human_review") != null) and
-              (.deferred_evidence | index("cloud_deployments.aws_verified") != null) and
+              (.deferred_evidence | index("cloud_deployments") != null) and
               (.github_release.title == "Latchway v1.0.0 — single_maintainer_v1") and
               (.github_release.body | contains("Profile status: incomplete")) and
               (.github_release.body | contains("not release-qualified")) and
-              ([.assets[].path] | length) == 13 and
-              ([.assets[].path] | unique | length) == 13 and
+              ([.assets[].path] | length) == 9 and
+              ([.assets[].path] | unique | length) == 9 and
               all(.assets[]; (.sha256 | test("^[0-9a-f]{64}$")))
             ' "$record" >/dev/null
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg digest "$index_digest" '
@@ -754,13 +591,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/$platform.tar.gz" \
-              --bundle "$root/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
           echo "image=$image" >> "$GITHUB_OUTPUT"
       - name: Preflight exact annotated tag release record and every fixed asset
         id: preflight
@@ -809,7 +639,7 @@ jobs:
               test -f "$root/$name"
             done
             if [[ "$(jq --raw-output .draft "$RUNNER_TEMP/release.json")" == false ]]; then
-              test "$(jq '.assets | length' "$RUNNER_TEMP/release.json")" = 15
+              test "$(jq '.assets | length' "$RUNNER_TEMP/release.json")" = 11
             fi
             echo "release_exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -936,8 +766,8 @@ jobs:
           set -Eeuo pipefail
           root="$RUNNER_TEMP/handoff"
           test -z "$(find "$root" -type l -print -quit)"
-          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 15
-          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 14
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 11
+          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 10
           (cd "$root" && sha256sum --strict --check SHA256SUMS)
           for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
             gh attestation verify "$root/$subject" \
@@ -961,6 +791,8 @@ jobs:
             } and
             .core_publication_gate == "passed" and .candidate_commit == $commit and
             .tag == "v1.0.0" and .image.coordinate == $image and
+            .deployment_evidence == {} and
+            (.deferred_evidence | index("cloud_deployments") != null) and
             .claims.release_qualified == false and .claims.fully_evidence_gated == false and
             .claims.independently_reviewed == false
           ' "$record" >/dev/null
@@ -968,12 +800,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/$platform.tar.gz" --bundle "$root/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
           message=$(jq --raw-output .github_release.tag_message "$record")
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" > "$RUNNER_TEMP/tag-ref.json"
           test "$(jq --raw-output .object.type "$RUNNER_TEMP/tag-ref.json")" = tag
@@ -987,7 +813,7 @@ jobs:
           jq --exit-status --arg title "$(jq -r .github_release.title "$record")" \
             --arg body "$(jq -r .github_release.body "$record")" '
               .tag_name == "v1.0.0" and .name == $title and .body == $body and
-              .prerelease == false and (.draft == true or .draft == false) and (.assets | length) == 15
+              .prerelease == false and (.draft == true or .draft == false) and (.assets | length) == 11
             ' "$RUNNER_TEMP/release.json" >/dev/null
           echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
           echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
@@ -1136,8 +962,6 @@ jobs:
           root="$RUNNER_TEMP/handoff"
           printf '%s\n' \
             SHA256SUMS \
-            cloud_run.attestation.json cloud_run.tar.gz \
-            compose.attestation.json compose.tar.gz \
             latchway-candidate.attestation.sigstore.json latchway-candidate.json \
             latchway-contract.tar.gz \
             latchway-linux-amd64-license.json latchway-linux-amd64-vulnerability.json latchway-linux-amd64.spdx.json \
@@ -1146,7 +970,7 @@ jobs:
           find "$root" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/handoff-assets"
           diff --unified=0 "$RUNNER_TEMP/expected-release-assets" "$RUNNER_TEMP/handoff-assets"
           test -z "$(find "$root" -type l -print -quit)"
-          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 14
+          test "$(wc -l < "$root/SHA256SUMS" | tr -d ' ')" = 10
           (cd "$root" && sha256sum --strict --check SHA256SUMS)
           for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
             gh attestation verify "$root/$subject" \
@@ -1169,18 +993,14 @@ jobs:
               }
             } and
             .candidate_commit == $commit and .tag == "v1.0.0" and .image.coordinate == $image and
+            .deployment_evidence == {} and
+            (.deferred_evidence | index("cloud_deployments") != null) and
             .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false}
           ' "$record" >/dev/null
           gh attestation verify "$candidate" --bundle "$root/latchway-candidate.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/$platform.tar.gz" --bundle "$root/$platform.attestation.json" \
-              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          done
           message=$(jq --raw-output .github_release.tag_message "$record")
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" > "$RUNNER_TEMP/tag-ref.json"
           test "$(jq --raw-output .object.type "$RUNNER_TEMP/tag-ref.json")" = tag

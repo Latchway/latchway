@@ -208,26 +208,23 @@ class ReleaseProfileTests(unittest.TestCase):
             all(item["status"] == "unverified" for item in result["deferred_evidence"])
         )
 
-    def test_single_maintainer_fails_closed_when_cloud_run_is_missing(self) -> None:
+    def test_single_maintainer_defers_cloud_deployments_without_a_document(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             report, evidence = self.single_fixture(root)
-            cloud = json.loads(
-                (evidence / "cloud_deployments.json").read_text(encoding="utf-8")
-            )
-            del cloud["claims"]["cloud_run_verified"]
-            (evidence / "cloud_deployments.json").write_text(
-                json.dumps(cloud), encoding="utf-8"
-            )
             result = MODULE.evaluate(
                 "single_maintainer_v1", report, evidence, self.now
             )
-        self.assertEqual(result["status"], "failed")
-        cloud_gate = next(
-            item for item in result["required_gates"] if item["id"] == "cloud_deployments"
+        self.assertEqual(result["status"], "passed")
+        self.assertNotIn(
+            "cloud_deployments", {item["id"] for item in result["required_gates"]}
         )
-        self.assertEqual(cloud_gate["status"], "failed")
-        self.assertEqual(cloud_gate["reason"], "release_profile_required_claim_missing")
+        cloud = next(
+            item
+            for item in result["deferred_evidence"]
+            if item["id"] == "cloud_deployments"
+        )
+        self.assertEqual(cloud["status"], "unverified")
 
     def test_strict_profile_delegates_to_unchanged_canonical_release_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

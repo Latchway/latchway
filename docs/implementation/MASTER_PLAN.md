@@ -392,10 +392,10 @@ Source implementation is complete when the clean cross-repository source gate
 passes on synchronized commits. The selected lower-assurance
 `single_maintainer_v1` public launch additionally requires authenticated
 evidence for public annotated tags and GitHub releases; GHCR, npm, SwiftPM,
-CocoaPods, and Maven publication; Docker Compose and Google Cloud Run against
-the exact immutable image; and the multi-architecture image, vulnerability and
+CocoaPods, and Maven publication; and the multi-architecture image, vulnerability and
 license scans, SBOM, signature, and provenance. It does not close deferred
-domains and cannot claim production readiness or `release-qualified`.
+domains—including every cloud deployment—and cannot claim production readiness
+or `release-qualified`.
 
 The later strict-full Definition of Done requires the same candidate to have
 protected evidence for:

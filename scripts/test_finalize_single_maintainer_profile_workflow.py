@@ -144,9 +144,9 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
             ".github/workflows/release.yml",
             ".github/workflows/single-maintainer-release.yml",
             ".github/workflows/release-domain-evidence.yml",
-            ".github/workflows/deployment-evidence.yml",
         ):
             self.assertIn(path, self.text)
+        self.assertNotIn(".github/workflows/deployment-evidence.yml", self.text)
         self.assertIn("/attempts/$attempt", self.text)
         self.assertIn("require_certificate_identity", self.text)
         self.assertIn(".signature.certificate", self.text)
@@ -167,8 +167,6 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
             "latchway-cross-repository.json",
             "latchway-candidate.json",
             "latchway-single-maintainer-v1.json",
-            "compose.tar.gz",
-            "cloud_run.tar.gz",
             "public_tags.json",
             "public_registries.json",
             "supply_chain.json",
@@ -186,9 +184,7 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
             '"live_sdk_conformance"',
             '"physical_devices"',
             '"live_provider"',
-            '"cloud_deployments.aws_verified"',
-            '"cloud_deployments.fly_io_verified"',
-            '"cloud_deployments.cloudflare_containers_verified"',
+            '"cloud_deployments"',
             '"operational_resilience"',
             '"public_registries.documentation_production_verified"',
             '"mintlify_production"',
@@ -198,14 +194,13 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
             '["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]',
             attestor,
         )
-        self.assertIn(
-            '.claims == {cloud_run_verified:true,compose_verified:true}', attestor
-        )
+        self.assertIn(".deployment_evidence == {}", attestor)
+        self.assertNotIn("compose_verified", attestor)
+        self.assertNotIn("cloud_run_verified", attestor)
 
     def test_final_handoff_retains_and_rehashes_all_selected_external_documents(self) -> None:
         attestor = self.attestor
         for domain in (
-            "cloud_deployments",
             "public_registries",
             "public_tags",
             "supply_chain",
@@ -406,7 +401,6 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
         script = section.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
         final_names = {
             "authority.json",
-            "external/cloud_deployments.json",
             "external/public_registries.json",
             "external/public_tags.json",
             "external/supply_chain.json",
@@ -469,7 +463,6 @@ class FinalizeSingleMaintainerProfileWorkflowTests(unittest.TestCase):
                 encoding="utf-8",
             )
             for domain in (
-                "cloud_deployments",
                 "public_registries",
                 "public_tags",
                 "supply_chain",

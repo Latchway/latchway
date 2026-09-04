@@ -100,10 +100,6 @@
           "cocoapods_verified",
           "maven_central_verified"
         ],
-        "cloud_deployments": [
-          "compose_verified",
-          "cloud_run_verified"
-        ],
         "supply_chain": [
           "multi_arch_image_verified",
           "vulnerability_scan_verified",
@@ -122,9 +118,7 @@
         "firebase_app_check",
         "turnstile",
         "live_provider",
-        "cloud_deployments.aws_verified",
-        "cloud_deployments.fly_io_verified",
-        "cloud_deployments.cloudflare_containers_verified",
+        "cloud_deployments",
         "operational_resilience",
         "public_registries.documentation_production_verified",
         "mintlify_production"

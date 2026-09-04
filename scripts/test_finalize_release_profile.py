@@ -106,20 +106,6 @@ class FinalizeReleaseProfileTests(unittest.TestCase):
             },
         )
 
-    def derive_cloud(self) -> None:
-        MODULE.derive_cloud_evidence(
-            type(
-                "Arguments",
-                (),
-                {
-                    "source_report": self.source,
-                    "core_handoff": self.handoff,
-                    "external_evidence_dir": self.external,
-                    "evaluation_time": SINGLE_FIXTURE.NOW,
-                },
-            )()
-        )
-
     def strict_release_report(self) -> Path:
         report = json.loads(json.dumps(self.source_document))
         report.update(
@@ -253,9 +239,7 @@ class FinalizeReleaseProfileTests(unittest.TestCase):
 
     def prepared(self) -> tuple[object, Path]:
         for domain, claims in MODULE.PROFILE_EVALUATOR.SINGLE_MAINTAINER_REQUIRED_CLAIMS.items():
-            if domain != "cloud_deployments":
-                self.domain_document(domain, list(claims))
-        self.derive_cloud()
+            self.domain_document(domain, list(claims))
         strict_report = self.strict_release_report()
         profile_report = self.root / MODULE.PROFILE_REPORT_NAME
         MODULE.derive_profile_report(
@@ -292,17 +276,26 @@ class FinalizeReleaseProfileTests(unittest.TestCase):
         )()
         return arguments, projection_path
 
-    def test_derives_only_compose_and_cloud_run_from_authenticated_core(self) -> None:
-        self.derive_cloud()
-        document = json.loads(
-            (self.external / "cloud_deployments.json").read_text(encoding="utf-8")
+    def test_cloud_deployments_remain_absent_and_deferred(self) -> None:
+        arguments, _ = self.prepared()
+        self.assertFalse((self.external / "cloud_deployments.json").exists())
+        result = MODULE.finalize_profile(arguments)
+        self.assertIn(
+            "cloud_deployments",
+            [item["id"] for item in result["deferred_evidence"]],
         )
-        self.assertEqual(
-            document["claims"],
-            {"compose_verified": True, "cloud_run_verified": True},
+        self.assertNotIn(
+            "cloud_deployments",
+            [item["id"] for item in result["required_gates"]],
         )
-        self.assertNotIn("aws_verified", document["claims"])
-        self.assertEqual(document["oci_image_digest"], SINGLE_FIXTURE.IMAGE)
+
+    def test_rejects_cloud_document_in_the_deferred_profile(self) -> None:
+        arguments, _ = self.prepared()
+        write_json(self.external / "cloud_deployments.json", {"claims": {}})
+        with self.assertRaisesRegex(
+            MODULE.FinalizationError, "deferred_cloud_evidence_present"
+        ):
+            MODULE.finalize_profile(arguments)
 
     def test_finalizes_authenticated_profile_without_strict_claims(self) -> None:
         arguments, _ = self.prepared()

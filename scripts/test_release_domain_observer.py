@@ -848,7 +848,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     "Authenticated profile-wide publication readiness is not claimed by this core-only record.\n"
                     f"Candidate commit: {coordinate['commit']}\n"
                     f"Image: {image}\n"
-                    "Required deployment evidence: Docker Compose and Google Cloud Run passed for this exact image.\n\n"
+                    "Deployment evidence: deferred by this publication profile; no deployment target is claimed as verified.\n\n"
                     "Deferred evidence remains unverified. This release is not release-qualified, fully evidence-gated, or independently reviewed."
                 )
             elif repository_id == "javascript":
@@ -879,9 +879,9 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 )
                 body = (
                     "Published with the `single_maintainer_v1` profile.\n\n"
-                    "The exact public Latchway core v1.0.0 release, including Docker Compose and Google Cloud Run evidence, was verified before this transaction began.\n"
+                    "The exact registry-only public Latchway core v1.0.0 release was verified before this transaction began; cloud deployment evidence is deferred and no deployment target is claimed as verified.\n"
                     "npm archives are accepted only with byte-identical registry data, registry signatures, and provenance bound to this repository, workflow, source commit, and main ref.\n"
-                    "External platform/device/provider evidence and independent human review remain deferred.\n"
+                    "Cloud deployment, external platform/device/provider evidence, and independent human review remain deferred.\n"
                     "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.\n\n"
                     f"Transaction owner: {owner}\n"
                     f"Transaction ID: {transaction_id}"
@@ -903,7 +903,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 if repository_id == "android":
                     body = (
                         "Published with the `single_maintainer_v1` profile.\n\n"
-                        "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this release were verified by automation. Independent human review and external platform/device/provider evidence are deferred. Docker Compose and GCP Cloud Run evidence remain required by the global v1 profile.\n\n"
+                        "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this registry-only release were verified by automation. Independent human review, cloud deployments, and external platform/device/provider evidence are deferred. No deployment target is claimed as verified.\n\n"
                         "This release is not `release_qualified`, fully evidence-gated, or independently reviewed."
                     )
                 else:

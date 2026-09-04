@@ -42,7 +42,6 @@ SINGLE_MAINTAINER_REQUIRED_CLAIMS: Mapping[str, tuple[str, ...]] = {
         for claim in CROSS.EXTERNAL_DOMAINS["public_registries"]
         if claim != "documentation_production_verified"
     ),
-    "cloud_deployments": ("compose_verified", "cloud_run_verified"),
     "supply_chain": CROSS.EXTERNAL_DOMAINS["supply_chain"],
 }
 SINGLE_MAINTAINER_DEFERRED = (
@@ -54,9 +53,7 @@ SINGLE_MAINTAINER_DEFERRED = (
     "firebase_app_check",
     "turnstile",
     "live_provider",
-    "cloud_deployments.aws_verified",
-    "cloud_deployments.fly_io_verified",
-    "cloud_deployments.cloudflare_containers_verified",
+    "cloud_deployments",
     "operational_resilience",
     "public_registries.documentation_production_verified",
     "mintlify_production",

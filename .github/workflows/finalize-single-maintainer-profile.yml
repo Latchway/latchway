@@ -165,7 +165,7 @@ jobs:
           path: ${{ runner.temp }}/authenticated/supply_chain
           run-id: ${{ inputs.supply_chain_run_id }}
           github-token: ${{ github.token }}
-      - name: Verify every signed subject and embedded deployment producer
+      - name: Verify every signed subject and the explicitly deferred deployment state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,6 +194,8 @@ jobs:
             .profile == "single_maintainer_v1" and .profile_status == "incomplete" and
             .candidate_commit == $commit and .tag == "v1.0.0" and
             .candidate_run == {run_id:$run,run_attempt:$attempt} and
+            .deployment_evidence == {} and
+            (.deferred_evidence | index("cloud_deployments") != null) and
             .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false}
           ' "$root/core/latchway-single-maintainer-v1.json" >/dev/null
           gh attestation verify "$root/core/latchway-candidate.json" \
@@ -201,27 +203,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-          for platform in compose cloud_run; do
-            gh attestation verify "$root/core/$platform.tar.gz" \
-              --bundle "$root/core/$platform.attestation.json" --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
-              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
-              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
-            run_id=$(jq --raw-output --arg platform "$platform" '.deployment_evidence[$platform].run_id' \
-              "$root/core/latchway-single-maintainer-v1.json")
-            attempt=$(jq --raw-output --arg platform "$platform" '.deployment_evidence[$platform].run_attempt' \
-              "$root/core/latchway-single-maintainer-v1.json")
-            [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$attempt" =~ ^[1-9][0-9]{0,5}$ ]]
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$root/run-authority/$platform-run.json"
-            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" '
-              .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and
-              .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt
-            ' "$root/run-authority/$platform-run.json" >/dev/null
-            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$root/run-authority/$platform-run.json")
-            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$root/run-authority/$platform-workflow.json"
-            jq --exit-status '.path == ".github/workflows/deployment-evidence.yml" and .state == "active"' \
-              "$root/run-authority/$platform-workflow.json" >/dev/null
-          done
           for domain in public_tags public_registries supply_chain; do
             gh attestation verify "$root/$domain/$domain.json" \
               --bundle "$root/$domain/$domain.attestation.sigstore.json" \
@@ -356,9 +337,6 @@ jobs:
           for domain in public_tags public_registries supply_chain; do
             cp -R "$authenticated/$domain/." "$external/"
           done
-          python3 scripts/finalize-release-profile.py derive-cloud-evidence \
-            --source-report "$authenticated/source/latchway-cross-repository.json" \
-            --core-handoff "$authenticated/core" --external-evidence-dir "$external"
           image=$(jq --raw-output .oci_image_digest "$authenticated/authority.json")
           set +e
           python3 scripts/cross-repo-conformance.py \
@@ -412,13 +390,11 @@ jobs:
             "$RUNNER_TEMP/latchway-single-maintainer-v1-final.json" \
             "$RUNNER_TEMP/authenticated/authority.json" "$output/"
           install -m 0600 -- \
-            "$RUNNER_TEMP/external-evidence/cloud_deployments.json" \
             "$RUNNER_TEMP/external-evidence/public_registries.json" \
             "$RUNNER_TEMP/external-evidence/public_tags.json" \
             "$RUNNER_TEMP/external-evidence/supply_chain.json" "$output/external/"
           (cd "$output" && sha256sum \
             authority.json \
-            external/cloud_deployments.json \
             external/public_registries.json \
             external/public_tags.json \
             external/supply_chain.json \
@@ -481,7 +457,7 @@ jobs:
           [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
           (( major > 2 || (major == 2 && minor >= 97) ))
           test -z "$(find "$authenticated" "$final" -type l -print -quit)"
-          test "$(find "$final" -type f | wc -l | tr -d ' ')" = 10
+          test "$(find "$final" -type f | wc -l | tr -d ' ')" = 9
           test "$(find "$final" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" = 1
           test -d "$final/external" && test ! -L "$final/external"
           (cd "$final" && sha256sum --strict --check SHA256SUMS)
@@ -495,7 +471,6 @@ jobs:
           authenticated = Path(sys.argv[2])
           expected_final = {
               "authority.json",
-              "external/cloud_deployments.json",
               "external/public_registries.json",
               "external/public_tags.json",
               "external/supply_chain.json",
@@ -570,7 +545,6 @@ jobs:
           starts = []
           finishes = []
           for domain in (
-              "cloud_deployments",
               "public_registries",
               "public_tags",
               "supply_chain",
@@ -719,10 +693,8 @@ jobs:
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main --deny-self-hosted-runners --format json \
             > "$RUNNER_TEMP/final-candidate-attestation.json"
-          # Compose and Cloud Run are authenticated through the closed core
-          # SHA256SUMS and record below. Both are signed by the sole OIDC-capable
-          # attest-handoff job; deployment-evidence has an unrelated cloud-auth
-          # OIDC job, so its workflow-level certificate is not used as authority.
+          # The closed core record below must retain an empty deployment evidence
+          # object and the profile-wide decision must keep that domain deferred.
           record="$final/latchway-single-maintainer-v1-final.json"
           projection="$final/latchway-single-maintainer-v1-projection.json"
           strict_report="$final/latchway-cross-repository-release-strict.json"
@@ -801,6 +773,8 @@ jobs:
             .release_policy.mode == "single_maintainer_v1" and
             .release_policy.independent_reviewer_required == false and
             .release_policy.strict_full_controls_satisfied == false and
+            .deployment_evidence == {} and
+            (.deferred_evidence | index("cloud_deployments") != null) and
             .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false} and
             .supply_chain == {license_scan_verified:true,multi_arch_image_verified:true,provenance_verified:true,sbom_verified:true,signature_verified:true,vulnerability_scan_verified:true}
           ' "$core_record" >/dev/null
@@ -808,21 +782,18 @@ jobs:
             ["independent_human_review","live_sdk_conformance","physical_devices",
              "apple_distribution_and_extensions","play_integrity_and_android_device",
              "firebase_app_check","turnstile","live_provider",
-             "cloud_deployments.aws_verified","cloud_deployments.fly_io_verified",
-             "cloud_deployments.cloudflare_containers_verified","operational_resilience",
+             "cloud_deployments","operational_resilience",
              "public_registries.documentation_production_verified","mintlify_production"] |
             map({id:.,status:"unverified",source:"release_profile_policy",reason:"deferred_by_profile"})
           ' > "$RUNNER_TEMP/expected-deferred.json"
           tags_sha=$(sha256sum "$final/external/public_tags.json" | cut -d' ' -f1)
           registries_sha=$(sha256sum "$final/external/public_registries.json" | cut -d' ' -f1)
-          cloud_sha=$(sha256sum "$final/external/cloud_deployments.json" | cut -d' ' -f1)
           supply_sha=$(sha256sum "$final/external/supply_chain.json" | cut -d' ' -f1)
           jq --null-input --sort-keys \
             --arg tags_sha "$tags_sha" --arg registries_sha "$registries_sha" \
-            --arg cloud_sha "$cloud_sha" --arg supply_sha "$supply_sha" \
+            --arg supply_sha "$supply_sha" \
             --slurpfile tags "$final/external/public_tags.json" \
             --slurpfile registries "$final/external/public_registries.json" \
-            --slurpfile cloud "$final/external/cloud_deployments.json" \
             --slurpfile supply "$final/external/supply_chain.json" '
             def gate($id;$required;$document;$sha):
               {id:$id,status:"passed",source:"external_evidence_document",details:{
@@ -835,11 +806,10 @@ jobs:
               {id:"source_conformance_passed",status:"passed",source:"cross_repository_release_report"},
               gate("public_tags";["remote_annotated_tags_verified","github_releases_verified"];$tags[0];$tags_sha),
               gate("public_registries";["oci_digest_verified","npm_javascript_verified","npm_react_native_verified","swift_package_verified","cocoapods_verified","maven_central_verified"];$registries[0];$registries_sha),
-              gate("cloud_deployments";["compose_verified","cloud_run_verified"];$cloud[0];$cloud_sha),
               gate("supply_chain";["multi_arch_image_verified","vulnerability_scan_verified","license_scan_verified","sbom_verified","signature_verified","provenance_verified"];$supply[0];$supply_sha),
               {id:"required_evidence_window",status:"passed",source:"external_evidence_documents",details:{
-                started_at:([$tags[0].started_at,$registries[0].started_at,$cloud[0].started_at,$supply[0].started_at] | min),
-                finished_at:([$tags[0].finished_at,$registries[0].finished_at,$cloud[0].finished_at,$supply[0].finished_at] | max),
+                started_at:([$tags[0].started_at,$registries[0].started_at,$supply[0].started_at] | min),
+                finished_at:([$tags[0].finished_at,$registries[0].finished_at,$supply[0].finished_at] | max),
                 maximum_age_seconds:604800}}
             ]
           ' > "$RUNNER_TEMP/expected-gates.json"
@@ -855,7 +825,7 @@ jobs:
             [empty("local_source";"passed"),empty("local_promotion";"failed"),empty("local_release";"passed"),
              empty("live_sdk_conformance";"unverified"),passed("public_tags";$tags[0];$tags_sha),
              empty("public_registries";"failed"),empty("physical_devices";"unverified"),
-             empty("live_provider";"unverified"),empty("cloud_deployments";"failed"),
+             empty("live_provider";"unverified"),empty("cloud_deployments";"unverified"),
              empty("operational_resilience";"unverified"),passed("supply_chain";$supply[0];$supply_sha)]
           ' > "$RUNNER_TEMP/expected-strict-domains.json"
           jq --null-input --sort-keys --arg image "$image" \
@@ -868,6 +838,7 @@ jobs:
               if $domain == "live_sdk_conformance" then "All SDKs passed live behavior against the exact release image."
               elif $domain == "physical_devices" then "Production App Attest and Play Integrity flows passed on required physical distributions."
               elif $domain == "live_provider" then "The bounded live-provider conformance suite passed."
+              elif $domain == "cloud_deployments" then "Compose and every claimed cloud deployment passed release-image smoke tests."
               else "Load, destructive failure, replica, recovery, and released upgrade gates passed." end),reason:"external_evidence_missing"};
             def partial($domain;$summary): {id:("external."+$domain),domain:$domain,required:true,status:"failed",summary:$summary,reason:"external_evidence_claims_invalid"};
             def passed($domain;$summary;$document;$sha): {id:("external."+$domain),domain:$domain,required:true,status:"passed",summary:$summary,details:{
@@ -889,7 +860,7 @@ jobs:
              passed("public_tags";"Remote annotated tags and GitHub releases were independently verified.";$tags[0];$tags_sha),
              partial("public_registries";"OCI, npm, Swift/CocoaPods, and Maven artifacts were independently verified."),
              missing("physical_devices"),missing("live_provider"),
-             partial("cloud_deployments";"Compose and every claimed cloud deployment passed release-image smoke tests."),
+             missing("cloud_deployments"),
              missing("operational_resilience"),
              passed("supply_chain";"The multi-architecture image, scans, SBOM, signature, and provenance were verified.";$supply[0];$supply_sha),
              {id:"promotion.evidence_window",domain:"local_promotion",required:true,status:"failed",
@@ -944,7 +915,7 @@ jobs:
             .independently_reviewed == false and .requires_independent_human_review == false and
             .candidate == {core_commit:$commit,release_tag:"v1.0.0",oci_image_digest:$image} and
             .authority == {policy_id:"latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing",inputs:$authority[0].inputs} and
-            (.input_digests | keys | sort) == ["authority_manifest","external_cloud_deployments","external_public_registries","external_public_tags","external_supply_chain","profile_evaluation","profile_release_report","strict_release_report"] and
+            (.input_digests | keys | sort) == ["authority_manifest","external_public_registries","external_public_tags","external_supply_chain","profile_evaluation","profile_release_report","strict_release_report"] and
             .required_gates == $gates[0] and .deferred_evidence == $deferred[0] and
             .forbidden_claims == ["release_qualified","fully_evidence_gated","independently_reviewed"]
           ' "$record" >/dev/null
@@ -1061,32 +1032,11 @@ jobs:
           validate_domain public_tags '["github_releases_verified","remote_annotated_tags_verified"]'
           validate_domain public_registries '["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
           validate_domain supply_chain '["license_scan_verified","multi_arch_image_verified","provenance_verified","sbom_verified","signature_verified","vulnerability_scan_verified"]'
-          cloud="$final/external/cloud_deployments.json"
-          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
-            --slurpfile source "$authenticated/source/latchway-cross-repository.json" '
-            (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
-            .schema_version == 1 and .kind == "latchway_cross_repository_external_evidence" and
-            .domain == "cloud_deployments" and .status == "passed" and
-            .core_commit == $commit and .core_release == $source[0].contract.core_release and
-            .contract_version == $source[0].contract.version and
-            .bundle_sha256 == $source[0].contract.bundle_sha256 and
-            .oci_image_digest == $image and .claims == {cloud_run_verified:true,compose_verified:true} and
-            .repositories == ([$source[0].repositories[] |
-              {key:.id,value:{commit:.commit,tag:.intended_tag,version:.version}}] | from_entries) and
-            ([.artifacts[].path] | sort) == ["artifacts/single-maintainer-cloud/SHA256SUMS","artifacts/single-maintainer-cloud/cloud_run.attestation.json","artifacts/single-maintainer-cloud/cloud_run.tar.gz","artifacts/single-maintainer-cloud/compose.attestation.json","artifacts/single-maintainer-cloud/compose.tar.gz","artifacts/single-maintainer-cloud/latchway-single-maintainer-v1.json"]
-          ' "$cloud" >/dev/null
-          while IFS=$'\t' read -r relative expected_sha; do
-            name=${relative#artifacts/single-maintainer-cloud/}
-            [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
-            artifact="$authenticated/core/$name"
-            test -f "$artifact" && test ! -L "$artifact"
-            test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "$expected_sha"
-          done < <(jq --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$cloud")
           test "$(jq --raw-output .input_digests.authority_manifest "$record")" = "$(sha256sum "$authority" | cut -d' ' -f1)"
           test "$(jq --raw-output .input_digests.strict_release_report "$record")" = "$(sha256sum "$strict_report" | cut -d' ' -f1)"
           test "$(jq --raw-output .input_digests.profile_release_report "$record")" = "$(sha256sum "$profile_report" | cut -d' ' -f1)"
           test "$(jq --raw-output .input_digests.profile_evaluation "$record")" = "$(sha256sum "$projection" | cut -d' ' -f1)"
-          for domain in cloud_deployments public_registries public_tags supply_chain; do
+          for domain in public_registries public_tags supply_chain; do
             test "$(jq --raw-output --arg domain "$domain" '.input_digests["external_" + $domain]' "$record")" = \
               "$(sha256sum "$final/external/$domain.json" | cut -d' ' -f1)"
           done

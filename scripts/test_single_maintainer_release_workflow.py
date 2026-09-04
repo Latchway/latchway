@@ -27,7 +27,7 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
         self.jobs = self.workflow["jobs"]
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_inputs_are_exact_candidate_compose_and_cloud_run_only(self) -> None:
+    def test_inputs_are_exact_candidate_only(self) -> None:
         inputs = self.workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertEqual(
             set(inputs),
@@ -35,10 +35,6 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
                 "candidate_commit",
                 "candidate_run_id",
                 "candidate_run_attempt",
-                "compose_run_id",
-                "compose_run_attempt",
-                "cloud_run_run_id",
-                "cloud_run_run_attempt",
             },
         )
         self.assertTrue(all(item["required"] for item in inputs.values()))
@@ -46,6 +42,14 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             self.assertNotIn(f"{deferred}_run_id", inputs)
         self.assertIn('tag=v1.0.0', self.text)
         self.assertNotIn("inputs.intended_tag", self.text)
+        for forbidden in (
+            "inputs.compose_run_id",
+            "inputs.cloud_run_run_id",
+            "compose.tar.gz",
+            "cloud_run.tar.gz",
+            ".github/workflows/deployment-evidence.yml",
+        ):
+            self.assertNotIn(forbidden, self.text)
 
     def test_strict_workflow_is_not_called_or_weakened(self) -> None:
         self.assertNotIn("promote-release.yml", self.text)
@@ -61,7 +65,6 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
                 "semantic-handoff",
                 "supply-chain",
                 "attest-handoff",
-                "immutable-release-settings",
                 "stage-release",
                 "promote-oci",
                 "publish-release",
@@ -110,58 +113,9 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             )
         for name in ("source-gate", "plan", "semantic-handoff", "supply-chain"):
             self.assertNotIn("write", self.jobs[name]["permissions"].values())
-        administration = self.jobs["immutable-release-settings"]
-        self.assertEqual(
-            administration["environment"],
-            "single-maintainer-v1-administration",
-        )
-        self.assertEqual(administration["permissions"], {})
-        first = administration["steps"][0]
-        self.assertEqual(
-            first["env"]["OBSERVED_POLICY_ID"],
-            "${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}",
-        )
-        self.assertIn(
-            "latchway-release-profile-v1:latchway:single_maintainer_v1:administration",
-            first["run"],
-        )
-        self.assertEqual(
-            administration["steps"][1]["env"][
-                "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
-            ],
-            "${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}",
-        )
-        settings_script = administration["steps"][1]["run"]
-        for repository in (
-            "Latchway/latchway",
-            "Latchway/latchway-js",
-            "Latchway/latchway-ios-sdk",
-            "Latchway/latchway-android",
-            "Latchway/latchway-react-native-sdk",
-        ):
-            self.assertEqual(
-                len(
-                    re.findall(
-                        rf"^\s*{re.escape(repository)}(?: \\|; do)$",
-                        settings_script,
-                        flags=re.MULTILINE,
-                    )
-                ),
-                1,
-            )
-        self.assertIn('(( major > 2 || (major == 2 && minor >= 97) ))', settings_script)
-        self.assertIn(
-            '(keys | sort) == ["enabled","enforced_by_owner"]',
-            settings_script,
-        )
-        self.assertIn('.enabled == true', settings_script)
-        self.assertIn('(.enforced_by_owner | type) == "boolean"', settings_script)
-        self.assertFalse(
-            any(
-                step.get("uses", "").startswith("actions/checkout@")
-                for step in administration["steps"]
-            )
-        )
+        self.assertNotIn("immutable-release-settings", self.jobs)
+        self.assertNotIn("single-maintainer-v1-administration", self.text)
+        self.assertNotIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", self.text)
 
     def test_source_free_handoff_is_stable_attested_and_reverified(self) -> None:
         artifact_name = "latchway-single-maintainer-v1-handoff-${{ github.run_id }}"
@@ -184,7 +138,7 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             set(self.jobs["stage-release"]["needs"]),
-            {"plan", "attest-handoff", "immutable-release-settings"},
+            {"plan", "attest-handoff"},
         )
         for name in ("stage-release", "promote-oci", "publish-release"):
             script = "\n".join(
@@ -254,6 +208,9 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn('([.artifacts[].path] | sort)', attestor_text)
         self.assertIn('.deferred_evidence == [', attestor_text)
+        self.assertIn('.deployment_evidence == {}', attestor_text)
+        self.assertIn('"cloud_deployments"', attestor_text)
+        self.assertNotIn('"cloud_deployments.aws_verified"', attestor_text)
         self.assertIn('.release_policy == {', attestor_text)
         self.assertIn('jq --exit-status --raw-output ".assets[]', attestor_text.replace("'", '"'))
 
@@ -266,19 +223,17 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
                 "semantic-handoff",
                 "supply-chain",
                 "attest-handoff",
-                "immutable-release-settings",
             )
             for step in self.jobs[name]["steps"]
         )
         for value in (
             "authenticate exact producer runs",
-            "Verify candidate Compose and Cloud Run attestations",
+            "Verify the candidate attestation",
             "Run local core and additive release gates",
-            "Re-run complete candidate and deployment semantics",
+            "Re-run complete candidate semantics",
             "Verify exact multi-architecture digest signature provenance and SBOMs",
             "Retain only the verified source-free mutation handoff",
             "Attest the exact source-free core publication handoff",
-            "Preflight immutable-release settings for the complete product",
         ):
             self.assertIn(value, all_preflight_names)
         stage_names = [step.get("name", "") for step in self.jobs["stage-release"]["steps"]]

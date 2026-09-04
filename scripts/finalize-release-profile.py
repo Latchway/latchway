@@ -18,7 +18,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
-import shutil
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -93,7 +92,7 @@ STRICT_DOMAIN_STATUS = {
     "public_registries": "failed",
     "physical_devices": "unverified",
     "live_provider": "unverified",
-    "cloud_deployments": "failed",
+    "cloud_deployments": "unverified",
     "operational_resilience": "unverified",
     "supply_chain": "passed",
 }
@@ -102,10 +101,11 @@ STRICT_MISSING_DOMAINS = frozenset(
         "live_sdk_conformance",
         "physical_devices",
         "live_provider",
+        "cloud_deployments",
         "operational_resilience",
     )
 )
-STRICT_PARTIAL_DOMAINS = frozenset(("public_registries", "cloud_deployments"))
+STRICT_PARTIAL_DOMAINS = frozenset(("public_registries",))
 STRICT_PASSED_EXTERNAL_DOMAINS = frozenset(("public_tags", "supply_chain"))
 PROFILE_REPORT_NAME = "latchway-single-maintainer-v1-profile-input.json"
 STRICT_REPORT_NAME = "latchway-cross-repository-release-strict.json"
@@ -675,7 +675,6 @@ def derive_profile_report(args: argparse.Namespace) -> dict[str, Any]:
 
 def validate_authenticated_external_inputs(
     authority_inputs: Mapping[str, Mapping[str, Any]],
-    authenticated_root: Path,
     external_evidence_dir: Path,
 ) -> None:
     for domain in ("public_tags", "public_registries", "supply_chain"):
@@ -683,33 +682,8 @@ def validate_authenticated_external_inputs(
         require_file(actual)
         if sha256_file(actual) != authority_inputs[domain]["sha256"]:
             raise FinalizationError("external_evidence_authority_mismatch")
-
-    cloud = read_json(external_evidence_dir / "cloud_deployments.json")
-    artifacts = cloud.get("artifacts")
-    expected_names = (
-        "SHA256SUMS",
-        "cloud_run.attestation.json",
-        "cloud_run.tar.gz",
-        "compose.attestation.json",
-        "compose.tar.gz",
-        "latchway-single-maintainer-v1.json",
-    )
-    if (
-        not isinstance(artifacts, list)
-        or sorted(item.get("path") for item in artifacts if isinstance(item, dict))
-        != [f"artifacts/single-maintainer-cloud/{name}" for name in expected_names]
-    ):
-        raise FinalizationError("cloud_evidence_artifacts_invalid")
-    by_path = {item["path"]: item for item in artifacts}
-    for name in expected_names:
-        relative = f"artifacts/single-maintainer-cloud/{name}"
-        item = by_path[relative]
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"path", "sha256"}
-            or item["sha256"] != sha256_file(authenticated_root / "core" / name)
-        ):
-            raise FinalizationError("cloud_evidence_authority_mismatch")
+    if (external_evidence_dir / "cloud_deployments.json").exists():
+        raise FinalizationError("deferred_cloud_evidence_present")
 
 
 def validate_authenticated_core_handoff(
@@ -722,22 +696,13 @@ def validate_authenticated_core_handoff(
     coordinates = validate_source_report(source)
     core = authenticated_root / "core"
     record = read_json(core / "latchway-single-maintainer-v1.json")
-    deployments = record.get("deployment_evidence")
-    if not isinstance(deployments, dict):
+    if record.get("deployment_evidence") != {}:
         raise FinalizationError("core_release_record_invalid")
     try:
-        compose = deployments["compose"]
-        cloud_run = deployments["cloud_run"]
-        if not isinstance(compose, dict) or not isinstance(cloud_run, dict):
-            raise TypeError
         verify_args = SimpleNamespace(
             candidate_commit=coordinates["core"]["commit"],
             candidate_run_id=str(authority_inputs["candidate"]["run_id"]),
             candidate_run_attempt=str(authority_inputs["candidate"]["run_attempt"]),
-            compose_run_id=str(compose["run_id"]),
-            compose_run_attempt=str(compose["run_attempt"]),
-            cloud_run_run_id=str(cloud_run["run_id"]),
-            cloud_run_run_attempt=str(cloud_run["run_attempt"]),
             handoff_directory=core,
         )
         verified = SINGLE.verify_handoff(verify_args, now)
@@ -762,113 +727,6 @@ def validate_authenticated_core_handoff(
         raise FinalizationError("core_release_record_invalid")
 
 
-def derive_cloud_evidence(args: argparse.Namespace) -> dict[str, Any]:
-    source = read_json(args.source_report)
-    coordinates = validate_source_report(source)
-    core = args.core_handoff
-    record = read_json(core / "latchway-single-maintainer-v1.json")
-    candidate_run = record.get("candidate_run")
-    deployments = record.get("deployment_evidence")
-    if not isinstance(candidate_run, dict) or not isinstance(deployments, dict):
-        raise FinalizationError("core_release_record_invalid")
-    try:
-        verify_args = SimpleNamespace(
-            candidate_commit=coordinates["core"]["commit"],
-            candidate_run_id=str(candidate_run["run_id"]),
-            candidate_run_attempt=str(candidate_run["run_attempt"]),
-            compose_run_id=str(deployments["compose"]["run_id"]),
-            compose_run_attempt=str(deployments["compose"]["run_attempt"]),
-            cloud_run_run_id=str(deployments["cloud_run"]["run_id"]),
-            cloud_run_run_attempt=str(deployments["cloud_run"]["run_attempt"]),
-            handoff_directory=core,
-        )
-        verified = SINGLE.verify_handoff(verify_args, args.evaluation_time)
-    except (KeyError, TypeError, SINGLE.ReleaseError) as error:
-        raise FinalizationError(
-            getattr(error, "code", "core_release_record_invalid")
-        ) from None
-    if verified != record or record.get("profile") != PROFILE:
-        raise FinalizationError("core_release_record_invalid")
-    image = record.get("image", {}).get("coordinate")
-    if not isinstance(image, str) or CROSS.OCI_IMAGE_DIGEST.fullmatch(image) is None:
-        raise FinalizationError("core_release_image_invalid")
-    candidate = read_json(core / "latchway-candidate.json")
-    if (
-        candidate.get("candidate_commit") != coordinates["core"]["commit"]
-        or image
-        != f"{candidate.get('image', {}).get('repository')}@{candidate.get('image', {}).get('index_digest')}"
-    ):
-        raise FinalizationError("core_release_candidate_mismatch")
-
-    output = args.external_evidence_dir
-    if not output.is_absolute() or not output.is_dir() or output.is_symlink():
-        raise FinalizationError("external_evidence_directory_invalid")
-    document_path = output / "cloud_deployments.json"
-    artifact_root = output / "artifacts" / "single-maintainer-cloud"
-    if document_path.exists() or artifact_root.exists():
-        raise FinalizationError("cloud_evidence_output_exists")
-    artifact_root.mkdir(parents=True, mode=0o700)
-    copied: list[dict[str, str]] = []
-    for name in (
-        "latchway-single-maintainer-v1.json",
-        "SHA256SUMS",
-        "compose.tar.gz",
-        "compose.attestation.json",
-        "cloud_run.tar.gz",
-        "cloud_run.attestation.json",
-    ):
-        source_path = core / name
-        require_file(source_path, 64 * 1024 * 1024)
-        destination = artifact_root / name
-        shutil.copyfile(source_path, destination)
-        destination.chmod(0o600)
-        copied.append(
-            {
-                "path": f"artifacts/single-maintainer-cloud/{name}",
-                "sha256": sha256_file(destination),
-            }
-        )
-    times: list[datetime] = []
-    for platform in ("compose", "cloud_run"):
-        try:
-            values, _ = SINGLE.read_archive(core / f"{platform}.tar.gz")
-            capture = SINGLE.decode_json_bytes(
-                values["manifest.json"], "deployment_manifest_invalid"
-            )
-        except SINGLE.ReleaseError as error:
-            raise FinalizationError(error.code) from None
-        times.extend(
-            (
-                parse_time(capture.get("started_at"), "cloud_evidence_time_invalid"),
-                parse_time(capture.get("finished_at"), "cloud_evidence_time_invalid"),
-            )
-        )
-    earliest, latest = min(times), max(times)
-    if earliest >= latest or latest > args.evaluation_time:
-        raise FinalizationError("cloud_evidence_time_invalid")
-    identity = {
-        "core_commit": coordinates["core"]["commit"],
-        "core_release": coordinates["core"]["tag"],
-        "contract_version": candidate["contract"]["version"],
-        "bundle_sha256": candidate["contract"]["bundle_sha256"],
-        "oci_image_digest": image,
-        "repositories": coordinates,
-    }
-    document = {
-        "schema_version": 1,
-        "kind": "latchway_cross_repository_external_evidence",
-        "domain": "cloud_deployments",
-        "status": "passed",
-        "started_at": CROSS.format_timestamp(earliest),
-        "finished_at": CROSS.format_timestamp(latest),
-        **identity,
-        "claims": {"compose_verified": True, "cloud_run_verified": True},
-        "artifacts": sorted(copied, key=lambda item: item["path"]),
-    }
-    write_json(document_path, document)
-    return document
-
-
 def finalize_profile(args: argparse.Namespace) -> dict[str, Any]:
     authenticated_root = require_real_directory(
         args.authenticated_root, "authenticated_root_invalid"
@@ -888,7 +746,7 @@ def finalize_profile(args: argparse.Namespace) -> dict[str, Any]:
         args.external_evidence_dir, "external_evidence_directory_invalid"
     )
     validate_authenticated_external_inputs(
-        authority_inputs, authenticated_root, external_root
+        authority_inputs, external_root
     )
     validate_authenticated_core_handoff(
         source,
@@ -1025,14 +883,6 @@ def evaluation_time(value: str | None) -> datetime:
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     commands = value.add_subparsers(dest="command", required=True)
-    derive = commands.add_parser(
-        "derive-cloud-evidence",
-        help="derive the profile cloud domain from the authenticated core handoff",
-    )
-    derive.add_argument("--source-report", type=Path, required=True)
-    derive.add_argument("--core-handoff", type=Path, required=True)
-    derive.add_argument("--external-evidence-dir", type=Path, required=True)
-    derive.add_argument("--evaluation-time")
     project = commands.add_parser(
         "derive-profile-report",
         help="derive the exact profile-local input while retaining the failed strict report",
@@ -1056,17 +906,13 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     arguments = parser().parse_args()
-    if arguments.command == "derive-cloud-evidence":
-        arguments.evaluation_time = evaluation_time(arguments.evaluation_time)
-    elif arguments.command == "finalize":
+    if arguments.command == "finalize":
         # Authenticated readiness is always evaluated against the current clock.
         # A caller-provided historical time could otherwise make stale evidence
         # appear eligible outside the fresh no-checkout workflow signer.
         arguments.evaluation_time = evaluation_time(None)
     try:
-        if arguments.command == "derive-cloud-evidence":
-            result = derive_cloud_evidence(arguments)
-        elif arguments.command == "derive-profile-report":
+        if arguments.command == "derive-profile-report":
             result = derive_profile_report(arguments)
         else:
             result = finalize_profile(arguments)
