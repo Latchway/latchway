@@ -1,6 +1,6 @@
 # Implementation status
 
-Status date: 2026-09-03
+Status date: 2026-09-04
 
 Latchway version 1 product source is complete at the validated implementation
 checkpoint. Core and all four final SDK heads are delivered to `main`.
@@ -59,20 +59,31 @@ distribution, Android hardware, delegated runtime
 execution, live-provider exact-image, cloud, resilience, protected registry
 supply-chain, publication, and post-publication domains remain open.
 
+The chosen first-publication scope is intentionally narrower than the original
+A-to-Z version 1 Definition of Done. `single_maintainer_v1` requires the exact
+GHCR and package publications, multi-architecture supply-chain evidence, and
+Docker Compose plus Google Cloud Run observations. It explicitly defers the
+independent reviewer, Apple/Android/browser/provider evidence, AWS, Fly.io,
+Cloudflare Containers, operational-resilience drills, and Mintlify production
+receipt. A passing profile may authorize those lower-assurance public bytes;
+it does not complete the original strict Definition of Done or support a
+production-ready, fully-evidence-gated, independently reviewed, or
+`release-qualified` claim.
+
 ## Required execution checkpoint
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; the selected profile's 13 authorized environment policies and npm/native publishing identities are configured. Candidate load verification, publication, and protected exact-image deployment remain open |
-| Current objective | Execute the explicit `single_maintainer_v1` launch profile: publish the exact GHCR/npm/SwiftPM/CocoaPods/Maven coordinates, pass supply-chain verification, and verify Docker Compose plus Google Cloud Run. Strict independent review and the other external domains remain deferred and unverified. |
+| Current phase | Phase 9: core and the four final SDK source heads are delivered to `main`; the selected profile's 13 authorized environment policies and npm/native publishing identities are configured. Protected candidate `86dae658676e7187a8db6a0deda3f8429ca6ab76` passed verification and failed isolated load. Its pool-starvation remediation is under final local validation; publication and protected exact-image deployment remain open. |
+| Current objective | Pass the unchanged local and protected load gates with the bounded regular/completion pool design, then execute the explicit `single_maintainer_v1` launch profile: publish the exact GHCR/npm/SwiftPM/CocoaPods/Maven coordinates, pass supply-chain verification, and verify Docker Compose plus Google Cloud Run. Strict independent review and the other external domains remain deferred and unverified. |
 | Validated implementation coordinates | Contract `cd47229eac32f4a93a0779903d927526b77817d6`; core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005`; JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
 | Protocol contract version | Released `1.0.0` at `2026-09-01T20:25:00Z`; wire protocol `2`; contract source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Database schema version | Current runtime source includes `29`; the frozen contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` remains `28`, and historical checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` remains `27` |
-| Last full test time | `2026-09-03` — core `8bf4d9dede1490c3129f7f745f1017875bd4a005` passed 423 Python release/workflow tests, generated documentation validation, actionlint, `go vet ./...`, and complete uncached `go test -count=1 ./...`; the frozen runtime checkpoint continues to carry the earlier full `make check` and PostgreSQL 15/18 gates. JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests (105 pass and one skip), actionlint, and the unchanged 665-actionable-task Gradle source gate. React Native `ba23c750ec662834b4d480940c4067508723defb` passed full `pnpm check`: 103 Vitest, 62 Node, 19 Python, 8 dependency-scan tests, TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4, external SwiftPM consumer, and all four CocoaPods lints. Its patched MacPaw 0.5.1 verifier separately passed 213/213 upstream tests plus the positive transport/cancellation probe. |
+| Last full test time | `2026-09-04` — the current uncommitted successor based on `86dae658676e7187a8db6a0deda3f8429ca6ab76` passed integrated `mise exec -- make check`: generated SQL, workflow lint, Go vet and all Go packages against local PostgreSQL 18, all 548 Python release/workflow tests, Console ESLint, Admin API generation, both TypeScript checks, all 292 Vitest cases, deterministic production build verification, and 37 Playwright cases across Chromium, Firefox, WebKit, and mobile WebKit with the one real-stack-only case intentionally skipped. Complete uncached `go test -count=1 ./...`, `go test -race -count=1 ./...`, and every Makefile fuzz-smoke target also pass against PostgreSQL 18. Image and unchanged local/protected load gates remain pending. The four SDK coordinates retain their recorded complete gates below. |
 | Passing test commands | Verified commands and required working directories are listed below |
-| Open blockers | For the selected single-maintainer launch profile: exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
+| Open blockers | For the selected single-maintainer launch profile: an unchanged passing protected load gate, exact GHCR/npm/SwiftPM/CocoaPods/Maven publication, immutable tags and GitHub releases, multi-architecture supply-chain receipts, and exact-image Docker Compose plus Google Cloud Run observations. Independent review, Mintlify production, Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers, and operational-resilience observations are deferred rather than passed. |
 | External credentials still required | The signed-in GitHub browser session successfully configured the authorized environments; the stored API credential still lacks Administration write. All five inert npm namespace publications and exact trusted-publisher grants are complete. The approved CocoaPods token is installed only in the iOS `single-maintainer-v1` environment; the Maven signing key/passphrase are installed only in Android `single-maintainer-v1-signing`, with the public fingerprint bound in Android's signing, Maven, and verification environments. Sonatype verified `dev.latchway` under Latchway on 2026-09-03. After separate explicit approval, one account-wide publishing token was created with expiration 2026-10-03; exactly its username/password secrets are installed in Android `single-maintainer-v1-maven`. Independent metadata/policy read-back passed. The updated disposable GCP identity passes all tested setup/evidence/cleanup permission checks for project `latchway`; protected short-lived workload identity configuration and deployment setup remain outstanding. The owner authorizes a disposable `asia-southeast1` verification stack only in `latchway`, at most two hours and $10, with cleanup of resources created for the test. No billable stack starts before a verified candidate image. A distinct reviewer and the Apple, Play, Turnstile, other-cloud, collector, and Mintlify identities are required only when completing the deferred strict profile. |
-| Next executable task | Diagnose candidate load failures without relaxing the gates, publish and verify the passing candidate GHCR image and registry coordinates, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
+| Next executable task | Finish the local full/race/image/load rerun for the pool-remediation candidate, push its audited history, and run the protected candidate workflow without relaxing any threshold. Only after it passes, publish and verify the candidate GHCR coordinates, retain scans/SBOM/signature/provenance, then run Docker Compose and Google Cloud Run against that exact digest and evaluate `single_maintainer_v1` without making a strict-assurance claim. |
 
 ### Validated version 1 source coordinates
 
@@ -172,6 +183,27 @@ mise exec -- make fuzz-smoke
 The real PostgreSQL Admin, session, App Attest, configuration, lifecycle, and
 lock-order suites also pass against the frozen implementation checkpoint.
 
+On 2026-09-04, the current uncommitted pool-remediation and Console successor
+also passed these separate gates:
+
+```sh
+go test -count=1 ./...
+go test -race -count=1 ./...
+GOCACHE=/private/tmp/latchway-gocache-fuzz-20260904 make fuzz-smoke
+python3 -m unittest discover -s scripts -p 'test_*.py'
+(cd web/console && ./node_modules/.bin/eslint .)
+(cd web/console && ./node_modules/.bin/tsc --noEmit)
+(cd web/console && ./node_modules/.bin/tsc -p tsconfig.node.json --noEmit)
+(cd web/console && ./node_modules/.bin/vitest run)
+```
+
+The Go suites used local PostgreSQL 18. The final integrated gate ran all 548
+Python tests with loopback permission and passed. Console Vitest passed
+292/292, its deterministic production build verified, and its browser suite
+passed 37 cases across Chromium, Firefox, WebKit, and mobile WebKit with the
+real-stack-only case intentionally skipped. Image and unchanged local/protected
+load reruns remain required on the committed successor.
+
 ## Candidate snapshot
 
 | Field | Current value |
@@ -197,18 +229,81 @@ released checkpoint and reproducible bundle above.
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including a generic component App Attest step-up protocol and bounded CEL request context whose feature/protocol are immutable-server bound; the CEL `request.estimated_input_tokens` fact remains untrusted, while production hard `input_tokens`/`total_tokens` and input-priced cost enforcement use a server-owned preflight bound tied to the exact post-rewrite body and selected physical model; quota snapshots fail closed when required request-size policy facts are unavailable. Calendar, token-bucket, and aggregate per-request `upstream_attempts` limits charge each physical dispatch atomically while `logical_requests` remains once per request. Cost retry treatment defaults to all actual attempts; user `initial_attempt_only` allowances require paired organization-only actual-attempt accounting. Current lifecycle transactions explicitly use `READ COMMITTED` and consistent application→environment→family/component lock order, closing root-challenge, App Attest post-disable insertion, configuration, family/component deadlock, retry replay, and excess-attempt races under real PostgreSQL tests. | Exact-candidate rerun and protected observations |
 | Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; opaque HTTP now has pairwise-disjoint exact-depth path templates while retaining the prior segment-bound `pathPrefixes` mode for existing v1 revisions; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
 | Weighted/sticky routing, fallback, retry, accounting | Complete; the clean local source load suite and all nine automated failure scenarios pass at the implementation checkpoint | Protected exact-image load and destructive-failure evidence |
-| Admin API, CLI, dashboard, wizard, request/usage/audit views | The frozen checkpoint includes redaction-safe audit filtering/detail, a shared doctor/support-bundle contract, the exact `latchway test-upstream serve` fixture command, separate first-byte/first-token request timestamps, canonical Admin-session inventory/revoke across API, CLI, and Console, negotiated server capabilities and read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect, polling fallback, and no row data. The Usage plans task links operators to the server-resolved Users effective-limit inspector instead of presenting a stale endpoint limitation. Complete local core gates pass. | Protected deployment operator acceptance |
+| Admin API, CLI, dashboard, wizard, request/usage/audit views | The frozen checkpoint includes redaction-safe audit filtering/detail, a shared doctor/support-bundle contract, the exact `latchway test-upstream serve` fixture command, separate first-byte/first-token request timestamps, canonical Admin-session inventory/revoke across API, CLI, and Console, negotiated server capabilities and read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect, polling fallback, and no row data. The successor adds a bounded, unauthenticated `latchway readiness` command that accepts only the exact seven-check `/readyz` success contract and never echoes response or transport detail. Its first-run wizard now requires exact canonical-template resumption, binds active-revision and self-test evidence to the selected endpoint, fails closed on revision drift, gates secret-bearing setup on `manage_secrets`, generates platform-specific native examples, and remounts task state when application/environment changes. Console ESLint, both TypeScript checks, 292/292 unit tests, and 37 browser cases across four browser profiles pass; the real-stack-only browser case remains intentionally opt-in. | Protected deployment operator acceptance and final integrated core gate |
 | Native/Web trust verifiers and component proof | Complete in source; a historical development-signed physical React Native iOS root run passed production App Attest registration and same-key assertion, the current source adds a Debug-only native App Intent delegated-request path, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical invocation of the current Debug App Intent path, protected extension matrix, physical Play Integrity, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passed the full package/browser gate and 71 offline release tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passed 106 offline release tests and its unchanged full 665-actionable-task Gradle gate. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passed 65 offline release tests, 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), external SwiftPM consumer, and all four CocoaPods lints. | Physical proof where applicable, protected exact-candidate evidence, tags, and publication |
-| React Native SDK | Successor commit `ba23c750ec662834b4d480940c4067508723defb` passes 103 Vitest, 62 Node, 19 Python, and 8/8 dependency-scan tests plus TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. It pins JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`, Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`, and Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; `Package.swift` and `Package.resolved` automatically enforce the same iOS revision. Its lower-assurance workflow remains fail-closed until the live policy environment is explicitly authorized and configured. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Hosted replay rejection; operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution, extension-matrix, and native-isolation proof; physical Android/Google Play proof; protected controls/evidence, tags, and publication |
+| React Native SDK | Successor commit `ba23c750ec662834b4d480940c4067508723defb` passes 103 Vitest, 62 Node, 19 Python, and 8/8 dependency-scan tests plus TypeScript/build/codegen, deterministic iOS/Android bundles, and native-boundary checks. It pins JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`, Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`, and Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; `Package.swift` and `Package.resolved` automatically enforce the same iOS revision. Its lower-assurance environment and policy sentinel are configured; the workflow remains fail-closed until protected release evidence authenticates the exact tuple. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning, App Attest and Keychain entitlement, registered-device, install, and launch checks without new App Attest or App Intent execution. The physical path was not rerun at the current successor. The Release fixture has no Latchway request path and fails closed. Historical commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` remains the live root-app App Attest proof. | Hosted replay rejection; operator-deferred physical invocation of the Debug App Intent path; protected Apple distribution, extension-matrix, and native-isolation proof; physical Android/Google Play proof; protected evidence, tags, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware, schema 25 hardens ephemeral challenges and browser Origin, schema 26 records logical-request decision stages, and schema 27 supports bounded audit operations; doctor exposes redaction-safe revision, connectivity, job, replica, key-ID consistency, and capacity diagnostics, and scheduled self-tests retain the bounded `run_scheduled_self_test` job label instead of collapsing to `other` | Protected exact-image drills |
-| Cloud and supply-chain workflows | Complete and statically/dry-run validated. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
+| Cloud and supply-chain workflows | Complete and statically/dry-run validated. The selected first-publication scope uses GHCR, then exact-image Docker Compose and manual-first Google Cloud Run in project `latchway`; Terraform is optional for the GCP operator path. Cloudflare Container evidence now follows the provider's bounded application cursor directly, rejects malformed, duplicate, repeated-cursor, and oversized results, and retains the prior scoped-token boundary instead of relying on Wrangler's one-page JSON listing. | Registry digests, scans, SBOM, signature, provenance, and Compose/Cloud Run smokes; AWS, Fly.io, and Cloudflare Containers are deferred under the selected profile |
 | Release controls | The closed strict desired-state manifest covers six repositories, 51 protected environments, exact main/tag rulesets, and five npm trusted-publisher tuples. `latchway-docs` uniquely requires CODEOWNERS review, one approval, and a written docs-not-required check; product repositories retain the no-source-review release model. The additive `single_maintainer_v1` environments and sentinels preserve a visibly lower-assurance path. Offline validation passes. After the initial API permission failure, all 13 owner-authorized reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels were configured through the signed-in browser on 2026-09-03. The five npm namespaces and exact selected-profile trusted publishers are verified. Separately authorized CocoaPods/signing secrets and fingerprint variables are installed only in their approved environments. Sonatype namespace verification and the one-month token's two exact Maven-environment secrets are complete, with independent metadata/policy verification. | Passing candidate load verification, protected GCP workload identity setup, and exact-candidate publication remain open. No strict ruleset application is claimed. A distinct reviewer and strict two-stage reconciliation remain deferred. |
 | Mintlify public docs | This canonical tree imports the four final reproducible bundles and retains task-oriented deployment comparison, release-image verification, and the completed Cloud Run/Cloudflare runbooks. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Configure `docs.latchway.dev`, deploy through protected controls, and seal post-deploy evidence |
 
 ## Local source evidence
 
+- Protected release-candidate run `33755044849`, attempt `1`, at exact source
+  `86dae658676e7187a8db6a0deda3f8429ca6ab76` passed the complete verification
+  job on a PostgreSQL-backed runner and then failed the isolated, unchanged
+  load acceptance gates. Image construction, candidate publication and signing
+  were skipped. The sanitized archive from job `100652486937`, artifact
+  `9894012731`, has SHA-256
+  `88f75a3a90d1d986704faf4c074209ae5f8686cd5c8b10cb4cab76ad6e6c3bb4`.
+  Preflight, idle RSS (`178.172 MiB`) and the `64` accepted / `64` denied
+  contention proof passed with zero overspend. Overhead p50/p95/p99 was
+  `20.592 / 116.855 / 214.505 ms` against `15 / 20 / 30 ms`. Of `6,000`
+  non-stream requests, `2,912` returned HTTP 200 and `3,088` returned the
+  structured `server_not_ready` HTTP 503 response; completion took `86.751 s`
+  and p50/p95/p99 was `22.006 / 42.822 / 43.867 s`. The terminal snapshot
+  retained `1,683` pending reservations and incomplete authenticated,
+  dispatched and streaming lifecycles. PostgreSQL reached `33` backends, `32`
+  active and `31` blocked on tuple/transaction-ID waits while the gateway used
+  its full shared 32-connection pool. All `500` SSE streams established without
+  premature closure; RSS growth `107.895 MiB` stayed below `128 MiB`, but the
+  held-window slope `91.944 MiB/min` exceeded `5 MiB/min`, so exact terminal
+  stream accounting did not pass. The gateway RSS rose from `205.469` to
+  `328.031 MiB` while anonymous huge pages rose from about `68` to `174 MiB`;
+  the later exact-source THP A/B diagnostic did not reproduce that slope, so
+  no production `GODEBUG` override is justified. This fresh isolated job rules
+  out contamination from the verification runner, but does not itself prove a
+  single memory or latency cause.
+- The current successor worktree partitions the existing aggregate per-process
+  PostgreSQL budget into independent regular and quota-completion pools. The
+  release load profile is exactly `32` aggregate / `24` regular / `8`
+  completion, and reservation/retry admission is capped at `12`, leaving
+  regular acquisition capacity for non-reservation work. Completion-only
+  routing covers first-byte recording, pre-dispatch release, initial and retry
+  settlement, final-attempt settlement and expired-reservation recovery. Real
+  PostgreSQL regressions prove those paths continue when the regular pool is
+  fully acquired, prove shared-bucket reservation admission preserves regular
+  headroom, and prove a blocked retry admission does not block independent
+  completion work. `/readyz` and the Admin doctor now probe the distinct
+  completion pool through independent bounded, redaction-safe checks. The
+  public aggregate diagnostic fields remain schema-compatible; the CLI doctor
+  intentionally uses one short-lived single-connection probe and cannot claim
+  serving-process pool state. The response relay separately reuses one timer
+  and one cancellation callback across a response; its allocation regression
+  observes `38` allocations for `1,000` SSE chunks instead of per-read churn.
+  The failed SSE fixture emits one event before its hold, so this optimization
+  is not claimed as the cause or fix for the measured held-window slope.
+  After the latest runtime, Console, and finalizer changes, complete uncached
+  normal and race Go suites passed against local PostgreSQL 18 and every
+  Makefile fuzz-smoke target passed. Full `mise exec -- make check` then passed
+  generated SQL, workflow lint, Go vet and all Go packages against PostgreSQL
+  18, all 548 Python cases, Console ESLint, Admin API generation, both
+  TypeScript checks, 292/292 Vitest cases, deterministic production build
+  verification, and 37 Playwright cases across Chromium, Firefox, WebKit, and
+  mobile WebKit, with the real-stack-only case intentionally skipped. Image and
+  unchanged local/protected load reruns remain required after the complete
+  patch is committed; no publication or paid cloud resource follows from these
+  local results.
+- The canonical public documentation check passed on 2026-09-04 after the
+  release-status reconciliation: generated references and all four SDK bundles
+  are current; structure and metadata cover 233 pages/routes; Vale reports zero
+  errors, warnings, or suggestions in 253 files; Mintlify build validation and
+  link/anchor/redirect/snippet checks pass; and all 235 inspected MDX files
+  satisfy the media-alt check. The color audit retains only its existing
+  advisory AA-versus-AAA notices, not a failing accessibility issue. This is
+  local documentation evidence, not a Mintlify production receipt.
 - Protected release-candidate run `33753494421`, attempt `1`, at exact source
   `2062a11d4513fcaccca6beacfc807df7d061eadc` stopped in core verification before
   the isolated load job. `TestTimeoutIsBoundedAndSafe` expected `non_streaming`
@@ -721,7 +816,10 @@ released checkpoint and reproducible bundle above.
   values were not overwritten, and post-write metadata verification passed.
   Secret material was read only from the approved local sources, retained in
   process memory, and passed through standard input rather than arguments or
-  logs. No Sonatype token was created or installed.
+  logs. After separate explicit approval, one Sonatype publishing token expiring
+  2026-10-03 was created and only its username/password were installed in
+  Android `single-maintainer-v1-maven`; independent environment metadata and
+  policy verification found no additional Maven secrets or policy drift.
 - Core CI run `33676007601` passed all eight jobs at
   `5ae5bcf7862a3315bada388ae41974d87bf13ef8`: contracts, lint, Console,
   PostgreSQL 15, PostgreSQL 18, reliability, deployment validation, and
@@ -915,8 +1013,12 @@ clean-published-consumer gates; all three rows remain `experimental`.
 
 ## External-required gates
 
-With local source convergence complete, the remaining non-repository domains
-are:
+With local source convergence complete, the following non-repository domains
+remain for the original strict A-to-Z Definition of Done. The selected
+`single_maintainer_v1` path requires only public tags/registries,
+multi-architecture supply-chain evidence, and exact-image Docker Compose plus
+Google Cloud Run; the other items below remain explicitly `unverified` rather
+than passed:
 
 1. a protected Apple Distribution, ad hoc, TestFlight, or App Store-derived
    immutable iOS candidate that repeats root-application App Attest, plus
@@ -976,13 +1078,21 @@ receipt, or protected promotion.
 ## Release decision
 
 The product repositories are source-converged and delivered, and canonical
-documentation is this checked-in tree. The project is not yet ready for the
+documentation is this checked-in tree. The authenticated
+`single_maintainer_v1` finalization path now exists, including the selected
+six-claim registry observation, exact producer run/attempt and immutable
+certificate binding, canonical duplicate-free JSON, local
+source/promotion/release reconstruction, retained deferred evidence, and a
+fresh no-checkout decision attestor. It preserves the unchanged failed strict
+report, verifies its exact all-domain evidence-window failure, and independently
+reconstructs the one-field profile-local projection. It has not been executed
+for a completed publication set, so the project is not yet ready for the
 selected lower-assurance public version 1 launch. That launch remains blocked
-until authenticated `single_maintainer_v1` evidence binds the required public
-tags and releases, package and GHCR bytes, multi-architecture supply-chain
-artifacts, Docker Compose, and Google Cloud Run to one immutable source tuple.
-The profile must retain `profile_status: incomplete`, keep deferred evidence
-`unverified`, and forbid a production-ready or `release-qualified` claim.
-Strict promotion and release-qualified documentation remain separately blocked
-until the strict finalizer binds every required external receipt to the same
-immutable coordinates.
+until its attested result binds the required public tags and releases, package
+and GHCR bytes, multi-architecture supply-chain artifacts, Docker Compose, and
+Google Cloud Run to one immutable source tuple. Only that authenticated result
+may set profile-scoped `publication_ready` to true; it keeps `profile_status`
+at `incomplete` and keeps `release_qualified`, `fully_evidence_gated`, and
+`independently_reviewed` at false. Strict A-to-Z completion remains separately
+blocked until the strict finalizer binds every required external receipt to the
+same immutable coordinates.

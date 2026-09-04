@@ -51,13 +51,35 @@ or `independently_reviewed`. The evaluator always emits
 `release_qualified: false`; a protected workflow must authenticate the
 producer runs and attestations before issuing any launch decision.
 
+After every required publication has completed, the protected
+`.github/workflows/finalize-single-maintainer-profile.yml` workflow is the only
+profile-wide path that may issue
+`v1_profile_publication_ready_with_deferred_assurance`. It authenticates the
+exact source, candidate, core-publication, public-tag, selected-registry, and
+supply-chain runs and attempts; reuses only the signed Compose and Cloud Run
+captures embedded in the closed core handoff; checks out the six exact public
+repository commits to prove source, promotion preconditions, and annotated
+release tags; preserves the canonical strict report with its expected failed
+all-domain evidence-window gate; derives a separately named profile-local
+input by changing only the `local_promotion` domain projection; and gives a
+fresh no-checkout signer the final decision. That signer independently
+reconstructs the one-field projection and exact gates from the retained inputs.
+The reclassification is permitted only because the unchanged strict report's
+exact `promotion.local_preconditions` check passed: its separate
+`promotion.evidence_window` check remains failed solely because it includes
+strict domains this profile explicitly defers.
+The decision keeps
+`release_qualified`, `fully_evidence_gated`, and `independently_reviewed`
+false and retains every deferred item as `unverified`.
+
 ## Evaluate an exact candidate
 
-First produce a canonical release-scope cross-repository report. It may have a
-failed strict verdict when only profile-deferred domains are absent, but its
-local source, promotion, and release domains must pass. Then retain the four
-required external documents and all hash-referenced artifacts in one evidence
-directory:
+First produce and retain the canonical strict cross-repository report. Its
+strict verdict and `local_promotion` domain are expected to remain failed when
+the all-domain evidence window includes profile-deferred domains; its separate
+`promotion.local_preconditions` check, local source domain, and local release
+domain must pass. Retain the exact source report, the four required external
+documents, and all hash-referenced artifacts in one evidence directory:
 
 ```text
 external-evidence/
@@ -73,14 +95,22 @@ Run:
 ```bash
 python3 scripts/release-profile.py validate-policy
 
+python3 scripts/finalize-release-profile.py derive-profile-report \
+  --strict-release-report /path/to/latchway-cross-repository-release-strict.json \
+  --source-report /path/to/latchway-cross-repository-source.json \
+  --external-evidence-dir /path/to/external-evidence \
+  --output /tmp/latchway-single-maintainer-v1-profile-input.json
+
 python3 scripts/release-profile.py evaluate \
   --profile single_maintainer_v1 \
-  --release-report /path/to/latchway-cross-repository-release.json \
+  --release-report /tmp/latchway-single-maintainer-v1-profile-input.json \
   --external-evidence-dir /path/to/external-evidence \
   --output /tmp/latchway-single-maintainer-v1.json
 ```
 
-The evaluator revalidates candidate coordinates, required claim closure,
+The derivation preserves the unchanged failed strict report and produces the
+separately named, one-field profile-local input. The evaluator revalidates
+candidate coordinates, required claim closure,
 timestamps, immutable image digest, artifact paths, artifact hashes, and the
 seven-day evidence window. Missing evidence is `unverified`; malformed,
 substituted, or tampered evidence is `failed`.
@@ -91,6 +121,40 @@ structural projection passes. The output deliberately cannot claim publication
 readiness. Authenticate every input with its producer and attestation in a
 protected workflow before making a launch decision. The strict protected
 workflows and their `strict_full` semantics remain unchanged.
+
+## Collect and finalize the selected public registries
+
+Run `.github/workflows/release-domain-observations.yml` for
+`public_registries` with `release_profile` set to `single_maintainer_v1` and
+leave both documentation-production run inputs empty. Pass that observation
+run to `.github/workflows/release-domain-evidence.yml`, again with
+`release_profile` set to `single_maintainer_v1`. The signed document has the
+exact six selected claims: GHCR, JavaScript npm, React Native npm, SwiftPM,
+CocoaPods, and Maven Central. It cannot contain or imply the deferred Mintlify
+claim. Omitting the profile input preserves the original strict seven-claim
+behavior.
+
+After the core and all SDK publications are successful, collect `public_tags`,
+the profile-scoped `public_registries`, and `supply_chain`, then dispatch
+`.github/workflows/finalize-single-maintainer-profile.yml` at the unchanged
+candidate commit. Supply the exact run ID and attempt for:
+
+- source conformance;
+- the immutable candidate;
+- the successful single-maintainer core release;
+- public tags;
+- profile-scoped public registries; and
+- supply chain.
+
+The workflow intentionally has no AWS, Fly.io, Cloudflare Containers,
+Mintlify, device, provider, resilience, or reviewer inputs. It fails if main
+has moved from the candidate, any producer path/run/attempt or attestation is
+substituted, a selected registry claim is absent, a deferred claim is promoted,
+or the regenerated strict report unexpectedly claims release readiness. Its
+90-day artifact contains the authenticated profile decision, the structural
+projection, the unchanged failed strict release report, the separately named
+profile-local input, the sealed authority manifest, all four selected external
+documents, checksums, and the final Sigstore bundle.
 
 ## Additive v1 core publication workflow
 

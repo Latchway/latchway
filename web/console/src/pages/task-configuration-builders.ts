@@ -4,6 +4,17 @@ import {
   upsertAreaResource,
   type JSONRecord
 } from "./configuration-slice";
+import {
+  requireAndroidPackageName,
+  requireAppleBundleID,
+  requireAppleBundleVersion,
+  requireCanonicalBrowserOrigin,
+  requireCloudProjectNumber,
+  requireFirebaseProjectNumber,
+  requireGuidedUpstreamURL,
+  requirePlayCertificateDigest,
+  requireTurnstileHostname
+} from "./client-proof-validation";
 
 const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
 const protocols = ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages"] as const;
@@ -40,18 +51,6 @@ export function usdToNanoUSD(value: string): number {
   return Number(nano);
 }
 
-function taskBaseURL(value: string): { baseUrl: string } {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error("Connection URL must be an absolute URL.");
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error("Connection URL cannot contain credentials, a query, or a fragment.");
-  if (parsed.protocol !== "https:") throw new Error("HTTPS is required in the guided connection flow.");
-  return { baseUrl: parsed.href.replace(/\/$/, "") };
-}
-
 export interface ConnectionTaskInput {
   authentication: "bearer" | "none";
   baseURL: string;
@@ -78,7 +77,7 @@ export function buildConnectionDocument(document: JSONRecord, input: ConnectionT
   if (!input.physicalModel.trim() || input.physicalModel.length > 256) throw new Error("Physical model must contain 1 through 256 characters.");
   const accountingID = requireIdentifier(`${modelID}_input`, "Derived input-accounting ID");
   const pricingID = requireIdentifier(`${modelID}_pricing`, "Derived pricing ID");
-  const location = taskBaseURL(input.baseURL);
+  const location = { baseUrl: requireGuidedUpstreamURL(input.baseURL) };
   const authentication = input.authentication === "bearer"
     ? { type: "bearer", secretRef: `secret/${requireIdentifier(input.secretName ?? "", "Secret name")}` }
     : { type: "none" };
@@ -135,9 +134,19 @@ export interface ClientAccessTaskInput {
   firebaseProjectID?: string;
   firebaseProjectNumber?: string;
   identityProviderID?: string;
-  platform: "android" | "ios" | "web";
+  platform: ClientPlatform;
+  playIntegrityCredential?: { type: "metadata" } | { type: "service_account"; secretName: string };
+  turnstileExpectedAction?: string;
+  turnstileSecretName?: string;
+  webVerificationProvider?: WebVerificationProvider;
   webOrigin?: string;
 }
+
+export type ClientPlatform = "android" | "ios" | "react_native_android" | "react_native_ios" | "web";
+export type WebVerificationProvider = "firebase_app_check" | "turnstile";
+
+const firebaseAppIDPattern = /^[!-~]{5,256}$/;
+const turnstileActionPattern = /^[A-Za-z0-9_-]{1,32}$/;
 
 export function buildClientAccessDocument(document: JSONRecord, input: ClientAccessTaskInput): JSONRecord {
   const policyID = requireIdentifier(input.attestationPolicyID, "Verification policy ID");
@@ -145,28 +154,54 @@ export function buildClientAccessDocument(document: JSONRecord, input: ClientAcc
   const featureID = requireIdentifier(input.featureID, "Feature ID");
   const selectedFeature = specRecords(document, "features").find((feature) => feature.id === featureID);
   if (!selectedFeature) throw new Error("Choose a feature from the active configuration.");
+  const selectedFeaturePolicy = selectedFeature.attestationPolicy;
+  if (selectedFeaturePolicy !== undefined) {
+    if (typeof selectedFeaturePolicy !== "string" || !identifierPattern.test(selectedFeaturePolicy)) {
+      throw new Error("The selected feature has an invalid verification policy binding.");
+    }
+    if (selectedFeaturePolicy !== policyID) {
+      throw new Error("Add this client surface to the selected feature's existing verification policy; changing the feature's policy requires an explicit configuration edit.");
+    }
+  }
   let selection: JSONRecord;
   let component: JSONRecord;
-  if (input.platform === "ios") {
-    if (!input.appIDPrefix?.match(/^[A-Z0-9]{1,64}$/) || !input.appleBundleID || !input.appleBundleVersion) throw new Error("Enter the exact App ID prefix, bundle ID, and CFBundleVersion.");
-    const development = input.environmentKind !== "production";
-    const category = input.appleValidationCategory ?? (development ? 3 : 4);
-    selection = { appAttest: { allowedBundleVersions: [input.appleBundleVersion], allowedValidationCategories: [category], appIdPrefix: input.appIDPrefix, bundleId: input.appleBundleID, environment: development ? "development" : "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" };
-    component = { allowedFeatures: [featureID], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { bundleIdentifiers: [input.appleBundleID] }, kind: "main_app", platform: "ios" };
-  } else if (input.platform === "android") {
-    if (!input.androidPackageName || !input.androidCertificateDigest?.match(/^[A-Za-z0-9_-]{43}=?$/)) throw new Error("Enter the exact Android package name and signing-certificate digest.");
-    const project = requireSafePositive(input.androidCloudProjectNumber ?? 0, "Cloud project number");
-    const version = requireSafePositive(input.androidVersionCode ?? 0, "Version code", true);
-    selection = { minimumTrustLevel: "app_verified", mode: "required", playIntegrity: { allowTestingResponses: input.environmentKind !== "production", certificateSha256Digests: [input.androidCertificateDigest], cloudProjectNumber: project, credentialSource: "metadata", maximumVersionCode: version, minimumDeviceIntegrity: "device", minimumVersionCode: version, packageName: input.androidPackageName, requireLicensed: input.environmentKind === "production" }, provider: "play_integrity" };
-    component = { allowedFeatures: [featureID], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { packageNames: [input.androidPackageName] }, kind: "android_app", platform: "android" };
+  if (input.platform === "ios" || input.platform === "react_native_ios") {
+    if (!input.appIDPrefix?.match(/^[A-Z0-9]{1,64}$/)) throw new Error("Enter the exact App ID prefix, bundle ID, and CFBundleVersion.");
+    const bundleID = requireAppleBundleID(input.appleBundleID);
+    const bundleVersion = requireAppleBundleVersion(input.appleBundleVersion);
+    const category = input.appleValidationCategory ?? (input.environmentKind === "development" ? 3 : 4);
+    const appAttestEnvironment = category === 3 ? "development" : "production";
+    if (input.environmentKind === "production" && appAttestEnvironment !== "production") {
+      throw new Error("Production environments require TestFlight, App Store, or ad hoc / enterprise distribution.");
+    }
+    selection = { appAttest: { allowedBundleVersions: [bundleVersion], allowedValidationCategories: [category], appIdPrefix: input.appIDPrefix, bundleId: bundleID, environment: appAttestEnvironment }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" };
+    component = { allowedFeatures: [featureID], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { bundleIdentifiers: [bundleID] }, kind: "main_app", platform: input.platform };
+  } else if (input.platform === "android" || input.platform === "react_native_android") {
+    const packageName = requireAndroidPackageName(input.androidPackageName);
+    const certificateDigest = requirePlayCertificateDigest(input.androidCertificateDigest);
+    const project = requireCloudProjectNumber(input.androidCloudProjectNumber ?? 0);
+    const version = requireSafePositive(input.androidVersionCode ?? 0, "Version code");
+    const credential = input.playIntegrityCredential;
+    if (!credential || (credential.type !== "metadata" && credential.type !== "service_account")) {
+      throw new Error("Choose the Play Integrity server credential source.");
+    }
+    selection = { minimumTrustLevel: "device_verified", mode: "required", ...(credential.type === "service_account" ? { secretRef: `secret/${requireIdentifier(credential.secretName, "Play Integrity secret name")}` } : {}), playIntegrity: { allowTestingResponses: input.environmentKind !== "production", certificateSha256Digests: [certificateDigest], cloudProjectNumber: project, credentialSource: credential.type, maximumVersionCode: version, minimumDeviceIntegrity: "device", minimumVersionCode: version, packageName, requireLicensed: input.environmentKind === "production" }, provider: "play_integrity" };
+    component = { allowedFeatures: [featureID], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { packageNames: [packageName] }, kind: "android_app", platform: input.platform };
   } else {
-    let origin: URL;
-    try { origin = new URL(input.webOrigin ?? ""); } catch { throw new Error("Enter an exact browser origin."); }
-    if (origin.pathname !== "/" || origin.search || origin.hash || (origin.protocol !== "https:" && !(input.environmentKind !== "production" && new Set(["localhost", "127.0.0.1", "[::1]"]).has(origin.hostname)))) throw new Error("Browser origin must be HTTPS, or loopback HTTP outside Production.");
-    if (!input.firebaseProjectNumber?.match(/^[1-9][0-9]{0,19}$/) || !input.firebaseAppID) throw new Error("Enter the Firebase project number and exact web app ID.");
+    const origin = requireCanonicalBrowserOrigin(input.webOrigin, input.environmentKind);
     const exactOrigin = origin.origin;
-    selection = { allowedOrigins: [exactOrigin], firebaseAppCheck: { allowedAppIds: [input.firebaseAppID], projectNumber: input.firebaseProjectNumber }, minimumTrustLevel: "web_risk_verified", mode: "required", provider: "firebase_app_check" };
-    component = { allowedFeatures: [featureID], attestation: { provider: "firebase_app_check", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { origins: [exactOrigin] }, kind: "browser", platform: "web" };
+    const provider = input.webVerificationProvider ?? "firebase_app_check";
+    if (provider !== "firebase_app_check" && provider !== "turnstile") throw new Error("Choose Firebase App Check or Cloudflare Turnstile for web verification.");
+    if (provider === "firebase_app_check") {
+      const projectNumber = requireFirebaseProjectNumber(input.firebaseProjectNumber);
+      if (!input.firebaseAppID?.match(firebaseAppIDPattern)) throw new Error("Enter the Firebase project number and exact web app ID.");
+      selection = { allowedOrigins: [exactOrigin], firebaseAppCheck: { allowedAppIds: [input.firebaseAppID], projectNumber }, minimumTrustLevel: "web_risk_verified", mode: "required", provider };
+    } else {
+      if (!turnstileActionPattern.test(input.turnstileExpectedAction ?? "")) throw new Error("Turnstile action must contain 1 through 32 letters, numbers, underscores, or hyphens.");
+      const hostname = requireTurnstileHostname(origin.hostname);
+      selection = { allowedOrigins: [exactOrigin], minimumTrustLevel: "web_risk_verified", mode: "required", provider, secretRef: `secret/${requireIdentifier(input.turnstileSecretName ?? "", "Turnstile secret name")}`, turnstile: { allowedHostnames: [hostname], expectedAction: input.turnstileExpectedAction } };
+    }
+    component = { allowedFeatures: [featureID], attestation: { provider, strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { origins: [exactOrigin] }, kind: "browser", platform: "web" };
   }
   const existingPolicy = specRecords(document, "attestationPolicies").find((candidate) => candidate.id === policyID);
   let existingPlatforms: JSONRecord | undefined;
@@ -189,6 +224,119 @@ export function buildClientAccessDocument(document: JSONRecord, input: ClientAcc
   if (!boundFeature) throw new Error("The selected feature disappeared while building the client-access change.");
   boundFeature.attestationPolicy = policyID;
   return next;
+}
+
+export interface ClientPlatformReadiness {
+  configured: string;
+  documentationURL: string;
+  key: ClientPlatform;
+  label: string;
+  missing: string[];
+  productionRequirement: string;
+  ready: boolean;
+  test: string;
+}
+
+const clientPlatformFacts: Record<ClientPlatform, Omit<ClientPlatformReadiness, "configured" | "missing" | "ready"> & { providers: string[] }> = {
+  ios: {
+    documentationURL: "https://docs.latchway.dev/clients/ios/quickstart",
+    key: "ios",
+    label: "iOS",
+    productionRequirement: "App Attest from the exact distribution-signed bundle and a supported physical device.",
+    providers: ["app_attest"],
+    test: "Send a signed physical-device request, then inspect its App Attest trust and feature decision."
+  },
+  android: {
+    documentationURL: "https://docs.latchway.dev/clients/android/quickstart",
+    key: "android",
+    label: "Android",
+    productionRequirement: "Play Integrity from the exact package, signing certificate, version, cloud project, and Play track.",
+    providers: ["play_integrity"],
+    test: "Send a Play-installed device request, then inspect its Play Integrity trust and feature decision."
+  },
+  web: {
+    documentationURL: "https://docs.latchway.dev/clients/web/browser-trust",
+    key: "web",
+    label: "Web",
+    productionRequirement: "An exact HTTPS origin plus fresh Firebase App Check or challenge-bound Turnstile evidence.",
+    providers: ["firebase_app_check", "turnstile"],
+    test: "Send a browser request from an allowed origin, then inspect its browser-risk trust and feature decision."
+  },
+  react_native_ios: {
+    documentationURL: "https://docs.latchway.dev/clients/react-native/ios-native-setup",
+    key: "react_native_ios",
+    label: "React Native iOS",
+    productionRequirement: "The React Native iOS runtime key with App Attest, exact signed entitlements, and a supported physical device.",
+    providers: ["app_attest"],
+    test: "Send through the native-backed React Native client on iOS and verify the recorded react_native_ios platform."
+  },
+  react_native_android: {
+    documentationURL: "https://docs.latchway.dev/clients/react-native/android-native-setup",
+    key: "react_native_android",
+    label: "React Native Android",
+    productionRequirement: "The React Native Android runtime key with Play Integrity and the exact Play-distributed application.",
+    providers: ["play_integrity"],
+    test: "Send through the native-backed React Native client on Android and verify the recorded react_native_android platform."
+  }
+};
+
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function providerLabel(value: string): string {
+  const labels: Record<string, string> = {
+    app_attest: "Apple App Attest",
+    debug: "Debug evidence",
+    firebase_app_check: "Firebase App Check",
+    play_integrity: "Google Play Integrity",
+    turnstile: "Cloudflare Turnstile"
+  };
+  return labels[value] ?? value.replaceAll("_", " ");
+}
+
+export function clientPlatformReadiness(document: JSONRecord): ClientPlatformReadiness[] {
+  const identities = specRecords(document, "identityProviders").map((identity) => String(identity.id ?? "")).filter((id) => identifierPattern.test(id));
+  const policies = specRecords(document, "attestationPolicies");
+  const policyByID = new Map(policies.map((policy) => [String(policy.id ?? ""), policy]));
+  const features = specRecords(document, "features");
+  const components = specRecords(document, "componentDefinitions");
+
+  return (Object.keys(clientPlatformFacts) as ClientPlatform[]).map((key) => {
+    const { providers: expectedProviders, ...facts } = clientPlatformFacts[key];
+    const roots = components.filter((component) => component.platform === key && component.familyRole === "root");
+    const platformSelections = policies.flatMap((policy) => {
+      const platforms = isJSONRecord(policy.platforms) ? policy.platforms : undefined;
+      const selection = platforms && isJSONRecord(platforms[key]) ? platforms[key] : undefined;
+      return selection ? [{ policyID: String(policy.id ?? ""), selection }] : [];
+    });
+    const compatibleSelections = platformSelections.filter(({ selection }) => expectedProviders.includes(String(selection.provider ?? "")) && selection.mode === "required");
+    const boundFeatures = new Set<string>();
+    for (const component of roots) {
+      const attestation = isJSONRecord(component.attestation) ? component.attestation : undefined;
+      const provider = String(attestation?.provider ?? "");
+      for (const featureID of stringValues(component.allowedFeatures)) {
+        const feature = features.find((candidate) => candidate.id === featureID);
+        const policy = policyByID.get(String(feature?.attestationPolicy ?? ""));
+        const platforms = policy && isJSONRecord(policy.platforms) ? policy.platforms : undefined;
+        const selection = platforms && isJSONRecord(platforms[key]) ? platforms[key] : undefined;
+        if (attestation?.strategy === "direct" && selection?.mode === "required" && selection.provider === provider && expectedProviders.includes(provider)) boundFeatures.add(featureID);
+      }
+    }
+    const missing: string[] = [];
+    if (!identities.length) missing.push("A user-authentication provider");
+    if (!roots.length) missing.push(`A root ${facts.label} Component Definition`);
+    if (!compatibleSelections.length) missing.push(`A required ${expectedProviders.map(providerLabel).join(" or ")} policy selection at ${key}`);
+    if (roots.length && compatibleSelections.length && !boundFeatures.size) missing.push("A feature granted by the root component and bound to the same verification policy");
+    const providers = [...new Set(platformSelections.map(({ selection }) => String(selection.provider ?? "")).filter(Boolean))];
+    const configured = [
+      identities.length ? `Authentication: ${identities.join(", ")}` : "Authentication: none",
+      providers.length ? `Verification: ${providers.map(providerLabel).join(", ")}` : "Verification: none",
+      roots.length ? `Root: ${roots.map((root) => String(root.id ?? "unnamed")).join(", ")}` : "Root: none",
+      boundFeatures.size ? `Features: ${[...boundFeatures].join(", ")}` : "Features: none bound end-to-end"
+    ].join(" · ");
+    return { ...facts, configured, missing, ready: missing.length === 0 };
+  });
 }
 
 export interface UsagePlanTaskInput {

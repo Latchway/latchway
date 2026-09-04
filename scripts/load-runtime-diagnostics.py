@@ -319,7 +319,22 @@ def cpu_model():
     return value if status == "ok" and CPU_MODEL.fullmatch(value) else None
 
 
-def host_metadata(pool_maximum):
+def valid_pool_partition(pool_maximum, regular_pool_maximum, completion_pool_maximum):
+    return (
+        all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (pool_maximum, regular_pool_maximum, completion_pool_maximum)
+        )
+        and 2 <= pool_maximum <= 500
+        and regular_pool_maximum >= 1
+        and completion_pool_maximum >= 1
+        and regular_pool_maximum == pool_maximum - completion_pool_maximum
+    )
+
+
+def host_metadata(pool_maximum, regular_pool_maximum, completion_pool_maximum):
+    if not valid_pool_partition(pool_maximum, regular_pool_maximum, completion_pool_maximum):
+        raise ValueError("invalid gateway database pool partition")
     memory = None
     try:
         memory = integer(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
@@ -330,6 +345,8 @@ def host_metadata(pool_maximum):
               "affinity_cpu_count": integer(affinity), "memory_bytes": memory,
               "architecture": label(os.uname().machine, ARCHITECTURES),
               "gateway_pool_max_connections": pool_maximum,
+              "gateway_regular_pool_max_connections": regular_pool_maximum,
+              "gateway_completion_pool_max_connections": completion_pool_maximum,
               "backend_count_is_not_pool_waiter_count": True,
               "database_counters_include_collector": True,
               "postgres_error_labels_may_include_collector_timeouts": True}
@@ -501,8 +518,9 @@ def write_record(writer, record):
     writer.flush()
 
 
-def collect(writer, postgres, gateway, stop_file, pool_maximum, *, tools_runner=None, maximum_seconds=MAXIMUM_SECONDS):
-    write_record(writer, host_metadata(pool_maximum))
+def collect(writer, postgres, gateway, stop_file, pool_maximum, regular_pool_maximum,
+            completion_pool_maximum, *, tools_runner=None, maximum_seconds=MAXIMUM_SECONDS):
+    write_record(writer, host_metadata(pool_maximum, regular_pool_maximum, completion_pool_maximum))
     deadline = time.monotonic() + maximum_seconds
     index = 0
     while time.monotonic() < deadline and not stop_file.exists():
@@ -532,18 +550,28 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stop-file", type=Path, required=True)
     parser.add_argument("--pool-max-connections", type=int, required=True)
+    parser.add_argument("--regular-pool-max-connections", type=int, required=True)
+    parser.add_argument("--completion-pool-max-connections", type=int, required=True)
     args = parser.parse_args()
     if (not re.fullmatch(r"latchway-load-postgres-[0-9]+-[0-9]{14}", args.postgres)
             or not re.fullmatch(r"latchway-load-gateway-[0-9]+-[0-9]{14}", args.gateway)
             or args.tools_runner != "latchway-load-runner-" + args.postgres.removeprefix("latchway-load-postgres-")
             or args.gateway != "latchway-load-gateway-" + args.postgres.removeprefix("latchway-load-postgres-")
             or not args.output.is_absolute() or not args.stop_file.is_absolute()
-            or not 1 <= args.pool_max_connections <= 500):
+            or not valid_pool_partition(
+                args.pool_max_connections,
+                args.regular_pool_max_connections,
+                args.completion_pool_max_connections,
+            )):
         return 2
     try:
         descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as writer:
-            collect(writer, args.postgres, args.gateway, args.stop_file, args.pool_max_connections, tools_runner=args.tools_runner)
+            collect(
+                writer, args.postgres, args.gateway, args.stop_file,
+                args.pool_max_connections, args.regular_pool_max_connections,
+                args.completion_pool_max_connections, tools_runner=args.tools_runner,
+            )
     except (OSError, ValueError):
         # The launcher retains the gate status and records a fixed unavailable
         # marker. Never copy dependency exceptions, argv or environment values.

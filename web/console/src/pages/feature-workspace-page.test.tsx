@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,9 +13,12 @@ vi.mock("../api/admin", async (importOriginal) => ({
 vi.mock("../api/session", () => ({
   useConsoleSession: () => ({ data: { mode: "configured", session: { capabilities: ["activate_configuration"], organization_id: "org_0123456789abcdef" } } })
 }));
+vi.mock("../app/console-compatibility-context", () => ({
+  useConsoleCompatibility: () => ({ mutationAllowed: true })
+}));
 
 const workspace = {
-  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_0123456789abcdef", organization_id: "org_0123456789abcdef", slug: "habitify", status: "active" as "active" | "disabled" },
+  application: { created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: "app_01J00000000000000000000000", organization_id: "org_0123456789abcdef", slug: "habitify", status: "active" as "active" | "disabled" },
   applications: [],
   environment: { active_revision_id: "rev_0123456789abcdef", application_id: "app_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production", status: "active" as "active" | "disabled" },
   environments: [], invalidApplication: false, invalidEnvironment: false, isLoading: false,
@@ -26,7 +29,7 @@ vi.mock("../app/workspace-context-value", () => ({
   useOptionalWorkspace: () => workspace
 }));
 
-import { FeatureWorkspacePage } from "./feature-workspace-page";
+import { buildFeatureClientSetupSnippets, FeatureWorkspacePage } from "./feature-workspace-page";
 import type { JSONRecord } from "./configuration-slice";
 
 const instant = "2026-08-29T00:00:00Z";
@@ -39,12 +42,25 @@ function activeDocument(): JSONRecord {
     kind: "EnvironmentConfig",
     metadata: { application: "habitify", environment: "production", organization: "example", retained: "yes" },
     spec: {
-      attestationPolicies: [{ id: "native", platforms: {} }],
+      attestationPolicies: [{ id: "native", platforms: {
+        android: { minimumTrustLevel: "app_verified", mode: "required", playIntegrity: { cloudProjectNumber: 123456 }, provider: "play_integrity" },
+        ios: { appAttest: {}, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" },
+        react_native_android: { minimumTrustLevel: "app_verified", mode: "required", playIntegrity: { cloudProjectNumber: 654321 }, provider: "play_integrity" },
+        react_native_ios: { appAttest: {}, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" },
+        web: { allowedOrigins: ["https://app.example.test"], minimumTrustLevel: "web_risk_verified", mode: "required", provider: "turnstile", secretRef: "secret/turnstile_private_do_not_render", turnstile: { allowedHostnames: ["app.example.test"], expectedAction: "latchway_session" } }
+      } }],
+      componentDefinitions: [
+        { allowedFeatures: ["weekly_summary"], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: "ios_main", kind: "main_app", platform: "ios" },
+        { allowedFeatures: ["weekly_summary"], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: "android_main", kind: "android_app", platform: "android" },
+        { allowedFeatures: ["weekly_summary"], attestation: { provider: "turnstile", strategy: "direct" }, familyRole: "root", id: "web_main", kind: "browser", platform: "web" },
+        { allowedFeatures: ["weekly_summary"], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: "react_native_ios_main", kind: "main_app", platform: "react_native_ios" },
+        { allowedFeatures: ["weekly_summary"], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: "react_native_android_main", kind: "android_app", platform: "react_native_android" }
+      ],
       features: [{ access: { expression: "principal.authenticated" }, attestationPolicy: "native", id: "weekly_summary", limitPlan: { expression: "'free'" }, output: { absoluteMaximumTokens: 1000, defaultMaximumTokens: 500 }, protocol: "openai_responses", routes: [{ id: "primary", model: "fast", priority: 10, when: "true" }] }],
       identityProviders: [{ id: "firebase", projectId: "example-mobile", type: "firebase" }],
       limitPlans: [{ id: "free", limits: [{ algorithm: "calendar", hard: true, maximum: 100, metric: "logical_requests", scope: ["user", "feature"], window: "1d" }] }],
       models: [{ capabilities: ["openai_responses"], id: "fast", upstream: "primary", upstreamModel: "fast-model" }, { capabilities: ["openai_responses"], id: "reliable", upstream: "primary", upstreamModel: "reliable-model" }],
-      upstreams: [{ authentication: { type: "none" }, baseUrl: "https://api.example.test/v1", id: "primary", type: "openai_compatible" }]
+      upstreams: [{ authentication: { secretRef: "secret/provider_super_secret", type: "bearer" }, baseUrl: "https://api.example.test/v1", id: "primary", type: "openai_compatible" }]
     }
   };
 }
@@ -79,7 +95,7 @@ describe("task-oriented feature setup", () => {
     render(<QueryClientProvider client={queryClient}><FeatureWorkspacePage /></QueryClientProvider>);
 
     expect(await screen.findByRole("heading", { name: "Create an AI capability." })).toBeInTheDocument();
-    await screen.findByText("weekly_summary");
+    await screen.findByRole("button", { name: "weekly_summary" });
     await user.type(screen.getByLabelText("Client feature ID"), "habit_assistant");
     await user.selectOptions(screen.getByLabelText("Primary model"), "fast");
     await user.selectOptions(screen.getByLabelText("Fallback model"), "reliable");
@@ -112,7 +128,7 @@ describe("task-oriented feature setup", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><FeatureWorkspacePage /></QueryClientProvider>);
 
-    expect(await screen.findByText("weekly_summary")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "weekly_summary" })).toBeInTheDocument();
     expect(screen.getByText("Selected scope is disabled").closest("section")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "Review feature change" })).toBeDisabled();
     expect(screen.getByText(/Re-enable both the application and environment/)).toBeInTheDocument();
@@ -131,5 +147,108 @@ describe("task-oriented feature setup", () => {
     await user.click(screen.getByRole("button", { name: "weekly_summary" }));
     expect(workspace.updateSearch).toHaveBeenLastCalledWith({ feature: "weekly_summary" }, { replace: false });
     expect(workspace.updateSearch.mock.calls.flat().join(" ")).not.toMatch(/custom_access|limit_plan|primary_model|secret|token/i);
+  });
+
+  it("renders personalized copyable iOS, Android, Web, and React Native snippets without server secrets", async () => {
+    adminRequestMock.mockResolvedValue({ data: revision(activeID, activeDocument(), "active", 1), etag: '"active-etag"' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    const clipboardWrite = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const { container } = render(<QueryClientProvider client={queryClient}><FeatureWorkspacePage /></QueryClientProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Use weekly_summary from each supported client." })).toBeInTheDocument();
+    const cards = container.querySelectorAll("[data-client-surface]");
+    expect([...cards].map((card) => card.getAttribute("data-client-surface"))).toEqual(["ios", "android", "web", "react_native"]);
+    const ios = container.querySelector('[data-client-surface="ios"]') as HTMLElement;
+    const android = container.querySelector('[data-client-surface="android"]') as HTMLElement;
+    const web = container.querySelector('[data-client-surface="web"]') as HTMLElement;
+    const reactNative = container.querySelector('[data-client-surface="react_native"]') as HTMLElement;
+    expect(ios).toHaveTextContent('applicationID: "app_01J00000000000000000000000"');
+    expect(ios).toHaveTextContent('environment: "production"');
+    expect(ios).toHaveTextContent("attestationProvider: appAttest");
+    expect(android).toHaveTextContent("cloudProjectNumber = 123456L");
+    expect(web).toHaveTextContent('createTurnstileProvider');
+    expect(web).toHaveTextContent("latchway.fetch" + '("/v1/responses"');
+    expect(web).toHaveTextContent('latchwayFeature: "weekly_summary"');
+    expect(reactNative).toHaveTextContent('playIntegrityCloudProjectNumber: "654321"');
+    expect(reactNative).toHaveTextContent('rootKeychainAccessGroup: "YOUR_FULLY_RESOLVED_PRIVATE_APP_ID_GROUP"');
+    expect(container).not.toHaveTextContent("turnstile_private_do_not_render");
+    expect(container).not.toHaveTextContent("provider_super_secret");
+
+    await user.click(within(web).getByRole("button", { name: "Copy Web snippet" }));
+    expect(clipboardWrite).toHaveBeenCalledOnce();
+    expect(clipboardWrite.mock.calls[0]?.[0]).toContain('applicationID: "app_01J00000000000000000000000"');
+    expect(clipboardWrite.mock.calls[0]?.[0]).not.toMatch(/turnstile_private_do_not_render|provider_super_secret/);
+    expect(await within(web).findByRole("status")).toHaveTextContent("Web snippet copied.");
+  });
+
+  it("fails snippet personalization closed instead of copying malformed or credential-bearing facts", () => {
+    const snippets = buildFeatureClientSetupSnippets({
+      applicationID: "app_81J00000000000000000000000",
+      document: activeDocument(),
+      environmentSlug: "production\"; const stolen = secret",
+      featureID: "weekly_summary",
+      gatewayURL: "https://operator:gateway-secret@example.test/"
+    });
+    const rendered = snippets.map((snippet) => `${snippet.status}\n${snippet.code}`).join("\n");
+    expect(rendered).not.toMatch(/app_81J00000000000000000000000|gateway-secret|const stolen/);
+    expect(rendered).toContain("YOUR_LATCHWAY_APPLICATION_ID");
+    expect(rendered).toContain("YOUR_ENVIRONMENT_SLUG");
+    expect(rendered).toContain("YOUR_LATCHWAY_GATEWAY");
+    expect(snippets.every((snippet) => !snippet.available)).toBe(true);
+  });
+
+  it("never presents a Responses endpoint as usable for an unresolved opaque feature", () => {
+    const document = activeDocument();
+    const feature = ((document.spec as JSONRecord).features as JSONRecord[])[0];
+    if (!feature) throw new Error("fixture feature missing");
+    feature.protocol = "opaque_http";
+    feature.opaqueHttp = {
+      allowedMethods: ["GET"],
+      maxBodyBytes: 0,
+      pathTemplates: ["/widgets/{widget_id}"]
+    };
+
+    const snippets = buildFeatureClientSetupSnippets({
+      applicationID: workspace.application.id,
+      document,
+      environmentSlug: workspace.environment.slug,
+      featureID: "weekly_summary",
+      gatewayURL: "https://gateway.example.test"
+    });
+    const rendered = snippets.map((snippet) => `${snippet.status}\n${snippet.code}`).join("\n");
+
+    expect(snippets.every((snippet) => !snippet.available)).toBe(true);
+    expect(rendered).toContain("a concrete capture-free allowed opaque proxy path");
+    expect(rendered).toContain('/proxy/weekly_summary/YOUR_ALLOWED_RELATIVE_PATH');
+    expect(rendered).toContain('method: "GET"');
+    expect(rendered).not.toContain("/v1/responses");
+  });
+
+  it("derives a usable opaque request only from an exact capture-free configured path", () => {
+    const document = activeDocument();
+    const feature = ((document.spec as JSONRecord).features as JSONRecord[])[0];
+    if (!feature) throw new Error("fixture feature missing");
+    feature.protocol = "opaque_http";
+    feature.opaqueHttp = {
+      allowedMethods: ["GET"],
+      maxBodyBytes: 0,
+      pathTemplates: ["/widgets/status"]
+    };
+
+    const snippets = buildFeatureClientSetupSnippets({
+      applicationID: workspace.application.id,
+      document,
+      environmentSlug: workspace.environment.slug,
+      featureID: "weekly_summary",
+      gatewayURL: "https://gateway.example.test"
+    });
+    const rendered = snippets.map((snippet) => snippet.code).join("\n");
+
+    expect(snippets.every((snippet) => snippet.available)).toBe(true);
+    expect(rendered).toContain('/proxy/weekly_summary/widgets/status');
+    expect(rendered).toContain('method: "GET"');
+    expect(rendered).not.toContain("YOUR_ALLOWED_RELATIVE_PATH");
+    expect(rendered).not.toContain("/v1/responses");
   });
 });

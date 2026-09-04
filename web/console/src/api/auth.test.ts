@@ -149,6 +149,53 @@ describe("administrator credential requests", () => {
     });
   });
 
+  it("preserves only a canonical correlation ID for an indeterminate operation", async () => {
+    const response = new Response(JSON.stringify({
+      code: "operation_indeterminate",
+      detail: "The database commit outcome is unknown.",
+      documentation_url: "https://docs.latchway.dev/errors/operation-indeterminate",
+      operation_id: "arq_00000000000000000000000000",
+      request_id: "request_test_1234",
+      retryable: true,
+      status: 503,
+      title: "Operation outcome unknown",
+      type: "https://docs.latchway.dev/errors/operation-indeterminate"
+    }), { headers: { "Content-Type": "application/problem+json" }, status: 503 });
+
+    expect(responseProblem(response, await response.json())).toMatchObject({
+      code: "operation_indeterminate",
+      operationId: "arq_00000000000000000000000000",
+      requestId: "request_test_1234",
+      retryable: true
+    });
+  });
+
+  it.each([
+    ["missing", undefined, "operation_indeterminate"],
+    ["malformed", "arq_not-canonical", "operation_indeterminate"],
+    ["attached to a determinate problem", "arq_00000000000000000000000000", "authentication_required"]
+  ])("rejects an operation ID that is %s", async (_label, operationID, code) => {
+    const documentationCode = code.replaceAll("_", "-");
+    const payload = {
+      code,
+      detail: "A safe error detail.",
+      documentation_url: `https://docs.latchway.dev/errors/${documentationCode}`,
+      ...(operationID ? { operation_id: operationID } : {}),
+      request_id: "request_test_1234",
+      retryable: code === "operation_indeterminate",
+      status: 503,
+      title: "Request failed",
+      type: `https://docs.latchway.dev/errors/${documentationCode}`
+    };
+    const response = new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/problem+json" }, status: 503 });
+
+    expect(responseProblem(response, await response.json())).toMatchObject({
+      code: "request_failed",
+      documentationURL: undefined,
+      retryable: false
+    });
+  });
+
   it("does not render an unstructured or mismatched server body as an error", async () => {
     const fetcher = vi.fn(async () =>
       Promise.resolve(

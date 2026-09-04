@@ -3112,15 +3112,25 @@ export interface components {
             }[];
             /** Format: date-time */
             completed_at?: string;
+            /** @description Exact immutable configuration revision used by the self-test. */
+            config_revision_id?: components["schemas"]["RevisionID"];
             /** Format: date-time */
             created_at: string;
+            /** @description Exact environment that owns and contextualizes the self-test run. */
+            environment_id: components["schemas"]["EnvironmentID"];
             id: components["schemas"]["SelfTestID"];
             /** @enum {string} */
             kind: "local" | "upstream" | "openrouter";
             schedule_id?: components["schemas"]["SelfTestScheduleID"];
             /** @enum {string} */
             state: "queued" | "running" | "passed" | "failed" | "canceled";
-        };
+        } & ({
+            /** @constant */
+            kind?: "local";
+        } | {
+            /** @enum {unknown} */
+            kind?: "upstream" | "openrouter";
+        });
         SelfTestSchedule: {
             application_id: components["schemas"]["ApplicationID"];
             /** @description Stable durable credential ID; never token plaintext. */
@@ -3184,6 +3194,8 @@ export interface components {
             upstreams: components["schemas"]["Upstream"][];
         };
         StartSelfTestRequest: {
+            /** @description Exact immutable active revision the server must bind before any provider dispatch. */
+            config_revision_id?: components["schemas"]["RevisionID"];
             environment_id: components["schemas"]["EnvironmentID"];
             /** @enum {string} */
             kind: "local" | "upstream" | "openrouter";
@@ -3218,10 +3230,13 @@ export interface components {
             /** @constant */
             contract_version: "1.0.0";
             database_schema_version: string;
+            /** @description True only when the regular administrative database pool is reachable and the schema is current. */
+            mutation_ready: boolean;
             protocol_versions: [
                 1,
                 2
             ];
+            /** @description Full traffic readiness using the exact same dependency evaluation as /readyz. */
             ready: boolean;
             /** @enum {string} */
             role: "all" | "api" | "worker";
@@ -5204,7 +5219,9 @@ export interface operations {
     };
     getSelfTest: {
         parameters: {
-            query?: never;
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
             header?: never;
             path: {
                 selfTestId: components["parameters"]["SelfTestID"];

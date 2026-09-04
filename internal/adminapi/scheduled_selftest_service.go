@@ -155,7 +155,8 @@ func (service *productionScheduledSelfTestService) RunBound(
 		return failedCredentialSelfTest(nil, "runner", "The scheduled self-test runner is unavailable.")
 	}
 	return runner.Run(ctx, credentialSelfTestInput{
-		Scope: prepared.Scope, Kind: prepared.Kind, UpstreamID: prepared.UpstreamID,
+		Scope: prepared.Scope, ConfigRevisionID: prepared.RevisionID,
+		Kind: prepared.Kind, UpstreamID: prepared.UpstreamID,
 		ModelID: prepared.ModelID, MaxCostNano: prepared.MaxCostNanoUSD,
 	})
 }

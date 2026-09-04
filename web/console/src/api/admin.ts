@@ -956,12 +956,22 @@ export const SelfTestSchema = z
       .max(32),
     completed_at: OptionalInstant,
     created_at: Instant,
+    config_revision_id: OpaqueID.optional(),
+    environment_id: z.string().regex(/^env_[A-Za-z0-9_-]{16,128}$/),
     id: OpaqueID,
     kind: z.enum(["local", "upstream", "openrouter"]),
     schedule_id: OpaqueID.optional(),
     state: z.enum(["queued", "running", "passed", "failed", "canceled"])
   })
-  .strict();
+  .strict()
+  .superRefine((run, context) => {
+    if (run.kind === "local" && run.config_revision_id) {
+      context.addIssue({ code: "custom", message: "Local self-tests cannot claim a configuration revision.", path: ["config_revision_id"] });
+    }
+    if (run.kind !== "local" && !run.config_revision_id) {
+      context.addIssue({ code: "custom", message: "Provider self-tests must identify their exact configuration revision.", path: ["config_revision_id"] });
+    }
+  });
 
 export const SelfTestScheduleSchema = z
   .object({
@@ -1006,6 +1016,7 @@ export const SystemStatusSchema = z
   .object({
     contract_version: z.string().max(64),
     database_schema_version: z.string().max(64),
+    mutation_ready: z.boolean(),
     protocol_versions: z.array(z.number().int()).max(32),
     ready: z.boolean(),
     role: z.enum(["all", "api", "worker"]),

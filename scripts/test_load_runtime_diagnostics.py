@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -205,11 +206,18 @@ class ResourceTests(unittest.TestCase):
                               "hostname": SECRET, "environment": SECRET}).encode()
         with patch.object(DIAGNOSTICS, "cpu_model", return_value="Intel(R) Xeon(R)"):
             with patch.object(DIAGNOSTICS, "capture", return_value=("ok", payload)):
-                result = DIAGNOSTICS.host_metadata(32)
+                result = DIAGNOSTICS.host_metadata(32, 24, 8)
         self.assertNotIn(SECRET, json.dumps(result))
         self.assertEqual(result["gateway_pool_max_connections"], 32)
+        self.assertEqual(result["gateway_regular_pool_max_connections"], 24)
+        self.assertEqual(result["gateway_completion_pool_max_connections"], 8)
         self.assertTrue(result["backend_count_is_not_pool_waiter_count"])
         self.assertEqual(result["docker"]["memory_bytes"], 1234)
+
+    def test_host_metadata_rejects_incoherent_pool_partition(self):
+        for partition in ((32, 0, 32), (32, 24, 0), (32, 25, 8), (1, 0, 1)):
+            with self.subTest(partition=partition), self.assertRaises(ValueError):
+                DIAGNOSTICS.host_metadata(*partition)
 
 
 class LogTests(unittest.TestCase):
@@ -335,7 +343,7 @@ class ProcessMemoryTests(unittest.TestCase):
              patch.object(DIAGNOSTICS, "resource_sample", return_value={"kind": "resources"}) as resource_sample, \
              patch.object(DIAGNOSTICS, "process_memory_sample", return_value={"kind": "process_memory"}) as memory_sample, \
              patch.object(DIAGNOSTICS, "postgres_error_labels", return_value={"kind": "postgres_error_labels"}):
-            DIAGNOSTICS.collect(io.StringIO(), POSTGRES, GATEWAY, Path(directory)/"stop", 32,
+            DIAGNOSTICS.collect(io.StringIO(), POSTGRES, GATEWAY, Path(directory)/"stop", 32, 24, 8,
                                 tools_runner=TOOLS_RUNNER, maximum_seconds=31)
         self.assertEqual(memory_sample.call_count, 3)  # T+0,15,30; never T+5 or T+10.
         self.assertEqual(resource_sample.call_count, memory_sample.call_count)
@@ -352,7 +360,7 @@ class LifecycleTests(unittest.TestCase):
             stop_file = Path(directory) / "stop"
             with patch.object(DIAGNOSTICS.time, "monotonic", side_effect=lambda: now[0]), patch.object(DIAGNOSTICS.time, "sleep", side_effect=sleep):
                 with patch.object(DIAGNOSTICS, "host_metadata", return_value={"kind": "host"}), patch.object(DIAGNOSTICS, "database_sample", side_effect=lambda *args, lifecycle=False: {"kind": "lifecycle" if lifecycle else "database_activity"}), patch.object(DIAGNOSTICS, "resource_sample", return_value={"kind": "resources"}), patch.object(DIAGNOSTICS, "postgres_error_labels", return_value={"kind": "postgres_error_labels"}):
-                    DIAGNOSTICS.collect(writer, POSTGRES, GATEWAY, stop_file, 32, maximum_seconds=11)
+                    DIAGNOSTICS.collect(writer, POSTGRES, GATEWAY, stop_file, 32, 24, 8, maximum_seconds=11)
         records = [json.loads(line) for line in writer.getvalue().splitlines()]
         self.assertEqual(records[-1]["status"], "time_bound_reached")
         self.assertEqual(records[-1]["activity_samples"], 3)
@@ -364,7 +372,7 @@ class LifecycleTests(unittest.TestCase):
             stop_file = Path(directory) / "stop"
             stop_file.touch()
             with patch.object(DIAGNOSTICS, "host_metadata", return_value={"kind": "host"}), patch.object(DIAGNOSTICS, "database_sample", return_value={"kind": "lifecycle"}) as sample, patch.object(DIAGNOSTICS, "postgres_error_labels", return_value={"kind": "postgres_error_labels"}):
-                DIAGNOSTICS.collect(writer, POSTGRES, GATEWAY, stop_file, 32)
+                DIAGNOSTICS.collect(writer, POSTGRES, GATEWAY, stop_file, 32, 24, 8)
         self.assertEqual(sample.call_count, 1)
         self.assertTrue(sample.call_args.kwargs["lifecycle"])
         self.assertEqual(json.loads(writer.getvalue().splitlines()[-1])["status"], "stopped")
@@ -379,7 +387,10 @@ class LifecycleTests(unittest.TestCase):
             for output in (existing, link):
                 arguments = ["diagnostics", "--postgres", POSTGRES, "--gateway", GATEWAY,
                              "--tools-runner", TOOLS_RUNNER,
-                             "--pool-max-connections", "32", "--output", str(output), "--stop-file", str(root/"stop")]
+                             "--pool-max-connections", "32",
+                             "--regular-pool-max-connections", "24",
+                             "--completion-pool-max-connections", "8",
+                             "--output", str(output), "--stop-file", str(root/"stop")]
                 with patch.object(sys, "argv", arguments):
                     self.assertEqual(DIAGNOSTICS.main(), 1)
             self.assertEqual(existing.read_text(), SECRET)
@@ -389,6 +400,49 @@ class HarnessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = (ROOT / "scripts/run-local-load-gates.sh").read_text()
+
+    def test_source_cleanliness_gate_rejects_tracked_and_untracked_changes_without_leaking_names(self):
+        start = self.source.index("require_clean_source_repository() {\n")
+        end = self.source.index("\n}\n", start) + 2
+        cleanliness_gate = self.source[start:end]
+
+        for state in ("clean", "tracked", "untracked"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory)
+                subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+                tracked = repository / "tracked.txt"
+                tracked.write_text("committed\n")
+                subprocess.run(["git", "-C", str(repository), "add", "tracked.txt"], check=True)
+                subprocess.run(
+                    [
+                        "git", "-C", str(repository),
+                        "-c", "user.name=Latchway Test",
+                        "-c", "user.email=test@latchway.invalid",
+                        "commit", "--quiet", "-m", "fixture",
+                    ],
+                    check=True,
+                )
+                if state == "tracked":
+                    tracked.write_text("changed " + SECRET)
+                elif state == "untracked":
+                    (repository / (SECRET + ".txt")).write_text("untracked")
+
+                script = "\n".join([
+                    "set -eu",
+                    "repository_root=" + shlex.quote(str(repository)),
+                    cleanliness_gate,
+                    "require_clean_source_repository",
+                ])
+                result = subprocess.run(
+                    ["/bin/sh", "-c", script], capture_output=True, text=True, timeout=5,
+                )
+                self.assertEqual(result.returncode, 0 if state == "clean" else 2, result.stderr)
+                self.assertNotIn(SECRET, result.stderr)
+
+        invocation = self.source.index("\nrequire_clean_source_repository\n", end)
+        self.assertLess(invocation, self.source.index('mkdir -p "$evidence_dir"'))
+        self.assertLess(invocation, self.source.index("run_dir=$(mktemp"))
+        self.assertLess(invocation, self.source.index("git clone --quiet --no-hardlinks"))
 
     def test_cleanup_preserves_success_and_failure_despite_collector_failure(self):
         start = self.source.index("cleanup() {\n")
@@ -437,11 +491,22 @@ class HarnessTests(unittest.TestCase):
         self.assertLess(self.source.index('cp "$run_dir/runtime/load-config.json"'), self.source.index('python3 "$run_dir/source/scripts/load-runtime-diagnostics.py"'))
         self.assertLess(self.source.index('wait "$diagnostics_pid"'), self.source.index('docker rm --force "$gateway"'))
         self.assertIn('--pool-max-connections "$gateway_db_pool_max_connections"', self.source)
+        self.assertIn('--regular-pool-max-connections "$gateway_db_regular_pool_max_connections"', self.source)
+        self.assertIn('--completion-pool-max-connections "$gateway_db_completion_pool_max_connections"', self.source)
+        self.assertIn(
+            "export LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections",
+            self.source,
+        )
+        self.assertIn("--env LATCHWAY_DB_COMPLETION_CONNECTIONS", self.source)
+        self.assertIn("gateway_completion_pool_env=$(docker inspect", self.source)
         self.assertIn('--tools-runner "$tools_runner"', self.source)
         self.assertIn('--stop-file "$run_dir/runtime-diagnostics.stop" >/dev/null 2>&1 &', self.source)
         self.assertNotIn("-mode ", self.source)
         for value in ("--cpus 4", "--cpus 2", "--memory 4g", "--memory 2g",
-                      "gateway_db_pool_max_connections=32", "postgres_max_connections=100"):
+                      "gateway_db_pool_max_connections=32",
+                      "gateway_db_regular_pool_max_connections=24",
+                      "gateway_db_completion_pool_max_connections=8",
+                      "postgres_max_connections=100"):
             self.assertIn(value, self.source)
 
     def test_existing_runner_is_named_and_cleanup_requires_ownership(self):

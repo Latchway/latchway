@@ -49,11 +49,12 @@ type credentialSelfTestRunner interface {
 }
 
 type credentialSelfTestInput struct {
-	Scope       configuration.TenantScope
-	Kind        string
-	UpstreamID  string
-	ModelID     string
-	MaxCostNano int64
+	Scope            configuration.TenantScope
+	ConfigRevisionID string
+	Kind             string
+	UpstreamID       string
+	ModelID          string
+	MaxCostNano      int64
 }
 
 type credentialSelfTestResult struct {
@@ -180,6 +181,7 @@ func (runner *productionCredentialSelfTests) Run(
 ) credentialSelfTestResult {
 	if runner == nil || ctx == nil || runner.now == nil ||
 		(input.Kind != "upstream" && input.Kind != "openrouter") ||
+		id.Validate(input.ConfigRevisionID, id.ConfigRevision) != nil ||
 		!selfTestIdentifierPattern.MatchString(input.UpstreamID) ||
 		!selfTestIdentifierPattern.MatchString(input.ModelID) ||
 		input.MaxCostNano < 1 || input.MaxCostNano > maximumSelfTestCostNanoUSD {
@@ -192,6 +194,9 @@ func (runner *productionCredentialSelfTests) Run(
 	snapshot, err := runner.configurations.CredentialSelfTestSnapshot(runCtx, input.Scope)
 	if err != nil {
 		return failedCredentialSelfTest(checks, "active_configuration", "The active compiled configuration could not be loaded.")
+	}
+	if snapshot.PolicyRevision() != input.ConfigRevisionID {
+		return failedCredentialSelfTest(checks, "active_configuration", "The active compiled configuration does not match the requested revision.")
 	}
 	checks = append(checks, passedSelfTestCheck("active_configuration", "The active compiled configuration was loaded."))
 
@@ -867,9 +872,14 @@ func checkedSelfTestAdd(left, right int64) (int64, bool) {
 
 func validStoredSelfTest(run selfTestDocument) bool {
 	if (run.Kind != "local" && run.Kind != "upstream" && run.Kind != "openrouter") ||
+		id.Validate(run.EnvironmentID, id.Environment) != nil ||
 		(run.State != "passed" && run.State != "failed") || run.CreatedAt.IsZero() ||
 		run.CompletedAt == nil || run.CompletedAt.IsZero() || run.CompletedAt.Before(run.CreatedAt) ||
 		len(run.Checks) == 0 || len(run.Checks) > 32 {
+		return false
+	}
+	if (run.Kind == "local" && run.ConfigRevisionID != "") ||
+		(run.Kind != "local" && id.Validate(run.ConfigRevisionID, id.ConfigRevision) != nil) {
 		return false
 	}
 	if run.ScheduleID != "" && id.Validate(run.ScheduleID, id.SelfTestSchedule) != nil {
@@ -891,24 +901,34 @@ func (store *operationalStore) startCredentialSelfTest(
 	input startSelfTestInput,
 ) (selfTestDocument, error) {
 	var applicationID string
+	var activeRevisionID string
 	var createdAt time.Time
 	err := store.pool.QueryRow(ctx, `
-		SELECT environment.application_id, statement_timestamp()
+		SELECT environment.application_id, statement_timestamp(),
+		       COALESCE(active.config_revision_id, '')
 		FROM environments AS environment
 		JOIN applications AS application
 		  ON application.organization_id = environment.organization_id
 		 AND application.application_id = environment.application_id
 		JOIN organizations AS organization
 		  ON organization.organization_id = environment.organization_id
+		LEFT JOIN active_config_revisions AS active
+		  ON active.organization_id = environment.organization_id
+		 AND active.application_id = environment.application_id
+		 AND active.environment_id = environment.environment_id
+		 AND active.revision_status = 'valid'
 		WHERE environment.organization_id = $1 AND environment.environment_id = $2
 		  AND organization.status = 'active' AND application.status = 'active'
 		  AND environment.status = 'active'
-	`, principal.OrganizationID, input.Environment).Scan(&applicationID, &createdAt)
+	`, principal.OrganizationID, input.Environment).Scan(&applicationID, &createdAt, &activeRevisionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return selfTestDocument{}, errOperationalNotFound
 	}
 	if err != nil {
 		return selfTestDocument{}, fmt.Errorf("inspect credential self-test environment: %w", err)
+	}
+	if activeRevisionID != input.ConfigRevisionID {
+		return selfTestDocument{}, errOperationalConflict
 	}
 	selfTestID, err := store.newID(id.Prefix("tst"))
 	if err != nil {
@@ -924,14 +944,17 @@ func (store *operationalStore) startCredentialSelfTest(
 			ApplicationID:  applicationID,
 			EnvironmentID:  input.Environment,
 		},
-		Kind: input.Kind, UpstreamID: input.Upstream, ModelID: input.Model,
+		ConfigRevisionID: input.ConfigRevisionID,
+		Kind:             input.Kind, UpstreamID: input.Upstream, ModelID: input.Model,
 		MaxCostNano: input.MaxCost,
 	})
 	if result.State != "passed" && result.State != "failed" {
 		result = failedCredentialSelfTest(nil, "runner", "The credential self-test runner returned an invalid result.")
 	}
 	run := selfTestDocument{
-		ID: selfTestID, Kind: input.Kind, State: result.State,
+		ID: selfTestID, EnvironmentID: input.Environment,
+		ConfigRevisionID: input.ConfigRevisionID,
+		Kind:             input.Kind, State: result.State,
 		CreatedAt: createdAt.UTC(), Checks: append([]selfTestCheck(nil), result.Checks...),
 	}
 

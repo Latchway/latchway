@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -272,6 +273,117 @@ class ReleaseDomainEvidenceTests(unittest.TestCase):
                         hashlib.sha256((output / artifact["path"]).read_bytes()).hexdigest(),
                         artifact["sha256"],
                     )
+
+    def test_single_maintainer_registry_profile_excludes_only_documentation(self) -> None:
+        fixture = self.fixture("public_registries")
+        omitted = "registry.documentation-production"
+        (fixture.raw / MODULE.result_name(omitted)).unlink()
+        shutil.rmtree(fixture.raw / "artifacts" / omitted.replace(".", "-"))
+        receipt = MODULE.produce(
+            domain=fixture.domain,
+            source_path=fixture.source,
+            candidate_path=fixture.candidate,
+            raw_root=fixture.raw,
+            receipt_path=fixture.receipt,
+            now=fixture.now,
+            context={
+                "repository": MODULE.REPOSITORY,
+                "workflow": MODULE.WORKFLOW,
+                "run_id": "12345",
+                "run_attempt": 1,
+            },
+            release_profile=MODULE.SINGLE_MAINTAINER_PROFILE,
+        )
+        self.assertEqual(
+            receipt["release_profile"], MODULE.SINGLE_MAINTAINER_PROFILE
+        )
+        self.assertNotIn(omitted, [item["id"] for item in receipt["observations"]])
+        document = MODULE.finalize(
+            domain=fixture.domain,
+            source_path=fixture.source,
+            candidate_path=fixture.candidate,
+            raw_root=fixture.raw,
+            receipt_path=fixture.receipt,
+            receipt_bundle=fixture.receipt_bundle,
+            source_bundle=fixture.source_bundle,
+            candidate_bundle=fixture.candidate_bundle,
+            output_root=fixture.root / "profile-output",
+            now=fixture.now,
+            verifier=lambda *args, **kwargs: [{"verified": True}],
+            release_profile=MODULE.SINGLE_MAINTAINER_PROFILE,
+        )
+        self.assertEqual(
+            document["claims"],
+            {
+                claim: True
+                for claim in MODULE.SINGLE_MAINTAINER_CLAIM_REQUIREMENTS[
+                    "public_registries"
+                ]
+            },
+        )
+        self.assertNotIn("documentation_production_verified", document["claims"])
+
+    def test_single_maintainer_public_tags_keep_the_exact_closed_claim_set(
+        self,
+    ) -> None:
+        self.assertEqual(
+            MODULE.expected_observations(
+                "public_tags", MODULE.SINGLE_MAINTAINER_PROFILE
+            ),
+            MODULE.expected_observations("public_tags"),
+        )
+        self.assertIs(
+            MODULE.SINGLE_MAINTAINER_CLAIM_REQUIREMENTS["public_tags"],
+            MODULE.CLAIM_REQUIREMENTS["public_tags"],
+        )
+        fixture = self.fixture("public_tags")
+        receipt = MODULE.produce(
+            domain=fixture.domain,
+            source_path=fixture.source,
+            candidate_path=fixture.candidate,
+            raw_root=fixture.raw,
+            receipt_path=fixture.receipt,
+            now=fixture.now,
+            context={
+                "repository": MODULE.REPOSITORY,
+                "workflow": MODULE.WORKFLOW,
+                "run_id": "12345",
+                "run_attempt": 1,
+            },
+            release_profile=MODULE.SINGLE_MAINTAINER_PROFILE,
+        )
+        self.assertEqual(
+            receipt["release_profile"], MODULE.SINGLE_MAINTAINER_PROFILE
+        )
+        document = MODULE.finalize(
+            domain=fixture.domain,
+            source_path=fixture.source,
+            candidate_path=fixture.candidate,
+            raw_root=fixture.raw,
+            receipt_path=fixture.receipt,
+            receipt_bundle=fixture.receipt_bundle,
+            source_bundle=fixture.source_bundle,
+            candidate_bundle=fixture.candidate_bundle,
+            output_root=fixture.root / "profile-tags-output",
+            now=fixture.now,
+            verifier=lambda *args, **kwargs: [{"verified": True}],
+            release_profile=MODULE.SINGLE_MAINTAINER_PROFILE,
+        )
+        self.assertEqual(
+            document["claims"],
+            {
+                claim: True
+                for claim in MODULE.CLAIM_REQUIREMENTS["public_tags"]
+            },
+        )
+
+    def test_single_maintainer_profile_is_rejected_for_deferred_domains(self) -> None:
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "release_profile_domain_invalid"
+        ):
+            MODULE.expected_observations(
+                "live_provider", MODULE.SINGLE_MAINTAINER_PROFILE
+            )
 
     def test_javascript_release_image_claim_requires_both_fixed_web_providers(self) -> None:
         requirements = MODULE.CLAIM_REQUIREMENTS["live_sdk_conformance"][

@@ -47,6 +47,8 @@ services:
       LATCHWAY_ROLE: ${LATCHWAY_ROLE:-all}
       LATCHWAY_LOG_LEVEL: ${LATCHWAY_LOG_LEVEL:-info}
       LATCHWAY_PUBLIC_ORIGIN: ${LATCHWAY_PUBLIC_ORIGIN:-http://localhost:8080}
+      LATCHWAY_DB_MAX_CONNECTIONS: ${LATCHWAY_DB_MAX_CONNECTIONS:-20}
+      LATCHWAY_DB_COMPLETION_CONNECTIONS: ${LATCHWAY_DB_COMPLETION_CONNECTIONS:-5}
       LATCHWAY_MASTER_KEY: ${LATCHWAY_MASTER_KEY:?generate and persist a base64-encoded 32-byte LATCHWAY_MASTER_KEY in .env}
       LATCHWAY_ADMIN_BOOTSTRAP_TOKEN: ${LATCHWAY_ADMIN_BOOTSTRAP_TOKEN:-}
       LATCHWAY_ADMIN_SESSION_LIFETIME: ${LATCHWAY_ADMIN_SESSION_LIFETIME:-12h}
@@ -54,7 +56,7 @@ services:
     ports:
       - "${LATCHWAY_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD", "/latchway", "doctor", "--output", "json"]
+      test: ["CMD", "/latchway", "--server", "http://127.0.0.1:8080", "--output", "json", "readiness"]
       interval: 5s
       timeout: 5s
       retries: 20

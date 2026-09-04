@@ -24,18 +24,19 @@ const (
 // Config contains bootstrap configuration. Product policy is loaded from
 // revisioned PostgreSQL configuration rather than environment variables.
 type Config struct {
-	ListenAddress        string
-	DatabaseURL          string
-	Role                 Role
-	LogLevel             string
-	MigrateOnStart       bool
-	ShutdownTimeout      time.Duration
-	ReadTimeout          time.Duration
-	IdleTimeout          time.Duration
-	DBMaxConnections     int32
-	PublicOrigin         string
-	AdminBootstrapToken  string
-	AdminSessionLifetime time.Duration
+	ListenAddress           string
+	DatabaseURL             string
+	Role                    Role
+	LogLevel                string
+	MigrateOnStart          bool
+	ShutdownTimeout         time.Duration
+	ReadTimeout             time.Duration
+	IdleTimeout             time.Duration
+	DBMaxConnections        int32
+	DBCompletionConnections int32
+	PublicOrigin            string
+	AdminBootstrapToken     string
+	AdminSessionLifetime    time.Duration
 }
 
 // Load reads process configuration from environment variables.
@@ -46,23 +47,28 @@ func Load() (Config, error) {
 	readTimeout, readErr := parseDurationEnv("LATCHWAY_READ_TIMEOUT", 15*time.Second)
 	idleTimeout, idleErr := parseDurationEnv("LATCHWAY_IDLE_TIMEOUT", 90*time.Second)
 	maxConnections, maxConnectionsErr := parseIntEnv("LATCHWAY_DB_MAX_CONNECTIONS", 20)
+	completionConnections, completionConnectionsErr := parseIntEnv(
+		"LATCHWAY_DB_COMPLETION_CONNECTIONS",
+		defaultDBCompletionConnections(maxConnections),
+	)
 	adminSessionLifetime, adminSessionErr := parseDurationEnv("LATCHWAY_ADMIN_SESSION_LIFETIME", 12*time.Hour)
 	publicOrigin := envOr("LATCHWAY_PUBLIC_ORIGIN", "http://"+net.JoinHostPort("localhost", port))
 	cfg := Config{
-		ListenAddress:        envOr("LATCHWAY_LISTEN_ADDRESS", net.JoinHostPort("0.0.0.0", port)),
-		DatabaseURL:          firstNonEmpty(os.Getenv("LATCHWAY_DATABASE_URL"), os.Getenv("DATABASE_URL")),
-		Role:                 Role(envOr("LATCHWAY_ROLE", string(RoleAll))),
-		LogLevel:             strings.ToLower(envOr("LATCHWAY_LOG_LEVEL", "info")),
-		MigrateOnStart:       migrateOnStart,
-		ShutdownTimeout:      shutdownTimeout,
-		ReadTimeout:          readTimeout,
-		IdleTimeout:          idleTimeout,
-		DBMaxConnections:     int32(maxConnections),
-		PublicOrigin:         publicOrigin,
-		AdminBootstrapToken:  os.Getenv("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"),
-		AdminSessionLifetime: adminSessionLifetime,
+		ListenAddress:           envOr("LATCHWAY_LISTEN_ADDRESS", net.JoinHostPort("0.0.0.0", port)),
+		DatabaseURL:             firstNonEmpty(os.Getenv("LATCHWAY_DATABASE_URL"), os.Getenv("DATABASE_URL")),
+		Role:                    Role(envOr("LATCHWAY_ROLE", string(RoleAll))),
+		LogLevel:                strings.ToLower(envOr("LATCHWAY_LOG_LEVEL", "info")),
+		MigrateOnStart:          migrateOnStart,
+		ShutdownTimeout:         shutdownTimeout,
+		ReadTimeout:             readTimeout,
+		IdleTimeout:             idleTimeout,
+		DBMaxConnections:        int32(maxConnections),
+		DBCompletionConnections: int32(completionConnections),
+		PublicOrigin:            publicOrigin,
+		AdminBootstrapToken:     os.Getenv("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"),
+		AdminSessionLifetime:    adminSessionLifetime,
 	}
-	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, adminSessionErr, cfg.Validate()); err != nil {
+	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, completionConnectionsErr, adminSessionErr, cfg.Validate()); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -99,6 +105,9 @@ func (c Config) Validate() error {
 	if c.DBMaxConnections < 2 || c.DBMaxConnections > 500 {
 		errs = append(errs, errors.New("database max connections must be between 2 and 500"))
 	}
+	if c.DBCompletionConnections < 1 || c.DBCompletionConnections >= c.DBMaxConnections {
+		errs = append(errs, errors.New("database completion connections must be at least 1 and less than database max connections"))
+	}
 	origin, originErr := url.Parse(c.PublicOrigin)
 	if originErr != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
 		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must be an absolute origin without credentials, path, query, or fragment"))
@@ -112,6 +121,21 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("admin session lifetime must be between 5 minutes and 30 days"))
 	}
 	return errors.Join(errs...)
+}
+
+// defaultDBCompletionConnections reserves one quarter of the total connection
+// budget, rounded up, so even the minimum two-connection configuration keeps
+// one regular and one completion connection. The remainder stays available to
+// regular request work.
+func defaultDBCompletionConnections(maxConnections int) int {
+	completionConnections := maxConnections / 4
+	if maxConnections%4 != 0 {
+		completionConnections++
+	}
+	if completionConnections < 1 {
+		return 1
+	}
+	return completionConnections
 }
 
 func isLoopbackHost(host string) bool {
@@ -167,9 +191,9 @@ func parseIntEnv(key string, fallback int) (int, error) {
 	if value == "" {
 		return fallback, nil
 	}
-	parsed, err := strconv.Atoi(value)
+	parsed, err := strconv.ParseInt(value, 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
-	return parsed, nil
+	return int(parsed), nil
 }

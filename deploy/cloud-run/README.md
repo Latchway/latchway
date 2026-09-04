@@ -51,8 +51,10 @@ The manual path is:
 | CPU allocation and scale | Instance-based billing; minimum 1, maximum 3 service instances |
 | Concurrency and request timeout | 100 / 3600 seconds |
 | `LATCHWAY_PUBLIC_ORIGIN` | `https://latchway-PROJECT_NUMBER.REGION.run.app` |
+| `LATCHWAY_ROLE` | `all` |
 | `LATCHWAY_MIGRATE_ON_START` | `false` after the explicit migration job |
-| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` |
+| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` aggregate connections per instance |
+| `LATCHWAY_DB_COMPLETION_CONNECTIONS` | `5`, reserved inside the aggregate total; regular work receives `15` |
 | `LATCHWAY_SHUTDOWN_TIMEOUT` | `8s`, inside Cloud Run's ten-second shutdown window |
 | `LATCHWAY_LOG_LEVEL` | `info` |
 | Secret-backed variables | `LATCHWAY_DATABASE_URL`, `LATCHWAY_MASTER_KEY`, temporary `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` |
@@ -70,8 +72,14 @@ on that listener; use a reviewed path-restricting edge with no `run.app` bypass
 if your operating policy requires private metrics. Readiness checks more than
 process health, including schema, active-environment configuration, keys, and
 worker heartbeat. Do not scale the combined worker to zero or throttle CPU
-between requests. Budget 60 application connections plus migrations, backups,
-administration, and temporary rollout/maximum-instance overshoot.
+between requests. At the manual maximum of three instances, the application
+ceiling is 60 aggregate connections: 15 are completion-reserved and 45 are for
+regular work. The completion reservation is a subset, not an extra 15. Include
+migrations, backups, administration, and temporary rollout/maximum-instance
+overshoot, then keep that planned peak at or below 80% of usable PostgreSQL
+connections so at least 20% remains free. The service template and Terraform
+set both pool values explicitly; change both together instead of expecting the
+runtime to recompute the completion reservation from a new aggregate.
 
 The manual guide includes Console fields, complete Cloud Shell commands,
 Cloud SQL alternatives, migration status checks, bootstrap removal, and a
@@ -87,8 +95,12 @@ The Terraform example provisions a private-IP Cloud SQL PostgreSQL 18
 instance, Secret Manager values, a Serverless VPC Access connector, a 2 vCPU / 2
 GiB Cloud Run service, and a one-shot migration job. Cloud Run's managed Cloud
 SQL connector presents short-lived client certificates over a Unix socket; the
-database rejects connections without trusted client certificates. The raw YAML files support
-teams that manage those dependencies separately. This is an optional
+database rejects connections without trusted client certificates. Terraform
+uses the Cloud Run Admin API v2 model, so the service and job declare a
+`cloud_sql_instance` volume mounted at `/cloudsql` as well as VPC access. The
+maintainer evidence receipt below reads the v1 compatibility representation
+instead and deliberately does not accept this private/VPC topology. The raw
+YAML files support teams that manage dependencies separately. This is an optional
 infrastructure-as-code path, not a prerequisite for using or forking Latchway.
 
 Authenticate Google Cloud and create or select a tightly scoped, versioned GCS
@@ -124,10 +136,12 @@ sqladmin.googleapis.com
 vpcaccess.googleapis.com
 ```
 
-Review the plan as a cost boundary. The production defaults create a regional
-high-availability Cloud SQL instance, a Serverless VPC Access connector with at
-least two instances, and one always-on 2-vCPU/2-GiB Cloud Run instance. These
-resources continue billing until deliberately scaled down or removed; do not
+Review the plan as a cost boundary. The initial `deploy_service=false` phase
+creates a regional high-availability Cloud SQL instance, a Serverless VPC
+Access connector with at least two instances, secrets, identities, and the
+migration job, but no traffic-serving service. After migration,
+`deploy_service=true` adds at least one always-on 2-vCPU/2-GiB Cloud Run
+instance. These resources continue billing until deliberately removed; do not
 apply the plan merely to perform static validation.
 
 ```bash
@@ -156,6 +170,10 @@ edition because the default `db-custom-2-7680` tier is not valid for Enterprise
 Plus. Keep `database_edition="ENTERPRISE"` unless the tier and its validation
 are changed together. `public_origin` must be the final HTTPS origin; the
 deterministic `run.app` origin is valid and avoids a separate domain frontend.
+`db_connections_per_instance=20` is the aggregate pool ceiling;
+`db_completion_connections_per_instance=5` reserves part of it and Terraform
+rejects a completion value that is not smaller than the total. Do not add these
+values when sizing Cloud SQL.
 The default allows unauthenticated Cloud Run ingress because Latchway performs
 its own session and DPoP authorization; use an external load balancer or Cloud
 Armor if additional edge policy is required.
@@ -182,14 +200,19 @@ See Google's current
 for frontend choices and limitations. Skip this frontend setup when the
 canonical origin is the built-in HTTPS `run.app` URL.
 
-The first deployment permits advisory-lock-protected startup migrations. Once
-the service is healthy, execute the one-shot job shown by
-`terraform output -raw migration_command`, then execute that job with the
-argument override `--args=--output,json,migrate,status`. Only a report where
-`current` equals `available` is current. Set `migrate_on_start=false` and apply
-again before the next controlled upgrade.
+The default stack keeps startup migrations and service creation disabled. The
+first apply therefore cannot deadlock on `/readyz` against an empty schema.
+Execute the one-shot job shown by `terraform output -raw migration_command`,
+then execute that job with the argument override
+`--args=--output,json,migrate,status`. Only a report where `current` equals
+`available` is current. The migration job uses its own service account and the
+same pinned database-secret version as the service; it cannot read the master
+key or administrator bootstrap token. Only after that status passes, set
+`deploy_service=true`; for the one-time owner-creation revision also set
+`inject_admin_bootstrap_token=true`, review a new saved plan, and apply it.
 
-Future upgrades are three explicit applies. First advance only
+Future upgrades keep `deploy_service=true` and use three explicit applies.
+First advance only
 `migration_image`, keeping the current service image, revision, approval, and
 100% traffic unchanged; apply and execute both `migrate up` and `migrate
 status`. Second, after the status passes, set the new `service_image`, matching
@@ -202,7 +225,8 @@ plan or mix unrelated infrastructure changes into them.
 Terraform creates a random administrator bootstrap secret and grants the
 runtime identity access only while `inject_admin_bootstrap_token=true`. Read it
 directly from Secret Manager into a password manager, create the first
-administrator, then set that variable and `migrate_on_start` to `false`. Give
+administrator, then set that variable back to `false`. Keep
+`migrate_on_start=false`. Give
 the post-bootstrap template a new `service_revision_name`, retain the current
 revision as `previous_service_revision_name`, set
 `service_traffic_percent=0`, apply, and probe the tagged candidate. Set traffic
@@ -213,16 +237,28 @@ the unused secret only under the team's recorded secret-retirement policy.
 Cloud Run request timeout is 60 minutes so SSE clients must reconnect before
 that boundary. CPU remains allocated for the combined worker role. `/healthz`
 is the liveness probe and `/readyz` checks PostgreSQL, schema, active
-configuration, master/signing keys, and worker heartbeat.
+configuration, the reserved quota-completion pool, master/signing keys, and
+worker heartbeat.
 Cloud Run allows ten seconds between SIGTERM and forced termination; this
 template gives the application eight seconds to drain so the process can exit
 before the platform deadline.
 
 Verify the ready revision resolved the configured immutable image before
-accepting traffic:
+accepting traffic. Download the attested `latchway-candidate.json` release
+asset alongside the image coordinate; Cloud Run may report either the OCI
+index digest or the `linux/amd64` child selected from that exact index:
 
 ```bash
 export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:REPLACE_WITH_RELEASE_DIGEST'
+export LATCHWAY_CANDIDATE_MANIFEST='./latchway-candidate.json'
+latchway_candidate_image=$(jq -er '.image.repository + "@" + .image.index_digest' \
+  "$LATCHWAY_CANDIDATE_MANIFEST")
+test "$latchway_candidate_image" = "$LATCHWAY_IMAGE"
+latchway_index_digest=$(jq -er '.image.index_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+  "$LATCHWAY_CANDIDATE_MANIFEST")
+latchway_amd64_digest=$(jq -er '.image.platforms["linux/amd64"] | select(test("^sha256:[0-9a-f]{64}$"))' \
+  "$LATCHWAY_CANDIDATE_MANIFEST")
+test "$latchway_index_digest" != "$latchway_amd64_digest"
 latchway_revision=$(gcloud run services describe latchway \
   --project PROJECT_ID \
   --region REGION \
@@ -237,16 +273,22 @@ latchway_resolved_digest=$(gcloud run revisions describe "$latchway_revision" \
   --project PROJECT_ID \
   --region REGION \
   --format='value(status.imageDigest)')
-test "$latchway_resolved_digest" = "${LATCHWAY_IMAGE##*@}"
+case "${latchway_resolved_digest##*@}" in
+  "$latchway_index_digest"|"$latchway_amd64_digest") ;;
+  *) echo 'ready revision is not bound to the candidate index or its linux/amd64 child' >&2; exit 1 ;;
+esac
 ```
 
 ## Connection budget
 
-The maximum application pool is `max_instances ×
-db_connections_per_instance` (200 with defaults). Add migration and operations
-headroom and keep the total below Cloud SQL's limit. Reduce the per-instance
-pool before increasing autoscaling. A production database should remain
-`REGIONAL`; the `ZONAL` option is for evaluation only.
+The maximum aggregate application pool is `max_instances ×
+db_connections_per_instance` (60 with defaults). Of that ceiling,
+`max_instances × db_completion_connections_per_instance` (15 by default) is
+reserved for completion, leaving 45 for regular work; it is not additive.
+Add migration, backup, administration, maintenance, and rollout-overlap demand,
+then keep the planned peak at or below 80% of usable Cloud SQL connections.
+Reduce the per-instance pool before increasing autoscaling. A production
+database should remain `REGIONAL`; the `ZONAL` option is for evaluation only.
 
 ## Raw YAML
 
@@ -255,8 +297,10 @@ Export the placeholders and render with `envsubst` into an untracked file:
 ```bash
 export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:...'
 export LATCHWAY_PUBLIC_ORIGIN='https://ai.example.com'
-export SERVICE_ACCOUNT='latchway-runtime@PROJECT_ID.iam.gserviceaccount.com'
-export VPC_CONNECTOR='projects/PROJECT_ID/locations/REGION/connectors/latchway'
+export RUNTIME_SERVICE_ACCOUNT='latchway-runtime@PROJECT_ID.iam.gserviceaccount.com'
+export MIGRATOR_SERVICE_ACCOUNT='latchway-migrator@PROJECT_ID.iam.gserviceaccount.com'
+export DATABASE_SECRET_VERSION='1'
+export MASTER_KEY_SECRET_VERSION='1'
 export CLOUD_SQL_CONNECTION_NAME='PROJECT_ID:REGION:latchway-postgres'
 envsubst < deploy/cloud-run/migration-job.yaml > /tmp/latchway-migration-job.yaml
 gcloud run jobs replace /tmp/latchway-migration-job.yaml --region REGION
@@ -267,12 +311,17 @@ envsubst < deploy/cloud-run/service.yaml > /tmp/latchway-service.yaml
 gcloud run services replace /tmp/latchway-service.yaml --region REGION
 ```
 
-The raw-YAML path preserves migration-before-service ordering. The checked-in
-service YAML still includes the initial bootstrap binding and startup-migration
-fallback: remove the bootstrap binding after first-owner setup and set
-`LATCHWAY_MIGRATE_ON_START=false` after the explicit job succeeds. Replace
-`latest` secret references with reviewed numeric versions in the rendered
-manifest. Do not reintroduce those bootstrap defaults during upgrades.
+The raw-YAML path preserves migration-before-service ordering and renders a
+v1 Cloud SQL connector profile: one `run.googleapis.com/cloudsql-instances`
+annotation on the service revision template and the job execution template,
+with no VPC annotation and no explicit volume or mount. Cloud Run exposes the
+managed Unix socket at `/cloudsql/PROJECT_ID:REGION:INSTANCE_ID`. Distinct
+runtime/migrator identities, startup migration disabled, numeric
+secret-version placeholders, no bootstrap binding, retry zero, and maximum
+three service instances remain closed. For first-owner setup, add the
+administrator bootstrap binding only to a temporary service revision, then
+remove it and its accessor grant before treating the deployment as steady
+state. Never render `latest` into a service or job revision.
 
 For controlled rollout without Terraform, use Cloud Run's no-traffic revision
 and explicit traffic controls described in the manual guide. Terraform is not
@@ -281,9 +330,14 @@ from ordinary deployment success.
 
 Grant the runtime service account Secret Manager accessor only on the named
 database and master-key secrets, plus the temporary bootstrap secret during
-initial setup. Keep Cloud SQL on private IP, require encrypted connections,
-enable point-in-time recovery, and test the procedures in
-`docs/operations/backup-restore.md` before taking traffic.
+initial setup. For this annotation-only v1 receipt topology, keep the fixed
+Cloud SQL instance's public-IP connector path enabled; the Cloud Run service
+and job use the managed `/cloudsql/...` socket and do not need an
+authorized-network allowlist. Require encrypted connections, enable
+point-in-time recovery, and test the procedures in
+`docs/operations/backup-restore.md` before taking traffic. Use the Terraform v2
+path above when private-IP/VPC connectivity is required; that topology is
+deliberately outside this receipt.
 
 ## Maintainer release evidence, not an adopter prerequisite
 
@@ -321,7 +375,20 @@ Then run `.github/workflows/deployment-evidence.yml` from protected `main` with
 ID, `ghcr.io/latchway/latchway@sha256:...` OCI index, public endpoint, project,
 region, service, and migration job. The
 collector reads the remote status from execution-scoped provider logs, checks
-the service and job image, resolves the revision digest, verifies secret
-references without retrieving their values, performs a two-revision SIGTERM
-rollout, and probes `/healthz` plus `/readyz`. Static validation alone is not a
-Cloud Run release claim.
+the closed service/job runtime profiles, resolves the revision digest, verifies
+secret references without retrieving their values, performs a two-revision
+replacement/rollout, and probes `/healthz` plus `/readyz`. The replacement
+observation proves revision turnover and restored readiness; it does not by
+itself prove graceful SIGTERM drain or process exit. Static validation alone is
+not a Cloud Run release claim.
+
+The selected receipt is fixed to project `latchway`, region
+`asia-southeast1`, service `latchway`, job `latchway-migrate`, and Cloud SQL
+connection `latchway:asia-southeast1:latchway-postgres`. The pinned `gcloud`
+collector reads Cloud Run's v1/Knative JSON compatibility shape. In that shape
+the connection must be the exact `run.googleapis.com/cloudsql-instances`
+annotation on both the desired service template and ready revision, on the
+job's execution template, and inherited onto the executed job. The receipt
+rejects VPC annotations plus explicit volumes and mounts. Terraform's v2
+private-IP/VPC volume model above remains a supported deployment example, but
+it is intentionally a different, non-receipt topology.

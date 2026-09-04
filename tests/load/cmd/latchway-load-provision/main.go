@@ -82,6 +82,8 @@ type options struct {
 	postgresMemorySwap          int64
 	postgresMaxConns            int
 	gatewayDBPool               int
+	gatewayDBRegularPool        int
+	gatewayDBCompletionPool     int
 	bootstrapEnv                string
 	adminPasswordEnv            string
 }
@@ -149,22 +151,7 @@ type privateJWK struct {
 
 func main() {
 	values := options{}
-	flag.StringVar(&values.gatewayURL, "gateway-url", "http://127.0.0.1:8080", "isolated gateway origin")
-	flag.StringVar(&values.upstreamURL, "upstream-base-url", "", "fixture base URL visible from the gateway")
-	flag.StringVar(&values.outputDir, "output-dir", "", "empty private directory for generated session files")
-	flag.StringVar(&values.localDockerImageID, "local-docker-image-id", "", "immutable local Docker gateway image ID")
-	flag.StringVar(&values.releaseOCIReference, "release-oci-reference", "", "immutable release OCI index reference")
-	flag.StringVar(&values.releaseOCIPlatformReference, "release-oci-platform-reference", "", "immutable executed release OCI platform-child reference")
-	flag.StringVar(&values.commit, "commit", "", "exact core commit represented by the image")
-	flag.StringVar(&values.postgresIdentity, "postgres-identity", "", "exact bounded PostgreSQL version/artifact identity")
-	flag.StringVar(&values.postgresNetwork, "postgres-network", "", "exact bounded PostgreSQL network placement")
-	flag.Int64Var(&values.postgresCPUMilli, "postgres-cpu-millicores", 0, "observed PostgreSQL CPU limit in millicores")
-	flag.Int64Var(&values.postgresMemory, "postgres-memory-bytes", 0, "observed PostgreSQL memory limit in bytes")
-	flag.Int64Var(&values.postgresMemorySwap, "postgres-memory-swap-bytes", 0, "observed PostgreSQL memory-plus-swap limit in bytes")
-	flag.IntVar(&values.postgresMaxConns, "postgres-max-connections", 0, "observed PostgreSQL max_connections")
-	flag.IntVar(&values.gatewayDBPool, "gateway-db-pool-max-connections", 0, "configured gateway DB pool maximum")
-	flag.StringVar(&values.bootstrapEnv, "bootstrap-token-env", "LATCHWAY_LOAD_BOOTSTRAP_TOKEN", "environment variable containing the isolated bootstrap token")
-	flag.StringVar(&values.adminPasswordEnv, "admin-password-env", "LATCHWAY_LOAD_ADMIN_PASSWORD", "environment variable containing the isolated owner password")
+	registerOptionsFlags(flag.CommandLine, &values)
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -174,6 +161,27 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("isolated load tenant and DPoP session provisioned")
+}
+
+func registerOptionsFlags(flags *flag.FlagSet, values *options) {
+	flags.StringVar(&values.gatewayURL, "gateway-url", "http://127.0.0.1:8080", "isolated gateway origin")
+	flags.StringVar(&values.upstreamURL, "upstream-base-url", "", "fixture base URL visible from the gateway")
+	flags.StringVar(&values.outputDir, "output-dir", "", "empty private directory for generated session files")
+	flags.StringVar(&values.localDockerImageID, "local-docker-image-id", "", "immutable local Docker gateway image ID")
+	flags.StringVar(&values.releaseOCIReference, "release-oci-reference", "", "immutable release OCI index reference")
+	flags.StringVar(&values.releaseOCIPlatformReference, "release-oci-platform-reference", "", "immutable executed release OCI platform-child reference")
+	flags.StringVar(&values.commit, "commit", "", "exact core commit represented by the image")
+	flags.StringVar(&values.postgresIdentity, "postgres-identity", "", "exact bounded PostgreSQL version/artifact identity")
+	flags.StringVar(&values.postgresNetwork, "postgres-network", "", "exact bounded PostgreSQL network placement")
+	flags.Int64Var(&values.postgresCPUMilli, "postgres-cpu-millicores", 0, "observed PostgreSQL CPU limit in millicores")
+	flags.Int64Var(&values.postgresMemory, "postgres-memory-bytes", 0, "observed PostgreSQL memory limit in bytes")
+	flags.Int64Var(&values.postgresMemorySwap, "postgres-memory-swap-bytes", 0, "observed PostgreSQL memory-plus-swap limit in bytes")
+	flags.IntVar(&values.postgresMaxConns, "postgres-max-connections", 0, "observed PostgreSQL max_connections")
+	flags.IntVar(&values.gatewayDBPool, "gateway-db-pool-max-connections", 0, "configured aggregate gateway DB pool maximum")
+	flags.IntVar(&values.gatewayDBRegularPool, "gateway-db-regular-pool-max-connections", 0, "configured regular gateway DB pool maximum")
+	flags.IntVar(&values.gatewayDBCompletionPool, "gateway-db-completion-pool-max-connections", 0, "configured quota-completion gateway DB pool maximum")
+	flags.StringVar(&values.bootstrapEnv, "bootstrap-token-env", "LATCHWAY_LOAD_BOOTSTRAP_TOKEN", "environment variable containing the isolated bootstrap token")
+	flags.StringVar(&values.adminPasswordEnv, "admin-password-env", "LATCHWAY_LOAD_ADMIN_PASSWORD", "environment variable containing the isolated owner password")
 }
 
 func run(ctx context.Context, values options) error {
@@ -189,8 +197,13 @@ func run(ctx context.Context, values options) error {
 		values.postgresCPUMilli < 1000 || values.postgresMemory < 1<<30 ||
 		values.postgresMemorySwap < values.postgresMemory ||
 		values.postgresMaxConns < 2 || values.postgresMaxConns > 500 ||
-		values.gatewayDBPool < 2 || values.gatewayDBPool > values.postgresMaxConns {
-		return errors.New("exact PostgreSQL identity/network/resources and a bounded gateway DB pool are required")
+		values.gatewayDBPool < 2 || values.gatewayDBPool > values.postgresMaxConns ||
+		!validGatewayDBPoolPartition(
+			values.gatewayDBPool,
+			values.gatewayDBRegularPool,
+			values.gatewayDBCompletionPool,
+		) {
+		return errors.New("exact PostgreSQL identity/network/resources and a bounded, exact gateway DB pool partition are required")
 	}
 	if !validEnvironmentName(values.bootstrapEnv) || !validEnvironmentName(values.adminPasswordEnv) {
 		return errors.New("secret environment variable names are invalid")
@@ -780,8 +793,10 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 			"postgresql_max_connections":      values.postgresMaxConns,
 			"postgresql_network":              values.postgresNetwork,
 			"gateway_db_pool_max_connections": values.gatewayDBPool,
-			"body_logging_disabled":           true,
-			"warm_configuration_cache":        true,
+			"gateway_db_regular_pool_max_connections":    values.gatewayDBRegularPool,
+			"gateway_db_completion_pool_max_connections": values.gatewayDBCompletionPool,
+			"body_logging_disabled":                      true,
+			"warm_configuration_cache":                   true,
 		},
 		"gateway": map[string]any{
 			"base_url":              values.gatewayURL,
@@ -1067,6 +1082,10 @@ func writeExclusive(path string, contents []byte, mode os.FileMode) error {
 		return fmt.Errorf("close %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+func validGatewayDBPoolPartition(total, regular, completion int) bool {
+	return regular >= 1 && completion >= 1 && regular == total-completion
 }
 
 func validLocalDockerImageID(value string) bool {

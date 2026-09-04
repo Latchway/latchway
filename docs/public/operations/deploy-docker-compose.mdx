@@ -50,10 +50,19 @@ LATCHWAY_DATABASE_URL=postgresql://latchway:URL_ENCODED_PASSWORD@postgres:5432/l
 LATCHWAY_MASTER_KEY=REPLACE_WITH_ONE_STABLE_32_BYTE_BASE64_KEY
 LATCHWAY_PUBLIC_ORIGIN=https://ai.example.com
 LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=REPLACE_WITH_ONE_USE_RANDOM_TOKEN
+LATCHWAY_DB_MAX_CONNECTIONS=20
+LATCHWAY_DB_COMPLETION_CONNECTIONS=5
 ```
 
 `sslmode=disable` is acceptable only across this template's private Compose
 network. Require and verify TLS when PostgreSQL is external.
+
+The total of `20` is the aggregate per-process connection ceiling. The
+completion pool reserves five connections inside that total, leaving 15 for
+ordinary database work. Do not budget `20 + 5`; the completion value must be
+at least one and strictly less than the aggregate total. The template supplies
+both values, so override both together; changing only the aggregate does not
+recompute the explicit completion reservation.
 
 ## Validate, pull, and start
 
@@ -68,8 +77,10 @@ docker compose --env-file .env.release \
 ```
 
 The template has no `build` key. The migration service must finish before the
-gateway becomes healthy. If either pull or migration fails, stop and resolve
-the immutable image or database problem; do not switch to a mutable tag.
+gateway becomes healthy. Its health check uses the bounded loopback
+`latchway readiness` probe, which observes the serving process without opening
+a second database pool. If either pull or migration fails, stop and resolve the
+immutable image or database problem; do not switch to a mutable tag.
 
 ## Verify the running deployment
 
@@ -82,10 +93,11 @@ docker compose --env-file .env.release \
 ```
 
 Accept migration status only when `up_to_date` is true and `current` equals
-`available`. Readiness also requires PostgreSQL, an active configuration,
-usable key material, and a recent worker heartbeat. Then verify the external
-HTTPS origin, one authenticated non-streaming request, and one SSE stream
-through the reverse proxy.
+`available`. Readiness also requires PostgreSQL, usable key material, a recent
+worker heartbeat, and an active configuration for every environment that
+already exists. An empty installation remains ready for first-owner setup.
+Then verify the external HTTPS origin, one authenticated non-streaming request,
+and one SSE stream through the reverse proxy.
 
 ## Remove bootstrap access
 
@@ -119,7 +131,11 @@ production traffic.
 ## Release evidence boundary
 
 A healthy source-built stack is not release evidence. The protected deployment
-receipt must prove that Compose pulled the exact signed digest, migration status
-passed, generated values did not enter logs or artifacts, health and readiness
-passed, SSE remained unbuffered, SIGTERM drained cleanly, and a replacement
-service returned ready.
+receipt proves that Compose pulled the exact signed digest, migration status
+passed, the closed signed archive contains no generated secret values, health
+and readiness passed, the original process exited successfully after `SIGTERM`
+within the configured grace period, and a distinctly identified replacement
+container returned ready. The workflow does not intentionally print generated
+secret values, but the receipt does not capture or prove the absence of values
+from the GitHub job log. Authenticated streaming and in-flight request behavior
+are covered by their dedicated release gates, not inferred from this receipt.

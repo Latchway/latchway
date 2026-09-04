@@ -31,7 +31,8 @@ Before accepting traffic:
 1. Verify the image digest, keyless signature, provenance, and SPDX attestation.
 2. Restore a recent backup into an isolated database and run `doctor` against it.
 3. Run `migrate up`, then confirm `migrate status` reports current equals available.
-4. Confirm `/healthz` and `/readyz`; readiness must include the worker heartbeat.
+4. Confirm `/healthz` and `/readyz`; readiness must include quota-completion
+   capacity and the worker heartbeat.
 5. Exercise session exchange from each supported client platform and one real
    non-streaming plus one streaming upstream request.
 6. Run the quota-contention and failure matrix, then the target load profiles.
@@ -102,10 +103,11 @@ wrapper captures bounded `/healthz` and `/readyz` responses through IPv4
 loopback, then retains them with the other raw observations before teardown.
 A fresh runner without provider credentials normalizes the pre-captured
 provider responses, revalidates the candidate, probes `/healthz` and `/readyz`
-for cloud platforms only, validates provider identity and resource ID, resolved image
-digest, remote `migrate status`, secret references, and SIGTERM replacement,
-and seals the deterministic archive. Finally, a no-checkout signer downloads
-only that validated archive and receives GitHub OIDC permission to attest it.
+for cloud platforms only, validates provider identity and resource ID, resolved
+image digest, remote `migrate status`, secret references, and platform-specific
+replacement or shutdown semantics, and seals the deterministic archive. Finally,
+a no-checkout signer downloads only that validated archive and receives GitHub
+OIDC permission to attest it.
 A missing command, log record, provider permission, digest match, health check,
 or archive fails the run; there is no manual-pass input.
 
@@ -216,6 +218,7 @@ python3 scripts/deployment-evidence.py finalize \
   --evidence-root "$EVIDENCE_ROOT" \
   --coordinates release-coordinates.json \
   --trusted-root trusted_root.jsonl \
+  --candidate-manifest latchway-candidate.json \
   --core-commit '<40 lowercase hex>' \
   --core-release v1.0.0 \
   --contract-version 1.0.0 \
@@ -249,14 +252,35 @@ Budget the worst case, not the steady state:
 
 ```text
 maximum application connections
-  = maximum API replicas × API pool size
-  + maximum worker replicas × worker pool size
+  = maximum API replicas × API aggregate pool ceiling
+  + maximum worker replicas × worker aggregate pool ceiling
+
+planned peak database demand
+  = maximum application connections
+  + migration, backup, administration, maintenance, and rollout slots
+
+planned peak database demand ≤ 80% of usable PostgreSQL connections
 ```
 
-Leave at least 20% plus explicit slots for migration jobs, administration,
-backup tooling, and provider maintenance. Reduce `LATCHWAY_DB_MAX_CONNECTIONS`
-before raising replica limits. A connection pooler may improve efficiency, but
-it does not replace a hard end-to-end connection budget.
+`LATCHWAY_DB_MAX_CONNECTIONS` is the aggregate per-process ceiling, including
+both pools. `LATCHWAY_DB_COMPLETION_CONNECTIONS` reserves a subset for terminal
+quota-lifecycle work and must be at least one and strictly below the aggregate;
+the remainder serves regular work. If unset, it defaults to one quarter of the
+aggregate rounded up. The deployment templates pin the default split to 20
+aggregate, five completion-reserved, and 15 regular connections. Never add the
+completion value to the aggregate total. Templates set both variables, so
+override both together; changing only the aggregate leaves the template's
+explicit completion reservation unchanged. Budget every possible replica plus
+the explicit non-application slots above and keep planned peak demand at or
+below 80% of usable PostgreSQL capacity so at least 20% remains free. Reduce
+the aggregate per-process ceiling before raising replica limits. A connection
+pooler may improve efficiency, but it does not replace a hard end-to-end
+connection budget.
+
+The accepted aggregate minimum of two is a functional one-regular / one-
+completion split, but it cannot preserve an additional regular connection when
+a reservation transaction is blocked. Use an aggregate of at least three in
+production; the supplied deployment profiles use 20.
 
 ## Timeouts and draining
 

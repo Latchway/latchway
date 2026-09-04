@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-04"
 owner: "core-operations"
 ---
 
@@ -109,6 +109,8 @@ Read each check as a bounded observation, not as a broader certification:
 
 | Check | What a pass actually establishes |
 | --- | --- |
+| `quota_completion_pool_connectivity` | The distinct PostgreSQL pool reserved for terminal quota writes accepted a bounded local probe. Single-pool CLI diagnostics omit this separate check. |
+| `quota_completion_pool_saturation` | The reserved completion pool was reachable and fewer than 75 percent of its connections were acquired at the observation instant. A failed connectivity probe also fails this check because pressure cannot be interpreted. This is a pressure snapshot, not a latency guarantee. |
 | `configuration_cache_state` | The API process that produced the report has a bounded, internally consistent cache with no entry beyond its reconciliation interval. A surface without process-local cache access reports `skipped`. |
 | `external_jwks_reachability` | Durable identity-provider state includes a recent successful JWKS refresh with no retained bounded error or stale provider. The doctor does not make a live request to the provider. |
 | `apple_verification_dependencies` | Active App Attest selections compile and the PostgreSQL-backed registered-key inventory is readable. It does not call Apple or prove a fresh physical-device assertion. |

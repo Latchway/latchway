@@ -23,6 +23,27 @@ const migrationLockID int64 = 0x4c41544348574159
 
 var isolatedSchemaName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
+// Pools contains independent regular-work and request-completion pools. The
+// caller owns Pools and must call Close when both pools are no longer in use;
+// components receiving either pool as a dependency must not close it.
+type Pools struct {
+	Regular    *pgxpool.Pool
+	Completion *pgxpool.Pool
+}
+
+// Close closes both pools.
+func (p *Pools) Close() {
+	if p == nil {
+		return
+	}
+	if p.Completion != nil {
+		p.Completion.Close()
+	}
+	if p.Regular != nil {
+		p.Regular.Close()
+	}
+}
+
 // Open constructs and verifies a bounded PostgreSQL pool.
 func Open(ctx context.Context, databaseURL string, maxConnections int32) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
@@ -30,6 +51,37 @@ func Open(ctx context.Context, databaseURL string, maxConnections int32) (*pgxpo
 		return nil, fmt.Errorf("parse database configuration: %w", err)
 	}
 	return openConfig(ctx, cfg, maxConnections)
+}
+
+// OpenPartitioned constructs and verifies two independently bounded pools from
+// the same PostgreSQL configuration. maxConnections remains the process-wide
+// connection budget; completionConnections is reserved from that budget and
+// the remainder is assigned to regular work.
+func OpenPartitioned(ctx context.Context, databaseURL string, maxConnections, completionConnections int32) (*Pools, error) {
+	if err := validatePartition(maxConnections, completionConnections); err != nil {
+		return nil, err
+	}
+	regularConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database configuration: %w", err)
+	}
+	completionConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database configuration: %w", err)
+	}
+
+	regular, completion, err := openPoolPair(
+		ctx,
+		regularConfig,
+		completionConfig,
+		maxConnections,
+		completionConnections,
+		openConfiguredPool,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &Pools{Regular: regular, Completion: completion}, nil
 }
 
 // OpenInSchema constructs a pool whose every connection is confined to one
@@ -52,15 +104,25 @@ func OpenInSchema(ctx context.Context, databaseURL, schema string, maxConnection
 }
 
 func openConfig(ctx context.Context, cfg *pgxpool.Config, maxConnections int32) (*pgxpool.Pool, error) {
+	if err := configurePool(cfg, maxConnections); err != nil {
+		return nil, err
+	}
+	return openConfiguredPool(ctx, cfg)
+}
+
+func configurePool(cfg *pgxpool.Config, maxConnections int32) error {
 	if cfg == nil || maxConnections < 1 {
-		return nil, errors.New("database pool configuration is invalid")
+		return errors.New("database pool configuration is invalid")
 	}
 	cfg.MaxConns = maxConnections
 	cfg.MinConns = 1
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	cfg.HealthCheckPeriod = 30 * time.Second
+	return nil
+}
 
+func openConfiguredPool(ctx context.Context, cfg *pgxpool.Config) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create database pool: %w", err)
@@ -70,6 +132,54 @@ func openConfig(ctx context.Context, cfg *pgxpool.Config, maxConnections int32) 
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	return pool, nil
+}
+
+type closeablePool interface {
+	Close()
+}
+
+type configuredPoolOpener[T closeablePool] func(context.Context, *pgxpool.Config) (T, error)
+
+func openPoolPair[T closeablePool](
+	ctx context.Context,
+	regularConfig, completionConfig *pgxpool.Config,
+	maxConnections, completionConnections int32,
+	opener configuredPoolOpener[T],
+) (T, T, error) {
+	var zero T
+	if err := validatePartition(maxConnections, completionConnections); err != nil {
+		return zero, zero, err
+	}
+	if opener == nil {
+		return zero, zero, errors.New("database pool opener is invalid")
+	}
+	if err := configurePool(regularConfig, maxConnections-completionConnections); err != nil {
+		return zero, zero, err
+	}
+	if err := configurePool(completionConfig, completionConnections); err != nil {
+		return zero, zero, err
+	}
+
+	regular, err := opener(ctx, regularConfig)
+	if err != nil {
+		return zero, zero, fmt.Errorf("open regular database pool: %w", err)
+	}
+	completion, err := opener(ctx, completionConfig)
+	if err != nil {
+		regular.Close()
+		return zero, zero, fmt.Errorf("open completion database pool: %w", err)
+	}
+	return regular, completion, nil
+}
+
+func validatePartition(maxConnections, completionConnections int32) error {
+	if maxConnections < 2 {
+		return errors.New("database max connections must allow two pools")
+	}
+	if completionConnections < 1 || completionConnections >= maxConnections {
+		return errors.New("database completion connections must be at least 1 and less than database max connections")
+	}
+	return nil
 }
 
 // Migrator applies embedded forward-only migrations under a session-scoped

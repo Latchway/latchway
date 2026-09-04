@@ -12,6 +12,9 @@ vi.mock("../api/admin", async (importOriginal) => ({
 vi.mock("../api/session", () => ({
   useConsoleSession: () => ({ data: { mode: "configured", session: { capabilities: ["revoke_installations"], organization_id: "org_0123456789abcdef" } } })
 }));
+vi.mock("../app/console-compatibility-context", () => ({
+  useConsoleCompatibility: () => ({ mutationAllowed: true })
+}));
 
 import { InstallationFamiliesPage } from "./installation-families-page";
 import { WorkspaceContext, type WorkspaceContextValue } from "../app/workspace-context-value";

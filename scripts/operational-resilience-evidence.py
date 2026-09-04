@@ -123,6 +123,9 @@ LOAD_GATES = frozenset(
         "quota_contention_zero_overspend",
     )
 )
+RELEASE_LOAD_DB_POOL_MAX_CONNECTIONS = 32
+RELEASE_LOAD_DB_REGULAR_POOL_MAX_CONNECTIONS = 24
+RELEASE_LOAD_DB_COMPLETION_POOL_MAX_CONNECTIONS = 8
 AUTOMATED_FAILURE_IDS = frozenset(
     (
         "reservation-reclamation-and-contention",
@@ -1041,7 +1044,9 @@ def validate_result_evidence(
             for name, count in problems.items()
         )
         or (not allow_problem_codes and problems != {})
+        or type(value["request_errors"]) is not int
         or value["request_errors"] != 0
+        or type(value["invalid_problem_responses"]) is not int
         or value["invalid_problem_responses"] != 0
     ):
         raise EvidenceError(code)
@@ -1354,6 +1359,7 @@ def validate_load_gate_metrics(
             or not isinstance(metrics["hold_seconds"], int)
             or isinstance(metrics["hold_seconds"], bool)
             or metrics["hold_seconds"] < 10
+            or type(metrics["premature_completions"]) is not int
             or metrics["premature_completions"] != 0
             or baseline is None
             or peak is None
@@ -1539,6 +1545,8 @@ def validate_load(
             "postgresql_max_connections",
             "postgresql_network",
             "gateway_db_pool_max_connections",
+            "gateway_db_regular_pool_max_connections",
+            "gateway_db_completion_pool_max_connections",
             "body_logging_disabled",
             "warm_configuration_cache",
         ),
@@ -1560,6 +1568,8 @@ def validate_load(
                 "postgresql_memory_swap_bytes",
                 "postgresql_max_connections",
                 "gateway_db_pool_max_connections",
+                "gateway_db_regular_pool_max_connections",
+                "gateway_db_completion_pool_max_connections",
             )
         )
         or environment["postgresql_cpu_millicores"] < 1000
@@ -1570,6 +1580,17 @@ def validate_load(
         or not 2
         <= environment["gateway_db_pool_max_connections"]
         <= environment["postgresql_max_connections"]
+        or environment["gateway_db_pool_max_connections"]
+        != RELEASE_LOAD_DB_POOL_MAX_CONNECTIONS
+        or environment["gateway_db_regular_pool_max_connections"]
+        != RELEASE_LOAD_DB_REGULAR_POOL_MAX_CONNECTIONS
+        or environment["gateway_db_completion_pool_max_connections"]
+        != RELEASE_LOAD_DB_COMPLETION_POOL_MAX_CONNECTIONS
+        or environment["gateway_db_regular_pool_max_connections"] < 1
+        or environment["gateway_db_completion_pool_max_connections"] < 1
+        or environment["gateway_db_regular_pool_max_connections"]
+        != environment["gateway_db_pool_max_connections"]
+        - environment["gateway_db_completion_pool_max_connections"]
         or environment["body_logging_disabled"] is not True
         or environment["warm_configuration_cache"] is not True
     ):
@@ -1962,6 +1983,7 @@ def validate_failure(
                     log["package"] != invocation["package"]
                     or log["run"] != invocation["run"]
                     or log["race"] is not invocation["race"]
+                    or type(log["exit_code"]) is not int
                     or log["exit_code"] != 0
                     or not isinstance(stored_log, str)
                     or Path(stored_log).name != expected_name
@@ -2168,6 +2190,7 @@ def validate_runtime_observations(
             "database",
             "schema",
             "active_configuration",
+            "quota_completion_pool",
             "master_key",
             "signing_key",
             "worker_heartbeat",

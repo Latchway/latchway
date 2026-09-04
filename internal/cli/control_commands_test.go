@@ -423,8 +423,14 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 	token := strings.Repeat("self-test-control-token-", 2)
 	t.Setenv("TEST_LATCHWAY_SELF_TEST_TOKEN", token)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodPost || request.URL.Path != "/admin/v1/self-tests" ||
-			request.Header.Get("Authorization") != "Bearer "+token {
+		if request.Header.Get("Authorization") != "Bearer "+token {
+			t.Fatalf("self-test request = %s %s", request.Method, request.URL.Path)
+		}
+		if request.Method == http.MethodGet && request.URL.Path == "/admin/v1/environments/"+controlTestEnvironment+"/config" {
+			return controlHTTPResponse(request, http.StatusOK,
+				`{"id":"`+controlTestRevision+`","environment_id":"`+controlTestEnvironment+`","state":"active"}`, nil), nil
+		}
+		if request.Method != http.MethodPost || request.URL.Path != "/admin/v1/self-tests" {
 			t.Fatalf("self-test request = %s %s", request.Method, request.URL.Path)
 		}
 		var body map[string]any
@@ -434,6 +440,7 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 			t.Fatal(err)
 		}
 		if body["kind"] != "openrouter" || body["environment_id"] != controlTestEnvironment ||
+			body["config_revision_id"] != controlTestRevision ||
 			body["upstream"] != "openrouter" || body["model"] != "canary" ||
 			body["max_cost_nano_usd"] != json.Number("10000000") {
 			t.Fatalf("self-test body = %#v", body)
@@ -442,7 +449,7 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 			t.Fatal("provider credential entered Admin API request")
 		}
 		return controlHTTPResponse(request, http.StatusAccepted,
-			`{"id":"tst_00000000000000000000000000","kind":"openrouter","state":"passed","created_at":"2026-08-29T00:00:00Z","completed_at":"2026-08-29T00:00:01Z","checks":[{"name":"usage","state":"passed","safe_detail":"Usage passed."}]}`, nil), nil
+			`{"id":"tst_00000000000000000000000000","environment_id":"`+controlTestEnvironment+`","config_revision_id":"`+controlTestRevision+`","kind":"openrouter","state":"passed","created_at":"2026-08-29T00:00:00Z","completed_at":"2026-08-29T00:00:01Z","checks":[{"name":"usage","state":"passed","safe_detail":"Usage passed."}]}`, nil), nil
 	})}
 	var output bytes.Buffer
 	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
@@ -453,8 +460,76 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 	}, opts); err != nil {
 		t.Fatalf("verify openrouter error = %v", err)
 	}
-	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"state": "passed"`) {
+	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"state": "passed"`) ||
+		!strings.Contains(output.String(), `"environment_id": "`+controlTestEnvironment+`"`) {
 		t.Fatalf("unsafe or incomplete self-test output = %q", output.String())
+	}
+}
+
+func TestVerifyOpenRouterRejectsMismatchedSelfTestContext(t *testing.T) {
+	token := strings.Repeat("self-test-context-token-", 2)
+	t.Setenv("TEST_LATCHWAY_SELF_TEST_CONTEXT_TOKEN", token)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method == http.MethodGet {
+			return controlHTTPResponse(request, http.StatusOK,
+				`{"id":"`+controlTestRevision+`","environment_id":"`+controlTestEnvironment+`","state":"active"}`, nil), nil
+		}
+		return controlHTTPResponse(request, http.StatusAccepted,
+			`{"id":"tst_00000000000000000000000000","environment_id":"env_11111111111111111111111111","config_revision_id":"`+controlTestRevision+`","kind":"openrouter","state":"passed","created_at":"2026-08-29T00:00:00Z","checks":[]}`, nil), nil
+	})}
+	opts := &options{output: "json", stdout: io.Discard, stderr: io.Discard, adminHTTPClient: client}
+	err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "verify", "openrouter", "--server-owned",
+		"--environment", controlTestEnvironment, "--upstream", "openrouter", "--model", "canary",
+		"--api-token-env", "TEST_LATCHWAY_SELF_TEST_CONTEXT_TOKEN",
+	}, opts)
+	if err == nil || !strings.Contains(err.Error(), "exact requested environment") {
+		t.Fatalf("mismatched self-test context error = %v", err)
+	}
+}
+
+func TestStatusConsumesAndValidatesCompleteSystemDocument(t *testing.T) {
+	token := strings.Repeat("system-status-token-", 2)
+	t.Setenv("TEST_LATCHWAY_SYSTEM_STATUS_TOKEN", token)
+	capabilities, err := json.Marshal(requiredServerCapabilitiesCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := `{"server_version":"1.0.0","contract_version":"1.0.0","protocol_versions":[1,2],"role":"all","database_schema_version":"000042","mutation_ready":true,"ready":true,"server_capabilities":` + string(capabilities) + `}`
+
+	for _, test := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "complete", body: valid},
+		{name: "missing capabilities", body: strings.Replace(valid, `,"server_capabilities":`+string(capabilities), "", 1), wantErr: true},
+		{name: "reordered capabilities", body: strings.Replace(valid, `"app_attest","play_integrity"`, `"play_integrity","app_attest"`, 1), wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Method != http.MethodGet || request.URL.Path != "/admin/v1/system" ||
+					request.Header.Get("Authorization") != "Bearer "+token {
+					t.Fatalf("status request = %s %s", request.Method, request.URL.Path)
+				}
+				return controlHTTPResponse(request, http.StatusOK, test.body, nil), nil
+			})}
+			var output bytes.Buffer
+			opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
+			err := executeWithOptions(context.Background(), []string{
+				"--server", "http://127.0.0.1:8080", "--output", "json", "status",
+				"--api-token-env", "TEST_LATCHWAY_SYSTEM_STATUS_TOKEN",
+			}, opts)
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "incompatible system status") {
+					t.Fatalf("status error = %v", err)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(output.String(), `"server_capabilities"`) || strings.Contains(output.String(), token) {
+				t.Fatalf("status result error/output = %v / %q", err, output.String())
+			}
+		})
 	}
 }
 

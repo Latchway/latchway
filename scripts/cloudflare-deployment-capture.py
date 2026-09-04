@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -16,11 +17,18 @@ from typing import Any
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 IMAGE = re.compile(r"^[a-z0-9.-]+/[a-z0-9._/-]+@(sha256:[0-9a-f]{64})$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+DEPLOYMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 ACCOUNT_ID = re.compile(r"^[0-9a-f]{32}$")
 EVIDENCE_ID = re.compile(r"^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$")
+RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$")
 MAX_JSON_BYTES = 8 * 1024 * 1024
 REQUIRED_RUNTIME_SECRETS = ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY")
 EVIDENCE_SECRET = "LATCHWAY_EVIDENCE_TOKEN"
+DATABASE_POOL_NAMES = (
+    "LATCHWAY_DB_MAX_CONNECTIONS",
+    "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+)
+CLOUDFLARE_DATABASE_POOL = (5, 3, 2)
 
 
 class CaptureError(Exception):
@@ -96,7 +104,7 @@ def manifest_descriptor(path: Path, expected_digest: str) -> dict[str, Any]:
         if (
             not isinstance(digest, str)
             or SHA256.fullmatch(digest) is None
-            or not isinstance(size, int)
+            or type(size) is not int
             or size < 1
         ):
             raise CaptureError("manifest_layer_invalid")
@@ -116,7 +124,7 @@ def contains_string(value: Any, expected: str) -> bool:
 
 def safe_provider_records(value: Any, code: str) -> list[dict[str, Any]]:
     records = require_list(value, code)
-    if len(records) > 50:
+    if len(records) != 1:
         raise CaptureError(code)
     reduced: list[dict[str, Any]] = []
     for record in records:
@@ -129,6 +137,81 @@ def safe_provider_records(value: Any, code: str) -> list[dict[str, Any]]:
             raise CaptureError("provider_secret_material_forbidden")
         reduced.append(item)
     return reduced
+
+
+def parse_provider_time(value: Any, code: str) -> datetime:
+    if not isinstance(value, str) or RFC3339.fullmatch(value) is None:
+        raise CaptureError(code)
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        raise CaptureError(code) from None
+
+
+def cloudflare_database_pool(
+    deployments: list[dict[str, Any]],
+    versions: list[dict[str, Any]],
+) -> tuple[str, dict[str, int]]:
+    code = "cloudflare_database_pool_invalid"
+    deployment = deployments[0]
+    version = versions[0]
+    if (
+        set(deployment) != {"id", "created_on", "versions"}
+        or not isinstance(deployment.get("id"), str)
+        or DEPLOYMENT_ID.fullmatch(deployment["id"]) is None
+        or set(version) != {"id", "resources"}
+    ):
+        raise CaptureError(code)
+    parse_provider_time(deployment["created_on"], code)
+    traffic = deployment["versions"]
+    if (
+        not isinstance(traffic, list)
+        or len(traffic) != 1
+        or not isinstance(traffic[0], dict)
+        or set(traffic[0]) != {"version_id", "percentage"}
+        or type(traffic[0].get("percentage")) is not int
+        or traffic[0]["percentage"] != 100
+    ):
+        raise CaptureError(code)
+    active_version_id = traffic[0].get("version_id")
+    if not isinstance(active_version_id, str) or UUID.fullmatch(active_version_id) is None:
+        raise CaptureError(code)
+    if version.get("id") != active_version_id:
+        raise CaptureError(code)
+    resources = version["resources"]
+    if not isinstance(resources, dict) or set(resources) != {"bindings"}:
+        raise CaptureError(code)
+    selected = resources["bindings"]
+    if (
+        not isinstance(selected, list)
+        or len(selected) != len(DATABASE_POOL_NAMES)
+        or any(not isinstance(item, dict) for item in selected)
+        or [item.get("name") for item in selected] != list(DATABASE_POOL_NAMES)
+        or any(set(item) != {"name", "type", "text"} for item in selected)
+        or any(item.get("type") != "plain_text" for item in selected)
+        or any(not isinstance(item.get("text"), str) for item in selected)
+    ):
+        raise CaptureError(code)
+    values = {item["name"]: item["text"] for item in selected}
+    if any(re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", item) is None for item in values.values()):
+        raise CaptureError(code)
+    aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+    completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+    regular = aggregate - completion
+    if (
+        not 2 <= aggregate <= 500
+        or regular < 1
+        or completion < 1
+        or completion >= aggregate
+        or regular + completion != aggregate
+        or (aggregate, regular, completion) != CLOUDFLARE_DATABASE_POOL
+    ):
+        raise CaptureError(code)
+    return active_version_id, {
+        "aggregate_max_connections": aggregate,
+        "regular_max_connections": regular,
+        "completion_max_connections": completion,
+    }
 
 
 def select_application(value: Any, mirror_image: str) -> dict[str, Any]:
@@ -238,15 +321,18 @@ def build(args: argparse.Namespace) -> str:
         or EVIDENCE_ID.fullmatch(evidence_id) is None
         or shutdown.get("evidence_id") != evidence_id
         or command != ["/latchway", "--output", "json", "migrate", "status"]
-        or migration.get("exit_code") != 0
+        or type(migration.get("exit_code")) is not int
+        or migration["exit_code"] != 0
         or status.get("up_to_date") is not True
         or status.get("current") != status.get("available")
-        or not isinstance(status.get("current"), int)
+        or type(status.get("current")) is not int
+        or type(status.get("available")) is not int
         or status["current"] < 1
         or stop.get("evidence_id") != evidence_id
         or stop.get("signal") != "SIGTERM"
         or stop.get("reason") != "runtime_signal"
-        or stop.get("exit_code") != 0
+        or type(stop.get("exit_code")) is not int
+        or stop["exit_code"] != 0
         or not isinstance(stop.get("requested_at"), str)
         or not isinstance(stop.get("stopped_at"), str)
     ):
@@ -254,6 +340,7 @@ def build(args: argparse.Namespace) -> str:
 
     deployments = safe_provider_records(load_json(args.deployments), "cloudflare_deployments_invalid")
     versions = safe_provider_records(load_json(args.versions), "cloudflare_versions_invalid")
+    active_version_id, database_pool = cloudflare_database_pool(deployments, versions)
     secret_names(load_json(args.secrets))
     output: Path = args.output_dir
     resource_id = application["id"]
@@ -272,6 +359,7 @@ def build(args: argparse.Namespace) -> str:
         "worker": {
             "status": "ready",
             "resource_id": resource_id,
+            "active_version_id": active_version_id,
             "deployments": deployments,
             "versions": versions,
         },
@@ -290,6 +378,7 @@ def build(args: argparse.Namespace) -> str:
                 **mirror,
             },
         },
+        "database_pool": database_pool,
     })
     write_json(output / "migration.json", {
         "command": command,

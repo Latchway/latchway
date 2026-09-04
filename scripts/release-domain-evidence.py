@@ -62,6 +62,7 @@ FINALIZER_WORKFLOW = ".github/workflows/release-domain-evidence.yml"
 SOURCE_WORKFLOW = ".github/workflows/cross-repository-conformance.yml"
 CANDIDATE_WORKFLOW = ".github/workflows/release.yml"
 REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
+SINGLE_MAINTAINER_PROFILE = "single_maintainer_v1"
 
 
 # A claim is derived only when all of its fixed machine observations exist.
@@ -151,6 +152,17 @@ CLAIM_REQUIREMENTS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
         "cocoapods_verified": ("registry.cocoapods",),
         "maven_central_verified": ("registry.maven-central",),
     },
+}
+
+SINGLE_MAINTAINER_CLAIM_REQUIREMENTS: Mapping[
+    str, Mapping[str, tuple[str, ...]]
+] = {
+    "public_tags": CLAIM_REQUIREMENTS["public_tags"],
+    "public_registries": {
+        claim: requirements
+        for claim, requirements in CLAIM_REQUIREMENTS["public_registries"].items()
+        if claim != "documentation_production_verified"
+    }
 }
 
 OBSERVATION_TOOLS: Mapping[str, str] = {
@@ -399,10 +411,28 @@ def result_name(observation: str) -> str:
     return observation.replace(".", "-") + ".json"
 
 
-def expected_observations(domain: str) -> tuple[str, ...]:
-    requirements = CLAIM_REQUIREMENTS.get(domain)
+def claim_requirements(
+    domain: str, release_profile: str | None = None
+) -> Mapping[str, tuple[str, ...]]:
+    if release_profile is None:
+        requirements = CLAIM_REQUIREMENTS.get(domain)
+    elif release_profile == SINGLE_MAINTAINER_PROFILE:
+        requirements = SINGLE_MAINTAINER_CLAIM_REQUIREMENTS.get(domain)
+    else:
+        requirements = None
     if requirements is None:
-        raise EvidenceError("domain_invalid")
+        raise EvidenceError(
+            "domain_invalid"
+            if release_profile is None
+            else "release_profile_domain_invalid"
+        )
+    return requirements
+
+
+def expected_observations(
+    domain: str, release_profile: str | None = None
+) -> tuple[str, ...]:
+    requirements = claim_requirements(domain, release_profile)
     return tuple(sorted({item for values in requirements.values() for item in values}))
 
 
@@ -510,13 +540,14 @@ def validate_raw_results(
     identity: Mapping[str, Any],
     minimum_time: datetime,
     now: datetime,
+    release_profile: str | None = None,
 ) -> tuple[list[dict[str, Any]], datetime, datetime, set[Path]]:
     if not raw_root.is_absolute() or not raw_root.is_dir() or raw_root.is_symlink():
         raise EvidenceError("raw_directory_invalid")
     observations: list[dict[str, Any]] = []
     intervals: list[tuple[datetime, datetime]] = []
     used_files: set[Path] = set()
-    for observation in expected_observations(domain):
+    for observation in expected_observations(domain, release_profile):
         path = raw_root / result_name(observation)
         value, started, finished, artifacts = validate_result(
             path, raw_root, domain, observation, identity, minimum_time, now
@@ -609,9 +640,9 @@ def produce(
     receipt_path: Path,
     now: datetime,
     context: Mapping[str, Any] | None = None,
+    release_profile: str | None = None,
 ) -> dict[str, Any]:
-    if domain not in CLAIM_REQUIREMENTS:
-        raise EvidenceError("domain_invalid")
+    claim_requirements(domain, release_profile)
     if not receipt_path.is_absolute() or receipt_path.exists() or receipt_path.is_symlink():
         raise EvidenceError("receipt_output_invalid")
     producer = dict(context if context is not None else protected_context())
@@ -630,7 +661,7 @@ def produce(
         raise EvidenceError("producer_identity_invalid")
     identity, _, candidate_created = identity_from_inputs(source_path, candidate_path, now)
     observations, started, finished, _ = validate_raw_results(
-        raw_root, domain, identity, candidate_created, now
+        raw_root, domain, identity, candidate_created, now, release_profile
     )
     receipt = {
         "schema_version": 1,
@@ -642,6 +673,8 @@ def produce(
         "candidate": identity,
         "observations": observations,
     }
+    if release_profile is not None:
+        receipt["release_profile"] = release_profile
     write_exclusive(receipt_path, receipt)
     return receipt
 
@@ -712,16 +745,20 @@ def validate_receipt(
     identity: Mapping[str, Any],
     minimum_time: datetime,
     now: datetime,
+    release_profile: str | None = None,
 ) -> tuple[dict[str, Any], datetime, datetime]:
     receipt = read_json(receipt_path)
     if FORBIDDEN_ASSERTION_KEYS & set(receipt):
         raise EvidenceError("self_asserted_receipt_rejected")
+    receipt_fields = [
+        "schema_version", "kind", "domain", "producer", "started_at",
+        "finished_at", "candidate", "observations",
+    ]
+    if release_profile is not None:
+        receipt_fields.append("release_profile")
     receipt = require_fields(
         receipt,
-        (
-            "schema_version", "kind", "domain", "producer", "started_at",
-            "finished_at", "candidate", "observations",
-        ),
+        receipt_fields,
         "receipt_fields_invalid",
     )
     producer = require_fields(
@@ -735,6 +772,7 @@ def validate_receipt(
         receipt["schema_version"] != 1
         or receipt["kind"] != "latchway_release_domain_producer_receipt"
         or receipt["domain"] != domain
+        or receipt.get("release_profile") != release_profile
         or receipt["candidate"] != identity
         or producer["repository"] != REPOSITORY
         or producer["workflow"] != WORKFLOW
@@ -745,7 +783,7 @@ def validate_receipt(
     ):
         raise EvidenceError("receipt_identity_invalid")
     observed, started, finished, _ = validate_raw_results(
-        raw_root, domain, identity, minimum_time, now
+        raw_root, domain, identity, minimum_time, now, release_profile
     )
     if receipt["observations"] != observed:
         raise EvidenceError("receipt_observations_mismatch")
@@ -785,9 +823,9 @@ def finalize(
     output_root: Path,
     now: datetime,
     verifier: Callable[..., list[Any]] = verify_attestation,
+    release_profile: str | None = None,
 ) -> dict[str, Any]:
-    if domain not in CLAIM_REQUIREMENTS:
-        raise EvidenceError("domain_invalid")
+    requirements_for_profile = claim_requirements(domain, release_profile)
     if any(
         bundle is None or not real_file(bundle, MAXIMUM_RESULT_BYTES)
         for bundle in (receipt_bundle, source_bundle, candidate_bundle)
@@ -804,7 +842,13 @@ def finalize(
     }
     identity, _, candidate_created = identity_from_inputs(source_path, candidate_path, now)
     receipt, started, finished = validate_receipt(
-        receipt_path, raw_root, domain, identity, candidate_created, now
+        receipt_path,
+        raw_root,
+        domain,
+        identity,
+        candidate_created,
+        now,
+        release_profile,
     )
     commit = identity["core_commit"]
     source_verification = verifier(
@@ -897,7 +941,7 @@ def finalize(
                 observation in {item["id"] for item in receipt["observations"]}
                 for observation in requirements
             )
-            for claim, requirements in CLAIM_REQUIREMENTS[domain].items()
+            for claim, requirements in requirements_for_profile.items()
         }
         if not all(claims.values()):
             raise EvidenceError("required_observation_missing")
@@ -928,6 +972,9 @@ def parser() -> argparse.ArgumentParser:
     modes.add_argument("--produce", action="store_true")
     modes.add_argument("--finalize", action="store_true")
     value.add_argument("--domain", choices=tuple(CLAIM_REQUIREMENTS), required=True)
+    value.add_argument(
+        "--release-profile", choices=(SINGLE_MAINTAINER_PROFILE,)
+    )
     value.add_argument("--source-conformance", type=Path, required=True)
     value.add_argument("--candidate-manifest", type=Path, required=True)
     value.add_argument("--raw-directory", type=Path, required=True)
@@ -956,6 +1003,7 @@ def main() -> int:
                 raw_root=arguments.raw_directory,
                 receipt_path=arguments.receipt,
                 now=now,
+                release_profile=arguments.release_profile,
             )
         else:
             if arguments.output_directory is None:
@@ -975,6 +1023,7 @@ def main() -> int:
                 candidate_bundle=arguments.candidate_attestation,
                 output_root=arguments.output_directory,
                 now=now,
+                release_profile=arguments.release_profile,
             )
     except (EvidenceError, OSError) as error:
         code = str(error) if isinstance(error, EvidenceError) else "evidence_io_failed"

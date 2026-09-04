@@ -545,11 +545,12 @@ func (api *API) disableSelfTestSchedule(w http.ResponseWriter, r *http.Request) 
 }
 
 type startSelfTestRequest struct {
-	Kind           string `json:"kind"`
-	EnvironmentID  string `json:"environment_id"`
-	Upstream       string `json:"upstream"`
-	Model          string `json:"model"`
-	MaxCostNanoUSD int64  `json:"max_cost_nano_usd"`
+	Kind             string `json:"kind"`
+	EnvironmentID    string `json:"environment_id"`
+	ConfigRevisionID string `json:"config_revision_id"`
+	Upstream         string `json:"upstream"`
+	Model            string `json:"model"`
+	MaxCostNanoUSD   int64  `json:"max_cost_nano_usd"`
 }
 
 func (api *API) startSelfTest(w http.ResponseWriter, r *http.Request) {
@@ -568,7 +569,8 @@ func (api *API) startSelfTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := api.operations.startSelfTest(r.Context(), mustPrincipal(r.Context()), startSelfTestInput{
-		Kind: request.Kind, Environment: request.EnvironmentID, Upstream: request.Upstream,
+		Kind: request.Kind, Environment: request.EnvironmentID,
+		ConfigRevisionID: request.ConfigRevisionID, Upstream: request.Upstream,
 		Model: request.Model, MaxCost: request.MaxCostNanoUSD, RequestID: operationID,
 	})
 	if err != nil {
@@ -579,12 +581,17 @@ func (api *API) startSelfTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) selfTest(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r) {
+	if !onlyQueryKeys(r, "environment_id") {
 		api.writeProblem(w, r, invalidRequest("The self-test query is invalid."))
 		return
 	}
+	environmentID, ok := requiredQueryValue(r, "environment_id")
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
+		return
+	}
 	run, err := api.operations.getSelfTest(
-		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "selfTestID"),
+		r.Context(), mustPrincipal(r.Context()), environmentID, chi.URLParam(r, "selfTestID"),
 	)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
@@ -600,24 +607,21 @@ func (api *API) systemStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	var ready bool
+	mutationReady := false
 	databaseVersion := "unknown"
-	if err := api.operations.pool.Ping(ctx); err != nil {
-		ready = false
-	} else {
+	if err := api.operations.pool.Ping(ctx); err == nil {
 		current, available, err := database.NewMigrator(api.operations.pool).Status(ctx)
-		if err != nil {
-			ready = false
-		} else {
+		if err == nil {
 			databaseVersion = strconv.FormatInt(current, 10)
-			ready = current == available
+			mutationReady = current == available
 		}
 	}
+	ready := api.systemReadiness != nil && api.systemReadiness(ctx)
 	build := buildinfo.Current()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"server_version": build.Version, "contract_version": build.ContractVersion,
 		"protocol_versions": buildinfo.SupportedProtocolVersions(), "role": api.role,
-		"database_schema_version": databaseVersion, "ready": ready,
+		"database_schema_version": databaseVersion, "mutation_ready": mutationReady, "ready": ready,
 		"server_capabilities": serverCapabilities(),
 	})
 }

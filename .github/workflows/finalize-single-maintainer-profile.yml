@@ -1,0 +1,1110 @@
+name: Finalize authenticated single-maintainer v1 profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Exact 40-character v1.0.0 core candidate commit
+        required: true
+        type: string
+      source_run_id:
+        description: Exact successful source-conformance run ID
+        required: true
+        type: string
+      source_run_attempt:
+        description: Exact source-conformance run attempt
+        required: true
+        type: string
+      candidate_run_id:
+        description: Exact successful release-candidate run ID
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact release-candidate run attempt
+        required: true
+        type: string
+      core_release_run_id:
+        description: Exact successful single-maintainer core release run ID
+        required: true
+        type: string
+      core_release_run_attempt:
+        description: Exact single-maintainer core release run attempt
+        required: true
+        type: string
+      public_tags_run_id:
+        description: Exact successful public-tags finalizer run ID
+        required: true
+        type: string
+      public_tags_run_attempt:
+        description: Exact public-tags finalizer run attempt
+        required: true
+        type: string
+      public_registries_run_id:
+        description: Exact successful single_maintainer_v1 public-registries run ID
+        required: true
+        type: string
+      public_registries_run_attempt:
+        description: Exact public-registries finalizer run attempt
+        required: true
+        type: string
+      supply_chain_run_id:
+        description: Exact successful supply-chain finalizer run ID
+        required: true
+        type: string
+      supply_chain_run_attempt:
+        description: Exact supply-chain finalizer run attempt
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: finalize-single-maintainer-v1-${{ inputs.candidate_commit }}
+  cancel-in-progress: false
+
+jobs:
+  authenticate:
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    steps:
+      - name: Verify the exact single-maintainer release-evidence-signing policy
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing"
+      - name: Authenticate every exact producer run without a checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          CORE_RELEASE_RUN_ID: ${{ inputs.core_release_run_id }}
+          CORE_RELEASE_RUN_ATTEMPT: ${{ inputs.core_release_run_attempt }}
+          PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_TAGS_RUN_ATTEMPT: ${{ inputs.public_tags_run_attempt }}
+          PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+          PUBLIC_REGISTRIES_RUN_ATTEMPT: ${{ inputs.public_registries_run_attempt }}
+          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          SUPPLY_CHAIN_RUN_ATTEMPT: ${{ inputs.supply_chain_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          mkdir -p "$RUNNER_TEMP/authenticated/run-authority"
+          verify_run() {
+            local label="$1" run_id="$2" attempt="$3" expected="$4"
+            [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$attempt" =~ ^[1-9][0-9]{0,5}$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" \
+              > "$RUNNER_TEMP/authenticated/run-authority/$label-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" '
+              .event == "workflow_dispatch" and .status == "completed" and
+              .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and
+              .run_attempt == $attempt and (.workflow_id | type == "number" and . > 0)
+            ' "$RUNNER_TEMP/authenticated/run-authority/$label-run.json" >/dev/null
+            workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/authenticated/run-authority/$label-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" \
+              > "$RUNNER_TEMP/authenticated/run-authority/$label-workflow.json"
+            jq --exit-status --arg expected "$expected" \
+              '.path == $expected and .state == "active"' \
+              "$RUNNER_TEMP/authenticated/run-authority/$label-workflow.json" >/dev/null
+          }
+          verify_run source "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+          verify_run core_release "$CORE_RELEASE_RUN_ID" "$CORE_RELEASE_RUN_ATTEMPT" .github/workflows/single-maintainer-release.yml
+          verify_run public_tags "$PUBLIC_TAGS_RUN_ID" "$PUBLIC_TAGS_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+          verify_run public_registries "$PUBLIC_REGISTRIES_RUN_ID" "$PUBLIC_REGISTRIES_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+          verify_run supply_chain "$SUPPLY_CHAIN_RUN_ID" "$SUPPLY_CHAIN_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+      - name: Download the exact source report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-source-${{ inputs.source_run_id }}-${{ inputs.source_run_attempt }}
+          path: ${{ runner.temp }}/authenticated/source
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact core publication handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-single-maintainer-v1-handoff-${{ inputs.core_release_run_id }}
+          path: ${{ runner.temp }}/authenticated/core
+          run-id: ${{ inputs.core_release_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact public-tags domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-public_tags-${{ inputs.candidate_commit }}-${{ inputs.public_tags_run_id }}-${{ inputs.public_tags_run_attempt }}
+          path: ${{ runner.temp }}/authenticated/public_tags
+          run-id: ${{ inputs.public_tags_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact profile-scoped public-registries domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-public_registries-${{ inputs.candidate_commit }}-${{ inputs.public_registries_run_id }}-${{ inputs.public_registries_run_attempt }}
+          path: ${{ runner.temp }}/authenticated/public_registries
+          run-id: ${{ inputs.public_registries_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact supply-chain domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-supply_chain-${{ inputs.candidate_commit }}-${{ inputs.supply_chain_run_id }}-${{ inputs.supply_chain_run_attempt }}
+          path: ${{ runner.temp }}/authenticated/supply_chain
+          run-id: ${{ inputs.supply_chain_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify every signed subject and embedded deployment producer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/authenticated"
+          test -z "$(find "$root" -type l -print -quit)"
+          gh attestation verify "$root/source/latchway-cross-repository.json" \
+            --bundle "$root/source/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          (cd "$root/core" && sha256sum --strict --check SHA256SUMS)
+          for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
+            gh attestation verify "$root/core/$subject" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/single-maintainer-release.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          done
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson run "$CANDIDATE_RUN_ID" \
+            --argjson attempt "$CANDIDATE_RUN_ATTEMPT" '
+            .profile == "single_maintainer_v1" and .profile_status == "incomplete" and
+            .candidate_commit == $commit and .tag == "v1.0.0" and
+            .candidate_run == {run_id:$run,run_attempt:$attempt} and
+            .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false}
+          ' "$root/core/latchway-single-maintainer-v1.json" >/dev/null
+          gh attestation verify "$root/core/latchway-candidate.json" \
+            --bundle "$root/core/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          for platform in compose cloud_run; do
+            gh attestation verify "$root/core/$platform.tar.gz" \
+              --bundle "$root/core/$platform.attestation.json" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+            run_id=$(jq --raw-output --arg platform "$platform" '.deployment_evidence[$platform].run_id' \
+              "$root/core/latchway-single-maintainer-v1.json")
+            attempt=$(jq --raw-output --arg platform "$platform" '.deployment_evidence[$platform].run_attempt' \
+              "$root/core/latchway-single-maintainer-v1.json")
+            [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$attempt" =~ ^[1-9][0-9]{0,5}$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$root/run-authority/$platform-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" '
+              .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and
+              .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt
+            ' "$root/run-authority/$platform-run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$root/run-authority/$platform-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$root/run-authority/$platform-workflow.json"
+            jq --exit-status '.path == ".github/workflows/deployment-evidence.yml" and .state == "active"' \
+              "$root/run-authority/$platform-workflow.json" >/dev/null
+          done
+          for domain in public_tags public_registries supply_chain; do
+            gh attestation verify "$root/$domain/$domain.json" \
+              --bundle "$root/$domain/$domain.attestation.sigstore.json" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-evidence.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          done
+          jq --exit-status '
+            .domain == "public_registries" and .status == "passed" and
+            .claims == {cocoapods_verified:true,maven_central_verified:true,
+              npm_javascript_verified:true,npm_react_native_verified:true,
+              oci_digest_verified:true,swift_package_verified:true} and
+            (.claims | has("documentation_production_verified") | not)
+          ' "$root/public_registries/public_registries.json" >/dev/null
+      - name: Seal the exact authenticated authority manifest
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          CORE_RELEASE_RUN_ID: ${{ inputs.core_release_run_id }}
+          CORE_RELEASE_RUN_ATTEMPT: ${{ inputs.core_release_run_attempt }}
+          PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_TAGS_RUN_ATTEMPT: ${{ inputs.public_tags_run_attempt }}
+          PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+          PUBLIC_REGISTRIES_RUN_ATTEMPT: ${{ inputs.public_registries_run_attempt }}
+          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          SUPPLY_CHAIN_RUN_ATTEMPT: ${{ inputs.supply_chain_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/authenticated"
+          image=$(jq --raw-output '.image.coordinate' "$root/core/latchway-single-maintainer-v1.json")
+          jq --null-input --sort-keys \
+            --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --argjson source_run "$SOURCE_RUN_ID" --argjson source_attempt "$SOURCE_RUN_ATTEMPT" \
+            --argjson candidate_run "$CANDIDATE_RUN_ID" --argjson candidate_attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --argjson core_run "$CORE_RELEASE_RUN_ID" --argjson core_attempt "$CORE_RELEASE_RUN_ATTEMPT" \
+            --argjson tags_run "$PUBLIC_TAGS_RUN_ID" --argjson tags_attempt "$PUBLIC_TAGS_RUN_ATTEMPT" \
+            --argjson registries_run "$PUBLIC_REGISTRIES_RUN_ID" --argjson registries_attempt "$PUBLIC_REGISTRIES_RUN_ATTEMPT" \
+            --argjson supply_run "$SUPPLY_CHAIN_RUN_ID" --argjson supply_attempt "$SUPPLY_CHAIN_RUN_ATTEMPT" \
+            --arg source_sha "$(sha256sum "$root/source/latchway-cross-repository.json" | cut -d' ' -f1)" \
+            --arg candidate_sha "$(sha256sum "$root/core/latchway-candidate.json" | cut -d' ' -f1)" \
+            --arg core_sha "$(sha256sum "$root/core/latchway-single-maintainer-v1.json" | cut -d' ' -f1)" \
+            --arg tags_sha "$(sha256sum "$root/public_tags/public_tags.json" | cut -d' ' -f1)" \
+            --arg registries_sha "$(sha256sum "$root/public_registries/public_registries.json" | cut -d' ' -f1)" \
+            --arg supply_sha "$(sha256sum "$root/supply_chain/supply_chain.json" | cut -d' ' -f1)" '
+            {schema_version:1,kind:"latchway_single_maintainer_v1_authority",
+             profile:"single_maintainer_v1",
+             policy_id:"latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing",
+             candidate_commit:$commit,oci_image_digest:$image,inputs:{
+              source_report:{workflow_path:".github/workflows/cross-repository-conformance.yml",run_id:$source_run,run_attempt:$source_attempt,subject_path:"source/latchway-cross-repository.json",sha256:$source_sha},
+              candidate:{workflow_path:".github/workflows/release.yml",run_id:$candidate_run,run_attempt:$candidate_attempt,subject_path:"core/latchway-candidate.json",sha256:$candidate_sha},
+              core_release:{workflow_path:".github/workflows/single-maintainer-release.yml",run_id:$core_run,run_attempt:$core_attempt,subject_path:"core/latchway-single-maintainer-v1.json",sha256:$core_sha},
+              public_tags:{workflow_path:".github/workflows/release-domain-evidence.yml",run_id:$tags_run,run_attempt:$tags_attempt,subject_path:"public_tags/public_tags.json",sha256:$tags_sha},
+              public_registries:{workflow_path:".github/workflows/release-domain-evidence.yml",run_id:$registries_run,run_attempt:$registries_attempt,subject_path:"public_registries/public_registries.json",sha256:$registries_sha},
+              supply_chain:{workflow_path:".github/workflows/release-domain-evidence.yml",run_id:$supply_run,run_attempt:$supply_attempt,subject_path:"supply_chain/supply_chain.json",sha256:$supply_sha}
+            }}
+          ' > "$root/authority.json"
+      - name: Retain only authenticated inputs for credential-free evaluation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-single-maintainer-v1-finalizer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+
+  evaluate:
+    needs: authenticate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out only the exact profile finalizer without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download only authority-authenticated inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-single-maintainer-v1-finalizer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+      - name: Materialize exact public repository commits and annotated tags
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          source="$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json"
+          workspace="$RUNNER_TEMP/repositories"
+          mkdir -p "$workspace"
+          coordinate() { jq --raw-output --arg id "$1" '.repositories[] | select(.id == $id) | .commit' "$source"; }
+          materialize() {
+            local id="$1" repository="$2" commit="$3"
+            local destination="$workspace/$id"
+            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+            git init "$destination" >/dev/null
+            git -C "$destination" remote add origin "https://github.com/Latchway/$repository.git"
+            GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0 git -c credential.helper= -C "$destination" \
+              fetch --force --tags --no-recurse-submodules origin
+            git -C "$destination" checkout --detach "$commit" >/dev/null
+            test "$(git -C "$destination" rev-parse --verify HEAD)" = "$commit"
+            test -z "$(git -C "$destination" status --porcelain=v1 --untracked-files=all)"
+          }
+          materialize core latchway "$CANDIDATE_COMMIT"
+          materialize javascript latchway-js "$(coordinate javascript)"
+          materialize ios latchway-ios-sdk "$(coordinate ios)"
+          materialize android latchway-android "$(coordinate android)"
+          materialize react_native latchway-react-native-sdk "$(coordinate react_native)"
+          documentation=$(jq --raw-output .documentation.commit "$source")
+          materialize documentation latchway-docs "$documentation"
+      - name: Preserve the strict failure and derive the narrow profile-local input
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          authenticated="$RUNNER_TEMP/authenticated"
+          external="$RUNNER_TEMP/external-evidence"
+          mkdir -p "$external"
+          for domain in public_tags public_registries supply_chain; do
+            cp -R "$authenticated/$domain/." "$external/"
+          done
+          python3 scripts/finalize-release-profile.py derive-cloud-evidence \
+            --source-report "$authenticated/source/latchway-cross-repository.json" \
+            --core-handoff "$authenticated/core" --external-evidence-dir "$external"
+          image=$(jq --raw-output .oci_image_digest "$authenticated/authority.json")
+          set +e
+          python3 scripts/cross-repo-conformance.py \
+            --workspace-root "$RUNNER_TEMP" \
+            --core-repo "$RUNNER_TEMP/repositories/core" \
+            --javascript-repo "$RUNNER_TEMP/repositories/javascript" \
+            --ios-repo "$RUNNER_TEMP/repositories/ios" \
+            --android-repo "$RUNNER_TEMP/repositories/android" \
+            --react-native-repo "$RUNNER_TEMP/repositories/react_native" \
+            --documentation-repo "$RUNNER_TEMP/repositories/documentation" \
+            --scope release --release-tag v1.0.0 --oci-image-digest "$image" \
+            --external-evidence-dir "$external" \
+            --output "$RUNNER_TEMP/latchway-cross-repository-release-strict.json"
+          status=$?
+          set -e
+          test "$status" = 1
+          jq --exit-status '
+            .scope == "release" and .verdict == "failed" and
+            .source_conformance_passed == true and .promotion_ready == false and
+            .release_ready == false and .evidence_window == null and
+            ([.evidence_domains[] | select(.id == "local_source" and .status == "passed")] | length) == 1 and
+            ([.evidence_domains[] | select(.id == "local_promotion" and .status == "failed")] | length) == 1 and
+            ([.evidence_domains[] | select(.id == "local_release" and .status == "passed")] | length) == 1
+          ' "$RUNNER_TEMP/latchway-cross-repository-release-strict.json" >/dev/null
+          python3 scripts/finalize-release-profile.py derive-profile-report \
+            --strict-release-report "$RUNNER_TEMP/latchway-cross-repository-release-strict.json" \
+            --source-report "$authenticated/source/latchway-cross-repository.json" \
+            --external-evidence-dir "$external" \
+            --output "$RUNNER_TEMP/latchway-single-maintainer-v1-profile-input.json"
+          python3 scripts/release-profile.py evaluate --profile single_maintainer_v1 \
+            --release-report "$RUNNER_TEMP/latchway-single-maintainer-v1-profile-input.json" \
+            --external-evidence-dir "$external" \
+            --output "$RUNNER_TEMP/latchway-single-maintainer-v1-projection.json"
+          python3 scripts/finalize-release-profile.py finalize \
+            --authority-manifest "$authenticated/authority.json" \
+            --authenticated-root "$authenticated" \
+            --strict-release-report "$RUNNER_TEMP/latchway-cross-repository-release-strict.json" \
+            --profile-release-report "$RUNNER_TEMP/latchway-single-maintainer-v1-profile-input.json" \
+            --external-evidence-dir "$external" \
+            --profile-evaluation "$RUNNER_TEMP/latchway-single-maintainer-v1-projection.json" \
+            --output "$RUNNER_TEMP/latchway-single-maintainer-v1-final.json"
+      - name: Seal the source-free finalization handoff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          output="$RUNNER_TEMP/finalization"
+          mkdir -p "$output/external"
+          install -m 0600 -- "$RUNNER_TEMP/latchway-cross-repository-release-strict.json" \
+            "$RUNNER_TEMP/latchway-single-maintainer-v1-profile-input.json" \
+            "$RUNNER_TEMP/latchway-single-maintainer-v1-projection.json" \
+            "$RUNNER_TEMP/latchway-single-maintainer-v1-final.json" \
+            "$RUNNER_TEMP/authenticated/authority.json" "$output/"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/external-evidence/cloud_deployments.json" \
+            "$RUNNER_TEMP/external-evidence/public_registries.json" \
+            "$RUNNER_TEMP/external-evidence/public_tags.json" \
+            "$RUNNER_TEMP/external-evidence/supply_chain.json" "$output/external/"
+          (cd "$output" && sha256sum \
+            authority.json \
+            external/cloud_deployments.json \
+            external/public_registries.json \
+            external/public_tags.json \
+            external/supply_chain.json \
+            latchway-cross-repository-release-strict.json \
+            latchway-single-maintainer-v1-final.json \
+            latchway-single-maintainer-v1-profile-input.json \
+            latchway-single-maintainer-v1-projection.json > SHA256SUMS)
+      - name: Retain the unsigned decision for a fresh no-checkout attestor
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-single-maintainer-v1-final-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finalization
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  attest:
+    needs: [authenticate, evaluate]
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify the exact single-maintainer release-evidence-signing policy
+        shell: bash
+        env:
+          OBSERVED_POLICY_ID: ${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$OBSERVED_POLICY_ID" = "latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing"
+      - name: Download authenticated inputs without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-single-maintainer-v1-finalizer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+      - name: Download the unsigned profile decision without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-single-maintainer-v1-final-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finalization
+      - name: Independently close authenticated profile semantics before OIDC
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          authenticated="$RUNNER_TEMP/authenticated"
+          final="$RUNNER_TEMP/finalization"
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          test -z "$(find "$authenticated" "$final" -type l -print -quit)"
+          test "$(find "$final" -type f | wc -l | tr -d ' ')" = 10
+          test "$(find "$final" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" = 1
+          test -d "$final/external" && test ! -L "$final/external"
+          (cd "$final" && sha256sum --strict --check SHA256SUMS)
+          # BEGIN FINALIZATION_CANONICAL_JSON_POLICY
+          python3 - "$final" "$authenticated" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          authenticated = Path(sys.argv[2])
+          expected_final = {
+              "authority.json",
+              "external/cloud_deployments.json",
+              "external/public_registries.json",
+              "external/public_tags.json",
+              "external/supply_chain.json",
+              "latchway-cross-repository-release-strict.json",
+              "latchway-single-maintainer-v1-final.json",
+              "latchway-single-maintainer-v1-profile-input.json",
+              "latchway-single-maintainer-v1-projection.json",
+          }
+          observed = {path.relative_to(root).as_posix() for path in root.rglob("*.json")}
+          if observed != expected_final:
+              raise SystemExit("finalization_json_closure_invalid")
+          expected_authenticated = {
+              "source/latchway-cross-repository.json",
+              "core/latchway-candidate.json",
+              "core/latchway-single-maintainer-v1.json",
+              "public_tags/public_tags.json",
+              "public_registries/public_registries.json",
+              "supply_chain/supply_chain.json",
+          }
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise ValueError("duplicate_member")
+                  value[key] = item
+              return value
+
+          for base, relatives in (
+              (root, expected_final),
+              (authenticated, expected_authenticated),
+          ):
+            for relative in sorted(relatives):
+              path = base / relative
+              raw = path.read_bytes()
+              try:
+                  value = json.loads(raw.decode("utf-8"), object_pairs_hook=strict_object)
+              except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                  raise SystemExit("finalization_json_invalid") from None
+              canonical = (
+                  json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+              ).encode("utf-8")
+              if raw != canonical:
+                  raise SystemExit("finalization_json_not_canonical")
+          PY
+          # END FINALIZATION_CANONICAL_JSON_POLICY
+          # BEGIN FINALIZATION_EVIDENCE_TIME_POLICY
+          python3 - "$final" "$authenticated/source/latchway-cross-repository.json" <<'PY'
+          from datetime import datetime, timedelta, timezone
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(sys.argv[1])
+          source = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          canonical_utc = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+          def timestamp(value):
+              if not isinstance(value, str) or canonical_utc.fullmatch(value) is None:
+                  raise SystemExit("finalization_evidence_time_invalid")
+              try:
+                  return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+                      tzinfo=timezone.utc
+                  )
+              except ValueError:
+                  raise SystemExit("finalization_evidence_time_invalid") from None
+
+          released_at = timestamp(source.get("contract", {}).get("released_at"))
+          now = datetime.now(timezone.utc).replace(microsecond=0)
+          maximum = timedelta(seconds=604800)
+          starts = []
+          finishes = []
+          for domain in (
+              "cloud_deployments",
+              "public_registries",
+              "public_tags",
+              "supply_chain",
+          ):
+              document = json.loads(
+                  (root / "external" / f"{domain}.json").read_text(encoding="utf-8")
+              )
+              started = timestamp(document.get("started_at"))
+              finished = timestamp(document.get("finished_at"))
+              if (
+                  started < released_at
+                  or started >= finished
+                  or finished > now
+                  or now - finished > maximum
+                  or finished - started > maximum
+              ):
+                  raise SystemExit("finalization_evidence_time_invalid")
+              starts.append(started)
+              finishes.append(finished)
+          if max(finishes) - min(starts) > maximum:
+              raise SystemExit("finalization_evidence_window_invalid")
+          PY
+          # END FINALIZATION_EVIDENCE_TIME_POLICY
+          workflow_root="$RUNNER_TEMP/trusted-producer-workflows"
+          mkdir -p "$workflow_root"
+          for workflow in \
+            cross-repository-conformance.yml \
+            release.yml \
+            single-maintainer-release.yml \
+            release-domain-evidence.yml \
+            finalize-single-maintainer-profile.yml; do
+            gh api -H "Accept: application/vnd.github.raw+json" \
+              "repos/$GITHUB_REPOSITORY/contents/.github/workflows/$workflow?ref=$CANDIDATE_COMMIT" \
+              > "$workflow_root/$workflow"
+          done
+          # A certificate has no job ID. Close that ambiguity by proving the exact
+          # jobs/environments that can request OIDC in every trusted workflow.
+          # Psych is Ruby's standard YAML parser. Inspect its AST first so aliases,
+          # custom tags, and duplicate keys never inherit YAML's ambiguous semantics.
+          ruby - "$workflow_root" <<'RUBY'
+          require "psych"
+
+          EXPECTED = {
+            "cross-repository-conformance.yml" => {"attest" => "release-evidence-signing"},
+            "release.yml" => {"sign" => "release-evidence-signing"},
+            "single-maintainer-release.yml" => {"attest-handoff" => "release-evidence-signing"},
+            "release-domain-evidence.yml" => {"attest" => "release-evidence-signing"},
+            "finalize-single-maintainer-profile.yml" => {"attest" => "release-evidence-signing"},
+          }.freeze
+          JOB_ID = /\A[A-Za-z0-9_-]+\z/
+
+          def fail_policy(code)
+            warn(code)
+            exit(1)
+          end
+
+          def mapping(node, code)
+            fail_policy(code) unless node.is_a?(Psych::Nodes::Mapping)
+            values = {}
+            node.children.each_slice(2) do |key, value|
+              fail_policy("trusted_workflow_mapping_key_invalid") unless key.is_a?(Psych::Nodes::Scalar)
+              fail_policy("trusted_workflow_merge_key_forbidden") if key.value == "<<"
+              fail_policy("trusted_workflow_duplicate_key") if values.key?(key.value)
+              values[key.value] = value
+            end
+            values
+          end
+
+          def validate_ast(node)
+            fail_policy("trusted_workflow_alias_forbidden") if node.is_a?(Psych::Nodes::Alias)
+            if node.respond_to?(:anchor) && !node.anchor.nil?
+              fail_policy("trusted_workflow_anchor_forbidden")
+            end
+            if node.respond_to?(:tag) && !node.tag.nil?
+              fail_policy("trusted_workflow_tag_forbidden")
+            end
+            mapping(node, "trusted_workflow_mapping_invalid") if node.is_a?(Psych::Nodes::Mapping)
+            children = node.children if node.respond_to?(:children)
+            children.each { |child| validate_ast(child) } unless children.nil?
+          end
+
+          EXPECTED.each do |name, expected_jobs|
+            begin
+              stream = Psych.parse_stream(File.binread(File.join(ARGV.fetch(0), name)))
+            rescue Psych::SyntaxError, ArgumentError, Errno::ENOENT
+              fail_policy("trusted_workflow_yaml_invalid")
+            end
+            fail_policy("trusted_workflow_document_closure_invalid") unless stream.children.length == 1
+            document = stream.children.fetch(0)
+            validate_ast(document)
+            root = mapping(document.root, "trusted_workflow_root_invalid")
+            top_permissions = mapping(root["permissions"], "trusted_workflow_global_permissions_invalid")
+            if top_permissions.key?("id-token")
+              fail_policy("trusted_workflow_global_oidc_forbidden")
+            end
+            jobs = mapping(root["jobs"], "trusted_workflow_jobs_invalid")
+            observed = {}
+            jobs.each do |job_id, job_node|
+              fail_policy("trusted_workflow_job_key_invalid") unless JOB_ID.match?(job_id)
+              job = mapping(job_node, "trusted_workflow_job_invalid")
+              permissions = job["permissions"]
+              next if permissions.nil?
+              permissions = mapping(permissions, "trusted_workflow_permissions_invalid")
+              next unless permissions.key?("id-token")
+              value = permissions["id-token"]
+              unless value.is_a?(Psych::Nodes::Scalar) && value.value == "write"
+                fail_policy("trusted_workflow_oidc_permission_invalid")
+              end
+              environment = job["environment"]
+              if environment.is_a?(Psych::Nodes::Mapping)
+                environment = mapping(environment, "trusted_workflow_environment_invalid")["name"]
+              end
+              unless environment.is_a?(Psych::Nodes::Scalar)
+                fail_policy("trusted_workflow_oidc_environment_invalid")
+              end
+              observed[job_id] = environment.value
+            end
+            fail_policy("trusted_workflow_oidc_jobs_invalid") unless observed == expected_jobs
+          end
+          RUBY
+          gh attestation verify "$authenticated/source/latchway-cross-repository.json" \
+            --bundle "$authenticated/source/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/final-source-attestation.json"
+          for domain in public_tags public_registries supply_chain; do
+            gh attestation verify "$authenticated/$domain/$domain.json" \
+              --bundle "$authenticated/$domain/$domain.attestation.sigstore.json" \
+              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-evidence.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+              > "$RUNNER_TEMP/final-$domain-attestation.json"
+          done
+          (cd "$authenticated/core" && sha256sum --strict --check SHA256SUMS)
+          for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
+            gh attestation verify "$authenticated/core/$subject" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/single-maintainer-release.yml" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+              > "$RUNNER_TEMP/final-core-$subject-attestation.json"
+          done
+          gh attestation verify "$authenticated/core/latchway-candidate.json" \
+            --bundle "$authenticated/core/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/final-candidate-attestation.json"
+          # Compose and Cloud Run are authenticated through the closed core
+          # SHA256SUMS and record below. Both are signed by the sole OIDC-capable
+          # attest-handoff job; deployment-evidence has an unrelated cloud-auth
+          # OIDC job, so its workflow-level certificate is not used as authority.
+          record="$final/latchway-single-maintainer-v1-final.json"
+          projection="$final/latchway-single-maintainer-v1-projection.json"
+          strict_report="$final/latchway-cross-repository-release-strict.json"
+          profile_report="$final/latchway-single-maintainer-v1-profile-input.json"
+          authority="$final/authority.json"
+          source_report="$authenticated/source/latchway-cross-repository.json"
+          cmp --silent "$authority" "$authenticated/authority.json"
+          cmp --silent "$final/external/public_tags.json" "$authenticated/public_tags/public_tags.json"
+          cmp --silent "$final/external/public_registries.json" "$authenticated/public_registries/public_registries.json"
+          cmp --silent "$final/external/supply_chain.json" "$authenticated/supply_chain/supply_chain.json"
+          image=$(jq --raw-output .oci_image_digest "$authority")
+          candidate="$authenticated/core/latchway-candidate.json"
+          core_record="$authenticated/core/latchway-single-maintainer-v1.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+            def source_ids: ["source.repository_layout","source.clean_worktrees","source.documentation_mirror","source.core_contract","source.contract_bundle","source.contract_locks","source.generated_fixtures","source.package_versions","source.sdk_documentation_bundles","source.react_native_pins"];
+            def all_check_ids: source_ids + ["promotion.local_preconditions","release.local_preconditions","external.live_sdk_conformance","external.public_tags","external.public_registries","external.physical_devices","external.live_provider","external.cloud_deployments","external.operational_resilience","external.supply_chain","promotion.evidence_window"];
+            def domain_ids: ["local_source","local_promotion","local_release","live_sdk_conformance","public_tags","public_registries","physical_devices","live_provider","cloud_deployments","operational_resilience","supply_chain"];
+            (keys | sort) == ["checks","contract","documentation","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+            .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+            .scope == "source" and .verdict == "passed" and .source_conformance_passed == true and
+            .promotion_ready == false and .release_ready == false and .evidence_window == null and
+            .contract.status == "released" and .contract.core_release == "v1.0.0" and
+            .contract.version == "1.0.0" and .contract.oci_image_digest == null and
+            .contract.bundle_file_name == "latchway-contract-1.0.0.tar.gz" and
+            (.contract.bundle_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+            ([.repositories[].id] | sort) == ["android","core","ios","javascript","react_native"] and
+            all(.repositories[];
+              (keys | sort) == ["commit","id","intended_tag","version"] and
+              (.commit | type == "string" and test("^[0-9a-f]{40}$")) and
+              .version == "1.0.0" and .intended_tag == "v1.0.0") and
+            (.repositories[] | select(.id == "core") | .commit) == $commit and
+            .documentation.canonical_core_commit == $commit and
+            ([.checks[].id]) == all_check_ids and
+            all(.checks[];
+              (.summary | type == "string" and length > 0) and
+              if (.id | startswith("source.")) then
+                (keys | sort) == ["details","domain","id","required","status","summary"] and
+                .domain == "local_source" and .required == true and .status == "passed" and
+                (.details | type == "object" and length > 0)
+              else
+                (keys | sort) == ["domain","id","reason","required","status","summary"] and
+                .required == false and .status == "unverified" and
+                (if (.id | startswith("external.")) then .reason == "external_evidence_not_required_by_scope"
+                 elif .id == "release.local_preconditions" then .reason == "release_scope_not_requested"
+                 else .reason == "promotion_scope_not_requested" end)
+              end) and
+            ([.evidence_domains[].id]) == domain_ids and
+            all(.evidence_domains[];
+              (keys | sort) == ["artifact_sha256","document_sha256","finished_at","id","oci_image_digest","required","started_at","status"] and
+              .started_at == null and .finished_at == null and .document_sha256 == null and
+              .oci_image_digest == null and .artifact_sha256 == [] and
+              if .id == "local_source" then .required == true and .status == "passed"
+              else .required == false and .status == "unverified" end)
+          ' "$source_report" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile source "$source_report" '
+            (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+            .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+            .candidate_commit == $commit and .intended_tag == "v1.0.0" and .version == "1.0.0" and
+            .contract.version == $source[0].contract.version and .contract.status == "released" and
+            .contract.released_at == $source[0].contract.released_at and
+            .contract.bundle_file_name == $source[0].contract.bundle_file_name and
+            .contract.bundle_sha256 == $source[0].contract.bundle_sha256 and
+            (.image.repository + "@" + .image.index_digest) == $image and
+            (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+            .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"]
+          ' "$candidate" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile authority "$authority" '
+            (keys | sort) == ["assets","candidate_commit","candidate_run","claims","core_publication_gate","deferred_evidence","deployment_evidence","github_release","image","kind","profile","profile_status","release_policy","schema_version","supply_chain","tag","version"] and
+            .schema_version == 1 and .kind == "latchway_single_maintainer_v1_core_release" and
+            .profile == "single_maintainer_v1" and .profile_status == "incomplete" and
+            .core_publication_gate == "passed" and .candidate_commit == $commit and
+            .tag == "v1.0.0" and .version == "1.0.0" and .image.coordinate == $image and
+            .candidate_run == {run_id:$authority[0].inputs.candidate.run_id,run_attempt:$authority[0].inputs.candidate.run_attempt} and
+            .release_policy.mode == "single_maintainer_v1" and
+            .release_policy.independent_reviewer_required == false and
+            .release_policy.strict_full_controls_satisfied == false and
+            .claims == {fully_evidence_gated:false,independently_reviewed:false,release_qualified:false} and
+            .supply_chain == {license_scan_verified:true,multi_arch_image_verified:true,provenance_verified:true,sbom_verified:true,signature_verified:true,vulnerability_scan_verified:true}
+          ' "$core_record" >/dev/null
+          jq --null-input --sort-keys '
+            ["independent_human_review","live_sdk_conformance","physical_devices",
+             "apple_distribution_and_extensions","play_integrity_and_android_device",
+             "firebase_app_check","turnstile","live_provider",
+             "cloud_deployments.aws_verified","cloud_deployments.fly_io_verified",
+             "cloud_deployments.cloudflare_containers_verified","operational_resilience",
+             "public_registries.documentation_production_verified","mintlify_production"] |
+            map({id:.,status:"unverified",source:"release_profile_policy",reason:"deferred_by_profile"})
+          ' > "$RUNNER_TEMP/expected-deferred.json"
+          tags_sha=$(sha256sum "$final/external/public_tags.json" | cut -d' ' -f1)
+          registries_sha=$(sha256sum "$final/external/public_registries.json" | cut -d' ' -f1)
+          cloud_sha=$(sha256sum "$final/external/cloud_deployments.json" | cut -d' ' -f1)
+          supply_sha=$(sha256sum "$final/external/supply_chain.json" | cut -d' ' -f1)
+          jq --null-input --sort-keys \
+            --arg tags_sha "$tags_sha" --arg registries_sha "$registries_sha" \
+            --arg cloud_sha "$cloud_sha" --arg supply_sha "$supply_sha" \
+            --slurpfile tags "$final/external/public_tags.json" \
+            --slurpfile registries "$final/external/public_registries.json" \
+            --slurpfile cloud "$final/external/cloud_deployments.json" \
+            --slurpfile supply "$final/external/supply_chain.json" '
+            def gate($id;$required;$document;$sha):
+              {id:$id,status:"passed",source:"external_evidence_document",details:{
+                required_claims:$required,observed_claims:$required,document_sha256:$sha,
+                artifact_sha256:([$document.artifacts[].sha256] | sort)}};
+            [
+              {id:"local_source",status:"passed",source:"cross_repository_release_report"},
+              {id:"local_promotion",status:"passed",source:"cross_repository_release_report"},
+              {id:"local_release",status:"passed",source:"cross_repository_release_report"},
+              {id:"source_conformance_passed",status:"passed",source:"cross_repository_release_report"},
+              gate("public_tags";["remote_annotated_tags_verified","github_releases_verified"];$tags[0];$tags_sha),
+              gate("public_registries";["oci_digest_verified","npm_javascript_verified","npm_react_native_verified","swift_package_verified","cocoapods_verified","maven_central_verified"];$registries[0];$registries_sha),
+              gate("cloud_deployments";["compose_verified","cloud_run_verified"];$cloud[0];$cloud_sha),
+              gate("supply_chain";["multi_arch_image_verified","vulnerability_scan_verified","license_scan_verified","sbom_verified","signature_verified","provenance_verified"];$supply[0];$supply_sha),
+              {id:"required_evidence_window",status:"passed",source:"external_evidence_documents",details:{
+                started_at:([$tags[0].started_at,$registries[0].started_at,$cloud[0].started_at,$supply[0].started_at] | min),
+                finished_at:([$tags[0].finished_at,$registries[0].finished_at,$cloud[0].finished_at,$supply[0].finished_at] | max),
+                maximum_age_seconds:604800}}
+            ]
+          ' > "$RUNNER_TEMP/expected-gates.json"
+          jq --null-input --sort-keys \
+            --arg image "$image" --arg tags_sha "$tags_sha" --arg supply_sha "$supply_sha" \
+            --slurpfile tags "$final/external/public_tags.json" \
+            --slurpfile supply "$final/external/supply_chain.json" '
+            def empty($id;$status): {id:$id,required:true,status:$status,started_at:null,finished_at:null,document_sha256:null,oci_image_digest:null,artifact_sha256:[]};
+            def passed($id;$document;$sha): {id:$id,required:true,status:"passed",
+              started_at:$document.started_at,finished_at:$document.finished_at,
+              document_sha256:$sha,oci_image_digest:$image,
+              artifact_sha256:([$document.artifacts[].sha256] | sort)};
+            [empty("local_source";"passed"),empty("local_promotion";"failed"),empty("local_release";"passed"),
+             empty("live_sdk_conformance";"unverified"),passed("public_tags";$tags[0];$tags_sha),
+             empty("public_registries";"failed"),empty("physical_devices";"unverified"),
+             empty("live_provider";"unverified"),empty("cloud_deployments";"failed"),
+             empty("operational_resilience";"unverified"),passed("supply_chain";$supply[0];$supply_sha)]
+          ' > "$RUNNER_TEMP/expected-strict-domains.json"
+          jq --null-input --sort-keys --arg image "$image" \
+            --arg tags_sha "$tags_sha" --arg supply_sha "$supply_sha" \
+            --slurpfile source "$source_report" \
+            --slurpfile tags "$final/external/public_tags.json" \
+            --slurpfile supply "$final/external/supply_chain.json" '
+            def source_check($id): $source[0].checks[] | select(.id == $id);
+            def missing($domain): {id:("external."+$domain),domain:$domain,required:true,status:"unverified",summary:(
+              if $domain == "live_sdk_conformance" then "All SDKs passed live behavior against the exact release image."
+              elif $domain == "physical_devices" then "Production App Attest and Play Integrity flows passed on required physical distributions."
+              elif $domain == "live_provider" then "The bounded live-provider conformance suite passed."
+              else "Load, destructive failure, replica, recovery, and released upgrade gates passed." end),reason:"external_evidence_missing"};
+            def partial($domain;$summary): {id:("external."+$domain),domain:$domain,required:true,status:"failed",summary:$summary,reason:"external_evidence_claims_invalid"};
+            def passed($domain;$summary;$document;$sha): {id:("external."+$domain),domain:$domain,required:true,status:"passed",summary:$summary,details:{
+              document_sha256:$sha,oci_image_digest:$image,started_at:$document.started_at,finished_at:$document.finished_at,
+              artifact_count:($document.artifacts|length),artifact_sha256:([$document.artifacts[].sha256]|sort)}};
+            ($source[0].repositories | map({key:.id,value:.intended_tag}) | from_entries) as $tags_by_repo |
+            [source_check("source.repository_layout"),source_check("source.clean_worktrees"),
+             source_check("source.documentation_mirror"),source_check("source.core_contract"),
+             source_check("source.contract_bundle"),source_check("source.contract_locks"),
+             source_check("source.generated_fixtures"),source_check("source.package_versions"),
+             source_check("source.sdk_documentation_bundles"),source_check("source.react_native_pins"),
+             {id:"promotion.local_preconditions",domain:"local_promotion",required:true,status:"passed",
+              summary:"The released contract and every intended source coordinate are valid before publication.",
+              details:{intended_tags:$tags_by_repo,contract_released_at:$source[0].contract.released_at,oci_image_digest:$image}},
+             {id:"release.local_preconditions",domain:"local_release",required:true,status:"passed",
+              summary:"All local release coordinates, clean trees, and annotated tags are valid.",
+              details:{tags:$tags_by_repo,annotated_tag_count:5}},
+             missing("live_sdk_conformance"),
+             passed("public_tags";"Remote annotated tags and GitHub releases were independently verified.";$tags[0];$tags_sha),
+             partial("public_registries";"OCI, npm, Swift/CocoaPods, and Maven artifacts were independently verified."),
+             missing("physical_devices"),missing("live_provider"),
+             partial("cloud_deployments";"Compose and every claimed cloud deployment passed release-image smoke tests."),
+             missing("operational_resilience"),
+             passed("supply_chain";"The multi-architecture image, scans, SBOM, signature, and provenance were verified.";$supply[0];$supply_sha),
+             {id:"promotion.evidence_window",domain:"local_promotion",required:true,status:"failed",
+              summary:"All required evidence is fresh and belongs to one bounded candidate window.",reason:"prerequisite_evidence_failed"}]
+          ' > "$RUNNER_TEMP/expected-strict-checks.json"
+          jq --sort-keys '(.evidence_domains[] | select(.id == "local_promotion") | .status) = "passed"' \
+            "$strict_report" > "$RUNNER_TEMP/reconstructed-profile-input.json"
+          cmp --silent "$profile_report" "$RUNNER_TEMP/reconstructed-profile-input.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile source "$source_report" \
+            --slurpfile domains "$RUNNER_TEMP/expected-strict-domains.json" \
+            --slurpfile checks "$RUNNER_TEMP/expected-strict-checks.json" '
+            (keys | sort) == ["checks","contract","documentation","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+            .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+            .scope == "release" and .verdict == "failed" and .source_conformance_passed == true and
+            .promotion_ready == false and .release_ready == false and .evidence_window == null and
+            .contract == ($source[0].contract + {oci_image_digest:$image}) and
+            .repositories == $source[0].repositories and .documentation == $source[0].documentation and
+            (.repositories[] | select(.id == "core") | .commit) == $commit and
+            .evidence_domains == $domains[0] and .checks == $checks[0]
+          ' "$strict_report" >/dev/null
+          # BEGIN PROFILE_PROJECTION_POLICY
+          read -r -d '' projection_policy <<'JQ' || true
+          (keys | sort) == ["authentication_status","candidate","deferred_evidence","evaluation_scope","forbidden_claims","kind","profile","profile_requirements_satisfied","publication_ready","release_qualified","required_gates","requires_independent_human_review","schema_version","status","status_claim","strict_cross_repository_ready"] and
+          .schema_version == 1 and .kind == "latchway_release_profile_evaluation" and
+          .evaluation_scope == "cross_repository_publication_profile" and
+          .profile == "single_maintainer_v1" and .status == "passed" and
+          .status_claim == "v1_profile_projection_passed_with_deferred_assurance" and
+          .profile_requirements_satisfied == true and .authentication_status == "not_performed" and
+          .publication_ready == false and .strict_cross_repository_ready == false and
+          .release_qualified == false and .requires_independent_human_review == false and
+          .candidate == {core_commit:$commit,release_tag:"v1.0.0",oci_image_digest:$image} and
+          .required_gates == $gates[0] and .deferred_evidence == $deferred[0] and
+          .forbidden_claims == ["release_qualified","fully_evidence_gated","independently_reviewed"]
+          JQ
+          # END PROFILE_PROJECTION_POLICY
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile gates "$RUNNER_TEMP/expected-gates.json" \
+            --slurpfile deferred "$RUNNER_TEMP/expected-deferred.json" \
+            "$projection_policy" "$projection" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile authority "$authority" --slurpfile gates "$RUNNER_TEMP/expected-gates.json" \
+            --slurpfile deferred "$RUNNER_TEMP/expected-deferred.json" '
+            (keys | sort) == ["authentication_status","authority","candidate","deferred_evidence","evaluation_scope","forbidden_claims","fully_evidence_gated","independently_reviewed","input_digests","kind","profile","profile_requirements_satisfied","publication_ready","release_qualified","required_gates","requires_independent_human_review","schema_version","status","status_claim","strict_cross_repository_ready"] and
+            .schema_version == 1 and .kind == "latchway_authenticated_release_profile" and
+            .evaluation_scope == "cross_repository_publication_profile" and
+            .profile == "single_maintainer_v1" and .status == "passed" and
+            .status_claim == "v1_profile_publication_ready_with_deferred_assurance" and
+            .profile_requirements_satisfied == true and .authentication_status == "passed" and
+            .publication_ready == true and .strict_cross_repository_ready == false and
+            .release_qualified == false and .fully_evidence_gated == false and
+            .independently_reviewed == false and .requires_independent_human_review == false and
+            .candidate == {core_commit:$commit,release_tag:"v1.0.0",oci_image_digest:$image} and
+            .authority == {policy_id:"latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing",inputs:$authority[0].inputs} and
+            (.input_digests | keys | sort) == ["authority_manifest","external_cloud_deployments","external_public_registries","external_public_tags","external_supply_chain","profile_evaluation","profile_release_report","strict_release_report"] and
+            .required_gates == $gates[0] and .deferred_evidence == $deferred[0] and
+            .forbidden_claims == ["release_qualified","fully_evidence_gated","independently_reviewed"]
+          ' "$record" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+            .schema_version == 1 and .kind == "latchway_single_maintainer_v1_authority" and
+            .profile == "single_maintainer_v1" and .candidate_commit == $commit and
+            .policy_id == "latchway-release-profile-v1:latchway:single_maintainer_v1:release-evidence-signing" and
+            (.inputs | keys | sort) == ["candidate","core_release","public_registries","public_tags","source_report","supply_chain"]
+          ' "$authority" >/dev/null
+          input_count=0
+          while IFS=$'\t' read -r id workflow run_id run_attempt relative expected_sha; do
+            input_count=$((input_count + 1))
+            [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$run_attempt" =~ ^[1-9][0-9]{0,5}$ ]]
+            [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+            case "$id:$workflow:$relative" in
+              source_report:.github/workflows/cross-repository-conformance.yml:source/latchway-cross-repository.json) ;;
+              candidate:.github/workflows/release.yml:core/latchway-candidate.json) ;;
+              core_release:.github/workflows/single-maintainer-release.yml:core/latchway-single-maintainer-v1.json) ;;
+              public_tags:.github/workflows/release-domain-evidence.yml:public_tags/public_tags.json) ;;
+              public_registries:.github/workflows/release-domain-evidence.yml:public_registries/public_registries.json) ;;
+              supply_chain:.github/workflows/release-domain-evidence.yml:supply_chain/supply_chain.json) ;;
+              *) exit 1 ;;
+            esac
+            subject="$authenticated/$relative"
+            test -f "$subject" && test ! -L "$subject"
+            test "$(sha256sum "$subject" | cut -d' ' -f1)" = "$expected_sha"
+          done < <(jq --raw-output '.inputs | to_entries[] | [.key,.value.workflow_path,.value.run_id,.value.run_attempt,.value.subject_path,.value.sha256] | @tsv' "$authority")
+          test "$input_count" = 6
+          # BEGIN CERTIFICATE_IDENTITY_POLICY
+          read -r -d '' certificate_policy <<'JQ' || true
+          type == "array" and length >= 1 and
+          any(.[];
+            (.verificationResult.signature.certificate // {}) as $certificate |
+            $certificate.issuer == "https://token.actions.githubusercontent.com" and
+            $certificate.subjectAlternativeName == $expected_signer and
+            $certificate.githubWorkflowRepository == $repository and
+            $certificate.githubWorkflowRef == "refs/heads/main" and
+            $certificate.githubWorkflowTrigger == "workflow_dispatch" and
+            $certificate.buildSignerURI == $expected_signer and
+            $certificate.buildSignerDigest == $commit and
+            $certificate.runnerEnvironment == "github-hosted" and
+            $certificate.sourceRepositoryURI == $expected_repository and
+            $certificate.sourceRepositoryDigest == $commit and
+            $certificate.sourceRepositoryRef == "refs/heads/main" and
+            $certificate.buildConfigURI == $expected_signer and
+            $certificate.buildConfigDigest == $commit and
+            $certificate.buildTrigger == "workflow_dispatch" and
+            $certificate.runInvocationURI == $expected_run and
+            $certificate.sourceRepositoryVisibilityAtSigning == "public")
+          JQ
+          # END CERTIFICATE_IDENTITY_POLICY
+          require_certificate_identity() {
+            local result="$1" run_id="$2" run_attempt="$3" workflow="$4"
+            local expected_run="https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt"
+            local expected_signer="https://github.com/$GITHUB_REPOSITORY/$workflow@refs/heads/main"
+            jq --exit-status --arg expected_run "$expected_run" \
+              --arg expected_signer "$expected_signer" --arg repository "$GITHUB_REPOSITORY" \
+              --arg expected_repository "https://github.com/$GITHUB_REPOSITORY" \
+              --arg commit "$CANDIDATE_COMMIT" \
+              "$certificate_policy" "$result" >/dev/null
+          }
+          require_certificate_identity "$RUNNER_TEMP/final-source-attestation.json" \
+            "$(jq --raw-output .inputs.source_report.run_id "$authority")" \
+            "$(jq --raw-output .inputs.source_report.run_attempt "$authority")" \
+            .github/workflows/cross-repository-conformance.yml
+          require_certificate_identity "$RUNNER_TEMP/final-candidate-attestation.json" \
+            "$(jq --raw-output .inputs.candidate.run_id "$authority")" \
+            "$(jq --raw-output .inputs.candidate.run_attempt "$authority")" \
+            .github/workflows/release.yml
+          for domain in public_tags public_registries supply_chain; do
+            require_certificate_identity "$RUNNER_TEMP/final-$domain-attestation.json" \
+              "$(jq --raw-output --arg domain "$domain" '.inputs[$domain].run_id' "$authority")" \
+              "$(jq --raw-output --arg domain "$domain" '.inputs[$domain].run_attempt' "$authority")" \
+              .github/workflows/release-domain-evidence.yml
+          done
+          for subject in SHA256SUMS latchway-single-maintainer-v1.json; do
+            require_certificate_identity "$RUNNER_TEMP/final-core-$subject-attestation.json" \
+              "$(jq --raw-output .inputs.core_release.run_id "$authority")" \
+              "$(jq --raw-output .inputs.core_release.run_attempt "$authority")" \
+              .github/workflows/single-maintainer-release.yml
+          done
+          validate_domain() {
+            local domain="$1" expected_claims="$2"
+            local document="$final/external/$domain.json"
+            local source_root="$authenticated/$domain"
+            local source_report="$authenticated/source/latchway-cross-repository.json"
+            jq --exit-status --arg domain "$domain" --arg commit "$CANDIDATE_COMMIT" \
+              --arg image "$image" --argjson expected_claims "$expected_claims" \
+              --slurpfile source "$source_report" '
+              (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
+              .schema_version == 1 and .kind == "latchway_cross_repository_external_evidence" and
+              .domain == $domain and .status == "passed" and .core_commit == $commit and
+              .core_release == $source[0].contract.core_release and
+              .contract_version == $source[0].contract.version and
+              .bundle_sha256 == $source[0].contract.bundle_sha256 and
+              .oci_image_digest == $image and (.claims | keys | sort) == $expected_claims and
+              .repositories == ([$source[0].repositories[] |
+                {key:.id,value:{commit:.commit,tag:.intended_tag,version:.version}}] | from_entries) and
+              all(.claims[]; . == true) and (.artifacts | length >= 1 and length <= 64) and
+              ([.artifacts[].path] | unique | length) == (.artifacts | length)
+            ' "$document" >/dev/null
+            artifact_count=0
+            while IFS=$'\t' read -r relative expected_sha; do
+              artifact_count=$((artifact_count + 1))
+              [[ "$relative" =~ ^artifacts/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+              [[ "$relative" != *..* && "$relative" != */ && "$relative" != *//* ]]
+              [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+              artifact="$source_root/$relative"
+              test -f "$artifact" && test ! -L "$artifact"
+              test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "$expected_sha"
+            done < <(jq --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$document")
+            test "$artifact_count" -ge 1
+          }
+          validate_domain public_tags '["github_releases_verified","remote_annotated_tags_verified"]'
+          validate_domain public_registries '["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
+          validate_domain supply_chain '["license_scan_verified","multi_arch_image_verified","provenance_verified","sbom_verified","signature_verified","vulnerability_scan_verified"]'
+          cloud="$final/external/cloud_deployments.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg image "$image" \
+            --slurpfile source "$authenticated/source/latchway-cross-repository.json" '
+            (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
+            .schema_version == 1 and .kind == "latchway_cross_repository_external_evidence" and
+            .domain == "cloud_deployments" and .status == "passed" and
+            .core_commit == $commit and .core_release == $source[0].contract.core_release and
+            .contract_version == $source[0].contract.version and
+            .bundle_sha256 == $source[0].contract.bundle_sha256 and
+            .oci_image_digest == $image and .claims == {cloud_run_verified:true,compose_verified:true} and
+            .repositories == ([$source[0].repositories[] |
+              {key:.id,value:{commit:.commit,tag:.intended_tag,version:.version}}] | from_entries) and
+            ([.artifacts[].path] | sort) == ["artifacts/single-maintainer-cloud/SHA256SUMS","artifacts/single-maintainer-cloud/cloud_run.attestation.json","artifacts/single-maintainer-cloud/cloud_run.tar.gz","artifacts/single-maintainer-cloud/compose.attestation.json","artifacts/single-maintainer-cloud/compose.tar.gz","artifacts/single-maintainer-cloud/latchway-single-maintainer-v1.json"]
+          ' "$cloud" >/dev/null
+          while IFS=$'\t' read -r relative expected_sha; do
+            name=${relative#artifacts/single-maintainer-cloud/}
+            [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+            artifact="$authenticated/core/$name"
+            test -f "$artifact" && test ! -L "$artifact"
+            test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "$expected_sha"
+          done < <(jq --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$cloud")
+          test "$(jq --raw-output .input_digests.authority_manifest "$record")" = "$(sha256sum "$authority" | cut -d' ' -f1)"
+          test "$(jq --raw-output .input_digests.strict_release_report "$record")" = "$(sha256sum "$strict_report" | cut -d' ' -f1)"
+          test "$(jq --raw-output .input_digests.profile_release_report "$record")" = "$(sha256sum "$profile_report" | cut -d' ' -f1)"
+          test "$(jq --raw-output .input_digests.profile_evaluation "$record")" = "$(sha256sum "$projection" | cut -d' ' -f1)"
+          for domain in cloud_deployments public_registries public_tags supply_chain; do
+            test "$(jq --raw-output --arg domain "$domain" '.input_digests["external_" + $domain]' "$record")" = \
+              "$(sha256sum "$final/external/$domain.json" | cut -d' ' -f1)"
+          done
+      - name: Attest the authenticated profile-wide decision
+        id: profile-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/finalization/latchway-single-maintainer-v1-final.json
+      - name: Retain the final attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.profile-attestation.outputs.bundle-path }}
+        run: install -m 0600 -- "$BUNDLE_PATH" "$RUNNER_TEMP/finalization/latchway-single-maintainer-v1-final.attestation.sigstore.json"
+      - name: Retain the authenticated profile decision
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-single-maintainer-v1-final-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finalization
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

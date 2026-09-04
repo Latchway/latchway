@@ -516,6 +516,7 @@ def validate_deployment_capture(
     run_attempt: str,
     image: str,
     bundle_sha256: str,
+    candidate_manifest: Mapping[str, Any],
 ) -> dict[str, Any]:
     if platform not in DEPLOYMENT_ASSET_FILES:
         raise ReleaseError("deployment_platform_invalid")
@@ -541,7 +542,9 @@ def validate_deployment_capture(
         for name in CAPTURE_FILES:
             (root / name).write_bytes(values[name])
         try:
-            verified_manifest, checks = DEPLOYMENT.validate_capture(root)
+            verified_manifest, checks = DEPLOYMENT.validate_capture(
+                root, candidate_manifest
+            )
         except DEPLOYMENT.EvidenceError as error:
             raise ReleaseError(error.code) from error
         if verified_manifest != manifest or any(item.status != "passed" for item in checks):
@@ -666,6 +669,7 @@ def prepare_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
             run_attempt=run_attempt,
             image=image,
             bundle_sha256=bundle_sha256,
+            candidate_manifest=manifest,
         )
 
     output = args.output_directory
@@ -880,6 +884,7 @@ def verify_handoff(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
             run_attempt=run_attempt,
             image=image,
             bundle_sha256=bundle_sha256,
+            candidate_manifest=manifest,
         )
     record = read_json(root / "latchway-single-maintainer-v1.json")
     verify_record_shape(record, args, manifest)

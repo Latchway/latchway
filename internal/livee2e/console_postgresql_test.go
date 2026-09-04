@@ -93,7 +93,8 @@ func TestConsoleFirstRunAgainstLiveStack(t *testing.T) {
 			Role: config.RoleAll, LogLevel: "error", MigrateOnStart: true,
 			ShutdownTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
 			IdleTimeout: 30 * time.Second, DBMaxConnections: 8,
-			PublicOrigin: publicOrigin, AdminBootstrapToken: bootstrapToken,
+			DBCompletionConnections: 2,
+			PublicOrigin:            publicOrigin, AdminBootstrapToken: bootstrapToken,
 			AdminSessionLifetime: time.Hour,
 		}, telemetry.NewLogger(io.Discard, "error"))
 	}()

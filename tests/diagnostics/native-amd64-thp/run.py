@@ -41,6 +41,11 @@ SUBNET = "10.239.170.0/24"
 PG_IP = "10.239.170.20"
 FIXTURE_IP = "10.239.170.10"
 GATES = ("preflight", "idle_memory", "gateway_overhead", "non_stream_100_rps", "sse_500_concurrent_memory")
+DB_POOL_MAX_CONNECTIONS = 32
+DB_REGULAR_POOL_MAX_CONNECTIONS = 24
+DB_COMPLETION_POOL_MAX_CONNECTIONS = 8
+if DB_REGULAR_POOL_MAX_CONNECTIONS != DB_POOL_MAX_CONNECTIONS - DB_COMPLETION_POOL_MAX_CONNECTIONS:
+    raise RuntimeError("DB_POOL_PARTITION_CHANGED")
 RUNTIME_KEYS = {"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS"}
 FAILURE_STAGES = {"initialization", "source_identity", "native_host", "source_clone", "sampler_overlay",
                   "gateway_image_build", "gateway_image_validate", "tools_image_build", "tools_image_validate",
@@ -349,6 +354,19 @@ class Runner(n.Runner):
                   env=self.env if environment is None else environment, timeout=15, maximum=256)
         self.observe(key)
 
+    def verify_gateway_pool_environment(self, arm):
+        expected = (
+            "LATCHWAY_DB_MAX_CONNECTIONS=" + str(DB_POOL_MAX_CONNECTIONS),
+            "LATCHWAY_DB_COMPLETION_CONNECTIONS=" + str(DB_COMPLETION_POOL_MAX_CONNECTIONS),
+        )
+        for setting in expected:
+            template = '{{range .Config.Env}}{{if eq . "' + setting + '"}}{{println "matched"}}{{end}}{{end}}'
+            raw = self.call(
+                ["docker", "container", "inspect", "--format", template, self.paths[arm + "_gateway"]],
+                maximum=64,
+            )[1]
+            n.need(raw.strip() == b"matched", "CONTAINER_SCOPE")
+
     def remove(self, key):
         value = self.inspect(key, cleanup=True)
         if value is None: return "absent"
@@ -463,7 +481,9 @@ class Runner(n.Runner):
         self.call(["docker", "start", self.paths[arm + "_fixture"]], maximum=256)
         gateway = {"LATCHWAY_DATABASE_URL": "postgres://latchway:" + shared["postgres"] + "@" + PG_IP + ":5432/latchway?sslmode=disable",
                    "LATCHWAY_MASTER_KEY": shared["master"], "LATCHWAY_PUBLIC_ORIGIN": "http://127.0.0.1:8080", "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN": shared["bootstrap"],
-                   "LATCHWAY_ROLE": "all", "LATCHWAY_LOG_LEVEL": "info", "LATCHWAY_MIGRATE_ON_START": "true", "LATCHWAY_DB_MAX_CONNECTIONS": "32", "LATCHWAY_SHUTDOWN_TIMEOUT": "30s"}
+                   "LATCHWAY_ROLE": "all", "LATCHWAY_LOG_LEVEL": "info", "LATCHWAY_MIGRATE_ON_START": "true",
+                   "LATCHWAY_DB_MAX_CONNECTIONS": str(DB_POOL_MAX_CONNECTIONS),
+                   "LATCHWAY_DB_COMPLETION_CONNECTIONS": str(DB_COMPLETION_POOL_MAX_CONNECTIONS), "LATCHWAY_SHUTDOWN_TIMEOUT": "30s"}
         # Same dictionary and immutable image in both arms. No inherited image
         # environment setting is erased. Only B overrides the exact GODEBUG key.
         if arm == "B": gateway["GODEBUG"] = self.disabled_debug
@@ -472,12 +492,16 @@ class Runner(n.Runner):
         for name in gateway: options.extend(("--env", name))
         self.create(arm + "_gateway", options, self.ledger["ids"]["gateway_image"], environment={**self.env, **gateway})
         self.call(["docker", "start", self.paths[arm + "_gateway"]], maximum=256)
+        self.verify_gateway_pool_environment(arm)
         gateway_namespace = "container:" + self.ledger["ids"][arm + "_gateway"]
         provision_env = {**self.env, "LATCHWAY_LOAD_BOOTSTRAP_TOKEN": shared["bootstrap"], "LATCHWAY_LOAD_ADMIN_PASSWORD": shared["admin"]}
         provision_args = ("/tools/latchway-load-provision", "-gateway-url", "http://127.0.0.1:8080", "-upstream-base-url", "http://" + FIXTURE_IP + ":19090/v1",
                           "-output-dir", "/evidence/runtime", "-local-docker-image-id", self.ledger["ids"]["gateway_image"], "-commit", BASE,
                           "-postgres-identity", "PostgreSQL 18.6 Alpine local Docker image " + self.ledger["postgres_image_id"], "-postgres-network", "same internal-only Docker bridge; PostgreSQL address " + PG_IP,
-                          "-postgres-cpu-millicores", "4000", "-postgres-memory-bytes", "4294967296", "-postgres-memory-swap-bytes", "4294967296", "-postgres-max-connections", "100", "-gateway-db-pool-max-connections", "32")
+                          "-postgres-cpu-millicores", "4000", "-postgres-memory-bytes", "4294967296", "-postgres-memory-swap-bytes", "4294967296", "-postgres-max-connections", "100",
+                          "-gateway-db-pool-max-connections", str(DB_POOL_MAX_CONNECTIONS),
+                          "-gateway-db-regular-pool-max-connections", str(DB_REGULAR_POOL_MAX_CONNECTIONS),
+                          "-gateway-db-completion-pool-max-connections", str(DB_COMPLETION_POOL_MAX_CONNECTIONS))
         self.create(arm + "_provisioner", ["--network", gateway_namespace, *common, "--env", "LATCHWAY_LOAD_BOOTSTRAP_TOKEN", "--env", "LATCHWAY_LOAD_ADMIN_PASSWORD",
                     "--volume", str(runtime) + ":/evidence/runtime"], self.ledger["ids"]["tools_image"], provision_args, provision_env)
         self.call(["docker", "start", "--attach", self.paths[arm + "_provisioner"]], timeout=90, discard=True)
@@ -495,7 +519,9 @@ class Runner(n.Runner):
         self.ledger["collectors"][arm] = "started_or_unknown"; self.save()
         self.collector_stopped = False
         self.collector = subprocess.Popen([sys.executable, str(REPO / DIRECTORY / "collector.py"), "--postgres", self.paths[arm + "_postgres"],
-                         "--gateway", self.paths[arm + "_gateway"], "--tools-runner", self.paths[arm + "_tools"], "--pool-max-connections", "32",
+                         "--gateway", self.paths[arm + "_gateway"], "--tools-runner", self.paths[arm + "_tools"], "--pool-max-connections", str(DB_POOL_MAX_CONNECTIONS),
+                         "--regular-pool-max-connections", str(DB_REGULAR_POOL_MAX_CONNECTIONS),
+                         "--completion-pool-max-connections", str(DB_COMPLETION_POOL_MAX_CONNECTIONS),
                          "--output", str(self.artifacts / (arm + "-runtime.jsonl")), "--stop-file", str(stop_file),
                          "--advisory-deadline-unix-ns", str(int((self.ledger["t0_wall"] + TOTAL_SECONDS - CLEANUP_SECONDS - 30) * 10**9))],
                          env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -527,7 +553,10 @@ class Runner(n.Runner):
         n.atomic_json(self.artifacts / (arm + "-environment.json"), {"schema_version": 1, "advisory_only": True, "release_evidence": False, "arm": arm,
                       "source_commit": BASE, "tooling_commit": self.tooling, "gateway_image_id": self.ledger["ids"]["gateway_image"], "tools_image_id": self.ledger["ids"]["tools_image"],
                       "postgres_image": n.PG_IMAGE, "gateway_cpus": 2, "gateway_memory_bytes": 2147483648, "postgres_cpus": 4, "postgres_memory_bytes": 4294967296,
-                      "postgres_max_connections": 100, "gateway_pool_max_connections": 32, "original_image_runtime_environment_sha256": self.runtime_env_hash,
+                      "postgres_max_connections": 100, "gateway_pool_max_connections": DB_POOL_MAX_CONNECTIONS,
+                      "gateway_regular_pool_max_connections": DB_REGULAR_POOL_MAX_CONNECTIONS,
+                      "gateway_completion_pool_max_connections": DB_COMPLETION_POOL_MAX_CONNECTIONS,
+                      "original_image_runtime_environment_sha256": self.runtime_env_hash,
                       "other_runtime_environment_preserved": True, "disablethp_override": arm == "B", "mode": MODE, "memory_observation": self.observations[arm]})
 
     def run(self):

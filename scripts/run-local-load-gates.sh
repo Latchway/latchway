@@ -6,6 +6,17 @@ usage() {
   exit 2
 }
 
+require_clean_source_repository() {
+  if ! source_status=$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all 2>/dev/null); then
+    echo "unable to verify source repository cleanliness" >&2
+    exit 2
+  fi
+  if [ -n "$source_status" ]; then
+    echo "source repository must be clean before load evidence is collected" >&2
+    exit 2
+  fi
+}
+
 acknowledge=false
 evidence_dir=
 release_image=
@@ -102,6 +113,9 @@ case "$evidence_dir" in
   /*) ;;
   *) echo "evidence directory must be absolute" >&2; exit 2 ;;
 esac
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+require_clean_source_repository
 if [ -L "$evidence_dir" ]; then
   echo "evidence directory cannot be a symbolic link" >&2
   exit 2
@@ -113,8 +127,6 @@ if [ ! -d "$evidence_dir" ] || [ -n "$(find "$evidence_dir" -mindepth 1 -maxdept
 fi
 chmod 700 "$evidence_dir"
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 # The image defaults to UID/GID 65532. Bind-mounted evidence is host-owned, so
 # run the tools as the invoking non-root user on both Linux and Docker Desktop.
 host_uid=$(id -u)
@@ -152,6 +164,14 @@ postgres_memory_bytes=4294967296
 postgres_memory_swap_bytes=4294967296
 postgres_max_connections=100
 gateway_db_pool_max_connections=32
+gateway_db_regular_pool_max_connections=24
+gateway_db_completion_pool_max_connections=8
+if [ "$gateway_db_regular_pool_max_connections" -lt 1 ] ||
+   [ "$gateway_db_completion_pool_max_connections" -lt 1 ] ||
+   [ "$gateway_db_regular_pool_max_connections" -ne "$((gateway_db_pool_max_connections - gateway_db_completion_pool_max_connections))" ]; then
+  echo "gateway database pool partition is incoherent" >&2
+  exit 2
+fi
 
 capture_postgres_startup_events() {
   # Database logs can contain SQL and parameters. Keep only fixed, allowlisted
@@ -437,6 +457,7 @@ export LATCHWAY_ROLE=all
 export LATCHWAY_LOG_LEVEL=info
 export LATCHWAY_MIGRATE_ON_START=true
 export LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections
+export LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections
 export LATCHWAY_SHUTDOWN_TIMEOUT=30s
 docker run --detach \
   --name "$gateway" \
@@ -457,6 +478,7 @@ docker run --detach \
   --env LATCHWAY_LOG_LEVEL \
   --env LATCHWAY_MIGRATE_ON_START \
   --env LATCHWAY_DB_MAX_CONNECTIONS \
+  --env LATCHWAY_DB_COMPLETION_CONNECTIONS \
   --env LATCHWAY_SHUTDOWN_TIMEOUT \
   "$gateway_runtime_image" >/dev/null
 
@@ -465,9 +487,11 @@ memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$gateway")
 memory_swap_bytes=$(docker inspect --format '{{.HostConfig.MemorySwap}}' "$gateway")
 observed_image=$(docker inspect --format '{{.Image}}' "$gateway")
 gateway_pool_env=$(docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$gateway")
+gateway_completion_pool_env=$(docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$gateway")
 if [ "$nano_cpus" != 2000000000 ] || [ "$memory_bytes" != 2147483648 ] || \
    [ "$memory_swap_bytes" != 2147483648 ] || [ "$observed_image" != "$gateway_image_id" ] || \
-   [ "$gateway_pool_env" != "LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections" ]; then
+   [ "$gateway_pool_env" != "LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections" ] || \
+   [ "$gateway_completion_pool_env" != "LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections" ]; then
   echo "gateway resource or image identity does not match the required 2 CPU / 2 GiB candidate" >&2
   exit 1
 fi
@@ -485,6 +509,8 @@ printf '%s\n' \
   "  \"gateway_memory_bytes\": $memory_bytes," \
   "  \"gateway_memory_swap_bytes\": $memory_swap_bytes," \
   "  \"gateway_db_pool_max_connections\": $gateway_db_pool_max_connections," \
+  "  \"gateway_db_regular_pool_max_connections\": $gateway_db_regular_pool_max_connections," \
+  "  \"gateway_db_completion_pool_max_connections\": $gateway_db_completion_pool_max_connections," \
   '  "gateway_expected_pid_in_shared_namespace": 1,' \
   '  "postgres_image": "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",' \
   "  \"postgres_local_docker_image_id\": \"$postgres_image_id\"," \
@@ -528,7 +554,9 @@ docker run --rm \
   -postgres-memory-bytes "$postgres_observed_memory_bytes" \
   -postgres-memory-swap-bytes "$postgres_observed_memory_swap_bytes" \
   -postgres-max-connections "$postgres_observed_max_connections" \
-  -gateway-db-pool-max-connections "$gateway_db_pool_max_connections"
+  -gateway-db-pool-max-connections "$gateway_db_pool_max_connections" \
+  -gateway-db-regular-pool-max-connections "$gateway_db_regular_pool_max_connections" \
+  -gateway-db-completion-pool-max-connections "$gateway_db_completion_pool_max_connections"
 
 cp "$run_dir/runtime/provision.json" "$evidence_dir/provision.json"
 cp "$run_dir/runtime/load-config.json" "$evidence_dir/load-config.json"
@@ -541,6 +569,8 @@ if command -v python3 >/dev/null 2>&1; then
   python3 "$run_dir/source/scripts/load-runtime-diagnostics.py" \
     --postgres "$postgres" --gateway "$gateway" --tools-runner "$tools_runner" \
     --pool-max-connections "$gateway_db_pool_max_connections" \
+    --regular-pool-max-connections "$gateway_db_regular_pool_max_connections" \
+    --completion-pool-max-connections "$gateway_db_completion_pool_max_connections" \
     --output "$evidence_dir/runtime-diagnostics.jsonl" \
     --stop-file "$run_dir/runtime-diagnostics.stop" >/dev/null 2>&1 &
   diagnostics_pid=$!

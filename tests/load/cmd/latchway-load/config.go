@@ -29,18 +29,20 @@ type config struct {
 }
 
 type environment struct {
-	Label                       string `json:"label"`
-	CPU                         string `json:"cpu"`
-	Memory                      string `json:"memory"`
-	PostgreSQL                  string `json:"postgresql"`
-	PostgreSQLCPUMillicores     int64  `json:"postgresql_cpu_millicores"`
-	PostgreSQLMemoryBytes       int64  `json:"postgresql_memory_bytes"`
-	PostgreSQLMemorySwapBytes   int64  `json:"postgresql_memory_swap_bytes"`
-	PostgreSQLMaxConnections    int    `json:"postgresql_max_connections"`
-	PostgreSQLNetwork           string `json:"postgresql_network"`
-	GatewayDBPoolMaxConnections int    `json:"gateway_db_pool_max_connections"`
-	BodyLoggingDisabled         bool   `json:"body_logging_disabled"`
-	WarmConfigCache             bool   `json:"warm_configuration_cache"`
+	Label                                 string `json:"label"`
+	CPU                                   string `json:"cpu"`
+	Memory                                string `json:"memory"`
+	PostgreSQL                            string `json:"postgresql"`
+	PostgreSQLCPUMillicores               int64  `json:"postgresql_cpu_millicores"`
+	PostgreSQLMemoryBytes                 int64  `json:"postgresql_memory_bytes"`
+	PostgreSQLMemorySwapBytes             int64  `json:"postgresql_memory_swap_bytes"`
+	PostgreSQLMaxConnections              int    `json:"postgresql_max_connections"`
+	PostgreSQLNetwork                     string `json:"postgresql_network"`
+	GatewayDBPoolMaxConnections           int    `json:"gateway_db_pool_max_connections"`
+	GatewayDBRegularPoolMaxConnections    int    `json:"gateway_db_regular_pool_max_connections"`
+	GatewayDBCompletionPoolMaxConnections int    `json:"gateway_db_completion_pool_max_connections"`
+	BodyLoggingDisabled                   bool   `json:"body_logging_disabled"`
+	WarmConfigCache                       bool   `json:"warm_configuration_cache"`
 }
 
 type evidenceMetadata struct {
@@ -182,8 +184,12 @@ func (cfg *config) validate(baseDir string) error {
 	if cfg.Environment.PostgreSQLCPUMillicores < 1000 || cfg.Environment.PostgreSQLMemoryBytes < 1<<30 ||
 		cfg.Environment.PostgreSQLMemorySwapBytes < cfg.Environment.PostgreSQLMemoryBytes ||
 		cfg.Environment.PostgreSQLMaxConnections < 2 || cfg.Environment.PostgreSQLMaxConnections > 500 ||
-		cfg.Environment.GatewayDBPoolMaxConnections < 2 || cfg.Environment.GatewayDBPoolMaxConnections > cfg.Environment.PostgreSQLMaxConnections {
-		return errors.New("load evidence requires PostgreSQL >=1 CPU/1 GiB, 2-500 server connections, and a gateway DB pool within that server limit")
+		cfg.Environment.GatewayDBPoolMaxConnections < 2 || cfg.Environment.GatewayDBPoolMaxConnections > cfg.Environment.PostgreSQLMaxConnections ||
+		cfg.Environment.GatewayDBRegularPoolMaxConnections < 1 ||
+		cfg.Environment.GatewayDBCompletionPoolMaxConnections < 1 ||
+		cfg.Environment.GatewayDBRegularPoolMaxConnections !=
+			cfg.Environment.GatewayDBPoolMaxConnections-cfg.Environment.GatewayDBCompletionPoolMaxConnections {
+		return errors.New("load evidence requires PostgreSQL >=1 CPU/1 GiB, 2-500 server connections, and an exact positive regular/completion gateway DB pool partition whose sum is within that server limit")
 	}
 	if !cfg.Environment.BodyLoggingDisabled || !cfg.Environment.WarmConfigCache {
 		return errors.New("release load evidence requires body logging disabled and a warm configuration cache")

@@ -179,11 +179,13 @@ approval, and a written docs-not-required status check; the five product
 repositories preserve the recorded zero-source-review policy. An explicit
 `single_maintainer_v1` profile permits a lower-assurance launch without an
 independent reviewer, keeps every deferred control visibly `unverified`, and
-forbids a `release-qualified` claim. Neither profile is claimed as applied live.
-npm account 2FA is enabled in `auth-and-writes` mode, and the inert
-`@latchway/client@0.0.0-bootstrap.0` namespace record is public; its unexpected
-`latest` alias still requires fail-closed cleanup, while the other four
-namespace records and every stable `1.0.0` npm package remain unpublished.
+forbids a `release-qualified` claim. Its 13 environments and exact non-secret
+policy sentinels are applied live; strict-profile rulesets are not. npm account
+2FA is enabled in `auth-and-writes` mode. All five npm namespaces contain
+only the exact `0.0.0-bootstrap.0` placeholder, whose bootstrap and `latest`
+aliases intentionally name that sole non-stable version, and all five exact
+trusted publishers are verified without npm tokens. Every stable `1.0.0` npm
+package remains unpublished.
 CocoaPods and Maven Central are also unpublished. Source compatibility does not
 imply registry compatibility until exact public bytes and clean public
 consumers are verified.

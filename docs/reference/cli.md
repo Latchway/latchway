@@ -14,9 +14,21 @@ variable. HTTPS is mandatory except for an explicit loopback origin.
 ```bash
 export LATCHWAY_SERVER=https://ai.example.com
 export LATCHWAY_ADMIN_API_TOKEN='value-from-a-secret-manager'
+latchway readiness
 latchway --output table status
 latchway --output json status
 ```
+
+`latchway readiness` is the one unauthenticated remote command. It performs a
+four-second, bounded HTTP `GET` of `${LATCHWAY_SERVER}/readyz` and sends
+no bearer, cookie, or browser Origin. The server origin must be exact canonical
+HTTPS, or canonical loopback HTTP for local operation. The command refuses
+redirects, non-200 responses, oversized bodies, non-JSON media types, duplicate
+members, trailing values, and any response outside the exact readiness contract.
+Success requires `status: ready` plus exactly `database`, `schema`,
+`active_configuration`, `quota_completion_pool`, `master_key`, `signing_key`,
+and `worker_heartbeat`, each set to `ok`. Its output contains only those fixed
+names and states; untrusted response text and transport errors are not echoed.
 
 Use `--api-token-env NAME` to select a different variable. The token is never
 accepted as a flag, printed, or included in a browser `Origin` header. Commands
@@ -262,6 +274,14 @@ an authenticated browser session and `system` is server-owned; `cli` versus
 
 ## Deployment diagnostics and support bundles
 
+Use the remote readiness probe when the local process environment and database
+credentials are intentionally unavailable:
+
+```bash
+latchway readiness
+latchway --output json readiness
+```
+
 `latchway doctor` runs the same structured, body-free deployment checks shown
 by the Admin API and Console Health center. It inspects database connectivity
 and schema, active revisions, signing-key rotation, master-key consistency,
@@ -269,6 +289,11 @@ JWKS state, worker heartbeats, job backlog, scheduled connection tests, clock
 skew, database pool pressure, storage size, expired quota reservations, and
 SDK contract metadata. A failed check returns a non-zero status; warnings are
 reported without making an otherwise compatible deployment fail.
+
+Because this is an out-of-process diagnostic, it opens one transient database
+connection and cannot observe the serving process's two live pools. Use
+`latchway readiness` for the serving process's completion-capacity gate and
+the Admin doctor for its separate regular/completion pool pressure facts.
 
 ```bash
 latchway doctor

@@ -67,7 +67,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             environment["name"]: environment["policy_id"]
             for environment in core["environments"]
         }
-        self.assertEqual(len(policies), 22)
+        self.assertEqual(len(policies), 23)
         declared_secrets = {
             environment["name"]: set(environment["secrets"]["allowed_names"])
             for environment in core["environments"]
@@ -205,9 +205,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     self.assertIn(raw_environment, policies, label)
                     concrete_environments = {raw_environment}
                 single_maintainer_profile = (
-                    path.name == "single-maintainer-release.yml"
+                    path.name
+                    in {
+                        "single-maintainer-release.yml",
+                        "finalize-single-maintainer-profile.yml",
+                    }
                     and raw_environment
-                    in {"release-evidence-signing", "release-image-publishing"}
+                    in {
+                        "release-evidence-signing",
+                        "release-image-publishing",
+                        "single-maintainer-v1-administration",
+                    }
                 )
 
                 for environment in concrete_environments:
@@ -227,9 +235,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     )
                 if single_maintainer_profile:
                     environment = next(iter(concrete_environments))
+                    policy_component = (
+                        "administration"
+                        if environment == "single-maintainer-v1-administration"
+                        else environment
+                    )
+                    expected_step_name = (
+                        "Verify the exact single-maintainer administration policy"
+                        if environment == "single-maintainer-v1-administration"
+                        else f"Verify the exact single-maintainer {environment} policy"
+                    )
                     self.assertEqual(
                         first.get("name"),
-                        f"Verify the exact single-maintainer {environment} policy",
+                        expected_step_name,
                         label,
                     )
                     self.assertEqual(
@@ -243,7 +261,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                             "set -Eeuo pipefail",
                             (
                                 'test "$OBSERVED_POLICY_ID" = '
-                                f'"latchway-release-profile-v1:latchway:single_maintainer_v1:{environment}"'
+                                f'"latchway-release-profile-v1:latchway:single_maintainer_v1:{policy_component}"'
                             ),
                         ],
                         label,
@@ -384,7 +402,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             consumers["preview-image-publishing"],
             ["preview-image.yml:publish", "preview-image.yml:sign"],
         )
-        self.assertEqual(environment_job_count, 48)
+        self.assertEqual(environment_job_count, 51)
         self.assertEqual(observed_secrets, declared_secrets)
         self.assertEqual(observed_variables, declared_variables)
 
@@ -457,6 +475,75 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     self.assertEqual(configuration.get("platforms"), "arm64", path.name)
         self.assertGreaterEqual(buildx_steps, 1)
         self.assertGreaterEqual(qemu_steps, 1)
+
+    def test_single_maintainer_tag_and_registry_domains_are_end_to_end_scoped(
+        self,
+    ) -> None:
+        observations = load_workflow("release-domain-observations.yml")
+        evidence = load_workflow("release-domain-evidence.yml")
+        for workflow in (observations, evidence):
+            profile = workflow["on"]["workflow_dispatch"]["inputs"][
+                "release_profile"
+            ]
+            self.assertEqual(profile["default"], "strict_full")
+            self.assertEqual(
+                profile["options"], ["strict_full", "single_maintainer_v1"]
+            )
+
+        observation_text = (
+            WORKFLOWS / "release-domain-observations.yml"
+        ).read_text(encoding="utf-8")
+        evidence_text = (WORKFLOWS / "release-domain-evidence.yml").read_text(
+            encoding="utf-8"
+        )
+        for text in (observation_text, evidence_text):
+            self.assertIn("single_maintainer_v1:public_tags", text)
+            self.assertIn("single_maintainer_v1:public_registries", text)
+        self.assertIn(
+            "signer_workflow=.github/workflows/release.yml", observation_text
+        )
+        self.assertIn(
+            "signer_workflow=.github/workflows/single-maintainer-release.yml",
+            observation_text,
+        )
+        self.assertIn(
+            '--signer-workflow "$repository/$signer_workflow"',
+            observation_text,
+        )
+        self.assertIn(
+            "javascript|react_native|ios|android) return 0",
+            observation_text,
+        )
+        for marker in (
+            "capture_owner_run()",
+            'relative="public-registries/$id/runs/owner-$run_id.json"',
+            'adoption="$capture/$root/assets/single-maintainer-npm-adoption.json"',
+            'owner=$(jq --raw-output \'.transaction.owner_run_id\' "$adoption")',
+            'capture_owner_run "$id" "$repository" "$owner"',
+        ):
+            self.assertIn(marker, observation_text)
+        observer_step = next(
+            step
+            for step in observations["jobs"]["observe_non_sdk"]["steps"]
+            if step.get("name")
+            == "Validate the isolated non-SDK observations offline"
+        )["run"]
+        receipt_step = next(
+            step
+            for step in observations["jobs"]["aggregate"]["steps"]
+            if step.get("name") == "Produce the exact machine-results manifest"
+        )["run"]
+        for run in (observer_step, receipt_step):
+            self.assertIn(
+                'if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]', run
+            )
+            self.assertIn(
+                "profile_arguments=(--release-profile single_maintainer_v1)",
+                run,
+            )
+        self.assertNotIn(
+            '"$EVIDENCE_DOMAIN" == public_registries', receipt_step
+        )
 
     def test_stable_ghcr_closure_verifies_referrers_and_anonymous_children(self) -> None:
         producer = load_workflow("release-domain-observations.yml")
@@ -628,6 +715,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "cross-repository-conformance.yml",
                 "deployment-evidence.yml",
                 "finalize-release-record.yml",
+                "finalize-single-maintainer-profile.yml",
                 "operational-resilience-evidence.yml",
                 "preview-image.yml",
                 "promote-release.yml",
@@ -681,6 +769,31 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         for job in workflow["jobs"].values():
             self.assertEqual(job.get("if"), "github.ref == 'refs/heads/main'")
+
+    def test_image_build_dates_are_normalized_from_commit_epoch_to_utc(self) -> None:
+        for workflow_name, job_name, step_name in (
+            ("release.yml", "image", "Resolve reproducible build metadata"),
+            (
+                "preview-image.yml",
+                "build",
+                "Require the exact current main non-release coordinate",
+            ),
+        ):
+            workflow = load_workflow(workflow_name)
+            run = next(
+                step["run"]
+                for step in workflow["jobs"][job_name]["steps"]
+                if step.get("name") == step_name
+            )
+            with self.subTest(workflow=workflow_name):
+                self.assertNotIn("--format=%cI", run)
+                self.assertIn("commit_epoch=$(git show -s --format=%ct HEAD)", run)
+                self.assertIn('[[ "$commit_epoch" =~ ^[1-9][0-9]*$ ]]', run)
+                self.assertIn(
+                    'build_date=$(date --utc --date="@$commit_epoch" +%Y-%m-%dT%H:%M:%SZ)',
+                    run,
+                )
+                self.assertIn('echo "date=$build_date" >> "$GITHUB_OUTPUT"', run)
 
     def test_candidate_image_signing_is_fresh_and_executes_no_candidate_tooling(self) -> None:
         workflow = load_workflow("release.yml")

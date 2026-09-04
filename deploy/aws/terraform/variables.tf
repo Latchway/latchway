@@ -49,12 +49,24 @@ variable "maximum_tasks" {
 }
 
 variable "db_connections_per_task" {
-  type    = number
-  default = 20
+  description = "Aggregate Latchway database connection ceiling per task, including the completion pool."
+  type        = number
+  default     = 20
 
   validation {
-    condition     = var.db_connections_per_task >= 2 && var.db_connections_per_task <= 100
-    error_message = "db_connections_per_task must be between 2 and 100."
+    condition     = var.db_connections_per_task >= 2 && var.db_connections_per_task <= 100 && floor(var.db_connections_per_task) == var.db_connections_per_task
+    error_message = "db_connections_per_task must be an integer between 2 and 100."
+  }
+}
+
+variable "db_completion_connections_per_task" {
+  description = "Connections reserved for quota-lifecycle completion inside db_connections_per_task; this is not an additive pool."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.db_completion_connections_per_task >= 1 && var.db_completion_connections_per_task <= 99 && floor(var.db_completion_connections_per_task) == var.db_completion_connections_per_task
+    error_message = "db_completion_connections_per_task must be an integer between 1 and 99; the task precondition also requires it to be less than db_connections_per_task."
   }
 }
 

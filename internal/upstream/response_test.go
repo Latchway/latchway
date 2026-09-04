@@ -386,6 +386,65 @@ func TestRelayResponseIdleTimeoutClosesBodyAfterClientStart(t *testing.T) {
 	waitForResponseRead(t, blocked)
 }
 
+func TestRelayResponseReusedReadDeadlineTimesOutAfterManyChunks(t *testing.T) {
+	t.Parallel()
+
+	const chunks = 64
+	blocked := newBlockingResponseBody()
+	body := &repeatedChunksThenBlockingResponseBody{
+		blockingResponseBody: blocked,
+		remaining:            chunks,
+	}
+	writer := newRelayResponseWriter()
+	var upstreamCancelCalls atomic.Int32
+	config := validRelayConfig()
+	config.IdleTimeout = 20 * time.Millisecond
+	dispatched := validRelayResponse(body)
+	dispatched.cancel = sync.OnceFunc(func() { upstreamCancelCalls.Add(1) })
+	outcome, err := RelayResponse(
+		context.Background(), writer, dispatched, &recordingResponseObserver{}, config,
+	)
+	if !errors.Is(err, ErrResponseIdleTimeout) || !outcome.ClientStarted ||
+		outcome.BodyBytes != int64(chunks*len("chunk")) {
+		t.Fatalf("multi-chunk idle relay: outcome=%#v error=%v", outcome, err)
+	}
+	if blocked.closeCalls.Load() != 1 || upstreamCancelCalls.Load() != 1 {
+		t.Fatalf("cleanup calls: body=%d upstream=%d",
+			blocked.closeCalls.Load(), upstreamCancelCalls.Load())
+	}
+	waitForResponseRead(t, blocked)
+}
+
+func TestRelayResponseReusedReadDeadlineObservesCancellationAfterManyChunks(t *testing.T) {
+	t.Parallel()
+
+	const chunks = 64
+	blocked := newBlockingResponseBody()
+	body := &repeatedChunksThenBlockingResponseBody{
+		blockingResponseBody: blocked,
+		remaining:            chunks,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-blocked.readStarted
+		cancel()
+	}()
+	writer := newRelayResponseWriter()
+	var upstreamCancelCalls atomic.Int32
+	dispatched := validRelayResponse(body)
+	dispatched.cancel = sync.OnceFunc(func() { upstreamCancelCalls.Add(1) })
+	outcome, err := RelayResponse(ctx, writer, dispatched, &recordingResponseObserver{}, validRelayConfig())
+	if !errors.Is(err, context.Canceled) || !outcome.ClientStarted ||
+		outcome.BodyBytes != int64(chunks*len("chunk")) {
+		t.Fatalf("multi-chunk canceled relay: outcome=%#v error=%v", outcome, err)
+	}
+	if blocked.closeCalls.Load() != 1 || upstreamCancelCalls.Load() != 1 {
+		t.Fatalf("cleanup calls: body=%d upstream=%d",
+			blocked.closeCalls.Load(), upstreamCancelCalls.Load())
+	}
+	waitForResponseRead(t, blocked)
+}
+
 func TestRelayResponseRejectsProviderErrorBodyBeforeClientStart(t *testing.T) {
 	t.Parallel()
 
@@ -869,6 +928,35 @@ func TestRelayResponseFlushesEverySSEChunk(t *testing.T) {
 	}
 }
 
+func TestRelayResponseReusesReadDeadlinesAcrossSSEChunks(t *testing.T) {
+	const chunks = 1_000
+	allocations := testing.AllocsPerRun(10, func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		body := &repeatedChunkResponseBody{remaining: chunks}
+		response := testDispatchedResponse(&http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"text/event-stream"}},
+			Body:       body,
+		}, func() {})
+		writer := &discardRelayResponseWriter{header: make(http.Header)}
+		outcome, err := RelayResponse(ctx, writer, response,
+			discardResponseObserver{}, validRelayConfig())
+		cancel()
+		if err != nil || outcome.BodyBytes != int64(chunks*len("data: x\n\n")) ||
+			body.closeCalls != 1 || writer.flushes != chunks {
+			t.Fatalf("SSE relay outcome=%#v error=%v closes=%d flushes=%d",
+				outcome, err, body.closeCalls, writer.flushes)
+		}
+	})
+	// The old per-read timer and context callback required more than eight
+	// allocations per chunk. Leave ample implementation/runtime headroom while
+	// preventing that stream-lifetime growth from returning.
+	if allocations >= 500 {
+		t.Fatalf("SSE relay allocations=%f, want fewer than 500 for %d chunks", allocations, chunks)
+	}
+	t.Logf("SSE relay allocations=%f for %d chunks", allocations, chunks)
+}
+
 func validRelayResponse(body io.ReadCloser) *DispatchedResponse {
 	return testDispatchedResponse(&http.Response{
 		StatusCode: http.StatusOK,
@@ -903,6 +991,47 @@ type responseRead struct {
 	data string
 	err  error
 }
+
+type repeatedChunkResponseBody struct {
+	remaining  int
+	closeCalls int
+}
+
+func (body *repeatedChunkResponseBody) Read(destination []byte) (int, error) {
+	if body.remaining == 0 {
+		return 0, io.EOF
+	}
+	body.remaining--
+	return copy(destination, "data: x\n\n"), nil
+}
+
+func (body *repeatedChunkResponseBody) Close() error {
+	body.closeCalls++
+	return nil
+}
+
+type discardResponseObserver struct{}
+
+func (discardResponseObserver) Observe([]byte) error { return nil }
+func (discardResponseObserver) Finalize() (protocol.Usage, error) {
+	return protocol.Usage{}, nil
+}
+
+type discardRelayResponseWriter struct {
+	header  http.Header
+	flushes int
+}
+
+func (writer *discardRelayResponseWriter) Header() http.Header { return writer.header }
+func (*discardRelayResponseWriter) WriteHeader(int)            {}
+func (*discardRelayResponseWriter) Write(value []byte) (int, error) {
+	return len(value), nil
+}
+func (writer *discardRelayResponseWriter) FlushError() error {
+	writer.flushes++
+	return nil
+}
+func (*discardRelayResponseWriter) SetWriteDeadline(time.Time) error { return nil }
 
 type scriptedResponseBody struct {
 	steps      []responseRead
@@ -944,6 +1073,19 @@ type blockingResponseBody struct {
 type firstChunkThenBlockingResponseBody struct {
 	*blockingResponseBody
 	firstReturned bool
+}
+
+type repeatedChunksThenBlockingResponseBody struct {
+	*blockingResponseBody
+	remaining int
+}
+
+func (body *repeatedChunksThenBlockingResponseBody) Read(destination []byte) (int, error) {
+	if body.remaining > 0 {
+		body.remaining--
+		return copy(destination, "chunk"), nil
+	}
+	return body.blockingResponseBody.Read(destination)
 }
 
 func (body *firstChunkThenBlockingResponseBody) Read(destination []byte) (int, error) {

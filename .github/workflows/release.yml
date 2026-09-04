@@ -211,9 +211,14 @@ jobs:
         env:
           INTENDED_TAG: ${{ inputs.intended_tag }}
         run: |
+          set -Eeuo pipefail
+          commit_epoch=$(git show -s --format=%ct HEAD)
+          [[ "$commit_epoch" =~ ^[1-9][0-9]*$ ]]
+          build_date=$(date --utc --date="@$commit_epoch" +%Y-%m-%dT%H:%M:%SZ)
+          [[ "$build_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
           echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
           echo "version=${INTENDED_TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$build_date" >> "$GITHUB_OUTPUT"
       - name: Build the exact amd64 candidate without registry credentials
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         id: build-amd64

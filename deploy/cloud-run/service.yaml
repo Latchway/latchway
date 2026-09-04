@@ -4,19 +4,19 @@ metadata:
   name: latchway
   annotations:
     run.googleapis.com/ingress: all
+    run.googleapis.com/invoker-iam-disabled: "true"
 spec:
   template:
     metadata:
       annotations:
         autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/maxScale: "3"
         run.googleapis.com/cpu-throttling: "false"
         run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
         run.googleapis.com/cloudsql-instances: ${CLOUD_SQL_CONNECTION_NAME}
-        run.googleapis.com/vpc-access-connector: ${VPC_CONNECTOR}
-        run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
-      serviceAccountName: ${SERVICE_ACCOUNT}
+      serviceAccountName: ${RUNTIME_SERVICE_ACCOUNT}
       containerConcurrency: 100
       timeoutSeconds: 3600
       containers:
@@ -32,36 +32,31 @@ spec:
               cpu: "2"
               memory: 2Gi
           env:
-            - name: PORT
-              value: "8080"
             - name: LATCHWAY_ROLE
               value: all
             - name: LATCHWAY_LOG_LEVEL
               value: info
             - name: LATCHWAY_MIGRATE_ON_START
-              value: "true"
-            - name: LATCHWAY_DB_MAX_CONNECTIONS
-              value: "20"
-            # Cloud Run sends SIGTERM only 10 seconds before forced shutdown.
-            - name: LATCHWAY_SHUTDOWN_TIMEOUT
-              value: "8s"
+              value: "false"
             - name: LATCHWAY_PUBLIC_ORIGIN
               value: "${LATCHWAY_PUBLIC_ORIGIN}"
             - name: LATCHWAY_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: latchway-database-url
-                  key: latest
+                  key: ${DATABASE_SECRET_VERSION}
             - name: LATCHWAY_MASTER_KEY
               valueFrom:
                 secretKeyRef:
                   name: latchway-master-key
-                  key: latest
-            - name: LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: latchway-admin-bootstrap-token
-                  key: latest
+                  key: ${MASTER_KEY_SECRET_VERSION}
+            # Cloud Run sends SIGTERM only 10 seconds before forced shutdown.
+            - name: LATCHWAY_SHUTDOWN_TIMEOUT
+              value: "8s"
+            - name: LATCHWAY_DB_MAX_CONNECTIONS
+              value: "20"
+            - name: LATCHWAY_DB_COMPLETION_CONNECTIONS
+              value: "5"
           startupProbe:
             initialDelaySeconds: 1
             timeoutSeconds: 3

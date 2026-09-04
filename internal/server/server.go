@@ -28,6 +28,8 @@ import (
 	console "github.com/latchway/latchway/web/console"
 )
 
+const quotaCompletionPoolReadinessTimeout = 500 * time.Millisecond
+
 // Server is the Latchway HTTP process.
 type Server struct {
 	httpServer *http.Server
@@ -47,12 +49,16 @@ type Handlers struct {
 }
 
 // ReadinessChecks contains process-specific capabilities that cannot be
-// inferred from PostgreSQL schema state alone. Each check must return a
-// redaction-safe error; the response exposes only the stable check state.
+// inferred from PostgreSQL schema state alone. Dependency errors remain
+// internal; the response exposes only each stable check state.
 type ReadinessChecks struct {
-	MasterKey       func(context.Context) error
-	SigningKey      func(context.Context) error
-	WorkerHeartbeat func(context.Context) error
+	// QuotaCompletionPool probes the distinct pool reserved for terminal quota
+	// lifecycle work. A nil probe means this server intentionally uses the
+	// primary pool for both classes, so the primary database probe is sufficient.
+	QuotaCompletionPool func(context.Context) error
+	MasterKey           func(context.Context) error
+	SigningKey          func(context.Context) error
+	WorkerHeartbeat     func(context.Context) error
 }
 
 // New builds a server whose readiness reflects PostgreSQL and schema state.
@@ -247,50 +253,78 @@ func readinessHandler(pool *pgxpool.Pool, dependencies ReadinessChecks) http.Han
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
-		checks := map[string]string{
-			"database": "ok", "schema": "ok", "active_configuration": "ok",
-			"master_key": "ok", "signing_key": "ok", "worker_heartbeat": "ok",
-		}
-		status := http.StatusOK
-		if pool == nil || pool.Ping(ctx) != nil {
-			checks["database"] = "unavailable"
-			checks["schema"] = "unknown"
-			checks["active_configuration"] = "unknown"
-			status = http.StatusServiceUnavailable
-		} else {
-			current, available, err := database.NewMigrator(pool).Status(ctx)
-			if err != nil || current != available {
-				checks["schema"] = "incompatible"
-				status = http.StatusServiceUnavailable
-			} else if activeConfigurationsAvailable(ctx, pool) != nil {
-				checks["active_configuration"] = "unavailable"
-				status = http.StatusServiceUnavailable
-			}
-		}
-		for _, check := range []struct {
-			name string
-			run  func(context.Context) error
-		}{
-			{name: "master_key", run: dependencies.MasterKey},
-			{name: "signing_key", run: dependencies.SigningKey},
-			{name: "worker_heartbeat", run: dependencies.WorkerHeartbeat},
-		} {
-			if check.run == nil {
-				checks[check.name] = "not_configured"
-				status = http.StatusServiceUnavailable
-				continue
-			}
-			if err := check.run(ctx); err != nil {
-				checks[check.name] = "unavailable"
-				status = http.StatusServiceUnavailable
-			}
-		}
+		status, checks := evaluateReadiness(ctx, pool, dependencies)
 		state := "ready"
 		if status != http.StatusOK {
 			state = "not_ready"
 		}
 		writeJSON(w, status, map[string]any{"status": state, "checks": checks})
 	}
+}
+
+// ReadinessReady evaluates the same seven fail-closed checks exposed by
+// /readyz. Authenticated status surfaces use this function so they cannot
+// claim mutation or traffic readiness from a weaker subset of dependencies.
+func ReadinessReady(ctx context.Context, pool *pgxpool.Pool, dependencies ReadinessChecks) bool {
+	status, _ := evaluateReadiness(ctx, pool, dependencies)
+	return status == http.StatusOK
+}
+
+func evaluateReadiness(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	dependencies ReadinessChecks,
+) (int, map[string]string) {
+	checks := map[string]string{
+		"database": "ok", "schema": "ok", "active_configuration": "ok",
+		"quota_completion_pool": "ok", "master_key": "ok",
+		"signing_key": "ok", "worker_heartbeat": "ok",
+	}
+	status := http.StatusOK
+	if pool == nil || pool.Ping(ctx) != nil {
+		checks["database"] = "unavailable"
+		checks["schema"] = "unknown"
+		checks["active_configuration"] = "unknown"
+		checks["quota_completion_pool"] = "unknown"
+		status = http.StatusServiceUnavailable
+	} else {
+		if dependencies.QuotaCompletionPool != nil {
+			probeCtx, cancelProbe := context.WithTimeout(ctx, quotaCompletionPoolReadinessTimeout)
+			probeErr := dependencies.QuotaCompletionPool(probeCtx)
+			cancelProbe()
+			if probeErr != nil {
+				checks["quota_completion_pool"] = "unavailable"
+				status = http.StatusServiceUnavailable
+			}
+		}
+		current, available, err := database.NewMigrator(pool).Status(ctx)
+		if err != nil || current != available {
+			checks["schema"] = "incompatible"
+			status = http.StatusServiceUnavailable
+		} else if activeConfigurationsAvailable(ctx, pool) != nil {
+			checks["active_configuration"] = "unavailable"
+			status = http.StatusServiceUnavailable
+		}
+	}
+	for _, check := range []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{name: "master_key", run: dependencies.MasterKey},
+		{name: "signing_key", run: dependencies.SigningKey},
+		{name: "worker_heartbeat", run: dependencies.WorkerHeartbeat},
+	} {
+		if check.run == nil {
+			checks[check.name] = "not_configured"
+			status = http.StatusServiceUnavailable
+			continue
+		}
+		if err := check.run(ctx); err != nil {
+			checks[check.name] = "unavailable"
+			status = http.StatusServiceUnavailable
+		}
+	}
+	return status, checks
 }
 
 func activeConfigurationsAvailable(ctx context.Context, pool *pgxpool.Pool) error {

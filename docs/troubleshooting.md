@@ -2,9 +2,12 @@
 
 ## `/readyz` returns 503
 
-Readiness checks the database, migration version, active configuration,
-master/signing-key availability, and the worker heartbeat when the selected
-process role requires one. Run:
+Readiness checks the database, migration version, active configuration, the
+reserved quota-completion pool, master/signing-key availability, and the worker
+heartbeat when the selected process role requires one. A
+`quota_completion_pool: unavailable` result means the distinct terminal-write
+pool could not accept its bounded probe; inspect PostgreSQL connectivity and
+settlement pressure before adding traffic. Run:
 
 ```bash
 latchway doctor

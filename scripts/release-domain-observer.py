@@ -119,6 +119,26 @@ JAVASCRIPT_NPM_AGGREGATE_ASSETS = (
     *JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS,
     "SHA256SUMS",
 )
+SINGLE_MAINTAINER_JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS = (
+    "package-evidence.json",
+    "release-candidate-evidence.json",
+    "post-publish-evidence.json",
+    "npm-registry-evidence-manifest.json",
+    "build-reproducibility.json",
+    "contract-evidence.json",
+    "dependency-vulnerability-scan.json",
+    "core-release-gate.json",
+    "latchway-single-maintainer-v1-intent.json",
+    "single-maintainer-npm-adoption.json",
+)
+SINGLE_MAINTAINER_JAVASCRIPT_NPM_AGGREGATE_ASSETS = (
+    *SINGLE_MAINTAINER_JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS,
+    "SHA256SUMS",
+)
+STRICT_RELEASE_WORKFLOW = ".github/workflows/release.yml"
+SINGLE_MAINTAINER_RELEASE_WORKFLOW = (
+    ".github/workflows/single-maintainer-release.yml"
+)
 JAVASCRIPT_RETAINED_TARBALL = re.compile(
     r"^latchway-(client|openai|vercel-ai|langchain)-"
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.tgz$"
@@ -137,10 +157,17 @@ COCOAPODS_FORBIDDEN_HOOKS = frozenset(
 
 
 def expected_source_attested_release_assets(
-    repository_id: str, version: str, release_names: Sequence[str]
+    repository_id: str,
+    version: str,
+    release_names: Sequence[str],
+    release_profile: str | None = None,
 ) -> set[str]:
     """Return the exact released subjects the production observer must verify."""
     names = set(release_names)
+    if release_profile == EVIDENCE.SINGLE_MAINTAINER_PROFILE:
+        return names
+    if release_profile is not None:
+        raise ObservationError("release_profile_invalid")
     if repository_id in {"javascript", "android"}:
         return names
     if repository_id == "react_native":
@@ -223,12 +250,15 @@ def validate_javascript_sha256sums(
 
 
 def validate_javascript_supporting_evidence(
-    documents: Mapping[str, Any], coordinate: Mapping[str, str]
+    documents: Mapping[str, Any],
+    coordinate: Mapping[str, str],
+    *,
+    require_tag_evidence: bool = True,
 ) -> None:
     tag = documents.get("tag-evidence.json")
     vulnerability = documents.get("dependency-vulnerability-scan.json")
     scanner = vulnerability.get("scanner") if isinstance(vulnerability, dict) else None
-    if (
+    if require_tag_evidence and (
         not isinstance(tag, dict)
         or set(tag) != {"schema_version", "tag", "version", "commit", "annotated"}
         or tag.get("schema_version") != 1
@@ -1033,15 +1063,30 @@ class Observer:
         live_provider_capture: Path | None = None,
         github_authority: Path | None = None,
         now: datetime,
+        release_profile: str | None = None,
     ):
         EVIDENCE.protected_context()
         if any(os.environ.get(name) for name in FORBIDDEN_CANDIDATE_CREDENTIAL_ENV):
             raise ObservationError("candidate_credentials_present")
         if domain not in EVIDENCE.CLAIM_REQUIREMENTS:
             raise ObservationError("domain_invalid")
+        if release_profile is not None and (
+            release_profile != EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            or domain not in {"public_tags", "public_registries"}
+        ):
+            raise ObservationError("release_profile_domain_invalid")
+        # public_tags deliberately keeps the same closed claim set while the
+        # profile records which immutable producer contract was accepted.
+        evidence_release_profile = release_profile
+        try:
+            EVIDENCE.claim_requirements(domain, evidence_release_profile)
+        except EVIDENCE.EvidenceError as error:
+            raise ObservationError(str(error)) from None
         if not output.is_absolute() or output.exists() or output.is_symlink():
             raise ObservationError("observation_output_invalid")
         self.domain = domain
+        self.release_profile = release_profile
+        self.evidence_release_profile = evidence_release_profile
         self.source = source
         self.candidate_path = candidate
         self.output = output
@@ -1378,7 +1423,9 @@ class Observer:
         retained_input_kind: str = "physical_device_receipt",
         raw_artifacts: Mapping[str, bytes] | None = None,
     ) -> None:
-        if observation not in EVIDENCE.expected_observations(self.domain):
+        if observation not in EVIDENCE.expected_observations(
+            self.domain, getattr(self, "evidence_release_profile", None)
+        ):
             raise ObservationError("observation_invalid")
         EVIDENCE.scan_safe(payload)
         slug = observation.replace(".", "-")
@@ -1530,7 +1577,12 @@ class Observer:
         ):
             raise ObservationError("observation_identity_changed")
         actual = {path.name for path in self.output.glob("*.json")}
-        expected = {EVIDENCE.result_name(item) for item in EVIDENCE.expected_observations(self.domain)}
+        expected = {
+            EVIDENCE.result_name(item)
+            for item in EVIDENCE.expected_observations(
+                self.domain, getattr(self, "evidence_release_profile", None)
+            )
+        }
         if actual != expected:
             raise ObservationError("observation_set_incomplete")
 
@@ -2434,26 +2486,82 @@ class Observer:
             tag_object = self._validate_tag_object(
                 tag_payload, tag, coordinate["commit"]
             )
-            message = tag_object.get("message")
-            if repository_id == "core":
-                match = re.fullmatch(
-                    re.escape(f"Latchway {tag}\n\nPromotion evidence SHA-256: ")
-                    + r"([0-9a-f]{64})",
-                    message if isinstance(message, str) else "",
+            release_payload, release_started, release_finished = (
+                self._github_authority_file(
+                    f"{root}/release.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
                 )
-                if match is None:
-                    raise ObservationError("public_tag_message_mismatch")
-                promotion_sha256 = match.group(1)
+            )
+            expected_assets, adoption_required = self._expected_release_assets(
+                repository_id,
+                coordinate["version"],
+                getattr(self, "release_profile", None),
+            )
+            message = tag_object.get("message")
+            if getattr(self, "release_profile", None) is None:
+                if repository_id == "core":
+                    match = re.fullmatch(
+                        re.escape(
+                            f"Latchway {tag}\n\nPromotion evidence SHA-256: "
+                        )
+                        + r"([0-9a-f]{64})",
+                        message if isinstance(message, str) else "",
+                    )
+                    if match is None:
+                        raise ObservationError("public_tag_message_mismatch")
+                    promotion_sha256 = match.group(1)
+                else:
+                    if promotion_sha256 is None:
+                        raise ObservationError("public_tag_message_mismatch")
+                    expected_message = (
+                        f"{sdk_titles[repository_id]} {tag}\n\n"
+                        f"Core promotion: {core_tag}\n"
+                        f"Promotion evidence SHA-256: {promotion_sha256}"
+                    )
+                    if message != expected_message:
+                        raise ObservationError("public_tag_message_mismatch")
+                release = self._validate_release(
+                    release_payload,
+                    tag,
+                    expected_assets=expected_assets,
+                    adoption_required=adoption_required,
+                    expected_name=(
+                        f"Latchway {tag}" if repository_id == "core" else None
+                    ),
+                    expected_body=(
+                        f"Immutable Latchway product release {tag}.\n\n"
+                        f"Candidate commit: {coordinate['commit']}\n"
+                        f"Promotion evidence SHA-256: {promotion_sha256}"
+                        if repository_id == "core"
+                        else None
+                    ),
+                )
             else:
-                if promotion_sha256 is None:
-                    raise ObservationError("public_tag_message_mismatch")
-                expected_message = (
-                    f"{sdk_titles[repository_id]} {tag}\n\n"
-                    f"Core promotion: {core_tag}\n"
-                    f"Promotion evidence SHA-256: {promotion_sha256}"
+                # First close the immutable asset set so that the iOS, Android,
+                # and React Native intent digest can be derived from the exact
+                # release metadata rather than accepted as an unbound string.
+                release = self._validate_release(
+                    release_payload,
+                    tag,
+                    expected_assets=expected_assets,
+                    adoption_required=adoption_required,
+                    single_adoption_per_key=True,
+                )
+                expected_message, expected_name, expected_body = (
+                    self._single_maintainer_release_contract(
+                        repository_id, coordinate, release, message
+                    )
                 )
                 if message != expected_message:
                     raise ObservationError("public_tag_message_mismatch")
+                release = self._validate_release(
+                    release_payload,
+                    tag,
+                    expected_assets=expected_assets,
+                    adoption_required=adoption_required,
+                    single_adoption_per_key=True,
+                    expected_name=expected_name,
+                    expected_body=expected_body,
+                )
             combined = canonical_json({"ref": ref, "tag": tag_object})
             observation = f"publication.annotated-tag.{repository_id}"
             self.emit(
@@ -2463,29 +2571,6 @@ class Observer:
                 finished=max(ref_finished, tag_finished),
                 version="github-cli-v2",
                 invocation=("gh", "api", repository, "annotated-tag", tag),
-            )
-
-            release_payload, release_started, release_finished = (
-                self._github_authority_file(
-                    f"{root}/release.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
-                )
-            )
-            expected_assets, adoption_required = self._expected_release_assets(
-                repository_id, coordinate["version"]
-            )
-            release = self._validate_release(
-                release_payload,
-                tag,
-                expected_assets=expected_assets,
-                adoption_required=adoption_required,
-                expected_name=(f"Latchway {tag}" if repository_id == "core" else None),
-                expected_body=(
-                    f"Immutable Latchway product release {tag}.\n\n"
-                    f"Candidate commit: {coordinate['commit']}\n"
-                    f"Promotion evidence SHA-256: {promotion_sha256}"
-                    if repository_id == "core"
-                    else None
-                ),
             )
             release_attestation, attestation_started, attestation_finished = (
                 self._release_attestation_from_authority(
@@ -2523,6 +2608,172 @@ class Observer:
                 invocation=("gh", "release", "verify", tag, "--repo", repository),
             )
 
+    def _single_maintainer_release_contract(
+        self,
+        repository_id: str,
+        coordinate: Mapping[str, str],
+        release: Mapping[str, Any],
+        observed_message: Any,
+    ) -> tuple[str, str, str]:
+        if getattr(self, "release_profile", None) != EVIDENCE.SINGLE_MAINTAINER_PROFILE:
+            raise ObservationError("release_profile_invalid")
+        tag = coordinate["tag"]
+        version = coordinate["version"]
+        if repository_id == "core":
+            image = self.identity["oci_image_digest"]
+            message = "\n".join(
+                (
+                    f"Latchway {tag}",
+                    "",
+                    "Release profile: single_maintainer_v1",
+                    f"Candidate commit: {coordinate['commit']}",
+                    f"Image: {image}",
+                )
+            )
+            body = "\n".join(
+                (
+                    f"Latchway {tag} core release.",
+                    "",
+                    "Release profile: single_maintainer_v1",
+                    "Profile status: incomplete until every required public package and registry check passes.",
+                    "Authenticated profile-wide publication readiness is not claimed by this core-only record.",
+                    f"Candidate commit: {coordinate['commit']}",
+                    f"Image: {image}",
+                    "Required deployment evidence: Docker Compose and Google Cloud Run passed for this exact image.",
+                    "",
+                    "Deferred evidence remains unverified. This release is not release-qualified, fully evidence-gated, or independently reviewed.",
+                )
+            )
+            return message, f"Latchway {tag} — single_maintainer_v1", body
+        if repository_id == "javascript":
+            tag_prefix = (
+                "Latchway JavaScript SDKs v1.0.0\n\n"
+                "Release profile: single_maintainer_v1\n"
+                "Assurance: deferred; not release-qualified or independently reviewed\n"
+            )
+            body_prefix = "\n".join(
+                (
+                    "Published with the `single_maintainer_v1` profile.",
+                    "",
+                    "The exact public Latchway core v1.0.0 release, including Docker Compose and Google Cloud Run evidence, was verified before this transaction began.",
+                    "npm archives are accepted only with byte-identical registry data, registry signatures, and provenance bound to this repository, workflow, source commit, and main ref.",
+                    "External platform/device/provider evidence and independent human review remain deferred.",
+                    "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.",
+                    "",
+                )
+            ) + "\n"
+            source = (
+                observed_message
+                if isinstance(observed_message, str)
+                else release.get("body")
+            )
+            prefix = tag_prefix if isinstance(observed_message, str) else body_prefix
+            match = re.fullmatch(
+                re.escape(
+                    prefix
+                    + "Transaction owner: https://github.com/Latchway/latchway-js/actions/runs/"
+                )
+                + r"([1-9][0-9]{0,15})\nTransaction ID: ([0-9a-f]{64})",
+                source if isinstance(source, str) else "",
+            )
+            if match is None or int(match.group(1)) > 9_007_199_254_740_991:
+                raise ObservationError("public_tag_message_mismatch")
+            run_id = int(match.group(1))
+            transaction_id = hashlib.sha256(
+                "\0".join(
+                    (
+                        "Latchway/latchway-js",
+                        SINGLE_MAINTAINER_RELEASE_WORKFLOW,
+                        str(run_id),
+                        coordinate["commit"],
+                        tag,
+                    )
+                ).encode("utf-8")
+            ).hexdigest()
+            if match.group(2) != transaction_id:
+                raise ObservationError("public_tag_message_mismatch")
+            owner_url = (
+                "https://github.com/Latchway/latchway-js/actions/runs/"
+                f"{run_id}"
+            )
+            message = "\n".join(
+                (
+                    "Latchway JavaScript SDKs v1.0.0",
+                    "",
+                    "Release profile: single_maintainer_v1",
+                    "Assurance: deferred; not release-qualified or independently reviewed",
+                    f"Transaction owner: {owner_url}",
+                    f"Transaction ID: {transaction_id}",
+                )
+            )
+            body = (
+                body_prefix
+                + f"Transaction owner: {owner_url}\n"
+                + f"Transaction ID: {transaction_id}"
+            )
+            return (
+                message,
+                f"Latchway JavaScript SDKs {version} — single-maintainer v1",
+                body,
+            )
+        sdk = {
+            "ios": "iOS",
+            "android": "Android",
+            "react_native": "React Native",
+        }.get(repository_id)
+        if sdk is None:
+            raise ObservationError("github_release_repository_invalid")
+        intent_digest = self._release_asset_sha256(
+            release, "latchway-single-maintainer-v1-intent.json"
+        )
+        message = "\n".join(
+            (
+                f"Latchway {sdk} SDK {tag}",
+                "",
+                "Release profile: single_maintainer_v1",
+                "Assurance: deferred; not release-qualified or independently reviewed",
+                f"Maintainer intent SHA-256: {intent_digest}",
+            )
+        )
+        if repository_id == "android":
+            body = "\n".join(
+                (
+                    "Published with the `single_maintainer_v1` profile.",
+                    "",
+                    "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this release were verified by automation. Independent human review and external platform/device/provider evidence are deferred. Docker Compose and GCP Cloud Run evidence remain required by the global v1 profile.",
+                    "",
+                    "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.",
+                )
+            )
+        else:
+            body = (
+                "Published with the `single_maintainer_v1` profile. External "
+                "platform/device/provider evidence and independent human review "
+                "are deferred. This release is not `release_qualified`, fully "
+                "evidence-gated, or independently reviewed.\n"
+            )
+        return message, f"Latchway {sdk} SDK {version} — single-maintainer v1", body
+
+    @staticmethod
+    def _release_asset_sha256(release: Mapping[str, Any], name: str) -> str:
+        assets = release.get("assets")
+        matches = (
+            [
+                item
+                for item in assets
+                if isinstance(item, dict) and item.get("name") == name
+            ]
+            if isinstance(assets, list)
+            else []
+        )
+        digest = matches[0].get("digest") if len(matches) == 1 else None
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        ):
+            raise ObservationError("github_release_asset_set_invalid")
+        return digest.removeprefix("sha256:")
+
     @staticmethod
     def _validate_tag_ref(payload: bytes, tag: str) -> dict[str, Any]:
         value = load_output(payload, "public_tag_ref_invalid")
@@ -2551,8 +2802,109 @@ class Observer:
 
     @staticmethod
     def _expected_release_assets(
-        repository_id: str, version: str
+        repository_id: str,
+        version: str,
+        release_profile: str | None = None,
     ) -> tuple[set[str], frozenset[str]]:
+        if release_profile == EVIDENCE.SINGLE_MAINTAINER_PROFILE:
+            if repository_id == "core":
+                return {
+                    "SHA256SUMS",
+                    "cloud_run.attestation.json",
+                    "cloud_run.tar.gz",
+                    "compose.attestation.json",
+                    "compose.tar.gz",
+                    "latchway-candidate.attestation.sigstore.json",
+                    "latchway-candidate.json",
+                    "latchway-contract.tar.gz",
+                    "latchway-linux-amd64-license.json",
+                    "latchway-linux-amd64-vulnerability.json",
+                    "latchway-linux-amd64.spdx.json",
+                    "latchway-linux-arm64-license.json",
+                    "latchway-linux-arm64-vulnerability.json",
+                    "latchway-linux-arm64.spdx.json",
+                    "latchway-single-maintainer-v1.json",
+                }, frozenset()
+            if repository_id == "javascript":
+                fixed = {
+                    *(
+                        f"latchway-{package_id}-{version}.tgz"
+                        for package_id, _ in JAVASCRIPT_NPM_PACKAGES
+                    ),
+                    f"docs-bundle-{version}.tar.gz",
+                    "SHA256SUMS",
+                    "build-reproducibility.json",
+                    "contract-evidence.json",
+                    "core-release-gate.json",
+                    "dependency-vulnerability-scan.json",
+                    "latchway-single-maintainer-v1-intent.json",
+                    "package-evidence.json",
+                    "post-publish-evidence.json",
+                    "release-candidate-evidence.json",
+                    "npm-registry-evidence-manifest.json",
+                    "single-maintainer-npm-adoption.json",
+                }
+                for package_id, _ in JAVASCRIPT_NPM_PACKAGES:
+                    fixed.update(
+                        {
+                            f"npm-{package_id}-registry-version.json",
+                            f"npm-{package_id}-registry-view.json",
+                            f"npm-{package_id}-attestations.json",
+                            f"npm-{package_id}-audit-signatures.json",
+                        }
+                    )
+                if len(fixed) != 32:
+                    raise ObservationError("github_release_asset_set_invalid")
+                return fixed, frozenset()
+            if repository_id == "react_native":
+                return {
+                    f"latchway-react-native-{version}.tgz",
+                    f"latchway-react-native-{version}.tgz.sha256",
+                    f"docs-bundle-{version}.tar.gz",
+                    "package-evidence.json",
+                    "build-reproducibility.json",
+                    "latchway-single-maintainer-v1-intent.json",
+                    "npm-registry-version.json",
+                    "npm-registry-view.json",
+                    "npm-attestations.json",
+                    "npm-audit-signatures.json",
+                    "npm-registry-evidence-manifest.json",
+                    "post-publish-evidence.json",
+                }, frozenset({""})
+            if repository_id == "ios":
+                archive = f"latchway-ios-sdk-{version}.tar.gz"
+                return {
+                    "SHA256SUMS",
+                    archive,
+                    f"{archive}.sha256",
+                    f"docs-bundle-{version}.tar.gz",
+                    "cocoapods-published-podspec.json",
+                    "cocoapods-reviewed-podspec.json",
+                    "cocoapods-release-evidence.json",
+                    "dependency-vulnerability-scan.json",
+                    "ios-registry-candidate.json",
+                    "latchway-single-maintainer-v1-intent.json",
+                }, frozenset()
+            if repository_id == "android":
+                return {
+                    f"latchway-android-{version}-maven-repository.zip",
+                    f"latchway-android-{version}-central-portal.zip",
+                    f"docs-bundle-{version}.tar.gz",
+                    "SHA256SUMS",
+                    "android-dependency-vulnerability-scan.json",
+                    "github-release-tag-binding.json",
+                    "latchway-maven-signing-public-key.asc",
+                    "latchway-single-maintainer-v1-intent.json",
+                    "maven-central-upload-intent.json",
+                    "maven-central-deployment.json",
+                    "maven-central-deployment-status.json",
+                    "maven-central-release-evidence.json",
+                    "pinned-core-conformance.tar.gz",
+                    "single-maintainer-release-evidence.json",
+                }, frozenset()
+            raise ObservationError("github_release_repository_invalid")
+        if release_profile is not None:
+            raise ObservationError("release_profile_invalid")
         if repository_id == "core":
             return {
                 "latchway-cross-repository-promotion.json",
@@ -2647,6 +2999,7 @@ class Observer:
         adoption_required: frozenset[str] = frozenset(),
         expected_name: str | None = None,
         expected_body: str | None = None,
+        single_adoption_per_key: bool = False,
     ) -> dict[str, Any]:
         value = load_output(payload, "github_release_invalid")
         if (
@@ -2698,6 +3051,10 @@ class Observer:
                 not expected_assets.issubset(names)
                 or set(adoptions) != set(adoption_required)
                 or any(not values for values in adoptions.values())
+                or (
+                    single_adoption_per_key
+                    and any(len(values) != 1 for values in adoptions.values())
+                )
             ):
                 raise ObservationError("github_release_asset_set_invalid")
         return value
@@ -2727,7 +3084,8 @@ class Observer:
         return canonical_json(normalized), started, finished
 
     def observe_public_registries(self) -> None:
-        self._observe_documentation_production()
+        if self.release_profile is None:
+            self._observe_documentation_production()
         image = self.identity["oci_image_digest"]
         cosign_payload, oci_started, oci_finished = self._github_authority_file(
             "public-registries/oci/cosign.json",
@@ -2821,33 +3179,41 @@ class Observer:
             ios_archive_path, "ios", ios
         )
         ios_source_attestations = {ios_archive_name: ios_attestation}
-        for name in (
-            f"docs-bundle-{ios['version']}.tar.gz",
-            "cocoapods-published-podspec.json",
-            "cocoapods-reviewed-podspec.json",
-            "cocoapods-release-evidence.json",
-            "cocoapods-release-evidence.SHA256SUMS",
-        ):
+        expected_ios_attestations = expected_source_attested_release_assets(
+            "ios",
+            ios["version"],
+            ios_assets,
+            getattr(self, "release_profile", None),
+        )
+        for name in sorted(expected_ios_attestations - {ios_archive_name}):
             path = ios_archive_path.parent / name
             path.write_bytes(ios_assets[name]["bytes"])
             ios_source_attestations[name] = self._verify_release_asset_attestation(
                 path, "ios", ios
             )
-        if set(ios_source_attestations) != expected_source_attested_release_assets(
-            "ios", ios["version"], ios_assets
-        ):
+        if set(ios_source_attestations) != expected_ios_attestations:
             raise ObservationError("release_asset_attestation_set_invalid")
-        self._validate_exact_checksum_file(
-            ios_assets["cocoapods-release-evidence.SHA256SUMS"]["bytes"],
-            {
-                name: ios_assets[name]["bytes"]
-                for name in (
-                    "cocoapods-published-podspec.json",
-                    "cocoapods-reviewed-podspec.json",
-                    "cocoapods-release-evidence.json",
-                )
-            },
-        )
+        if getattr(self, "release_profile", None) is None:
+            self._validate_exact_checksum_file(
+                ios_assets["cocoapods-release-evidence.SHA256SUMS"]["bytes"],
+                {
+                    name: ios_assets[name]["bytes"]
+                    for name in (
+                        "cocoapods-published-podspec.json",
+                        "cocoapods-reviewed-podspec.json",
+                        "cocoapods-release-evidence.json",
+                    )
+                },
+            )
+        else:
+            self._validate_exact_checksum_file(
+                ios_assets["SHA256SUMS"]["bytes"],
+                {
+                    name: ios_assets[name]["bytes"]
+                    for name in ios_assets
+                    if name != "SHA256SUMS"
+                },
+            )
         published_spec = ios_assets["cocoapods-published-podspec.json"]["bytes"]
         reviewed_spec = ios_assets["cocoapods-reviewed-podspec.json"]["bytes"]
         published_spec_value = self._validate_cocoapods_spec(published_spec, ios)
@@ -2942,7 +3308,10 @@ class Observer:
                 path, "android", android
             )
         if set(android_source_attestations) != expected_source_attested_release_assets(
-            "android", android["version"], android_assets
+            "android",
+            android["version"],
+            android_assets,
+            getattr(self, "release_profile", None),
         ):
             raise ObservationError("release_asset_attestation_set_invalid")
         self._extract_reviewed_zip(android_archive, android_root)
@@ -3154,6 +3523,37 @@ class Observer:
             raise ObservationError("release_asset_attestation_invalid")
         return value
 
+    def _publication_workflow(self) -> str:
+        profile = getattr(self, "release_profile", None)
+        if profile is None:
+            return STRICT_RELEASE_WORKFLOW
+        if profile == EVIDENCE.SINGLE_MAINTAINER_PROFILE:
+            return SINGLE_MAINTAINER_RELEASE_WORKFLOW
+        raise ObservationError("release_profile_invalid")
+
+    def _publication_event(self) -> str:
+        return (
+            "workflow_dispatch"
+            if self._publication_workflow() == SINGLE_MAINTAINER_RELEASE_WORKFLOW
+            else "repository_dispatch"
+        )
+
+    def _javascript_aggregate_json_assets(self) -> tuple[str, ...]:
+        return (
+            SINGLE_MAINTAINER_JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS
+            if getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            else JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS
+        )
+
+    def _javascript_aggregate_assets(self) -> tuple[str, ...]:
+        return (
+            SINGLE_MAINTAINER_JAVASCRIPT_NPM_AGGREGATE_ASSETS
+            if getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            else JAVASCRIPT_NPM_AGGREGATE_ASSETS
+        )
+
     @staticmethod
     def _javascript_npm_evidence_names(package_id: str) -> tuple[str, ...]:
         if package_id not in {item[0] for item in JAVASCRIPT_NPM_PACKAGES}:
@@ -3261,20 +3661,29 @@ class Observer:
             name: load_output(
                 release_assets[name]["bytes"], "registry_npm_package_set_invalid"
             )
-            for name in JAVASCRIPT_NPM_AGGREGATE_JSON_ASSETS
+            for name in self._javascript_aggregate_json_assets()
         }
         package_evidence = documents["package-evidence.json"]
         candidate = documents["release-candidate-evidence.json"]
-        publish_input = documents["publish-input-evidence.json"]
+        publish_input = documents.get("publish-input-evidence.json")
         post_publish = documents["post-publish-evidence.json"]
         manifest = documents["npm-registry-evidence-manifest.json"]
         reproducibility = documents["build-reproducibility.json"]
-        validate_javascript_supporting_evidence(documents, coordinate)
+        single_maintainer = (
+            getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        )
+        validate_javascript_supporting_evidence(
+            documents,
+            coordinate,
+            require_tag_evidence=not single_maintainer,
+        )
         repository_url = "https://github.com/Latchway/latchway-js"
+        workflow_path = self._publication_workflow()
         source = {
             "repository": repository_url,
             "commit": coordinate["commit"],
-            "workflow": ".github/workflows/release.yml",
+            "workflow": workflow_path,
             "ref": "refs/heads/main",
         }
         gates = [
@@ -3349,9 +3758,31 @@ class Observer:
             )
         ):
             raise ObservationError("registry_npm_release_candidate_invalid")
-        publish_packages = publish_input.get("packages") if isinstance(publish_input, dict) else None
-        publish_consumer = publish_input.get("consumer") if isinstance(publish_input, dict) else None
-        if (
+        if single_maintainer and isinstance(package_items, list):
+            publish_packages = [
+                {
+                    key: item.get(key)
+                    for key in (
+                        "id", "package", "version", "tarball", "bytes",
+                        "sha1", "sha256", "sha512", "integrity",
+                    )
+                }
+                for item in package_items
+                if isinstance(item, dict)
+            ]
+            publish_consumer = None
+        else:
+            publish_packages = (
+                publish_input.get("packages")
+                if isinstance(publish_input, dict)
+                else None
+            )
+            publish_consumer = (
+                publish_input.get("consumer")
+                if isinstance(publish_input, dict)
+                else None
+            )
+        if not single_maintainer and (
             not isinstance(publish_input, dict)
             or set(publish_input)
             != {"schema_version", "kind", "version", "source_commit", "release_tag", "package_count", "publish_order", "packages", "verified_job_evidence", "package_evidence", "checksums", "consumer"}
@@ -3478,6 +3909,9 @@ class Observer:
             )
         ):
             raise ObservationError("registry_npm_reproducibility_invalid")
+
+        if not isinstance(publish_packages, list) or len(publish_packages) != 4:
+            raise ObservationError("registry_npm_publish_input_invalid")
 
         normalized: list[dict[str, Any]] = []
         for index, (package_id, package) in enumerate(JAVASCRIPT_NPM_PACKAGES):
@@ -3638,7 +4072,10 @@ class Observer:
                 path, "javascript", coordinate
             )
         if set(source_attestations) != expected_source_attested_release_assets(
-            "javascript", coordinate["version"], release_assets
+            "javascript",
+            coordinate["version"],
+            release_assets,
+            getattr(self, "release_profile", None),
         ):
             raise ObservationError("release_asset_attestation_set_invalid")
         package_proofs: list[dict[str, Any]] = []
@@ -3715,7 +4152,7 @@ class Observer:
             )
         retained_aggregates = {
             name: self._retained_asset_envelope(name, release_assets[name])
-            for name in JAVASCRIPT_NPM_AGGREGATE_ASSETS
+            for name in self._javascript_aggregate_assets()
         }
         proof = {
             "schema_version": 2,
@@ -3795,7 +4232,10 @@ class Observer:
         published_dependencies: dict[str, Any] | None = None
         dependency_evidence_bytes: bytes | None = None
         dependency_evidence_asset: Mapping[str, Any] | None = None
-        if repository_id == "react_native":
+        if (
+            repository_id == "react_native"
+            and "published-dependency-evidence.json" in release_assets
+        ):
             dependency_evidence_bytes = release_assets[
                 "published-dependency-evidence.json"
             ]["bytes"]
@@ -3805,6 +4245,11 @@ class Observer:
             published_dependencies = self._validate_rn_published_dependencies(
                 dependency_evidence_bytes
             )
+        elif (
+            repository_id == "react_native"
+            and getattr(self, "release_profile", None) is None
+        ):
+            raise ObservationError("registry_npm_dependency_evidence_invalid")
         tarball_name = package_evidence.get("tarball") if isinstance(package_evidence, dict) else None
         if not isinstance(tarball_name, str) or re.fullmatch(r"[A-Za-z0-9._-]+\.tgz", tarball_name) is None:
             raise ObservationError("registry_npm_package_evidence_invalid")
@@ -3819,18 +4264,22 @@ class Observer:
             "build-reproducibility.json": reviewed_root / "build-reproducibility.json",
             docs_bundle_name: reviewed_root / docs_bundle_name,
         }
+        if (
+            repository_id == "react_native"
+            and getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        ):
+            for name in (
+                f"latchway-react-native-{coordinate['version']}.tgz.sha256",
+                "latchway-single-maintainer-v1-intent.json",
+            ):
+                reviewed_paths[name] = reviewed_root / name
         if dependency_evidence_bytes is not None:
             reviewed_paths["published-dependency-evidence.json"] = (
                 reviewed_root / "published-dependency-evidence.json"
             )
-        reviewed_paths[tarball_name].write_bytes(reviewed_bytes)
-        reviewed_paths["package-evidence.json"].write_bytes(package_evidence_bytes)
-        reviewed_paths["build-reproducibility.json"].write_bytes(reproducibility_bytes)
-        reviewed_paths[docs_bundle_name].write_bytes(docs_bundle_bytes)
-        if dependency_evidence_bytes is not None:
-            reviewed_paths["published-dependency-evidence.json"].write_bytes(
-                dependency_evidence_bytes
-            )
+        for name, path in reviewed_paths.items():
+            path.write_bytes(release_assets[name]["bytes"])
         asset_attestations = {
             name: self._verify_release_asset_attestation(path, repository_id, coordinate)
             for name, path in reviewed_paths.items()
@@ -3873,7 +4322,10 @@ class Observer:
             not isinstance(retained_source_attestations, dict)
             or set(asset_attestations) | set(retained_source_attestations)
             != expected_source_attested_release_assets(
-                repository_id, coordinate["version"], release_assets
+                repository_id,
+                coordinate["version"],
+                release_assets,
+                getattr(self, "release_profile", None),
             )
         ):
             raise ObservationError("release_asset_attestation_set_invalid")
@@ -3919,6 +4371,18 @@ class Observer:
             proof["release_asset_digests"]["published-dependency-evidence.json"] = (
                 dependency_evidence_asset["digest"]
             )
+        if (
+            repository_id == "react_native"
+            and getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        ):
+            for name in (
+                f"latchway-react-native-{coordinate['version']}.tgz.sha256",
+                "latchway-single-maintainer-v1-intent.json",
+            ):
+                proof["release_asset_digests"][name] = release_assets[name][
+                    "metadata"
+                ]["digest"]
         finished = datetime.now(timezone.utc).replace(microsecond=0)
         if finished <= started:
             finished = started + EVIDENCE.timedelta(seconds=1)
@@ -3963,7 +4427,9 @@ class Observer:
     ) -> None:
         coordinate = self.identity["repositories"][repository_id]
         expected_assets, adoption_required = self._expected_release_assets(
-            repository_id, coordinate["version"]
+            repository_id,
+            coordinate["version"],
+            getattr(self, "release_profile", None),
         )
         if not isinstance(value, dict) or set(value) != {
             "repository",
@@ -4162,6 +4628,7 @@ class Observer:
         post = retained_values["post-publish-evidence.json"]
         repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
         repository_url = f"https://github.com/{repository}"
+        workflow_path = self._publication_workflow()
         if (
             not isinstance(post, dict)
             or post.get("schema_version") != 2
@@ -4172,7 +4639,7 @@ class Observer:
             or post.get("registry") != "https://registry.npmjs.org/"
             or nested(post, "source", "repository") != repository_url
             or nested(post, "source", "commit") != coordinate["commit"]
-            or nested(post, "source", "workflow") != ".github/workflows/release.yml"
+            or nested(post, "source", "workflow") != workflow_path
             or nested(post, "source", "ref") != "refs/heads/main"
             or nested(post, "evidence_manifest", "sha256")
             != hashlib.sha256(release_assets["npm-registry-evidence-manifest.json"]["bytes"]).hexdigest()
@@ -4219,13 +4686,13 @@ class Observer:
                 or source != {
                     "repository": repository_url,
                     "commit": coordinate["commit"],
-                    "workflow": ".github/workflows/release.yml",
+                    "workflow": workflow_path,
                     "ref": "refs/heads/main",
                 }
                 or origin != {
                     "repository": repository_url,
                     "commit": coordinate["commit"],
-                    "workflow": ".github/workflows/release.yml",
+                    "workflow": workflow_path,
                     "ref": "refs/heads/main",
                     "predicate_type": "https://slsa.dev/provenance/v1",
                     "run_id": provenance["run_id"],
@@ -4237,7 +4704,7 @@ class Observer:
                 or str(adoption.get("run_attempt")) != name.split("-")[-1].removesuffix(".json")
                 or adoption.get("repository") != repository_url
                 or adoption.get("commit") != coordinate["commit"]
-                or adoption.get("workflow") != ".github/workflows/release.yml"
+                or adoption.get("workflow") != workflow_path
                 or adoption.get("ref") != "refs/heads/main"
                 or not valid_npm_adoption_mode(
                     adoption.get("mode"),
@@ -4295,6 +4762,10 @@ class Observer:
         release_assets: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
         raw_names = set(self._javascript_npm_evidence_names(package_id))
+        single_maintainer = (
+            getattr(self, "release_profile", None)
+            == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        )
         adoption_names = sorted(
             name
             for name in release_assets
@@ -4304,7 +4775,14 @@ class Observer:
                 and match.group(1) == package_id
             )
         )
-        if not raw_names.issubset(release_assets) or not adoption_names:
+        if (
+            not raw_names.issubset(release_assets)
+            or (not single_maintainer and not adoption_names)
+            or (
+                single_maintainer
+                and "single-maintainer-npm-adoption.json" not in release_assets
+            )
+        ):
             raise ObservationError("registry_npm_release_evidence_invalid")
         retained = {
             name: self._retained_asset_envelope(name, release_assets[name])
@@ -4406,15 +4884,38 @@ class Observer:
             raise ObservationError("registry_npm_post_publish_invalid")
         repository = "Latchway/latchway-js"
         repository_url = f"https://github.com/{repository}"
+        workflow_path = self._publication_workflow()
         source_binding = {
             "repository": repository_url,
             "commit": coordinate["commit"],
-            "workflow": ".github/workflows/release.yml",
+            "workflow": workflow_path,
             "ref": "refs/heads/main",
         }
         manifest_sha256 = hashlib.sha256(
             release_assets["npm-registry-evidence-manifest.json"]["bytes"]
         ).hexdigest()
+        if single_maintainer:
+            adoption = self._validate_javascript_single_maintainer_adoption(
+                release_assets,
+                coordinate,
+                package,
+                post_entry,
+                provenance,
+            )
+            return {
+                "provenance": provenance,
+                "retained": retained,
+                "live": {
+                    **live,
+                    "npm_view": {
+                        "sha256": hashlib.sha256(live_view_payload).hexdigest(),
+                        "content_base64": base64.b64encode(
+                            live_view_payload
+                        ).decode("ascii"),
+                    },
+                },
+                "adoptions": [adoption],
+            }
         adoptions: list[dict[str, Any]] = []
         for name in adoption_names:
             record = load_output(
@@ -4518,8 +5019,126 @@ class Observer:
             "adoptions": adoptions,
         }
 
-    @staticmethod
+    def _validate_javascript_single_maintainer_adoption(
+        self,
+        release_assets: Mapping[str, Mapping[str, Any]],
+        coordinate: Mapping[str, str],
+        package: str,
+        post_entry: Mapping[str, Any],
+        provenance: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        name = "single-maintainer-npm-adoption.json"
+        record = load_output(
+            release_assets[name]["bytes"], "registry_npm_adoption_invalid"
+        )
+        transaction = record.get("transaction") if isinstance(record, dict) else None
+        source = record.get("source") if isinstance(record, dict) else None
+        packages = record.get("packages") if isinstance(record, dict) else None
+        owner = transaction.get("owner_run_id") if isinstance(transaction, dict) else None
+        if (
+            not isinstance(record, dict)
+            or set(record)
+            != {
+                "schema_version", "kind", "transaction", "source",
+                "release_tag", "packages",
+            }
+            or record.get("schema_version") != 1
+            or record.get("kind") != "latchway_single_maintainer_npm_adoption"
+            or source
+            != {
+                "repository": "https://github.com/Latchway/latchway-js",
+                "commit": coordinate["commit"],
+                "workflow": SINGLE_MAINTAINER_RELEASE_WORKFLOW,
+                "ref": "refs/heads/main",
+            }
+            or record.get("release_tag") != coordinate["tag"]
+            or not isinstance(transaction, dict)
+            or set(transaction)
+            != {
+                "id", "owner_repository", "owner_workflow", "owner_run_id"
+            }
+            or transaction.get("owner_repository") != "Latchway/latchway-js"
+            or transaction.get("owner_workflow")
+            != SINGLE_MAINTAINER_RELEASE_WORKFLOW
+            or not isinstance(owner, int)
+            or isinstance(owner, bool)
+            or not 1 <= owner <= 9_007_199_254_740_991
+            or transaction.get("id")
+            != hashlib.sha256(
+                "\0".join(
+                    (
+                        "Latchway/latchway-js",
+                        SINGLE_MAINTAINER_RELEASE_WORKFLOW,
+                        str(owner),
+                        coordinate["commit"],
+                        coordinate["tag"],
+                    )
+                ).encode("utf-8")
+            ).hexdigest()
+            or not isinstance(packages, list)
+            or len(packages) != len(JAVASCRIPT_NPM_PACKAGES)
+        ):
+            raise ObservationError("registry_npm_adoption_invalid")
+        owner_run = self._github_owner_run_from_authority("javascript", owner)
+        owner_attempt = owner_run.get("run_attempt")
+        if (
+            not isinstance(owner_attempt, int)
+            or isinstance(owner_attempt, bool)
+            or owner_attempt < 1
+        ):
+            raise ObservationError("registry_npm_adoption_invalid")
+        self._validate_npm_workflow_run(
+            owner_run,
+            "Latchway/latchway-js",
+            coordinate["commit"],
+            owner,
+            owner_attempt,
+            conclusions={"success"},
+        )
+        by_package = {
+            item.get("package"): item for item in packages if isinstance(item, dict)
+        }
+        if set(by_package) != {item[1] for item in JAVASCRIPT_NPM_PACKAGES}:
+            raise ObservationError("registry_npm_adoption_invalid")
+        item = by_package.get(package)
+        expected_mode = (
+            "transaction_publication"
+            if provenance.get("run_id") == owner
+            else "verified_existing"
+        )
+        if (
+            not isinstance(item, dict)
+            or set(item)
+            != {
+                "package", "version", "tarball", "provenance", "mode",
+                "attestation", "signature_verification",
+            }
+            or item.get("version") != coordinate["version"]
+            or item.get("tarball") != post_entry.get("tarball")
+            or item.get("provenance")
+            != nested(post_entry, "trusted_publisher", "provenance_origin")
+            or item.get("provenance")
+            != {
+                "invocation_id": provenance.get("invocation_id"),
+                "run_id": provenance.get("run_id"),
+                "run_attempt": provenance.get("run_attempt"),
+            }
+            or item.get("mode") != expected_mode
+            or item.get("attestation")
+            != nested(post_entry, "trusted_publisher", "sigstore_bundle")
+            or item.get("signature_verification")
+            != nested(post_entry, "registry_signature_verification", "output")
+        ):
+            raise ObservationError("registry_npm_adoption_invalid")
+        return {
+            "asset": self._retained_asset_envelope(name, release_assets[name]),
+            "record": record,
+            "package": item,
+            "authenticated_owner_run": owner_run,
+        }
+
     def _validate_npm_workflow_run(
+        self,
         run: Mapping[str, Any],
         repository: str,
         commit: str,
@@ -4531,12 +5150,12 @@ class Observer:
         if (
             run.get("id") != run_id
             or run.get("run_attempt") != run_attempt
-            or run.get("event") != "repository_dispatch"
+            or run.get("event") != self._publication_event()
             or run.get("status") != "completed"
             or run.get("conclusion") not in conclusions
             or run.get("head_sha") != commit
             or run.get("head_branch") != "main"
-            or run.get("path") != ".github/workflows/release.yml"
+            or run.get("path") != self._publication_workflow()
             or nested(run, "repository", "full_name") != repository
         ):
             raise ObservationError("registry_npm_provenance_run_invalid")
@@ -4689,6 +5308,8 @@ class Observer:
         provenance_attestation, statement = selected["provenance"]
         repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
         repository_url = f"https://github.com/{repository}"
+        workflow_path = self._publication_workflow()
+        workflow_event = self._publication_event()
         workflow = nested(statement, "predicate", "buildDefinition", "externalParameters", "workflow")
         resolved = nested(statement, "predicate", "buildDefinition", "resolvedDependencies")
         github = nested(statement, "predicate", "buildDefinition", "internalParameters", "github")
@@ -4701,10 +5322,10 @@ class Observer:
             not isinstance(workflow, dict)
             or workflow.get("repository") != repository_url
             or workflow.get("ref") != "refs/heads/main"
-            or workflow.get("path") != ".github/workflows/release.yml"
+            or workflow.get("path") != workflow_path
             or not isinstance(resolved, list)
             or not any(nested(item, "digest", "gitCommit") == coordinate["commit"] for item in resolved if isinstance(item, dict))
-            or nested(github, "event_name") != "repository_dispatch"
+            or nested(github, "event_name") != workflow_event
             or match is None
         ):
             raise ObservationError("registry_npm_provenance_binding_invalid")
@@ -4730,7 +5351,7 @@ class Observer:
         san, _, _ = self._execute_command(
             ("openssl", "x509", "-inform", "DER", "-in", str(certificate_path), "-noout", "-ext", "subjectAltName")
         )
-        expected_identity = f"URI:{repository_url}/.github/workflows/release.yml@refs/heads/main"
+        expected_identity = f"URI:{repository_url}/{workflow_path}@refs/heads/main"
         if expected_identity.encode("utf-8") not in san:
             raise ObservationError("registry_npm_provenance_certificate_invalid")
         publish = selected["publish"][1]
@@ -4774,7 +5395,7 @@ class Observer:
             "attestations_content_base64": base64.b64encode(payload).decode("ascii"),
             "source_repository": repository,
             "source_commit": coordinate["commit"],
-            "workflow": ".github/workflows/release.yml",
+            "workflow": workflow_path,
             "workflow_ref": "refs/heads/main",
             "invocation_id": invocation,
             "run_id": run_id,
@@ -4816,6 +5437,24 @@ class Observer:
             raise ObservationError("registry_npm_provenance_run_invalid")
         return value
 
+    def _github_owner_run_from_authority(
+        self, repository_id: str, run_id: int
+    ) -> dict[str, Any]:
+        if (
+            repository_id != "javascript"
+            or not isinstance(run_id, int)
+            or isinstance(run_id, bool)
+            or not 1 <= run_id <= 9_007_199_254_740_991
+        ):
+            raise ObservationError("registry_npm_adoption_invalid")
+        value, _, _ = self._github_authority_json(
+            f"public-registries/{repository_id}/runs/owner-{run_id}.json",
+            "registry_npm_adoption_invalid",
+        )
+        if not isinstance(value, dict):
+            raise ObservationError("registry_npm_adoption_invalid")
+        return value
+
     def _release_asset_set(
         self, repository_id: str
     ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -4825,14 +5464,33 @@ class Observer:
             f"{root}/release.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
         )
         expected_assets, adoption_required = self._expected_release_assets(
-            repository_id, coordinate["version"]
+            repository_id,
+            coordinate["version"],
+            getattr(self, "release_profile", None),
         )
         release = self._validate_release(
             release_payload,
             coordinate["tag"],
             expected_assets=expected_assets,
             adoption_required=adoption_required,
+            single_adoption_per_key=(
+                getattr(self, "release_profile", None)
+                == EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            ),
         )
+        if getattr(self, "release_profile", None) is not None:
+            _, expected_name, expected_body = self._single_maintainer_release_contract(
+                repository_id, coordinate, release, None
+            )
+            release = self._validate_release(
+                release_payload,
+                coordinate["tag"],
+                expected_assets=expected_assets,
+                adoption_required=adoption_required,
+                single_adoption_per_key=True,
+                expected_name=expected_name,
+                expected_body=expected_body,
+            )
         assets = release.get("assets")
         if not isinstance(assets, list):
             raise ObservationError("github_release_asset_invalid")
@@ -7586,6 +8244,9 @@ class Observer:
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     value.add_argument("--domain", choices=tuple(EVIDENCE.CLAIM_REQUIREMENTS), required=True)
+    value.add_argument(
+        "--release-profile", choices=(EVIDENCE.SINGLE_MAINTAINER_PROFILE,)
+    )
     value.add_argument("--source-conformance", type=Path, required=True)
     value.add_argument("--candidate-manifest", type=Path, required=True)
     value.add_argument("--output-directory", type=Path, required=True)
@@ -7649,6 +8310,7 @@ def main() -> int:
             javascript_captures=javascript_captures,
             live_provider_capture=arguments.live_provider_capture_directory,
             github_authority=arguments.github_authority_directory,
+            release_profile=arguments.release_profile,
             now=datetime.now(timezone.utc).replace(microsecond=0),
         )
         observer.observe()
@@ -7660,7 +8322,18 @@ def main() -> int:
         )
         print(f"release domain observation rejected: {code}", file=sys.stderr)
         return 1
-    print(json.dumps({"domain": arguments.domain, "observations": len(EVIDENCE.expected_observations(arguments.domain))}, sort_keys=True))
+    summary = {
+        "domain": arguments.domain,
+        "observations": len(
+            EVIDENCE.expected_observations(
+                arguments.domain,
+                arguments.release_profile,
+            )
+        ),
+    }
+    if arguments.release_profile is not None:
+        summary["release_profile"] = arguments.release_profile
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

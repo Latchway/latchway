@@ -14,6 +14,14 @@ on:
           - supply_chain
           - public_tags
           - public_registries
+      release_profile:
+        description: Fixed release profile for public tags and registries
+        required: false
+        default: strict_full
+        type: choice
+        options:
+          - strict_full
+          - single_maintainer_v1
       candidate_commit:
         description: Exact core candidate and producer commit
         required: true
@@ -76,6 +84,8 @@ jobs:
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
           MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
           MACHINE_RESULTS_RUN_ATTEMPT: ${{ inputs.machine_results_run_attempt }}
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
         run: |
           set -Eeuo pipefail
           version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
@@ -89,6 +99,12 @@ jobs:
           [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$MACHINE_RESULTS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$MACHINE_RESULTS_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          case "$RELEASE_PROFILE:$EVIDENCE_DOMAIN" in
+            strict_full:*) ;;
+            single_maintainer_v1:public_tags) ;;
+            single_maintainer_v1:public_registries) ;;
+            *) exit 1 ;;
+          esac
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
       - name: Verify every input run and attempt belongs to its fixed producer
         shell: bash
@@ -217,6 +233,7 @@ jobs:
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
           set -Eeuo pipefail
@@ -225,9 +242,14 @@ jobs:
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          profile_arguments=()
+          if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+            profile_arguments=(--release-profile single_maintainer_v1)
+          fi
           python3 scripts/release-domain-evidence.py \
             --finalize \
             --domain "$EVIDENCE_DOMAIN" \
+            "${profile_arguments[@]}" \
             --source-conformance "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json" \
             --source-attestation "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.attestation.sigstore.json" \
             --candidate-manifest "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json" \
@@ -280,6 +302,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
           SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
@@ -363,8 +386,13 @@ jobs:
               expected_observations='["publication.annotated-tag.android","publication.annotated-tag.core","publication.annotated-tag.ios","publication.annotated-tag.javascript","publication.annotated-tag.react_native","publication.github-release.android","publication.github-release.core","publication.github-release.ios","publication.github-release.javascript","publication.github-release.react_native"]'
               ;;
             public_registries)
-              expected_claims='["cocoapods_verified","documentation_production_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
-              expected_observations='["registry.cocoapods","registry.documentation-production","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
+              if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+                expected_claims='["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
+                expected_observations='["registry.cocoapods","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
+              else
+                expected_claims='["cocoapods_verified","documentation_production_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
+                expected_observations='["registry.cocoapods","registry.documentation-production","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
+              fi
               ;;
             *) exit 1 ;;
           esac
@@ -428,11 +456,17 @@ jobs:
           image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
           jq -S --arg image "$image" '.oci_image_digest=$image' "$RUNNER_TEMP/expected-machine-candidate-base.json" \
             > "$RUNNER_TEMP/expected-machine-candidate.json"
+          receipt_fields='["candidate","domain","finished_at","kind","observations","producer","schema_version","started_at"]'
+          if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+            receipt_fields='["candidate","domain","finished_at","kind","observations","producer","release_profile","schema_version","started_at"]'
+          fi
           jq --exit-status \
             --arg domain "$EVIDENCE_DOMAIN" --arg run "$MACHINE_RESULTS_RUN_ID" \
+            --arg profile "$RELEASE_PROFILE" --argjson fields "$receipt_fields" \
             --argjson attempt "$MACHINE_RESULTS_RUN_ATTEMPT" --argjson observations "$expected_observations" '
-              (keys | sort) == ["candidate","domain","finished_at","kind","observations","producer","schema_version","started_at"] and
+              (keys | sort) == $fields and
               .schema_version == 1 and .kind == "latchway_release_domain_producer_receipt" and .domain == $domain and
+              (if $profile == "single_maintainer_v1" then .release_profile == $profile else has("release_profile") | not end) and
               .producer == {repository:"Latchway/latchway",workflow:".github/workflows/release-domain-observations.yml",run_id:$run,run_attempt:$attempt} and
               (.observations | map(.id)) == $observations and
               all(.observations[];

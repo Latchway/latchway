@@ -67,12 +67,13 @@ services:
       LATCHWAY_LOG_LEVEL: ${LATCHWAY_LOG_LEVEL:-info}
       LATCHWAY_MIGRATE_ON_START: "false"
       LATCHWAY_DB_MAX_CONNECTIONS: ${LATCHWAY_DB_MAX_CONNECTIONS:-20}
+      LATCHWAY_DB_COMPLETION_CONNECTIONS: ${LATCHWAY_DB_COMPLETION_CONNECTIONS:-5}
       LATCHWAY_SHUTDOWN_TIMEOUT: 30s
       PORT: "8080"
     ports:
       - "127.0.0.1:${LATCHWAY_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD", "/latchway", "doctor", "--output", "json"]
+      test: ["CMD", "/latchway", "--server", "http://127.0.0.1:8080", "--output", "json", "readiness"]
       interval: 5s
       timeout: 5s
       retries: 30

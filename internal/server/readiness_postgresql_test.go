@@ -32,6 +32,9 @@ func TestReadinessChecksSchemaConfigurationKeysAndWorkerPostgreSQL(t *testing.T)
 	if status != http.StatusOK || body["status"] != "ready" {
 		t.Fatalf("initial readiness status=%d body=%v", status, body)
 	}
+	if readinessCheck(body, "quota_completion_pool") != "ok" {
+		t.Fatalf("single-pool completion readiness = %v", body)
+	}
 	for _, name := range []string{"master_key", "signing_key", "worker_heartbeat"} {
 		if calls[name] != 1 {
 			t.Fatalf("%s calls=%d want 1", name, calls[name])
@@ -55,21 +58,22 @@ func TestReadinessChecksSchemaConfigurationKeysAndWorkerPostgreSQL(t *testing.T)
 	}
 
 	failing := ReadinessChecks{
-		MasterKey:       func(context.Context) error { return errors.New("secret plaintext must not appear") },
-		SigningKey:      func(context.Context) error { return errors.New("private signing bytes") },
-		WorkerHeartbeat: func(context.Context) error { return errors.New("worker host detail") },
+		QuotaCompletionPool: func(context.Context) error { return errors.New("private completion pool detail") },
+		MasterKey:           func(context.Context) error { return errors.New("secret plaintext must not appear") },
+		SigningKey:          func(context.Context) error { return errors.New("private signing bytes") },
+		WorkerHeartbeat:     func(context.Context) error { return errors.New("worker host detail") },
 	}
 	status, body = serveReadiness(t, pool, failing)
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("dependency failure status=%d", status)
 	}
-	for _, name := range []string{"master_key", "signing_key", "worker_heartbeat"} {
+	for _, name := range []string{"quota_completion_pool", "master_key", "signing_key", "worker_heartbeat"} {
 		if readinessCheck(body, name) != "unavailable" {
 			t.Fatalf("%s check=%v", name, body)
 		}
 	}
 	encoded, _ := json.Marshal(body)
-	for _, private := range []string{"secret plaintext", "private signing", "worker host"} {
+	for _, private := range []string{"private completion", "secret plaintext", "private signing", "worker host"} {
 		if regexp.MustCompile(private).Match(encoded) {
 			t.Fatalf("readiness disclosed dependency detail: %s", encoded)
 		}
@@ -81,6 +85,57 @@ func TestReadinessChecksSchemaConfigurationKeysAndWorkerPostgreSQL(t *testing.T)
 	status, body = serveReadiness(t, pool, checks)
 	if status != http.StatusServiceUnavailable || readinessCheck(body, "schema") != "incompatible" {
 		t.Fatalf("schema mismatch status=%d body=%v", status, body)
+	}
+}
+
+func TestReadinessChecksDistinctCompletionPoolAvailableClosedAndFullyAcquiredPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedReadinessPool(t)
+	baseChecks := ReadinessChecks{
+		MasterKey:       func(context.Context) error { return nil },
+		SigningKey:      func(context.Context) error { return nil },
+		WorkerHeartbeat: func(context.Context) error { return nil },
+	}
+
+	available := newReadinessCompletionPool(t, ctx, pool)
+	checks := baseChecks
+	checks.QuotaCompletionPool = available.Ping
+	status, body := serveReadiness(t, pool, checks)
+	if status != http.StatusOK || body["status"] != "ready" ||
+		readinessCheck(body, "quota_completion_pool") != "ok" {
+		t.Fatalf("available completion pool status=%d body=%v", status, body)
+	}
+
+	available.Close()
+	status, body = serveReadiness(t, pool, checks)
+	if status != http.StatusServiceUnavailable || body["status"] != "not_ready" ||
+		readinessCheck(body, "quota_completion_pool") != "unavailable" {
+		t.Fatalf("closed completion pool status=%d body=%v", status, body)
+	}
+	closedBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`(?i)closed|private completion`).Match(closedBody) {
+		t.Fatalf("closed completion readiness disclosed dependency detail: %s", closedBody)
+	}
+
+	full := newReadinessCompletionPool(t, ctx, pool)
+	held, err := full.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(held.Release)
+	checks = baseChecks
+	checks.QuotaCompletionPool = full.Ping
+	status, body = serveReadiness(t, pool, checks)
+	if status != http.StatusServiceUnavailable || body["status"] != "not_ready" ||
+		readinessCheck(body, "quota_completion_pool") != "unavailable" {
+		t.Fatalf("fully acquired completion pool status=%d body=%v", status, body)
+	}
+	for _, name := range []string{"database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"} {
+		if readinessCheck(body, name) != "ok" {
+			t.Fatalf("fully acquired completion pool cascaded into %s: %v", name, body)
+		}
 	}
 }
 
@@ -99,6 +154,19 @@ func readinessCheck(body map[string]any, name string) string {
 	checks, _ := body["checks"].(map[string]any)
 	value, _ := checks[name].(string)
 	return value
+}
+
+func newReadinessCompletionPool(t *testing.T, ctx context.Context, primary *pgxpool.Pool) *pgxpool.Pool {
+	t.Helper()
+	config := primary.Config()
+	config.MaxConns = 1
+	config.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 func isolatedReadinessPool(t *testing.T) (*pgxpool.Pool, context.Context) {

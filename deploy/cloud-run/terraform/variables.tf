@@ -135,17 +135,28 @@ variable "min_instances" {
 
 variable "max_instances" {
   type    = number
-  default = 10
+  default = 3
 }
 
 variable "db_connections_per_instance" {
-  description = "Latchway pool size per Cloud Run instance."
+  description = "Aggregate Latchway database connection ceiling per Cloud Run instance, including the completion pool."
   type        = number
   default     = 20
 
   validation {
-    condition     = var.db_connections_per_instance >= 2 && var.db_connections_per_instance <= 100
-    error_message = "db_connections_per_instance must be between 2 and 100."
+    condition     = var.db_connections_per_instance >= 2 && var.db_connections_per_instance <= 100 && floor(var.db_connections_per_instance) == var.db_connections_per_instance
+    error_message = "db_connections_per_instance must be an integer between 2 and 100."
+  }
+}
+
+variable "db_completion_connections_per_instance" {
+  description = "Connections reserved for quota-lifecycle completion inside db_connections_per_instance; this is not an additive pool."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.db_completion_connections_per_instance >= 1 && var.db_completion_connections_per_instance <= 99 && floor(var.db_completion_connections_per_instance) == var.db_completion_connections_per_instance
+    error_message = "db_completion_connections_per_instance must be an integer between 1 and 99; the service precondition also requires it to be less than db_connections_per_instance."
   }
 }
 
@@ -155,14 +166,20 @@ variable "allow_unauthenticated" {
   default     = true
 }
 
-variable "inject_admin_bootstrap_token" {
-  description = "Inject the generated bootstrap token. Set false immediately after the first administrator is created."
+variable "deploy_service" {
+  description = "Create the traffic-serving service only after the dedicated migration job has brought a fresh database schema current."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "inject_admin_bootstrap_token" {
+  description = "Temporary first-owner exception. Keep false for the evidence-eligible steady state; if enabled, remove the binding and accessor grant immediately after setup."
+  type        = bool
+  default     = false
 }
 
 variable "migrate_on_start" {
-  description = "Safe first-deploy fallback; set false after adopting the explicit migration-job workflow."
+  description = "Emergency-only fallback. Keep false and run the dedicated least-privilege migration job for every evidence-eligible deployment."
   type        = bool
-  default     = true
+  default     = false
 }

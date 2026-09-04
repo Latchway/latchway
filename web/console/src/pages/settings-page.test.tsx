@@ -11,6 +11,12 @@ import { SettingsPage } from "./settings-page";
 const mocks = vi.hoisted(() => ({
   activate: vi.fn(),
   adminRequest: vi.fn(),
+  compatibility: {
+    isFetching: false,
+    mutationAllowed: true,
+    refresh: vi.fn(),
+    status: undefined as unknown
+  },
   dirty: vi.fn(),
   readFile: vi.fn(),
   session: {
@@ -40,6 +46,7 @@ vi.mock("../api/admin", async (importOriginal) => ({
   adminRequest: mocks.adminRequest
 }));
 vi.mock("../api/session", () => ({ useConsoleSession: () => mocks.session }));
+vi.mock("../app/console-compatibility-context", () => ({ useConsoleCompatibility: () => mocks.compatibility }));
 vi.mock("../app/workspace-context-value", () => ({ useOptionalWorkspace: () => mocks.workspace }));
 vi.mock("../app/use-dirty-edit-protection", () => ({ useDirtyEditProtection: mocks.dirty }));
 vi.mock("./configuration-transfer", async (importOriginal) => ({
@@ -53,6 +60,7 @@ vi.mock("./configuration-transfer", async (importOriginal) => ({
 const systemStatus = {
   contract_version: "1.0.0",
   database_schema_version: "27",
+  mutation_ready: true,
   protocol_versions: [1, 2],
   ready: true,
   role: "all" as const,
@@ -122,6 +130,11 @@ beforeEach(() => {
   mocks.readFile.mockReset();
   mocks.stage.mockReset();
   mocks.yaml.mockClear();
+  mocks.compatibility.isFetching = false;
+  mocks.compatibility.mutationAllowed = true;
+  mocks.compatibility.status = systemStatus;
+  mocks.compatibility.refresh.mockReset();
+  mocks.compatibility.refresh.mockResolvedValue(systemStatus);
   mocks.session.data.session.capabilities = ["activate_configuration", "manage_owners"];
   mocks.workspace.environment.status = "active";
   mocks.adminRequest.mockImplementation(async (path: string) => {
@@ -141,10 +154,11 @@ beforeEach(() => {
 });
 
 describe("Settings compatibility", () => {
-  it("enters read-only safe mode for protocol, capability, contract, or readiness gaps", () => {
+  it("enters read-only safe mode for protocol, capability, contract, or mutation-readiness gaps", () => {
     const result = evaluateSettingsCompatibility({
       ...systemStatus,
       contract_version: "0.9.0",
+      mutation_ready: false,
       protocol_versions: [1],
       ready: false,
       server_capabilities: systemStatus.server_capabilities.filter((item) => item !== "opaque_http")
@@ -156,6 +170,22 @@ describe("Settings compatibility", () => {
     expect(result.missingCapabilities).toEqual(["opaque_http"]);
     expect(result.reasons).toHaveLength(4);
   });
+
+  it("reports traffic readiness without deadlocking administrative remediation", () => {
+    expect(evaluateSettingsCompatibility({
+      ...systemStatus,
+      mutation_ready: true,
+      ready: false
+    }).readOnlySafeMode).toBe(false);
+
+    const unsafe = evaluateSettingsCompatibility({
+      ...systemStatus,
+      mutation_ready: false,
+      ready: true
+    });
+    expect(unsafe.readOnlySafeMode).toBe(true);
+    expect(unsafe.reasons).toContain("The administrative database and schema are not ready for mutations.");
+  });
 });
 
 describe("SettingsPage", () => {
@@ -166,7 +196,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Unavailable and off in v1.")).toBeInTheDocument();
     expect(screen.getByText("Deployment-configured.")).toBeInTheDocument();
     expect(screen.getByText("None.")).toBeInTheDocument();
-    expect(screen.getByText("168 hours")).toBeInTheDocument();
+    expect(await screen.findByText("168 hours")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Negotiated server capabilities" })).toHaveTextContent("admin_session_management");
     expect(screen.getByText("SSE capability negotiated")).toBeInTheDocument();
     expect(screen.getByText(/latchway config pull --environment env_0123456789abcdef --format yaml/)).toBeInTheDocument();
@@ -242,14 +272,18 @@ describe("SettingsPage", () => {
 
   it("keeps mutations disabled in safe mode and does not request session inventory without permission", async () => {
     mocks.session.data.session.capabilities = ["activate_configuration"];
+    const incompatibleStatus = { ...systemStatus, protocol_versions: [1] };
+    mocks.compatibility.mutationAllowed = false;
+    mocks.compatibility.status = incompatibleStatus;
+    mocks.compatibility.refresh.mockResolvedValue(incompatibleStatus);
     mocks.adminRequest.mockImplementation(async (path: string) => {
-      if (path === "/admin/v1/system") return { data: { ...systemStatus, protocol_versions: [1] } };
       if (path === "/admin/v1/system/doctor") return { data: { ...doctor, facts: { ...doctor.facts, runtime: { ...doctor.facts.runtime, protocol_versions: [1] } } } };
       throw new Error(`Unexpected request ${path}`);
     });
     render(<SettingsPage />);
 
     expect(await screen.findByText("Read-only safe mode is active")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download redaction-safe YAML" })).toBeEnabled();
     expect(screen.getByLabelText(/YAML or JSON configuration file/)).toBeDisabled();
     expect(screen.getByText("Owner access required")).toBeInTheDocument();
     expect(mocks.adminRequest.mock.calls.some(([path]) => String(path).startsWith("/admin/v1/admin-sessions"))).toBe(false);

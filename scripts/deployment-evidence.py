@@ -69,6 +69,9 @@ RELEASE = re.compile(rf"^v{SEMVER}$")
 OCI_IMAGE = re.compile(r"^ghcr\.io/latchway/latchway@sha256:([0-9a-f]{64})$")
 RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$")
 EVIDENCE_ID = re.compile(r"^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$")
+UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 WORKFLOW_REF = re.compile(
     r"^Latchway/latchway/\.github/workflows/deployment-evidence\.yml@refs/heads/main$"
 )
@@ -85,6 +88,87 @@ WRANGLER_PACKAGE_COUNT = 91
 WRANGLER_INTEGRITY = "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw=="
 NPM_REGISTRY_TARBALL = re.compile(r"^https://registry\.npmjs\.org/[^?#\s]+\.tgz$")
 NPM_SHA512_INTEGRITY = re.compile(r"^sha512-[A-Za-z0-9+/]{86}==$")
+DATABASE_POOL_FIELDS = (
+    "aggregate_max_connections",
+    "regular_max_connections",
+    "completion_max_connections",
+)
+DATABASE_POOL_ENVIRONMENT_NAMES = (
+    "LATCHWAY_DB_MAX_CONNECTIONS",
+    "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+)
+STANDARD_DATABASE_POOL = (20, 15, 5)
+CLOUDFLARE_DATABASE_POOL = (5, 3, 2)
+APPLICATION_READINESS_HEALTHCHECK_COMMAND = [
+    "CMD",
+    "/latchway",
+    "--server",
+    "http://127.0.0.1:8080",
+    "--output",
+    "json",
+    "readiness",
+]
+CLOUD_RUN_STARTUP_PROBE = {
+    "initialDelaySeconds": 1,
+    "timeoutSeconds": 3,
+    "periodSeconds": 3,
+    "failureThreshold": 40,
+    "httpGet": {"path": "/readyz", "port": 8080},
+}
+CLOUD_RUN_LIVENESS_PROBE = {
+    "timeoutSeconds": 3,
+    "periodSeconds": 15,
+    "failureThreshold": 3,
+    "httpGet": {"path": "/healthz", "port": 8080},
+}
+CLOUD_RUN_PROJECT_ID = "latchway"
+CLOUD_RUN_REGION = "asia-southeast1"
+CLOUD_RUN_SERVICE = "latchway"
+CLOUD_RUN_MIGRATION_JOB = "latchway-migrate"
+CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "latchway-runtime@latchway.iam.gserviceaccount.com"
+CLOUD_RUN_MIGRATOR_SERVICE_ACCOUNT = "latchway-migrator@latchway.iam.gserviceaccount.com"
+CLOUD_RUN_CLOUD_SQL_CONNECTION_NAME = "latchway:asia-southeast1:latchway-postgres"
+CLOUD_RUN_CLOUD_SQL_ANNOTATIONS = {
+    "run.googleapis.com/cloudsql-instances": CLOUD_RUN_CLOUD_SQL_CONNECTION_NAME,
+}
+CLOUD_RUN_BASE_RUNTIME_ANNOTATIONS = {
+    "autoscaling.knative.dev/minScale": "1",
+    "autoscaling.knative.dev/maxScale": "3",
+    "run.googleapis.com/cpu-throttling": "false",
+    "run.googleapis.com/startup-cpu-boost": "true",
+    "run.googleapis.com/execution-environment": "gen2",
+}
+CLOUD_RUN_RUNTIME_ANNOTATIONS = {
+    **CLOUD_RUN_BASE_RUNTIME_ANNOTATIONS,
+    **CLOUD_RUN_CLOUD_SQL_ANNOTATIONS,
+}
+CLOUD_RUN_NETWORK_PROFILE = {
+    "mode": "cloud_sql_public_ip_connector",
+    "ingress": "all",
+    "invoker": "unauthenticated",
+    "vpc_access": "none",
+    "database_transport": "unix_socket",
+    "cloud_sql_connection_name": CLOUD_RUN_CLOUD_SQL_CONNECTION_NAME,
+    "cloud_sql_socket_path": f"/cloudsql/{CLOUD_RUN_CLOUD_SQL_CONNECTION_NAME}",
+}
+CLOUD_RUN_MIGRATION_RESOURCES = {"limits": {"cpu": "1", "memory": "512Mi"}}
+CLOUD_RUN_CLOUD_SQL_NETWORK_ANNOTATIONS = {
+    "run.googleapis.com/cloudsql-instances": "${CLOUD_SQL_CONNECTION_NAME}",
+}
+CLOUD_RUN_SECRET_REFERENCES = {
+    "LATCHWAY_DATABASE_URL": "latchway-database-url",
+    "LATCHWAY_MASTER_KEY": "latchway-master-key",
+}
+CLOUD_RUN_RUNTIME_ENVIRONMENT_NAMES = (
+    "LATCHWAY_ROLE",
+    "LATCHWAY_LOG_LEVEL",
+    "LATCHWAY_MIGRATE_ON_START",
+    "LATCHWAY_PUBLIC_ORIGIN",
+    *CLOUD_RUN_SECRET_REFERENCES,
+    "LATCHWAY_SHUTDOWN_TIMEOUT",
+    *DATABASE_POOL_ENVIRONMENT_NAMES,
+)
+CANDIDATE_IMAGE_PLATFORMS = ("linux/amd64", "linux/arm64")
 
 
 class EvidenceError(Exception):
@@ -302,6 +386,49 @@ def expected_digest(manifest: Mapping[str, Any]) -> str:
     return match.group(1)
 
 
+def cloud_run_candidate_platform_digest(
+    candidate: Mapping[str, Any] | None,
+    manifest: Mapping[str, Any],
+) -> str | None:
+    """Return the authenticated linux/amd64 child digest, when supplied.
+
+    Cloud Run accepts an OCI index but executes linux/amd64. Depending on the
+    provider response surface, RevisionStatus.imageDigest can identify either
+    the submitted index or the selected platform manifest. A child digest is
+    eligible only when it comes from the release candidate manifest already
+    bound to this capture's commit, tag, repository, and index.
+    """
+    if candidate is None:
+        return None
+    image = candidate.get("image") if isinstance(candidate, Mapping) else None
+    if (
+        candidate.get("status") != "passed"
+        or candidate.get("candidate_commit") != manifest.get("core_commit")
+        or candidate.get("intended_tag") != manifest.get("core_release")
+        or not isinstance(image, dict)
+        or set(image) != {"repository", "index_digest", "platforms"}
+    ):
+        raise EvidenceError("cloud_run_candidate_image_invalid")
+    platforms = image["platforms"]
+    if (
+        image.get("repository") != "ghcr.io/latchway/latchway"
+        or not isinstance(image.get("index_digest"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", image["index_digest"]) is None
+        or image["repository"] + "@" + image["index_digest"]
+        != manifest.get("oci_image_digest")
+        or not isinstance(platforms, dict)
+        or set(platforms) != set(CANDIDATE_IMAGE_PLATFORMS)
+        or any(
+            not isinstance(value, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
+            for value in platforms.values()
+        )
+        or len({image["index_digest"], *platforms.values()}) != 3
+    ):
+        raise EvidenceError("cloud_run_candidate_image_invalid")
+    return platforms["linux/amd64"].removeprefix("sha256:")
+
+
 def require_capture_time(value: Any, manifest: Mapping[str, Any]) -> datetime:
     observed = parse_time(value)
     started, finished = parse_time(manifest["started_at"]), parse_time(manifest["finished_at"])
@@ -443,8 +570,23 @@ def validate_compose() -> Mapping[str, Any]:
         raise EvidenceError("compose_secret_injection_missing")
     if environment.get("LATCHWAY_MIGRATE_ON_START") != "false":
         raise EvidenceError("compose_startup_migration_not_disabled")
+    if (
+        environment.get("LATCHWAY_DB_MAX_CONNECTIONS")
+        != "${LATCHWAY_DB_MAX_CONNECTIONS:-20}"
+        or environment.get("LATCHWAY_DB_COMPLETION_CONNECTIONS")
+        != "${LATCHWAY_DB_COMPLETION_CONNECTIONS:-5}"
+    ):
+        raise EvidenceError("compose_database_pool_partition_invalid")
     if environment.get("LATCHWAY_SHUTDOWN_TIMEOUT") != "30s" or gateway.get("stop_grace_period") != "35s":
         raise EvidenceError("compose_shutdown_budget_invalid")
+    if gateway.get("healthcheck") != {
+        "test": APPLICATION_READINESS_HEALTHCHECK_COMMAND,
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "5s",
+    }:
+        raise EvidenceError("compose_serving_process_readiness_required")
     return {"services": sorted(document["services"])}
 
 
@@ -472,6 +614,113 @@ def env_map(container: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def validate_cloud_run_startup_probe(container: Mapping[str, Any], code: str) -> None:
+    if container.get("startupProbe") != CLOUD_RUN_STARTUP_PROBE:
+        raise EvidenceError(code)
+
+
+def validate_cloud_run_runtime_environment(
+    container: Mapping[str, Any],
+    endpoint: str,
+    code: str,
+) -> dict[str, Mapping[str, Any]]:
+    environment = container.get("env")
+    if (
+        not isinstance(environment, list)
+        or len(environment) != len(CLOUD_RUN_RUNTIME_ENVIRONMENT_NAMES)
+        or any(not isinstance(item, dict) for item in environment)
+        or [item.get("name") for item in environment]
+        != list(CLOUD_RUN_RUNTIME_ENVIRONMENT_NAMES)
+    ):
+        raise EvidenceError(code)
+    values = {item["name"]: item for item in environment}
+    for name, expected_secret in CLOUD_RUN_SECRET_REFERENCES.items():
+        item = values[name]
+        if set(item) != {"name", "valueFrom"}:
+            raise EvidenceError(code)
+        reference = nested(item, "valueFrom", "secretKeyRef")
+        if (
+            not isinstance(reference, dict)
+            or set(reference) != {"name", "key"}
+            or reference.get("name") != expected_secret
+            or not isinstance(reference.get("key"), str)
+            or re.fullmatch(r"[1-9][0-9]*", reference["key"]) is None
+        ):
+            raise EvidenceError(code)
+    for name in (
+        "LATCHWAY_ROLE",
+        "LATCHWAY_LOG_LEVEL",
+        "LATCHWAY_MIGRATE_ON_START",
+        "LATCHWAY_PUBLIC_ORIGIN",
+        "LATCHWAY_SHUTDOWN_TIMEOUT",
+        *DATABASE_POOL_ENVIRONMENT_NAMES,
+    ):
+        item = values[name]
+        if set(item) != {"name", "value"} or not isinstance(item.get("value"), str):
+            raise EvidenceError(code)
+    if (
+        values["LATCHWAY_ROLE"]["value"] != "all"
+        or values["LATCHWAY_LOG_LEVEL"]["value"] != "info"
+        or values["LATCHWAY_MIGRATE_ON_START"]["value"] != "false"
+        or values["LATCHWAY_PUBLIC_ORIGIN"]["value"] != endpoint
+        or values["LATCHWAY_SHUTDOWN_TIMEOUT"]["value"] != "8s"
+    ):
+        raise EvidenceError(code)
+    return values
+
+
+def validate_cloud_run_runtime_profile(
+    spec: Any,
+    annotations: Any,
+    endpoint: str,
+    code: str,
+) -> Mapping[str, Any]:
+    runtime = require_fields(
+        spec,
+        {"serviceAccountName", "containerConcurrency", "timeoutSeconds", "containers"},
+        code,
+    )
+    if (
+        annotations != CLOUD_RUN_RUNTIME_ANNOTATIONS
+        or runtime["serviceAccountName"] != CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT
+        or type(runtime["containerConcurrency"]) is not int
+        or runtime["containerConcurrency"] != 100
+        or type(runtime["timeoutSeconds"]) is not int
+        or runtime["timeoutSeconds"] != 3600
+        or not isinstance(runtime["containers"], list)
+        or len(runtime["containers"]) != 1
+        or not isinstance(runtime["containers"][0], dict)
+    ):
+        raise EvidenceError(code)
+    container = require_fields(
+        runtime["containers"][0],
+        {
+            "name", "image", "command", "args", "ports", "resources", "env",
+            "startupProbe", "livenessProbe",
+        },
+        code,
+    )
+    if (
+        container["name"] != "latchway"
+        or container["command"] != ["/latchway"]
+        or container["args"] != ["serve", "--role", "all"]
+        or container["ports"] != [{"name": "http1", "containerPort": 8080}]
+        or container["resources"] != {"limits": {"cpu": "2", "memory": "2Gi"}}
+        or container["startupProbe"] != CLOUD_RUN_STARTUP_PROBE
+        or container["livenessProbe"] != CLOUD_RUN_LIVENESS_PROBE
+    ):
+        raise EvidenceError(code)
+    environment = validate_cloud_run_runtime_environment(container, endpoint, code)
+    return {
+        "serviceAccountName": runtime["serviceAccountName"],
+        "containerConcurrency": runtime["containerConcurrency"],
+        "timeoutSeconds": runtime["timeoutSeconds"],
+        "annotations": annotations,
+        "container": {key: container[key] for key in container},
+        "environment": environment,
+    }
+
+
 def validate_cloud_run_yaml() -> Mapping[str, Any]:
     service = yaml_as_json(ROOT / "deploy/cloud-run/service.yaml")
     job = yaml_as_json(ROOT / "deploy/cloud-run/migration-job.yaml")
@@ -481,21 +730,102 @@ def validate_cloud_run_yaml() -> Mapping[str, Any]:
     job_container = cloud_run_containers(job)[0]
     if service_container.get("image") != "${LATCHWAY_IMAGE}" or job_container.get("image") != "${LATCHWAY_IMAGE}":
         raise EvidenceError("cloud_run_image_placeholder_invalid")
-    if job_container.get("args") != ["migrate", "up"]:
-        raise EvidenceError("cloud_run_migration_command_invalid")
-    environment = env_map(service_container)
-    if nested(environment.get("LATCHWAY_DATABASE_URL"), "valueFrom", "secretKeyRef") is None:
-        raise EvidenceError("cloud_run_database_secret_missing")
-    if nested(environment.get("LATCHWAY_MASTER_KEY"), "valueFrom", "secretKeyRef") is None:
-        raise EvidenceError("cloud_run_master_secret_missing")
-    if nested(environment.get("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"), "valueFrom", "secretKeyRef") is None:
-        raise EvidenceError("cloud_run_bootstrap_secret_missing")
-    if nested(environment.get("LATCHWAY_SHUTDOWN_TIMEOUT"), "value") != "8s":
-        raise EvidenceError("cloud_run_shutdown_budget_invalid")
-    if nested(service_container, "startupProbe", "httpGet", "path") != "/readyz":
-        raise EvidenceError("cloud_run_readiness_probe_missing")
-    if nested(service_container, "livenessProbe", "httpGet", "path") != "/healthz":
-        raise EvidenceError("cloud_run_liveness_probe_missing")
+    template = nested(service, "spec", "template")
+    runtime_spec = nested(template, "spec")
+    annotations = nested(template, "metadata", "annotations")
+    service_annotations = nested(service, "metadata", "annotations")
+    job_annotations = nested(job, "spec", "template", "metadata", "annotations")
+    if (
+        not isinstance(runtime_spec, dict)
+        or service_annotations != {
+            "run.googleapis.com/ingress": "all",
+            "run.googleapis.com/invoker-iam-disabled": "true",
+        }
+        or annotations != {
+            **CLOUD_RUN_BASE_RUNTIME_ANNOTATIONS,
+            **CLOUD_RUN_CLOUD_SQL_NETWORK_ANNOTATIONS,
+        }
+        or job_annotations != CLOUD_RUN_CLOUD_SQL_NETWORK_ANNOTATIONS
+        or set(runtime_spec) != {
+            "serviceAccountName", "containerConcurrency", "timeoutSeconds", "containers",
+        }
+        or runtime_spec.get("serviceAccountName") != "${RUNTIME_SERVICE_ACCOUNT}"
+        or type(runtime_spec.get("containerConcurrency")) is not int
+        or runtime_spec["containerConcurrency"] != 100
+        or type(runtime_spec.get("timeoutSeconds")) is not int
+        or runtime_spec["timeoutSeconds"] != 3600
+        or service_container.get("command") != ["/latchway"]
+        or service_container.get("args") != ["serve", "--role", "all"]
+        or service_container.get("ports") != [{"name": "http1", "containerPort": 8080}]
+        or service_container.get("resources") != {"limits": {"cpu": "2", "memory": "2Gi"}}
+        or service_container.get("startupProbe") != CLOUD_RUN_STARTUP_PROBE
+        or service_container.get("livenessProbe") != CLOUD_RUN_LIVENESS_PROBE
+        or set(service_container) != {
+            "name", "image", "command", "args", "ports", "resources", "env",
+            "startupProbe", "livenessProbe",
+        }
+    ):
+        raise EvidenceError("cloud_run_runtime_profile_invalid")
+    environment = service_container.get("env")
+    if (
+        not isinstance(environment, list)
+        or [item.get("name") for item in environment if isinstance(item, dict)]
+        != list(CLOUD_RUN_RUNTIME_ENVIRONMENT_NAMES)
+    ):
+        raise EvidenceError("cloud_run_runtime_environment_invalid")
+    by_name = env_map(service_container)
+    expected_plain = {
+        "LATCHWAY_ROLE": "all",
+        "LATCHWAY_LOG_LEVEL": "info",
+        "LATCHWAY_MIGRATE_ON_START": "false",
+        "LATCHWAY_PUBLIC_ORIGIN": "${LATCHWAY_PUBLIC_ORIGIN}",
+        "LATCHWAY_SHUTDOWN_TIMEOUT": "8s",
+        "LATCHWAY_DB_MAX_CONNECTIONS": "20",
+        "LATCHWAY_DB_COMPLETION_CONNECTIONS": "5",
+    }
+    if any(nested(by_name.get(name), "value") != value for name, value in expected_plain.items()):
+        raise EvidenceError("cloud_run_runtime_environment_invalid")
+    expected_versions = {
+        "LATCHWAY_DATABASE_URL": ("latchway-database-url", "${DATABASE_SECRET_VERSION}"),
+        "LATCHWAY_MASTER_KEY": ("latchway-master-key", "${MASTER_KEY_SECRET_VERSION}"),
+    }
+    for name, (secret, version) in expected_versions.items():
+        reference = nested(by_name.get(name), "valueFrom", "secretKeyRef")
+        if reference != {"name": secret, "key": version}:
+            raise EvidenceError("cloud_run_runtime_secret_reference_invalid")
+    job_outer = nested(job, "spec", "template", "spec")
+    task_spec = nested(job_outer, "template", "spec")
+    job_environment = job_container.get("env")
+    if (
+        not isinstance(job_outer, dict)
+        or set(job_outer) != {"taskCount", "parallelism", "template"}
+        or type(job_outer.get("taskCount")) is not int
+        or job_outer["taskCount"] != 1
+        or type(job_outer.get("parallelism")) is not int
+        or job_outer["parallelism"] != 1
+        or not isinstance(task_spec, dict)
+        or set(task_spec) != {
+            "serviceAccountName", "maxRetries", "timeoutSeconds", "containers",
+        }
+        or task_spec.get("serviceAccountName") != "${MIGRATOR_SERVICE_ACCOUNT}"
+        or type(task_spec.get("maxRetries")) is not int
+        or task_spec["maxRetries"] != 0
+        or str(task_spec.get("timeoutSeconds")).rstrip("s") != "900"
+        or job_container.get("name") != "latchway-migrate"
+        or job_container.get("command") != ["/latchway"]
+        or job_container.get("args") != ["migrate", "up"]
+        or job_container.get("resources") != CLOUD_RUN_MIGRATION_RESOURCES
+        or set(job_container) != {"name", "image", "command", "args", "resources", "env"}
+        or job_environment != [{
+            "name": "LATCHWAY_DATABASE_URL",
+            "valueFrom": {"secretKeyRef": {
+                "name": "latchway-database-url", "key": "${DATABASE_SECRET_VERSION}",
+            }},
+        }]
+    ):
+        raise EvidenceError("cloud_run_migration_profile_invalid")
+    if "latest" in json.dumps({"service": service, "job": job}, sort_keys=True).lower():
+        raise EvidenceError("cloud_run_unpinned_secret_reference")
     return {"service_api": service.get("apiVersion"), "job_api": job.get("apiVersion")}
 
 
@@ -513,6 +843,8 @@ def require_text(path: Path, fragments: Iterable[str], code: str) -> Mapping[str
 def validate_cloud_run_terraform() -> Mapping[str, Any]:
     main = ROOT / "deploy/cloud-run/terraform/main.tf"
     variables = ROOT / "deploy/cloud-run/terraform/variables.tf"
+    outputs = ROOT / "deploy/cloud-run/terraform/outputs.tf"
+    tfvars = ROOT / "deploy/cloud-run/terraform/terraform.tfvars.example"
     versions = ROOT / "deploy/cloud-run/terraform/versions.tf"
     require_text(
         main,
@@ -522,14 +854,28 @@ def validate_cloud_run_terraform() -> Mapping[str, Any]:
             '"cloudresourcemanager.googleapis.com"',
             '"iam.googleapis.com"',
             'resource "google_service_account" "runtime"',
+            'resource "google_service_account" "migrator"',
+            "service_account = google_service_account.migrator.email",
+            "google_secret_manager_secret_iam_member.migrator_database",
+            "version = google_secret_manager_secret_version.database_url.version",
+            "version = google_secret_manager_secret_version.master_key.version",
+            "max_retries     = 0",
+            'name    = "latchway-migrate"',
+            'memory = "512Mi"',
             "depends_on = [google_project_service.required]",
             'args    = ["migrate", "up"]',
             'name  = "LATCHWAY_SHUTDOWN_TIMEOUT"',
             'value = "8s"',
+            'name  = "LATCHWAY_DB_MAX_CONNECTIONS"',
+            "value = tostring(var.db_connections_per_instance)",
+            'name  = "LATCHWAY_DB_COMPLETION_CONNECTIONS"',
+            "value = tostring(var.db_completion_connections_per_instance)",
+            "var.db_completion_connections_per_instance < var.db_connections_per_instance",
             'name = "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"',
             "var.inject_admin_bootstrap_token ? [1] : []",
             'path = "/readyz"',
             'path = "/healthz"',
+            'execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"',
             "image   = var.service_image",
             "image   = var.migration_image",
             "edition           = var.database_edition",
@@ -540,6 +886,8 @@ def validate_cloud_run_terraform() -> Mapping[str, Any]:
         ),
         "cloud_run_terraform_incomplete",
     )
+    if 'version = "latest"' in main.read_text(encoding="utf-8"):
+        raise EvidenceError("cloud_run_terraform_secret_version_unpinned")
     require_text(
         variables,
         (
@@ -553,8 +901,49 @@ def validate_cloud_run_terraform() -> Mapping[str, Any]:
             'condition     = var.database_edition == "ENTERPRISE"',
             'variable "inject_admin_bootstrap_token"',
             'variable "migrate_on_start"',
+            'variable "deploy_service"',
+            'variable "db_connections_per_instance"',
+            "floor(var.db_connections_per_instance) == var.db_connections_per_instance",
+            'variable "db_completion_connections_per_instance"',
+            "floor(var.db_completion_connections_per_instance) == var.db_completion_connections_per_instance",
+            "default = 3",
         ),
         "cloud_run_variables_incomplete",
+    )
+    require_text(
+        outputs,
+        (
+            'output "configured_steady_state_application_database_connections"',
+            'output "configured_steady_state_regular_application_database_connections"',
+            'output "configured_steady_state_completion_application_database_connections"',
+            'output "maximum_application_database_connections"',
+            'output "maximum_regular_application_database_connections"',
+            'output "maximum_completion_application_database_connections"',
+            "Configured steady-state aggregate application connection ceiling across max_instances Cloud Run service instances",
+            "Configured steady-state regular-work connection ceiling across max_instances Cloud Run service instances",
+            "Configured steady-state completion-reserved connection ceiling across max_instances Cloud Run service instances",
+            "Compatibility alias for configured_steady_state_application_database_connections",
+            "Compatibility alias for configured_steady_state_regular_application_database_connections",
+            "Compatibility alias for configured_steady_state_completion_application_database_connections",
+            "Rollout and provider overshoot are excluded.",
+            "Despite the legacy maximum name, rollout and provider overshoot are excluded.",
+            "var.max_instances * var.db_connections_per_instance",
+            "var.max_instances * (var.db_connections_per_instance - var.db_completion_connections_per_instance)",
+            "var.max_instances * var.db_completion_connections_per_instance",
+        ),
+        "cloud_run_outputs_incomplete",
+    )
+    require_text(
+        tfvars,
+        (
+            "db_connections_per_instance            = 20",
+            "db_completion_connections_per_instance = 5",
+            "max_instances                          = 3",
+            "inject_admin_bootstrap_token           = false",
+            "migrate_on_start                       = false",
+            "deploy_service                   = false",
+        ),
+        "cloud_run_tfvars_incomplete",
     )
     require_text(versions, ('backend "gcs" {}',), "cloud_run_backend_incomplete")
     return {"terraform_files": len(list(main.parent.glob("*.tf")))}
@@ -563,6 +952,8 @@ def validate_cloud_run_terraform() -> Mapping[str, Any]:
 def validate_aws_terraform() -> Mapping[str, Any]:
     main = ROOT / "deploy/aws/terraform/main.tf"
     variables = ROOT / "deploy/aws/terraform/variables.tf"
+    outputs = ROOT / "deploy/aws/terraform/outputs.tf"
+    tfvars = ROOT / "deploy/aws/terraform/terraform.tfvars.example"
     require_text(
         main,
         (
@@ -571,6 +962,10 @@ def validate_aws_terraform() -> Mapping[str, Any]:
             'stopTimeout            = 35',
             'deregistration_delay = 60',
             '{ name = "LATCHWAY_SHUTDOWN_TIMEOUT", value = "30s" }',
+            '{ name = "LATCHWAY_DB_MAX_CONNECTIONS", value = tostring(var.db_connections_per_task) }',
+            '{ name = "LATCHWAY_DB_COMPLETION_CONNECTIONS", value = tostring(var.db_completion_connections_per_task) }',
+            "var.db_completion_connections_per_task < var.db_connections_per_task",
+            'command     = ["CMD", "/latchway", "--server", "http://127.0.0.1:8080", "--output", "json", "readiness"]',
             'path                = "/readyz"',
             "wait_for_steady_state = true",
             "assign_public_ip = false",
@@ -580,8 +975,46 @@ def validate_aws_terraform() -> Mapping[str, Any]:
     )
     require_text(
         variables,
-        ('regex("@sha256:[0-9a-f]{64}$", var.image)', 'variable "migrate_on_start"'),
+        (
+            'regex("@sha256:[0-9a-f]{64}$", var.image)',
+            'variable "migrate_on_start"',
+            'variable "db_connections_per_task"',
+            "floor(var.db_connections_per_task) == var.db_connections_per_task",
+            'variable "db_completion_connections_per_task"',
+            "floor(var.db_completion_connections_per_task) == var.db_completion_connections_per_task",
+        ),
         "aws_variables_incomplete",
+    )
+    require_text(
+        outputs,
+        (
+            'output "configured_steady_state_application_database_connections"',
+            'output "configured_steady_state_regular_application_database_connections"',
+            'output "configured_steady_state_completion_application_database_connections"',
+            'output "maximum_application_database_connections"',
+            'output "maximum_regular_application_database_connections"',
+            'output "maximum_completion_application_database_connections"',
+            "Configured steady-state aggregate application connection ceiling across maximum_tasks ECS tasks",
+            "Configured steady-state regular-work connection ceiling across maximum_tasks ECS tasks",
+            "Configured steady-state completion-reserved connection ceiling across maximum_tasks ECS tasks",
+            "Compatibility alias for configured_steady_state_application_database_connections",
+            "Compatibility alias for configured_steady_state_regular_application_database_connections",
+            "Compatibility alias for configured_steady_state_completion_application_database_connections",
+            "Rollout and provider overshoot are excluded.",
+            "Despite the legacy maximum name, rollout and provider overshoot are excluded.",
+            "var.maximum_tasks * var.db_connections_per_task",
+            "var.maximum_tasks * (var.db_connections_per_task - var.db_completion_connections_per_task)",
+            "var.maximum_tasks * var.db_completion_connections_per_task",
+        ),
+        "aws_outputs_incomplete",
+    )
+    require_text(
+        tfvars,
+        (
+            "db_connections_per_task            = 20",
+            "db_completion_connections_per_task = 5",
+        ),
+        "aws_tfvars_incomplete",
     )
     return {"terraform_files": len(list(main.parent.glob("*.tf")))}
 
@@ -629,6 +1062,7 @@ def validate_fly_document(document: Any) -> Mapping[str, Any]:
             "LATCHWAY_LOG_LEVEL",
             "LATCHWAY_MIGRATE_ON_START",
             "LATCHWAY_DB_MAX_CONNECTIONS",
+            "LATCHWAY_DB_COMPLETION_CONNECTIONS",
             "LATCHWAY_SHUTDOWN_TIMEOUT",
         ),
         "fly_environment_fields_invalid",
@@ -698,6 +1132,7 @@ def validate_fly_document(document: Any) -> Mapping[str, Any]:
         or nested(root, "env", "LATCHWAY_LOG_LEVEL") != "info"
         or nested(root, "env", "LATCHWAY_MIGRATE_ON_START") != "false"
         or nested(root, "env", "LATCHWAY_DB_MAX_CONNECTIONS") != "20"
+        or nested(root, "env", "LATCHWAY_DB_COMPLETION_CONNECTIONS") != "5"
     ):
         raise EvidenceError("fly_environment_invalid")
     if (
@@ -780,6 +1215,7 @@ def validate_cloudflare() -> Mapping[str, Any]:
             '"image": "../../Dockerfile"',
             '"max_instances": 4',
             '"LATCHWAY_DB_MAX_CONNECTIONS": "5"',
+            '"LATCHWAY_DB_COMPLETION_CONNECTIONS": "2"',
             '"LATCHWAY_SHUTDOWN_TIMEOUT": "30s"',
             '"rollout_step_percentage": [10, 50, 100]',
             '"rollout_active_grace_period": 35',
@@ -794,6 +1230,10 @@ def validate_cloudflare() -> Mapping[str, Any]:
             "this.ctx.container!.exec(command",
             'await this.stop("SIGTERM")',
             "MAX_EVIDENCE_OUTPUT_BYTES",
+            'LATCHWAY_DB_MAX_CONNECTIONS: requiredString(',
+            '"LATCHWAY_DB_MAX_CONNECTIONS"',
+            'LATCHWAY_DB_COMPLETION_CONNECTIONS: requiredString(',
+            '"LATCHWAY_DB_COMPLETION_CONNECTIONS"',
             "latchway:evidence:pending-stop",
             "params.exitCode",
         ),
@@ -1237,8 +1677,33 @@ def validate_workflow() -> Mapping[str, Any]:
         "version: '0.4.89'",
         'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"',
         "--args=--output,json,migrate,status",
+        'test "$GCP_PROJECT" = "latchway"',
+        'test "$GCP_REGION" = "asia-southeast1"',
+        'test "$GCP_SERVICE" = "latchway"',
+        'test "$GCP_MIGRATION_JOB" = "latchway-migrate"',
         'command:["--output","json","migrate","status"]',
+        'LATCHWAY_DB_COMPLETION_CONNECTIONS: "2"',
+        'healthcheck:{test:["CMD","/latchway","--server","http://127.0.0.1:8080","--output","json","readiness"],interval:"5s",timeout:"5s",retries:30,start_period:"5s"}',
+        'LATCHWAY_DB_COMPLETION_CONNECTIONS:"${LATCHWAY_DB_COMPLETION_CONNECTIONS:-5}"',
+        "Cloud Run probe is not the release profile",
+        "Cloud Run runtime secret reference is not pinned",
+        "Cloud Run desired and latest-ready runtime profiles differ",
+        "Cloud Run latest-ready revision identity or readiness is invalid",
+        "Cloud Run traffic is not exclusively bound to the latest-ready revision",
+        "ECS database pool partition is not the release profile",
+        "ECS task definition is not bound to the stable service deployment and tasks",
+        "Fly database pool partition is not the release profile",
+        "Compose database pool partition is not the release profile",
+        "Cloudflare database pool partition is not the release profile",
+        "Retain a strict allowlist, not Wrangler's historical records",
+        "Cloudflare raw artifact must retain exactly one active deployment and version",
+        "Cloudflare provider record contains forbidden secret material",
+        '"active_version_id": active_version_id',
+        '"database_pool": database_pool',
         "--signal SIGTERM --time 35",
+        "up -d --wait --force-recreate --no-deps latchway",
+        'test "$gateway_id" != "$before_gateway_id"',
+        "/tmp/compose-provider-raw",
         "actions/attest@",
         "artifact-metadata: write",
         "id-token: write",
@@ -1381,7 +1846,11 @@ def validate_manifest(value: Any, root: Path) -> dict[str, Any]:
         "oci_image_digest", "endpoint", "provider_resource_id", "collector", "observations",
     }
     manifest = require_fields(value, fields, "capture_manifest_fields_invalid")
-    if manifest["schema_version"] != 1 or manifest["kind"] != "latchway_cloud_deployment_capture":
+    if (
+        type(manifest["schema_version"]) is not int
+        or manifest["schema_version"] != 1
+        or manifest["kind"] != "latchway_cloud_deployment_capture"
+    ):
         raise EvidenceError("capture_manifest_identity_invalid")
     if manifest["platform"] not in PLATFORMS:
         raise EvidenceError("capture_platform_invalid")
@@ -1426,7 +1895,7 @@ def validate_manifest(value: Any, root: Path) -> dict[str, Any]:
         or COMMIT.fullmatch(collector["sha"]) is None
         or not isinstance(collector.get("run_id"), str)
         or re.fullmatch(r"[1-9]\d{0,19}", collector["run_id"]) is None
-        or not isinstance(collector.get("run_attempt"), int)
+        or type(collector.get("run_attempt")) is not int
         or not 1 <= collector["run_attempt"] <= 1000
         or collector.get("environment") != f"deployment-evidence-{manifest['platform']}"
     ):
@@ -1447,7 +1916,7 @@ def validate_manifest(value: Any, root: Path) -> dict[str, Any]:
 
 def validate_http_observation(value: Any, manifest: Mapping[str, Any], path: str) -> None:
     observation = require_fields(value, {"url", "status_code", "observed_at", "tls", "body"}, "http_observation_fields_invalid")
-    if observation["status_code"] != 200:
+    if type(observation["status_code"]) is not int or observation["status_code"] != 200:
         raise EvidenceError("http_status_invalid", {"path": path})
     require_capture_time(observation["observed_at"], manifest)
     parsed = urllib.parse.urlsplit(str(observation["url"]))
@@ -1460,19 +1929,30 @@ def validate_http_observation(value: Any, manifest: Mapping[str, Any], path: str
     if not isinstance(body, dict):
         raise EvidenceError("http_body_invalid", {"path": path})
     if path == "/healthz":
+        if set(body) != {"status", "build"}:
+            raise EvidenceError("health_response_invalid")
         build = body.get("build")
-        if body.get("status") != "ok" or not isinstance(build, dict):
+        if body.get("status") != "ok" or not isinstance(build, dict) or set(build) != {
+            "version", "commit", "build_date", "contract_version", "protocol_version",
+        }:
             raise EvidenceError("health_response_invalid")
         if (
             build.get("commit") != manifest["core_commit"]
             or build.get("version") != manifest["core_release"][1:]
             or build.get("contract_version") != manifest["contract_version"]
-            or not isinstance(build.get("protocol_version"), str)
+            or build.get("protocol_version") != expected_current_protocol_version()
         ):
             raise EvidenceError("health_build_identity_mismatch")
+        try:
+            parse_time(build.get("build_date"))
+        except EvidenceError:
+            raise EvidenceError("health_build_identity_mismatch") from None
     else:
         checks = body.get("checks")
-        expected_checks = {"database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"}
+        expected_checks = {
+            "database", "schema", "active_configuration", "quota_completion_pool",
+            "master_key", "signing_key", "worker_heartbeat",
+        }
         if body.get("status") != "ready" or not isinstance(checks, dict) or set(checks) != expected_checks or any(checks[name] != "ok" for name in expected_checks):
             raise EvidenceError("readiness_response_invalid")
 
@@ -1486,14 +1966,38 @@ def validate_migration(value: Any) -> None:
     if (
         not isinstance(status, dict)
         or status.get("up_to_date") is not True
-        or not isinstance(status.get("current"), int)
-        or status.get("current") != status.get("available")
-        or status["current"] < 1
+        or type(status.get("current")) is not int
+        or type(status.get("available")) is not int
+        or status.get("current") != expected_current_schema_version()
+        or status.get("available") != expected_current_schema_version()
     ):
         raise EvidenceError("migration_status_invalid")
     execution = migration["provider_execution"]
     if not isinstance(execution, dict) or execution.get("reported_status") != status:
         raise EvidenceError("migration_provider_execution_invalid")
+
+
+def expected_current_protocol_version() -> str:
+    document = read_json(ROOT / "api/protocol-version.json")
+    wire = document.get("wire_protocol") if isinstance(document, dict) else None
+    current = wire.get("current") if isinstance(wire, dict) else None
+    if type(current) is not int or current < 1:
+        raise EvidenceError("protocol_contract_invalid")
+    return str(current)
+
+
+def expected_current_schema_version() -> int:
+    pattern = re.compile(r"^(\d{6})_[a-z0-9_]+[.]sql$")
+    files = sorted((ROOT / "migrations").glob("*.sql"))
+    versions: list[int] = []
+    for path in files:
+        match = pattern.fullmatch(path.name)
+        if match is None or not real_file(path):
+            raise EvidenceError("migration_catalog_invalid")
+        versions.append(int(match.group(1)))
+    if not versions or versions != list(range(1, versions[-1] + 1)):
+        raise EvidenceError("migration_catalog_invalid")
+    return versions[-1]
 
 
 def validate_secrets(value: Any, control: Mapping[str, Any]) -> None:
@@ -1555,81 +2059,553 @@ def find_env(container: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     return result
 
 
-def validate_cloud_run(control: Mapping[str, Any], migration: Mapping[str, Any], shutdown: Mapping[str, Any], digest: str) -> Mapping[str, Any]:
+def validate_database_pool(
+    value: Any,
+    expected: tuple[int, int, int],
+    code: str,
+) -> dict[str, int]:
+    pool = require_fields(value, DATABASE_POOL_FIELDS, code)
+    aggregate = pool["aggregate_max_connections"]
+    regular = pool["regular_max_connections"]
+    completion = pool["completion_max_connections"]
+    if (
+        any(type(item) is not int for item in (aggregate, regular, completion))
+        or not 2 <= aggregate <= 500
+        or regular < 1
+        or completion < 1
+        or completion >= aggregate
+        or regular + completion != aggregate
+        or (aggregate, regular, completion) != expected
+    ):
+        raise EvidenceError(code)
+    return {
+        "aggregate_max_connections": aggregate,
+        "regular_max_connections": regular,
+        "completion_max_connections": completion,
+    }
+
+
+def database_pool_from_environment(
+    environment: Any,
+    expected: tuple[int, int, int],
+    code: str,
+) -> dict[str, int]:
+    if not isinstance(environment, list):
+        raise EvidenceError(code)
+    selected = [
+        item
+        for item in environment
+        if isinstance(item, dict)
+        and item.get("name") in DATABASE_POOL_ENVIRONMENT_NAMES
+    ]
+    if (
+        len(selected) != len(DATABASE_POOL_ENVIRONMENT_NAMES)
+        or {item.get("name") for item in selected}
+        != set(DATABASE_POOL_ENVIRONMENT_NAMES)
+        or any(set(item) != {"name", "value"} for item in selected)
+        or any(not isinstance(item.get("value"), str) for item in selected)
+    ):
+        raise EvidenceError(code)
+    values = {item["name"]: item["value"] for item in selected}
+    if any(re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", item) is None for item in values.values()):
+        raise EvidenceError(code)
+    aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+    completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+    return validate_database_pool(
+        {
+            "aggregate_max_connections": aggregate,
+            "regular_max_connections": aggregate - completion,
+            "completion_max_connections": completion,
+        },
+        expected,
+        code,
+    )
+
+
+def cloudflare_provider_database_pool(
+    worker: Mapping[str, Any],
+) -> dict[str, int]:
+    code = "cloudflare_database_pool_invalid"
+    active_version_id = worker.get("active_version_id")
+    deployments = worker.get("deployments")
+    versions = worker.get("versions")
+    if (
+        not isinstance(active_version_id, str)
+        or UUID.fullmatch(active_version_id) is None
+        or not isinstance(deployments, list)
+        or len(deployments) != 1
+        or not isinstance(versions, list)
+        or len(versions) != 1
+    ):
+        raise EvidenceError(code)
+    for records in (deployments, versions):
+        if len(records) > 50:
+            raise EvidenceError(code)
+        for item in records:
+            if not isinstance(item, dict):
+                raise EvidenceError(code)
+            serialized = json.dumps(
+                item,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+            if len(serialized.encode()) > 256 * 1024 or any(
+                marker in serialized.lower()
+                for marker in ('"password":', '"token":', '"secret_value":')
+            ):
+                raise EvidenceError(code)
+    deployment = deployments[0]
+    version = versions[0]
+    if (
+        set(deployment) != {"id", "created_on", "versions"}
+        or not isinstance(deployment.get("id"), str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", deployment["id"]) is None
+        or not isinstance(deployment.get("created_on"), str)
+        or RFC3339.fullmatch(deployment["created_on"]) is None
+        or set(version) != {"id", "resources"}
+    ):
+        raise EvidenceError(code)
+    try:
+        parse_time(deployment["created_on"])
+    except EvidenceError:
+        raise EvidenceError(code) from None
+    traffic = deployment["versions"]
+    if (
+        not isinstance(traffic, list)
+        or len(traffic) != 1
+        or not isinstance(traffic[0], dict)
+        or set(traffic[0]) != {"version_id", "percentage"}
+        or traffic[0].get("version_id") != active_version_id
+        or type(traffic[0].get("percentage")) is not int
+        or traffic[0]["percentage"] != 100
+    ):
+        raise EvidenceError(code)
+    if version.get("id") != active_version_id:
+        raise EvidenceError(code)
+    resources = version["resources"]
+    if not isinstance(resources, dict) or set(resources) != {"bindings"}:
+        raise EvidenceError(code)
+    selected = resources["bindings"]
+    if (
+        not isinstance(selected, list)
+        or len(selected) != len(DATABASE_POOL_ENVIRONMENT_NAMES)
+        or any(not isinstance(item, dict) for item in selected)
+        or [item.get("name") for item in selected]
+        != list(DATABASE_POOL_ENVIRONMENT_NAMES)
+        or any(set(item) != {"name", "type", "text"} for item in selected)
+        or any(item.get("type") != "plain_text" for item in selected)
+        or any(not isinstance(item.get("text"), str) for item in selected)
+    ):
+        raise EvidenceError(code)
+    return database_pool_from_environment(
+        [{"name": item["name"], "value": item["text"]} for item in selected],
+        CLOUDFLARE_DATABASE_POOL,
+        code,
+    )
+
+
+def cloud_run_resource_identity(
+    value: Any,
+    collection: str,
+    name: str,
+    code: str,
+) -> Mapping[str, Any]:
+    metadata = require_fields(value, {"name", "selfLink", "uid", "location"}, code)
+    suffix = f"/namespaces/{CLOUD_RUN_PROJECT_ID}/{collection}/{name}"
+    if (
+        metadata["name"] != name
+        or metadata["location"] != CLOUD_RUN_REGION
+        or not isinstance(metadata["uid"], str)
+        or not metadata["uid"]
+        or not isinstance(metadata["selfLink"], str)
+        or not metadata["selfLink"].endswith(suffix)
+    ):
+        raise EvidenceError(code)
+    return metadata
+
+
+def validate_cloud_run_database_environment(
+    value: Any,
+    code: str,
+) -> Mapping[str, Any]:
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        raise EvidenceError(code)
+    item = value[0]
+    if set(item) != {"name", "valueFrom"} or item.get("name") != "LATCHWAY_DATABASE_URL":
+        raise EvidenceError(code)
+    reference = nested(item, "valueFrom", "secretKeyRef")
+    if (
+        not isinstance(reference, dict)
+        or set(reference) != {"name", "key"}
+        or reference.get("name") != CLOUD_RUN_SECRET_REFERENCES["LATCHWAY_DATABASE_URL"]
+        or not isinstance(reference.get("key"), str)
+        or re.fullmatch(r"[1-9][0-9]*", reference["key"]) is None
+    ):
+        raise EvidenceError(code)
+    return item
+
+
+def validate_cloud_run_rollout(value: Any, digest: str, revision_name: str) -> None:
+    rollout = require_fields(
+        value,
+        {"method", "started_at", "finished_at", "readiness_restored", "before", "after"},
+        "cloud_run_rollout_fields_invalid",
+    )
+    started, finished = parse_time(rollout["started_at"]), parse_time(rollout["finished_at"])
+    if (
+        rollout["method"] != "cloud_run_revision_rollout"
+        or rollout["readiness_restored"] is not True
+        or finished <= started
+        or finished - started > timedelta(minutes=30)
+    ):
+        raise EvidenceError("cloud_run_rollout_invalid")
+    phases = []
+    for name in ("before", "after"):
+        phase = require_fields(
+            rollout[name], {"image_digest", "resource_id"},
+            "cloud_run_rollout_phase_invalid",
+        )
+        if image_digest(phase["image_digest"]) != digest or not isinstance(phase["resource_id"], str) or not phase["resource_id"]:
+            raise EvidenceError("cloud_run_rollout_phase_invalid")
+        phases.append(phase)
+    if phases[0]["resource_id"] == phases[1]["resource_id"] or phases[1]["resource_id"] != revision_name:
+        raise EvidenceError("cloud_run_revision_not_replaced")
+
+
+def validate_cloud_run(
+    control: Mapping[str, Any],
+    migration: Mapping[str, Any],
+    shutdown: Mapping[str, Any],
+    digest: str,
+    platform_digest: str | None = None,
+    endpoint: str | None = None,
+) -> Mapping[str, Any]:
     value = require_fields(
         control,
-        {"platform", "service", "revision", "migration_job"},
+        {
+            "platform", "service", "revision", "migration_job",
+            "database_pool", "network_profile",
+        },
         "cloud_run_control_fields_invalid",
     )
-    if value["platform"] != "cloud_run":
+    if (
+        value["platform"] != "cloud_run"
+        or not isinstance(endpoint, str)
+        or value["network_profile"] != CLOUD_RUN_NETWORK_PROFILE
+    ):
         raise EvidenceError("cloud_run_control_invalid")
-    service, revision, migration_job = value["service"], value["revision"], value["migration_job"]
-    if not isinstance(service, dict) or not isinstance(revision, dict) or not isinstance(migration_job, dict):
-        raise EvidenceError("cloud_run_control_invalid")
-    container = cloud_run_containers(service)[0]
-    if image_digest(container.get("image")) != digest:
+
+    service = require_fields(
+        value["service"], {"metadata", "spec", "status"},
+        "cloud_run_service_fields_invalid",
+    )
+    service_metadata = cloud_run_resource_identity(
+        service["metadata"], "services", CLOUD_RUN_SERVICE,
+        "cloud_run_service_identity_invalid",
+    )
+    service_spec = require_fields(service["spec"], {"template"}, "cloud_run_service_spec_invalid")
+    desired_template = require_fields(
+        service_spec["template"], {"metadata", "spec"},
+        "cloud_run_service_template_invalid",
+    )
+    desired_metadata = require_fields(
+        desired_template["metadata"], {"annotations"},
+        "cloud_run_desired_runtime_profile_invalid",
+    )
+    desired_profile = validate_cloud_run_runtime_profile(
+        desired_template["spec"], desired_metadata["annotations"], endpoint,
+        "cloud_run_desired_runtime_profile_invalid",
+    )
+
+    revision = require_fields(
+        value["revision"], {"metadata", "spec", "status"},
+        "cloud_run_revision_fields_invalid",
+    )
+    revision_metadata_raw = require_fields(
+        revision["metadata"], {"name", "selfLink", "uid", "location", "annotations"},
+        "cloud_run_revision_metadata_fields_invalid",
+    )
+    revision_name = revision_metadata_raw["name"]
+    if not isinstance(revision_name, str) or not revision_name:
+        raise EvidenceError("cloud_run_latest_ready_revision_identity_invalid")
+    revision_metadata = cloud_run_resource_identity(
+        {key: revision_metadata_raw[key] for key in ("name", "selfLink", "uid", "location")},
+        "revisions", revision_name, "cloud_run_revision_metadata_fields_invalid",
+    )
+    revision_profile = validate_cloud_run_runtime_profile(
+        revision["spec"], revision_metadata_raw["annotations"], endpoint,
+        "cloud_run_revision_runtime_profile_invalid",
+    )
+    if desired_profile != revision_profile:
+        raise EvidenceError("cloud_run_runtime_profile_mismatch")
+    desired_container = desired_profile["container"]
+    revision_container = revision_profile["container"]
+    if image_digest(desired_container.get("image")) != digest:
         raise EvidenceError("cloud_run_image_digest_mismatch")
-    observed = first_nested(revision, (("status", "imageDigest"), ("status", "image_digest")))
-    if image_digest(observed) != digest:
+
+    service_status = require_fields(
+        service["status"], {"conditions", "latestReadyRevisionName", "traffic", "url"},
+        "cloud_run_service_status_fields_invalid",
+    )
+    if service_status["url"] != endpoint:
+        raise EvidenceError("cloud_run_endpoint_binding_invalid")
+    if service_status["latestReadyRevisionName"] != revision_name:
+        raise EvidenceError("cloud_run_latest_ready_revision_identity_invalid")
+    for conditions, code in (
+        (service_status["conditions"], "cloud_run_service_not_ready"),
+        (nested(revision, "status", "conditions"), "cloud_run_latest_ready_revision_not_ready"),
+    ):
+        if not isinstance(conditions, list) or not any(
+            isinstance(item, dict) and item.get("type") == "Ready" and
+            str(item.get("status")).lower() == "true" for item in conditions
+        ):
+            raise EvidenceError(code)
+    traffic = service_status["traffic"]
+    if (
+        not isinstance(traffic, list)
+        or len(traffic) != 1
+        or not isinstance(traffic[0], dict)
+        or set(traffic[0]) != {"revisionName", "percent"}
+        or traffic[0].get("revisionName") != revision_name
+        or type(traffic[0].get("percent")) is not int
+        or traffic[0]["percent"] != 100
+    ):
+        raise EvidenceError("cloud_run_latest_ready_revision_traffic_invalid")
+
+    revision_status = require_fields(
+        revision["status"], {"conditions", "imageDigest"},
+        "cloud_run_revision_status_fields_invalid",
+    )
+    resolved_digest = image_digest(revision_status["imageDigest"])
+    allowed_resolved_digests = {digest}
+    if platform_digest is not None:
+        if SHA256.fullmatch(platform_digest) is None or platform_digest == digest:
+            raise EvidenceError("cloud_run_candidate_image_invalid")
+        allowed_resolved_digests.add(platform_digest)
+    if image_digest(revision_container.get("image")) != digest or resolved_digest not in allowed_resolved_digests:
         raise EvidenceError("cloud_run_resolved_digest_mismatch")
-    if image_digest(cloud_run_containers(migration_job)[0].get("image")) != digest:
-        raise EvidenceError("cloud_run_migration_image_digest_mismatch")
-    env = find_env(container)
-    if nested(env.get("LATCHWAY_SHUTDOWN_TIMEOUT"), "value") != "8s":
-        raise EvidenceError("cloud_run_shutdown_timeout_mismatch")
-    for name in REQUIRED_SECRET_NAMES:
-        if first_nested(env.get(name), (("valueFrom", "secretKeyRef"), ("valueSource", "secretKeyRef"))) is None:
-            raise EvidenceError("cloud_run_secret_reference_missing")
-    execution = migration.get("provider_execution")
-    conditions = first_nested(execution, (("status", "conditions"), ("conditions",)))
-    if not isinstance(conditions, list) or not any(
-        isinstance(item, dict) and item.get("type") in ("Completed", "Ready") and str(item.get("status")).lower() == "true"
-        for item in conditions
+
+    database_pool = validate_database_pool(
+        value["database_pool"], STANDARD_DATABASE_POOL,
+        "cloud_run_database_pool_invalid",
+    )
+    for profile in (desired_profile, revision_profile):
+        if database_pool_from_environment(
+            profile["container"].get("env"), STANDARD_DATABASE_POOL,
+            "cloud_run_database_pool_invalid",
+        ) != database_pool:
+            raise EvidenceError("cloud_run_database_pool_invalid")
+
+    migration_job = require_fields(
+        value["migration_job"], {"metadata", "spec"},
+        "cloud_run_migration_job_fields_invalid",
+    )
+    cloud_run_resource_identity(
+        migration_job["metadata"], "jobs", CLOUD_RUN_MIGRATION_JOB,
+        "cloud_run_migration_job_identity_invalid",
+    )
+    job_spec = require_fields(
+        migration_job["spec"],
+        {
+            "executionTemplateAnnotations", "taskCount", "parallelism",
+            "serviceAccountName", "timeoutSeconds", "maxRetries", "containers",
+        },
+        "cloud_run_migration_job_profile_invalid",
+    )
+    if (
+        job_spec["executionTemplateAnnotations"] != CLOUD_RUN_CLOUD_SQL_ANNOTATIONS
+        or type(job_spec["taskCount"]) is not int or job_spec["taskCount"] != 1
+        or type(job_spec["parallelism"]) is not int or job_spec["parallelism"] != 1
+        or job_spec["serviceAccountName"] != CLOUD_RUN_MIGRATOR_SERVICE_ACCOUNT
+        or type(job_spec["timeoutSeconds"]) is not int or job_spec["timeoutSeconds"] != 900
+        or type(job_spec["maxRetries"]) is not int or job_spec["maxRetries"] != 0
+        or not isinstance(job_spec["containers"], list) or len(job_spec["containers"]) != 1
+        or not isinstance(job_spec["containers"][0], dict)
+    ):
+        raise EvidenceError("cloud_run_migration_job_profile_invalid")
+    job_container = require_fields(
+        job_spec["containers"][0],
+        {"name", "image", "command", "args", "resources", "env"},
+        "cloud_run_migration_job_container_invalid",
+    )
+    expected_database_env = [desired_profile["environment"]["LATCHWAY_DATABASE_URL"]]
+    if (
+        job_container["name"] != "latchway-migrate"
+        or image_digest(job_container["image"]) != digest
+        or job_container["command"] != ["/latchway"]
+        or job_container["args"] != ["migrate", "up"]
+        or job_container["resources"] != CLOUD_RUN_MIGRATION_RESOURCES
+        or job_container["env"] != expected_database_env
+    ):
+        raise EvidenceError("cloud_run_migration_job_container_invalid")
+    validate_cloud_run_database_environment(
+        job_container["env"], "cloud_run_migration_job_container_invalid",
+    )
+
+    execution = require_fields(
+        migration.get("provider_execution"),
+        {"metadata", "spec", "status", "reported_status", "log_record"},
+        "cloud_run_migration_execution_failed",
+    )
+    execution_metadata_raw = require_fields(
+        execution["metadata"],
+        {"name", "selfLink", "uid", "location", "annotations"},
+        "cloud_run_migration_execution_identity_invalid",
+    )
+    if execution_metadata_raw["annotations"] != CLOUD_RUN_CLOUD_SQL_ANNOTATIONS:
+        raise EvidenceError("cloud_run_migration_execution_profile_invalid")
+    execution_name = execution_metadata_raw["name"]
+    if not isinstance(execution_name, str) or not execution_name:
+        raise EvidenceError("cloud_run_migration_execution_identity_invalid")
+    execution_metadata = cloud_run_resource_identity(
+        {
+            key: execution_metadata_raw[key]
+            for key in ("name", "selfLink", "uid", "location")
+        },
+        "executions", execution_name,
+        "cloud_run_migration_execution_identity_invalid",
+    )
+    execution_spec = require_fields(execution["spec"], {"containers"}, "cloud_run_migration_execution_profile_invalid")
+    if not isinstance(execution_spec["containers"], list) or len(execution_spec["containers"]) != 1 or not isinstance(execution_spec["containers"][0], dict):
+        raise EvidenceError("cloud_run_migration_execution_profile_invalid")
+    execution_container = require_fields(
+        execution_spec["containers"][0],
+        {"name", "image", "command", "args", "resources", "env"},
+        "cloud_run_migration_execution_profile_invalid",
+    )
+    if (
+        execution_container["name"] != "latchway-migrate"
+        or image_digest(execution_container["image"]) != digest
+        or execution_container["command"] != ["/latchway"]
+        or execution_container["args"] != ["--output", "json", "migrate", "status"]
+        or execution_container["resources"] != CLOUD_RUN_MIGRATION_RESOURCES
+        or execution_container["env"] != expected_database_env
+    ):
+        raise EvidenceError("cloud_run_migration_execution_profile_invalid")
+    validate_cloud_run_database_environment(
+        execution_container["env"], "cloud_run_migration_execution_profile_invalid",
+    )
+    execution_status = require_fields(
+        execution["status"], {"conditions", "succeededCount", "failedCount", "completionTime"},
+        "cloud_run_migration_execution_failed",
+    )
+    conditions = execution_status["conditions"]
+    if (
+        not isinstance(conditions, list)
+        or not any(isinstance(item, dict) and item.get("type") == "Completed" and str(item.get("status")).lower() == "true" for item in conditions)
+        or type(execution_status["succeededCount"]) is not int
+        or execution_status["succeededCount"] != 1
+        or type(execution_status["failedCount"]) is not int
+        or execution_status["failedCount"] != 0
+        or not isinstance(execution_status["completionTime"], str)
     ):
         raise EvidenceError("cloud_run_migration_execution_failed")
-    log_record = execution.get("log_record") if isinstance(execution, dict) else None
-    execution_name = nested(execution, "metadata", "name")
+    parse_time(execution_status["completionTime"])
+    log_record = execution["log_record"]
     if (
-        not isinstance(log_record, dict)
+        execution["reported_status"] != migration.get("status")
+        or not isinstance(log_record, dict)
         or not isinstance(log_record.get("insert_ids"), list)
         or not log_record["insert_ids"]
         or any(not isinstance(item, str) or not item for item in log_record["insert_ids"])
-        or log_record.get("line_count") != len(log_record["insert_ids"])
-        or not isinstance(log_record.get("execution_name"), str)
-        or not log_record["execution_name"]
+        or type(log_record.get("line_count")) is not int
+        or log_record["line_count"] != len(log_record["insert_ids"])
+        or log_record.get("execution_name") != execution_metadata["name"]
         or not isinstance(log_record.get("timestamp"), str)
-        or (isinstance(execution_name, str) and execution_name.rsplit("/", 1)[-1] != log_record["execution_name"])
     ):
         raise EvidenceError("cloud_run_migration_log_invalid")
     parse_time(log_record["timestamp"])
-    validate_shutdown(shutdown, "cloud_run_revision_rollout", 10, 8, digest)
-    if nested(shutdown, "before", "resource_id") == nested(shutdown, "after", "resource_id"):
-        raise EvidenceError("cloud_run_revision_not_replaced")
-    return {"resource": nested(service, "metadata", "selfLink"), "digest": digest}
+
+    assert resolved_digest is not None
+    validate_cloud_run_rollout(shutdown, resolved_digest, revision_name)
+    return {
+        "resource": service_metadata["selfLink"],
+        "digest": digest,
+        "runtime_digest": resolved_digest,
+        "database_pool": database_pool,
+        "runtime_profile": "manual-v1-cloud-sql-connector-steady-state",
+        "rollout": "provider_revision_replacement",
+    }
 
 
 def validate_aws(control: Mapping[str, Any], migration: Mapping[str, Any], shutdown: Mapping[str, Any], digest: str) -> Mapping[str, Any]:
-    value = require_fields(control, {"platform", "service", "task_definition", "tasks"}, "aws_control_fields_invalid")
+    value = require_fields(control, {"platform", "service", "task_definition", "tasks", "database_pool"}, "aws_control_fields_invalid")
     if value["platform"] != "aws" or not isinstance(value["service"], dict) or not isinstance(value["task_definition"], dict) or not isinstance(value["tasks"], list):
         raise EvidenceError("aws_control_invalid")
-    definitions = value["task_definition"].get("containerDefinitions")
+    task_definition = require_fields(
+        value["task_definition"],
+        {"taskDefinitionArn", "containerDefinitions"},
+        "aws_task_definition_fields_invalid",
+    )
+    definition_arn = task_definition["taskDefinitionArn"]
+    if (
+        not isinstance(definition_arn, str)
+        or not definition_arn.startswith("arn:")
+        or ":task-definition/" not in definition_arn
+    ):
+        raise EvidenceError("aws_task_definition_arn_invalid")
+    definitions = task_definition["containerDefinitions"]
     if not isinstance(definitions, list) or len(definitions) != 1 or not isinstance(definitions[0], dict):
         raise EvidenceError("aws_task_definition_invalid")
     container = definitions[0]
     if image_digest(container.get("image")) != digest or container.get("stopTimeout") != 35 or container.get("readonlyRootFilesystem") is not True:
         raise EvidenceError("aws_task_runtime_invalid")
+    database_pool = validate_database_pool(
+        value["database_pool"],
+        STANDARD_DATABASE_POOL,
+        "aws_database_pool_invalid",
+    )
+    if database_pool_from_environment(
+        container.get("environment"),
+        STANDARD_DATABASE_POOL,
+        "aws_database_pool_invalid",
+    ) != database_pool:
+        raise EvidenceError("aws_database_pool_invalid")
     environment = {item.get("name"): item.get("value") for item in container.get("environment", []) if isinstance(item, dict)}
     if environment.get("LATCHWAY_SHUTDOWN_TIMEOUT") != "30s":
         raise EvidenceError("aws_shutdown_timeout_mismatch")
     secret_names = {item.get("name") for item in container.get("secrets", []) if isinstance(item, dict)}
     if not REQUIRED_SECRET_NAMES.issubset(secret_names):
         raise EvidenceError("aws_secret_reference_missing")
-    service = value["service"]
-    if service.get("status") != "ACTIVE" or service.get("runningCount") != service.get("desiredCount") or int(service.get("desiredCount", 0)) < 2:
+    service = require_fields(
+        value["service"],
+        {
+            "serviceArn", "serviceName", "clusterArn", "status", "desiredCount",
+            "runningCount", "taskDefinition", "deployments",
+        },
+        "aws_service_fields_invalid",
+    )
+    deployments = service["deployments"]
+    if (
+        service.get("status") != "ACTIVE"
+        or type(service.get("desiredCount")) is not int
+        or service.get("runningCount") != service.get("desiredCount")
+        or service["desiredCount"] < 2
+        or service.get("taskDefinition") != definition_arn
+        or not isinstance(deployments, list)
+        or len(deployments) != 1
+        or not isinstance(deployments[0], dict)
+        or set(deployments[0])
+        != {"id", "status", "taskDefinition", "desiredCount", "pendingCount", "runningCount", "rolloutState"}
+        or deployments[0].get("status") != "PRIMARY"
+        or deployments[0].get("taskDefinition") != definition_arn
+        or deployments[0].get("desiredCount") != service["desiredCount"]
+        or deployments[0].get("runningCount") != service["desiredCount"]
+        or deployments[0].get("pendingCount") != 0
+        or deployments[0].get("rolloutState") != "COMPLETED"
+        or len(value["tasks"]) != service["desiredCount"]
+    ):
         raise EvidenceError("aws_service_not_stable")
     for task in value["tasks"]:
         containers = task.get("containers") if isinstance(task, dict) else None
-        if task.get("lastStatus") != "RUNNING" or not isinstance(containers, list) or not containers or image_digest(containers[0].get("imageDigest")) != digest:
+        if (
+            task.get("lastStatus") != "RUNNING"
+            or task.get("taskDefinitionArn") != definition_arn
+            or not isinstance(containers, list)
+            or not containers
+            or image_digest(containers[0].get("imageDigest")) != digest
+        ):
             raise EvidenceError("aws_task_digest_mismatch")
     execution = migration.get("provider_execution")
     stopped = execution.get("stopped_task") if isinstance(execution, dict) else None
@@ -1637,9 +2613,11 @@ def validate_aws(control: Mapping[str, Any], migration: Mapping[str, Any], shutd
     if (
         not isinstance(containers, list)
         or not containers
-        or containers[0].get("exitCode") != 0
+        or type(containers[0].get("exitCode")) is not int
+        or containers[0]["exitCode"] != 0
         or image_digest(containers[0].get("imageDigest")) != digest
         or stopped.get("lastStatus") != "STOPPED"
+        or stopped.get("taskDefinitionArn") != definition_arn
     ):
         raise EvidenceError("aws_migration_execution_failed")
     log_record = execution.get("log_record") if isinstance(execution, dict) else None
@@ -1647,9 +2625,9 @@ def validate_aws(control: Mapping[str, Any], migration: Mapping[str, Any], shutd
         not isinstance(log_record, dict)
         or not isinstance(log_record.get("log_stream"), str)
         or not log_record["log_stream"]
-        or not isinstance(log_record.get("timestamp_ms"), int)
-        or not isinstance(log_record.get("ingestion_time_ms"), int)
-        or not isinstance(log_record.get("line_count"), int)
+        or type(log_record.get("timestamp_ms")) is not int
+        or type(log_record.get("ingestion_time_ms")) is not int
+        or type(log_record.get("line_count")) is not int
         or not 1 <= log_record["line_count"] <= 100
         or log_record["timestamp_ms"] <= 0
         or log_record["ingestion_time_ms"] < log_record["timestamp_ms"]
@@ -1658,7 +2636,12 @@ def validate_aws(control: Mapping[str, Any], migration: Mapping[str, Any], shutd
     validate_shutdown(shutdown, "ecs_task_replacement", 35, 30, digest)
     if nested(shutdown, "before", "resource_id") == nested(shutdown, "after", "resource_id"):
         raise EvidenceError("aws_task_not_replaced")
-    return {"resource": service.get("serviceArn"), "digest": digest, "replicas": len(value["tasks"])}
+    return {
+        "resource": service.get("serviceArn"),
+        "digest": digest,
+        "replicas": len(value["tasks"]),
+        "database_pool": database_pool,
+    }
 
 
 def fly_machine_digest(machine: Mapping[str, Any]) -> str | None:
@@ -1666,12 +2649,23 @@ def fly_machine_digest(machine: Mapping[str, Any]) -> str | None:
 
 
 def validate_fly_capture(control: Mapping[str, Any], migration: Mapping[str, Any], shutdown: Mapping[str, Any], digest: str) -> Mapping[str, Any]:
-    value = require_fields(control, {"platform", "app", "machines"}, "fly_control_fields_invalid")
+    value = require_fields(control, {"platform", "app", "machines", "database_pool"}, "fly_control_fields_invalid")
     if value["platform"] != "fly_io" or not isinstance(value["app"], dict) or not isinstance(value["machines"], list) or len(value["machines"]) < 2:
         raise EvidenceError("fly_control_invalid")
+    database_pool = validate_database_pool(
+        value["database_pool"],
+        STANDARD_DATABASE_POOL,
+        "fly_database_pool_invalid",
+    )
     for machine in value["machines"]:
         if not isinstance(machine, dict) or machine.get("state") != "started" or fly_machine_digest(machine) != digest:
             raise EvidenceError("fly_machine_digest_mismatch")
+        if database_pool_from_environment(
+            machine.get("environment"),
+            STANDARD_DATABASE_POOL,
+            "fly_database_pool_invalid",
+        ) != database_pool:
+            raise EvidenceError("fly_database_pool_invalid")
         checks = machine.get("checks")
         if isinstance(checks, list) and any(isinstance(item, dict) and item.get("status") not in ("passing", "success") for item in checks):
             raise EvidenceError("fly_machine_check_failed")
@@ -1679,7 +2673,8 @@ def validate_fly_capture(control: Mapping[str, Any], migration: Mapping[str, Any
     machine_ids = {item.get("id") for item in value["machines"] if isinstance(item, dict)}
     if (
         not isinstance(execution, dict)
-        or execution.get("exit_code") != 0
+        or type(execution.get("exit_code")) is not int
+        or execution["exit_code"] != 0
         or execution.get("machine_id") not in machine_ids
         or not isinstance(execution.get("stdout_sha256"), str)
         or SHA256.fullmatch(execution["stdout_sha256"]) is None
@@ -1690,15 +2685,26 @@ def validate_fly_capture(control: Mapping[str, Any], migration: Mapping[str, Any
     after_instance = nested(shutdown, "after", "resource_id")
     if not isinstance(before_instance, str) or not isinstance(after_instance, str) or before_instance == after_instance:
         raise EvidenceError("fly_machine_instance_not_replaced")
-    return {"resource": value["app"].get("ID", value["app"].get("id")), "digest": digest, "replicas": len(value["machines"])}
+    return {
+        "resource": value["app"].get("ID", value["app"].get("id")),
+        "digest": digest,
+        "replicas": len(value["machines"]),
+        "database_pool": database_pool,
+    }
 
 
 def validate_compose_capture(control: Mapping[str, Any], migration: Mapping[str, Any], shutdown: Mapping[str, Any], digest: str) -> Mapping[str, Any]:
-    value = require_fields(control, {"platform", "project", "gateway", "image"}, "compose_control_fields_invalid")
+    value = require_fields(control, {"platform", "project", "gateway", "image", "database_pool"}, "compose_control_fields_invalid")
     if value["platform"] != "compose" or not isinstance(value["gateway"], dict) or not isinstance(value["image"], dict):
         raise EvidenceError("compose_control_invalid")
     gateway = value["gateway"]
-    if nested(gateway, "State", "Running") is not True or nested(gateway, "State", "Health", "Status") != "healthy":
+    gateway_id = gateway.get("Id")
+    if (
+        not isinstance(gateway_id, str)
+        or not gateway_id
+        or nested(gateway, "State", "Running") is not True
+        or nested(gateway, "State", "Health", "Status") != "healthy"
+    ):
         raise EvidenceError("compose_gateway_not_healthy")
     if nested(gateway, "Config", "Labels", "com.docker.compose.project") != value["project"]:
         raise EvidenceError("compose_project_identity_mismatch")
@@ -1706,20 +2712,53 @@ def validate_compose_capture(control: Mapping[str, Any], migration: Mapping[str,
         digests = value["image"].get("RepoDigests")
         if not isinstance(digests, list) or digest not in {image_digest(item) for item in digests}:
             raise EvidenceError("compose_image_digest_mismatch")
+    database_pool = validate_database_pool(
+        value["database_pool"],
+        STANDARD_DATABASE_POOL,
+        "compose_database_pool_invalid",
+    )
+    if database_pool_from_environment(
+        nested(gateway, "Config", "Env"),
+        STANDARD_DATABASE_POOL,
+        "compose_database_pool_invalid",
+    ) != database_pool:
+        raise EvidenceError("compose_database_pool_invalid")
     execution = migration.get("provider_execution")
-    if not isinstance(execution, dict) or execution.get("exit_code") != 0:
+    if (
+        not isinstance(execution, dict)
+        or type(execution.get("exit_code")) is not int
+        or execution["exit_code"] != 0
+        or type(execution.get("migration_container_exit_code")) is not int
+        or execution["migration_container_exit_code"] != 0
+    ):
         raise EvidenceError("compose_migration_execution_failed")
     validate_shutdown(shutdown, "compose_sigterm_restart", 35, 30, digest)
-    return {"resource": value["project"], "digest": digest}
+    before_id = nested(shutdown, "before", "resource_id")
+    after_id = nested(shutdown, "after", "resource_id")
+    if (
+        not isinstance(before_id, str)
+        or not before_id
+        or not isinstance(after_id, str)
+        or not after_id
+        or before_id == after_id
+        or after_id != gateway_id
+        or before_id == value["project"]
+    ):
+        raise EvidenceError("compose_gateway_not_replaced")
+    return {
+        "resource": value["project"],
+        "digest": digest,
+        "database_pool": database_pool,
+    }
 
 
 def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[str, Any], shutdown: Mapping[str, Any], digest: str) -> Mapping[str, Any]:
-    value = require_fields(control, {"platform", "worker", "container"}, "cloudflare_control_fields_invalid")
+    value = require_fields(control, {"platform", "worker", "container", "database_pool"}, "cloudflare_control_fields_invalid")
     if value["platform"] != "cloudflare_containers" or not isinstance(value["worker"], dict) or not isinstance(value["container"], dict):
         raise EvidenceError("cloudflare_control_invalid")
     worker = require_fields(
         value["worker"],
-        {"status", "resource_id", "deployments", "versions"},
+        {"status", "resource_id", "active_version_id", "deployments", "versions"},
         "cloudflare_worker_fields_invalid",
     )
     container = require_fields(
@@ -1742,6 +2781,13 @@ def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[s
         {"image", "manifest_digest", "config_digest", "layers"},
         "cloudflare_mirror_image_fields_invalid",
     )
+    database_pool = validate_database_pool(
+        value["database_pool"],
+        CLOUDFLARE_DATABASE_POOL,
+        "cloudflare_database_pool_invalid",
+    )
+    if cloudflare_provider_database_pool(worker) != database_pool:
+        raise EvidenceError("cloudflare_database_pool_invalid")
     if (
         worker["status"] != "ready"
         or worker["resource_id"] != application["id"]
@@ -1774,7 +2820,7 @@ def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[s
             not isinstance(layer, dict)
             or set(layer) != {"digest", "size"}
             or image_digest(layer.get("digest")) is None
-            or not isinstance(layer.get("size"), int)
+            or type(layer.get("size")) is not int
             or layer["size"] < 1
             for layer in canonical["layers"]
         )
@@ -1800,7 +2846,8 @@ def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[s
     if (
         not isinstance(execution, dict)
         or set(execution) != {"exit_code", "evidence_id", "instance_name", "command", "reported_status"}
-        or execution.get("exit_code") != 0
+        or type(execution.get("exit_code")) is not int
+        or execution["exit_code"] != 0
         or not isinstance(execution.get("evidence_id"), str)
         or EVIDENCE_ID.fullmatch(execution["evidence_id"]) is None
         or execution.get("instance_name") != "instance-0"
@@ -1824,7 +2871,12 @@ def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[s
         or shutdown.get("provider_reason") != "runtime_signal"
     ):
         raise EvidenceError("cloudflare_container_not_replaced")
-    return {"resource": worker["resource_id"], "digest": digest, "runtime_digest": mirror_digest}
+    return {
+        "resource": worker["resource_id"],
+        "digest": digest,
+        "runtime_digest": mirror_digest,
+        "database_pool": database_pool,
+    }
 
 
 def validate_shutdown(
@@ -1851,8 +2903,11 @@ def validate_shutdown(
     if (
         shutdown["method"] != method
         or shutdown["signal"] != "SIGTERM"
+        or type(shutdown["platform_timeout_seconds"]) is not int
         or shutdown["platform_timeout_seconds"] != platform_timeout
+        or type(shutdown["application_timeout_seconds"]) is not int
         or shutdown["application_timeout_seconds"] != app_timeout
+        or type(shutdown["exit_code"]) is not int
         or shutdown["exit_code"] != 0
         or shutdown["readiness_restored"] is not True
         or finished <= started
@@ -1867,7 +2922,10 @@ def validate_shutdown(
         raise EvidenceError("shutdown_image_digest_mismatch")
 
 
-def validate_capture(root: Path) -> tuple[dict[str, Any], list[Check]]:
+def validate_capture(
+    root: Path,
+    candidate_manifest: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[Check]]:
     manifest = validate_manifest(read_json(root / "manifest.json"), root)
     values = {name: read_json(root / manifest["observations"][name]["path"]) for name in OBSERVATIONS}
     checks: list[Check] = []
@@ -1884,7 +2942,7 @@ def validate_capture(root: Path) -> tuple[dict[str, Any], list[Check]]:
 
     check("capture.identity", "The capture has an authenticated provider identity resource.", lambda: validate_identity(values["identity"], manifest))
     check("capture.health", "The release build answered the liveness endpoint.", lambda: validate_http_observation(values["health"], manifest, "/healthz"))
-    check("capture.readiness", "Database, schema, configuration, keys, and worker are ready.", lambda: validate_http_observation(values["readiness"], manifest, "/readyz"))
+    check("capture.readiness", "Database, schema, configuration, quota completion capacity, keys, and worker are ready.", lambda: validate_http_observation(values["readiness"], manifest, "/readyz"))
     check("capture.migration", "The deployed image reports the current schema.", lambda: validate_migration(values["migration"]))
     check("capture.secrets", "Runtime secret references exist without captured secret values.", lambda: validate_secrets(values["secrets"], values["control_plane"]))
     validator = {
@@ -1898,19 +2956,25 @@ def validate_capture(root: Path) -> tuple[dict[str, Any], list[Check]]:
     def validate_control_plane() -> Mapping[str, Any]:
         require_capture_time(values["shutdown"].get("started_at"), manifest)
         require_capture_time(values["shutdown"].get("finished_at"), manifest)
-        details = validator(
+        arguments: list[Any] = [
             values["control_plane"],
             values["migration"],
             values["shutdown"],
             expected_digest(manifest),
-        )
+        ]
+        if manifest["platform"] == "cloud_run":
+            arguments.append(
+                cloud_run_candidate_platform_digest(candidate_manifest, manifest)
+            )
+            arguments.append(manifest["endpoint"])
+        details = validator(*arguments)
         if details.get("resource") != manifest["provider_resource_id"]:
             raise EvidenceError("provider_control_plane_resource_mismatch")
         return details
 
     check(
         "capture.control_plane",
-        "The provider serves the exact release digest and passed migration and shutdown checks.",
+        "The provider serves the exact release digest and passed migration plus its platform lifecycle check.",
         validate_control_plane,
     )
     return manifest, checks
@@ -1921,8 +2985,27 @@ def validate_identity(value: Any, manifest: Mapping[str, Any]) -> Mapping[str, A
     if identity["platform"] != manifest["platform"] or identity["resource_id"] != manifest["provider_resource_id"]:
         raise EvidenceError("provider_identity_mismatch")
     require_capture_time(identity["observed_at"], manifest)
-    if not isinstance(identity["provider_response"], dict) or not identity["provider_response"]:
+    provider_response = identity["provider_response"]
+    if not isinstance(provider_response, dict) or not provider_response:
         raise EvidenceError("provider_identity_response_invalid")
+    if manifest["platform"] == "cloud_run":
+        response = require_fields(
+            provider_response,
+            {"projectId", "projectNumber", "lifecycleState", "gcloud_version"},
+            "cloud_run_provider_identity_invalid",
+        )
+        if (
+            response["projectId"] != CLOUD_RUN_PROJECT_ID
+            or not isinstance(response["projectNumber"], str)
+            or re.fullmatch(r"[1-9][0-9]*", response["projectNumber"]) is None
+            or response["lifecycleState"] != "ACTIVE"
+            or not isinstance(response["gcloud_version"], dict)
+            or not response["gcloud_version"]
+            or not identity["resource_id"].endswith(
+                f"/namespaces/{CLOUD_RUN_PROJECT_ID}/services/{CLOUD_RUN_SERVICE}"
+            )
+        ):
+            raise EvidenceError("cloud_run_provider_identity_invalid")
     return {"resource_id_sha256": hashlib.sha256(identity["resource_id"].encode()).hexdigest()}
 
 
@@ -1936,8 +3019,12 @@ def normalized_tar_info(path: Path, name: str) -> tarfile.TarInfo:
     return info
 
 
-def seal_capture(capture: Path, output: Path) -> None:
-    manifest, checks = validate_capture(capture)
+def seal_capture(
+    capture: Path,
+    output: Path,
+    candidate_manifest: Mapping[str, Any] | None = None,
+) -> None:
+    manifest, checks = validate_capture(capture, candidate_manifest)
     if any(item.status != "passed" for item in checks):
         raise EvidenceError("capture_validation_failed")
     allowed = {"manifest.json", *(f"{name}.json" for name in OBSERVATIONS)}
@@ -2063,6 +3150,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         raise EvidenceError("core_coordinates_mismatch")
     if OCI_IMAGE.fullmatch(args.image) is None or SHA256.fullmatch(args.bundle_sha256) is None or re.fullmatch(SEMVER, args.contract_version) is None:
         raise EvidenceError("release_identity_invalid")
+    candidate_manifest = read_json(args.candidate_manifest.resolve())
 
     artifacts_dir = root / "artifacts/cloud-deployments"
     verification_summary: dict[str, Any] = {}
@@ -2075,7 +3163,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix=f"latchway-{platform}-evidence-") as temporary:
             extracted = Path(temporary)
             extract_capture(archive, extracted)
-            manifest, checks = validate_capture(extracted)
+            manifest, checks = validate_capture(extracted, candidate_manifest)
             if any(item.status != "passed" for item in checks):
                 raise EvidenceError("platform_capture_failed", {"platform": platform})
             if (
@@ -2167,6 +3255,7 @@ def parse_arguments() -> argparse.Namespace:
     validate.add_argument("--capture-dir", type=Path, required=True)
     validate.add_argument("--output", type=Path, required=True)
     validate.add_argument("--junit", type=Path)
+    validate.add_argument("--candidate-manifest", type=Path)
 
     observe = subcommands.add_parser("observe-http", help="capture bounded liveness and readiness responses")
     observe.add_argument("--endpoint", required=True)
@@ -2176,6 +3265,7 @@ def parse_arguments() -> argparse.Namespace:
     seal = subcommands.add_parser("seal", help="write a deterministic capture archive")
     seal.add_argument("--capture-dir", type=Path, required=True)
     seal.add_argument("--output", type=Path, required=True)
+    seal.add_argument("--candidate-manifest", type=Path)
 
     final = subcommands.add_parser("finalize", help="verify signed platform archives and emit cloud_deployments.json")
     final.add_argument("--evidence-root", type=Path, required=True)
@@ -2186,6 +3276,7 @@ def parse_arguments() -> argparse.Namespace:
     final.add_argument("--contract-version", required=True)
     final.add_argument("--bundle-sha256", required=True)
     final.add_argument("--image", required=True)
+    final.add_argument("--candidate-manifest", type=Path, required=True)
     return parser.parse_args()
 
 
@@ -2202,7 +3293,14 @@ def main() -> int:
             make_manifest(args)
             return 0
         if args.command == "validate-capture":
-            manifest, checks = validate_capture(args.capture_dir.resolve())
+            candidate_manifest = (
+                read_json(args.candidate_manifest.resolve())
+                if args.candidate_manifest is not None
+                else None
+            )
+            manifest, checks = validate_capture(
+                args.capture_dir.resolve(), candidate_manifest
+            )
             value = report(
                 "latchway_deployment_capture_validation",
                 checks,
@@ -2218,7 +3316,14 @@ def main() -> int:
             observe_http(args.endpoint, args.output_dir.resolve(), args.timeout)
             return 0
         if args.command == "seal":
-            seal_capture(args.capture_dir.resolve(), args.output.resolve())
+            candidate_manifest = (
+                read_json(args.candidate_manifest.resolve())
+                if args.candidate_manifest is not None
+                else None
+            )
+            seal_capture(
+                args.capture_dir.resolve(), args.output.resolve(), candidate_manifest
+            )
             return 0
         if args.command == "finalize":
             try:

@@ -20,13 +20,17 @@ platforms.
   at that hostname
 - a publicly reachable PostgreSQL 15+ database with TLS enforced
 
-The four container instances are each limited to five PostgreSQL connections,
-for a maximum of 20 application connections. A one-minute Cron Trigger sends a
+The four container instances each have an aggregate ceiling of five PostgreSQL
+connections: two are completion-reserved inside that total and three serve
+regular work. The application maximum is therefore 20 connections—eight
+completion-reserved and 12 regular—not 28. A one-minute Cron Trigger sends a
 private health request to `instance-0`, keeping at least one `all`-role runtime
 active for signing-key rotation, reservation recovery, retention, usage
-rollups, and shared JWKS refresh even when user traffic is quiet. Leave
-capacity for migrations, administration, and database maintenance; adjust the
-instance count, pool size, and database ceiling together.
+rollups, and shared JWKS refresh even when user traffic is quiet. Include
+migrations, administration, backups, maintenance, and rollout overlap, then
+keep planned peak demand at or below 80% of usable PostgreSQL connections.
+Adjust instance count, aggregate pool size, completion reservation, and the
+database ceiling together.
 
 ## Configure and validate
 
@@ -198,7 +202,7 @@ generated config shown above.
 The platform-only health endpoint is
 `/__latchway/cloudflare/healthz`. Use Latchway's forwarded `/healthz` for
 liveness and `/readyz` for database, schema, configuration, signing-key,
-master-key, and worker-heartbeat readiness.
+master-key, reserved quota-completion-pool, and worker-heartbeat readiness.
 
 ## Release evidence
 

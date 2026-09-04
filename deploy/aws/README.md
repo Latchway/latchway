@@ -53,10 +53,20 @@ is required. RDS accepts port 5432 only from the task security group and forces
 TLS. The ALB idle timeout is 4,000 seconds for SSE; clients should still
 reconnect and servers should emit periodic events.
 
-At maximum scale, application pools reserve `maximum_tasks ×
-db_connections_per_task` connections (200 by default). Leave separate capacity
-for migrations, operations, and PostgreSQL maintenance before increasing either
-number.
+At maximum scale, application pools reserve the aggregate `maximum_tasks ×
+db_connections_per_task` ceiling (200 by default). The default completion
+reservation is five inside each task's total of 20, so 50 of those 200
+connections are completion-reserved and 150 serve regular work; never add 50
+to 200. Add migrations, operations, backups, administration, maintenance, and
+rollout overlap, then keep planned peak demand at or below 80% of usable RDS
+connections so at least 20% remains free. Terraform rejects a completion
+reservation that is not smaller than the per-task total. Set both Terraform
+pool inputs together when changing the split; neither input is derived from
+the other inside the deployment template.
+
+The ECS container health check calls the loopback `latchway readiness` HTTP
+probe. It observes the serving process, including its reserved completion
+pool, without opening another PostgreSQL pool from the health-check process.
 
 The application drains for 30 seconds. ECS waits 35 seconds before a forced
 stop, and the ALB target group drains for 60 seconds. Keep these values ordered

@@ -8,11 +8,12 @@ import {
   startAdminEventFallback,
   type AdminEventStreamConnection
 } from "../api/admin-events";
-import { adminRequest, SystemStatusSchema } from "../api/admin";
 import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
 import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
+import { useConsoleCompatibility } from "./console-compatibility-context";
+import { ConsoleCompatibilityProvider } from "./console-compatibility";
 import { WorkspaceProvider } from "./workspace-context";
 import { useWorkspace } from "./workspace-context-value";
 
@@ -148,6 +149,7 @@ function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
 function AppShellContent() {
   const queryClient = useQueryClient();
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const [commandOpen, setCommandOpen] = useState(false);
   const commandReturnFocus = useRef<HTMLElement | null>(null);
@@ -200,25 +202,14 @@ function AppShellContent() {
   }, [commandOpen]);
 
   useEffect(() => {
-    if (mode !== "configured") return;
-    const controller = new AbortController();
-    let connection: AdminEventStreamConnection | undefined;
-    let disposed = false;
-    void adminRequest("/admin/v1/system", SystemStatusSchema, { signal: controller.signal })
-      .then(({ data }) => {
-        if (disposed) return;
-        const onTopics = dispatchAdminRefresh;
-        connection = data.server_capabilities.includes("admin_event_stream")
-          ? openAdminEventStream({ environmentID: workspace.environment?.id, onTopics })
-          : startAdminEventFallback(onTopics);
-      })
-      .catch(() => undefined);
+    if (mode !== "configured" || !consoleCompatibility.status) return;
+    const connection: AdminEventStreamConnection = consoleCompatibility.status.server_capabilities.includes("admin_event_stream")
+      ? openAdminEventStream({ environmentID: workspace.environment?.id, onTopics: dispatchAdminRefresh })
+      : startAdminEventFallback(dispatchAdminRefresh);
     return () => {
-      disposed = true;
-      controller.abort();
       connection?.close();
     };
-  }, [mode, workspace.environment?.id]);
+  }, [consoleCompatibility.status, mode, workspace.environment?.id]);
 
   async function logout(): Promise<void> {
     setLoggingOut(true);
@@ -362,6 +353,11 @@ function AppShellContent() {
         </header>
 
         <main className="main-content" id="main-content" tabIndex={-1}>
+          {mode === "configured" && !consoleCompatibility.mutationAllowed ? <div className="control-notice control-notice--error" role="status">
+            <strong>Read-only safe mode</strong>
+            <span>Administrative reads and redaction-safe export remain available. Mutations stay disabled until the Console verifies the server contract, protocol, required capabilities, and mutation readiness.</span>
+            {consoleCompatibility.compatibility?.reasons.length ? <ul>{consoleCompatibility.compatibility.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : consoleCompatibility.error ? <small>Compatibility status could not be loaded.</small> : <small>Compatibility status is being verified.</small>}
+          </div> : null}
           <Outlet />
         </main>
       </div>
@@ -371,5 +367,5 @@ function AppShellContent() {
 }
 
 export function AppShell() {
-  return <WorkspaceProvider><AppShellContent /></WorkspaceProvider>;
+  return <WorkspaceProvider><ConsoleCompatibilityProvider><AppShellContent /></ConsoleCompatibilityProvider></WorkspaceProvider>;
 }

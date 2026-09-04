@@ -68,9 +68,11 @@ flyctl deploy --app "$FLY_APP" \
 
 Passing `--image` bypasses a Dockerfile rebuild. The release command applies
 migrations once before the rolling deployment. The default two 2-vCPU,
-2-GiB Machines reserve up to 40 application database connections in total;
-leave separate headroom for migrations, administration, backups, and database
-maintenance.
+2-GiB Machines reserve up to 40 aggregate application database connections.
+Ten are completion-reserved inside that ceiling and 30 serve regular work;
+`LATCHWAY_DB_COMPLETION_CONNECTIONS` is a subset, never an added pool. Include
+migrations, administration, backups, maintenance, and rollout demand, then keep
+planned peak demand at or below 80% of usable PostgreSQL connections.
 
 ## Verify rollout and streaming
 

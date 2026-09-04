@@ -17,7 +17,8 @@ const base = `{
   "main": "src/index.ts",
   "vars": {
     "LATCHWAY_MIGRATE_ON_START": "true",
-    "LATCHWAY_DB_MAX_CONNECTIONS": "5"
+    "LATCHWAY_DB_MAX_CONNECTIONS": "5",
+    "LATCHWAY_DB_COMPLETION_CONNECTIONS": "2"
   },
   "secrets": {
     "required": [
@@ -68,6 +69,7 @@ test("replaces the source build with exactly one immutable image", () => {
   assert.equal(generated.includes("../../Dockerfile"), false);
   assert.equal(generated.includes("image_build_context"), false);
   assert.equal(releaseConfigurationMode(generated), "bootstrap");
+  assert.match(generated, /"LATCHWAY_DB_COMPLETION_CONNECTIONS": "2"/u);
   assert.match(generated, /"pattern": "ai\.example\.com"/u);
   assert.match(generated, /"custom_domain": true/u);
 });

@@ -70,7 +70,7 @@ func newRootCommand(opts *options) *cobra.Command {
 		return nil
 	}
 	root.AddCommand(
-		newServeCommand(opts), newTestUpstreamCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newVersionCommand(opts),
+		newServeCommand(opts), newTestUpstreamCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newReadinessCommand(opts), newVersionCommand(opts),
 		newDevelopCommand(opts),
 		newTokenModeLoginCommand(opts), newTokenModeLogoutCommand(opts),
 		newAdminCommand(opts), newSecretCommand(opts), newStatusCommand(opts), newConfigCommand(opts),

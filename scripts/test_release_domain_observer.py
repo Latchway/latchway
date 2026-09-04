@@ -164,6 +164,8 @@ class ReleaseDomainObserverTests(unittest.TestCase):
     def bare_observer(self, domain: str = "live_provider") -> MODULE.Observer:
         observer = object.__new__(MODULE.Observer)
         observer.domain = domain
+        observer.release_profile = None
+        observer.evidence_release_profile = None
         observer.output = self.root / "raw"
         observer.output.mkdir(exist_ok=True)
         observer.repositories = {}
@@ -791,6 +793,263 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             proof["release_attestation"]["sha256"],
             hashlib.sha256(attestation).hexdigest(),
         )
+
+    def selected_public_tag_responses(
+        self, observer: MODULE.Observer
+    ) -> list[tuple[bytes, datetime, datetime]]:
+        responses: list[tuple[bytes, datetime, datetime]] = []
+        for release_id, repository_id in enumerate(
+            ("core", "javascript", "ios", "android", "react_native"),
+            start=10,
+        ):
+            coordinate = observer.identity["repositories"][repository_id]
+            expected_assets, adoption_required = observer._expected_release_assets(
+                repository_id,
+                coordinate["version"],
+                MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE,
+            )
+            names = sorted(expected_assets)
+            for package_id in sorted(adoption_required):
+                middle = f"-{package_id}" if package_id else ""
+                names.append(f"npm-release-adoption{middle}-123-1.json")
+            assets = [
+                {
+                    "id": index + 1,
+                    "name": name,
+                    "size": 1,
+                    "digest": "sha256:" + f"{index + 1:064x}",
+                }
+                for index, name in enumerate(names)
+            ]
+            intent_sha256 = next(
+                (
+                    asset["digest"].removeprefix("sha256:")
+                    for asset in assets
+                    if asset["name"]
+                    == "latchway-single-maintainer-v1-intent.json"
+                ),
+                None,
+            )
+            tag = coordinate["tag"]
+            version = coordinate["version"]
+            if repository_id == "core":
+                image = observer.identity["oci_image_digest"]
+                message = (
+                    f"Latchway {tag}\n\n"
+                    "Release profile: single_maintainer_v1\n"
+                    f"Candidate commit: {coordinate['commit']}\n"
+                    f"Image: {image}"
+                )
+                title = f"Latchway {tag} — single_maintainer_v1"
+                body = (
+                    f"Latchway {tag} core release.\n\n"
+                    "Release profile: single_maintainer_v1\n"
+                    "Profile status: incomplete until every required public package and registry check passes.\n"
+                    "Authenticated profile-wide publication readiness is not claimed by this core-only record.\n"
+                    f"Candidate commit: {coordinate['commit']}\n"
+                    f"Image: {image}\n"
+                    "Required deployment evidence: Docker Compose and Google Cloud Run passed for this exact image.\n\n"
+                    "Deferred evidence remains unverified. This release is not release-qualified, fully evidence-gated, or independently reviewed."
+                )
+            elif repository_id == "javascript":
+                run_id = 123
+                transaction_id = hashlib.sha256(
+                    "\0".join(
+                        (
+                            "Latchway/latchway-js",
+                            ".github/workflows/single-maintainer-release.yml",
+                            str(run_id),
+                            coordinate["commit"],
+                            tag,
+                        )
+                    ).encode()
+                ).hexdigest()
+                owner = (
+                    "https://github.com/Latchway/latchway-js/actions/runs/123"
+                )
+                message = (
+                    "Latchway JavaScript SDKs v1.0.0\n\n"
+                    "Release profile: single_maintainer_v1\n"
+                    "Assurance: deferred; not release-qualified or independently reviewed\n"
+                    f"Transaction owner: {owner}\n"
+                    f"Transaction ID: {transaction_id}"
+                )
+                title = (
+                    "Latchway JavaScript SDKs 1.0.0 — single-maintainer v1"
+                )
+                body = (
+                    "Published with the `single_maintainer_v1` profile.\n\n"
+                    "The exact public Latchway core v1.0.0 release, including Docker Compose and Google Cloud Run evidence, was verified before this transaction began.\n"
+                    "npm archives are accepted only with byte-identical registry data, registry signatures, and provenance bound to this repository, workflow, source commit, and main ref.\n"
+                    "External platform/device/provider evidence and independent human review remain deferred.\n"
+                    "This release is not `release_qualified`, fully evidence-gated, or independently reviewed.\n\n"
+                    f"Transaction owner: {owner}\n"
+                    f"Transaction ID: {transaction_id}"
+                )
+            else:
+                self.assertIsNotNone(intent_sha256)
+                sdk = {
+                    "ios": "iOS",
+                    "android": "Android",
+                    "react_native": "React Native",
+                }[repository_id]
+                message = (
+                    f"Latchway {sdk} SDK {tag}\n\n"
+                    "Release profile: single_maintainer_v1\n"
+                    "Assurance: deferred; not release-qualified or independently reviewed\n"
+                    f"Maintainer intent SHA-256: {intent_sha256}"
+                )
+                title = f"Latchway {sdk} SDK {version} — single-maintainer v1"
+                if repository_id == "android":
+                    body = (
+                        "Published with the `single_maintainer_v1` profile.\n\n"
+                        "The Maven Central bytes, OpenPGP signatures, deterministic source artifacts, pinned-core conformance, and GitHub provenance in this release were verified by automation. Independent human review and external platform/device/provider evidence are deferred. Docker Compose and GCP Cloud Run evidence remain required by the global v1 profile.\n\n"
+                        "This release is not `release_qualified`, fully evidence-gated, or independently reviewed."
+                    )
+                else:
+                    body = (
+                        "Published with the `single_maintainer_v1` profile. External platform/device/provider evidence and independent human review are deferred. This release is not `release_qualified`, fully evidence-gated, or independently reviewed.\n"
+                    )
+            responses.extend(
+                (
+                    (
+                        json.dumps(
+                            {
+                                "ref": f"refs/tags/{tag}",
+                                "object": {"type": "tag", "sha": "f" * 40},
+                            }
+                        ).encode(),
+                        self.workflow_started,
+                        self.workflow_finished,
+                    ),
+                    (
+                        json.dumps(
+                            {
+                                "tag": tag,
+                                "object": {
+                                    "type": "commit",
+                                    "sha": coordinate["commit"],
+                                },
+                                "message": message,
+                            }
+                        ).encode(),
+                        self.workflow_started,
+                        self.workflow_finished,
+                    ),
+                    (
+                        json.dumps(
+                            {
+                                "id": release_id,
+                                "tag_name": tag,
+                                "name": title,
+                                "body": body,
+                                "draft": False,
+                                "prerelease": False,
+                                "immutable": True,
+                                "assets": assets,
+                            }
+                        ).encode(),
+                        self.workflow_started,
+                        self.workflow_finished,
+                    ),
+                )
+            )
+        return responses
+
+    def test_single_maintainer_public_tags_validate_exact_five_repo_surface(self) -> None:
+        observer = self.bare_observer("public_tags")
+        observer.release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        observer.evidence_release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        responses = self.selected_public_tag_responses(observer)
+        attestation = b'{"verification":"passed"}\n'
+        with mock.patch.object(
+            observer, "_github_authority_file", side_effect=responses
+        ), mock.patch.object(
+            observer,
+            "_release_attestation_from_authority",
+            return_value=(
+                attestation,
+                self.workflow_started,
+                self.workflow_finished,
+            ),
+        ), mock.patch.object(observer, "emit") as emit:
+            observer.observe_public_tags()
+        self.assertEqual(emit.call_count, 10)
+
+    def test_single_maintainer_public_tags_reject_tag_body_and_asset_drift(self) -> None:
+        for mutation in ("tag", "body", "asset"):
+            observer = self.bare_observer("public_tags")
+            observer.release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            observer.evidence_release_profile = (
+                MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+            )
+            responses = self.selected_public_tag_responses(observer)
+            payload, started, finished = responses[2]
+            core_release = json.loads(payload)
+            if mutation == "tag":
+                tag_payload, tag_started, tag_finished = responses[1]
+                tag_object = json.loads(tag_payload)
+                tag_object["message"] += "\nextra"
+                responses[1] = (
+                    json.dumps(tag_object).encode(), tag_started, tag_finished
+                )
+            elif mutation == "body":
+                core_release["body"] += "\nextra"
+                responses[2] = (
+                    json.dumps(core_release).encode(), started, finished
+                )
+            else:
+                core_release["assets"].append(
+                    {
+                        "id": 999,
+                        "name": "unexpected.txt",
+                        "size": 1,
+                        "digest": "sha256:" + "9" * 64,
+                    }
+                )
+                responses[2] = (
+                    json.dumps(core_release).encode(), started, finished
+                )
+            with self.subTest(mutation=mutation), mock.patch.object(
+                observer, "_github_authority_file", side_effect=responses
+            ), self.assertRaisesRegex(
+                MODULE.ObservationError,
+                "public_tag_message_mismatch|github_release_invalid|github_release_asset_set_invalid",
+            ):
+                observer.observe_public_tags()
+
+    def test_single_maintainer_react_native_rejects_multiple_adoptions(
+        self,
+    ) -> None:
+        observer = self.bare_observer("public_tags")
+        observer.release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        observer.evidence_release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        responses = self.selected_public_tag_responses(observer)
+        payload, started, finished = responses[14]
+        release = json.loads(payload)
+        release["assets"].append(
+            {
+                "id": 999,
+                "name": "npm-release-adoption-124-1.json",
+                "size": 1,
+                "digest": "sha256:" + "9" * 64,
+            }
+        )
+        responses[14] = (json.dumps(release).encode(), started, finished)
+        with mock.patch.object(
+            observer, "_github_authority_file", side_effect=responses
+        ), mock.patch.object(
+            observer,
+            "_release_attestation_from_authority",
+            return_value=(
+                b'{"verification":"passed"}\n',
+                self.workflow_started,
+                self.workflow_finished,
+            ),
+        ), self.assertRaisesRegex(
+            MODULE.ObservationError, "github_release_asset_set_invalid"
+        ):
+            observer.observe_public_tags()
 
     def test_reviewed_zip_rejects_duplicate_and_symlink_members(self) -> None:
         for mode in ("duplicate", "symlink"):
@@ -2644,6 +2903,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 )
 
     def test_npm_provenance_origin_may_fail_but_adoption_must_succeed(self) -> None:
+        observer = self.bare_observer("public_registries")
         run = {
             "id": 41,
             "run_attempt": 1,
@@ -2655,7 +2915,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "path": ".github/workflows/release.yml",
             "repository": {"full_name": "Latchway/latchway-js"},
         }
-        MODULE.Observer._validate_npm_workflow_run(
+        observer._validate_npm_workflow_run(
             run,
             "Latchway/latchway-js",
             "a" * 40,
@@ -2666,7 +2926,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.ObservationError, "registry_npm_provenance_run_invalid"
         ):
-            MODULE.Observer._validate_npm_workflow_run(
+            observer._validate_npm_workflow_run(
                 run,
                 "Latchway/latchway-js",
                 "a" * 40,
@@ -2675,7 +2935,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 conclusions={"success"},
             )
         run["conclusion"] = "success"
-        MODULE.Observer._validate_npm_workflow_run(
+        observer._validate_npm_workflow_run(
             run,
             "Latchway/latchway-js",
             "a" * 40,
@@ -2683,6 +2943,62 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             1,
             conclusions={"success"},
         )
+
+    def test_single_maintainer_npm_run_requires_selected_workflow_and_event(
+        self,
+    ) -> None:
+        observer = self.bare_observer("public_registries")
+        observer.release_profile = MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        run = {
+            "id": 41,
+            "run_attempt": 1,
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "a" * 40,
+            "head_branch": "main",
+            "path": ".github/workflows/single-maintainer-release.yml",
+            "repository": {"full_name": "Latchway/latchway-js"},
+        }
+        observer._validate_npm_workflow_run(
+            run,
+            "Latchway/latchway-js",
+            "a" * 40,
+            41,
+            1,
+            conclusions={"success"},
+        )
+        with mock.patch.object(
+            observer,
+            "_github_authority_json",
+            return_value=(run, self.workflow_started, self.workflow_finished),
+        ) as authority:
+            self.assertEqual(
+                observer._github_owner_run_from_authority("javascript", 41),
+                run,
+            )
+        authority.assert_called_once_with(
+            "public-registries/javascript/runs/owner-41.json",
+            "registry_npm_adoption_invalid",
+        )
+        for field, value in (
+            ("event", "repository_dispatch"),
+            ("path", ".github/workflows/release.yml"),
+        ):
+            tampered = copy.deepcopy(run)
+            tampered[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                MODULE.ObservationError,
+                "registry_npm_provenance_run_invalid",
+            ):
+                observer._validate_npm_workflow_run(
+                    tampered,
+                    "Latchway/latchway-js",
+                    "a" * 40,
+                    41,
+                    1,
+                    conclusions={"success"},
+                )
 
     def test_exact_sdk_release_asset_sets_reject_unknown_missing_and_no_adoption(self) -> None:
         expected, adoption_required = MODULE.Observer._expected_release_assets(
@@ -2749,6 +3065,50 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     json.dumps(changed).encode(), "v1.0.0",
                     expected_assets=expected, adoption_required=adoption_required,
                 )
+
+    def test_single_maintainer_release_asset_closures_are_exact(self) -> None:
+        expected_counts = {
+            "core": 15,
+            "javascript": 32,
+            "ios": 10,
+            "android": 14,
+            "react_native": 12,
+        }
+        for repository_id, count in expected_counts.items():
+            expected, adoption_required = MODULE.Observer._expected_release_assets(
+                repository_id,
+                "1.0.0",
+                MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE,
+            )
+            with self.subTest(repository_id=repository_id):
+                self.assertEqual(len(expected), count)
+                self.assertEqual(
+                    MODULE.expected_source_attested_release_assets(
+                        repository_id,
+                        "1.0.0",
+                        sorted(expected),
+                        MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE,
+                    ),
+                    expected,
+                )
+                if repository_id in {"core", "javascript", "ios", "android"}:
+                    self.assertIn("SHA256SUMS", expected)
+                self.assertEqual(
+                    adoption_required,
+                    frozenset({""})
+                    if repository_id == "react_native"
+                    else frozenset(),
+                )
+        javascript, _ = MODULE.Observer._expected_release_assets(
+            "javascript", "1.0.0", MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        )
+        self.assertIn("single-maintainer-npm-adoption.json", javascript)
+        self.assertNotIn("publish-input-evidence.json", javascript)
+        ios, _ = MODULE.Observer._expected_release_assets(
+            "ios", "1.0.0", MODULE.EVIDENCE.SINGLE_MAINTAINER_PROFILE
+        )
+        self.assertIn("ios-registry-candidate.json", ios)
+        self.assertNotIn("cocoapods-release-evidence.SHA256SUMS", ios)
 
     def test_every_sdk_release_requires_the_versioned_documentation_bundle(self) -> None:
         for repository_id in ("javascript", "ios", "android", "react_native"):

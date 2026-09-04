@@ -515,6 +515,8 @@ class OperationalEvidenceFixture:
                     "postgresql_max_connections": 100,
                     "postgresql_network": "low-latency-internal",
                     "gateway_db_pool_max_connections": 32,
+                    "gateway_db_regular_pool_max_connections": 24,
+                    "gateway_db_completion_pool_max_connections": 8,
                     "body_logging_disabled": True,
                     "warm_configuration_cache": True,
                 },
@@ -742,6 +744,7 @@ class OperationalEvidenceFixture:
                 "database": "ok",
                 "schema": "ok",
                 "active_configuration": "ok",
+                "quota_completion_pool": "ok",
                 "master_key": "ok",
                 "signing_key": "ok",
                 "worker_heartbeat": "ok",
@@ -1262,6 +1265,16 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("/tools/latchway-failure-driver serve", launcher)
+        for value in (
+            "gateway_db_pool_max_connections=16",
+            "gateway_db_regular_pool_max_connections=12",
+            "gateway_db_completion_pool_max_connections=4",
+            "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+            "-gateway-db-regular-pool-max-connections",
+            "-gateway-db-completion-pool-max-connections",
+            "verify_gateway_pool_environment",
+        ):
+            self.assertIn(value, launcher)
         self.assertIn("docker pull --platform linux/amd64", failure)
         self.assertIn("docker logout ghcr.io", failure)
         self.assertIn("--acknowledge-disposable-target", failure)
@@ -1514,6 +1527,14 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertIn('run_cli "$candidate_runtime_image"', operational)
         self.assertIn('run_cli "$previous_candidate_runtime_image"', operational)
         self.assertIn('"$postgres_runtime_image" >/dev/null', operational)
+        for value in (
+            "gateway_db_pool_max_connections=5",
+            "gateway_db_regular_pool_max_connections=3",
+            "gateway_db_completion_pool_max_connections=2",
+            "--env LATCHWAY_DB_COMPLETION_CONNECTIONS",
+            "operational gateway pool environment does not match",
+        ):
+            self.assertIn(value, operational)
 
     def test_final_artifact_coordinates_match_every_consumer(self) -> None:
         operational = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -1682,6 +1703,35 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.EvidenceError, "automated_log_not_passed"):
             self.finalize()
 
+    def test_zero_evidence_counters_reject_json_booleans(self) -> None:
+        original_load = self.fixture.load_path.read_bytes()
+
+        def gate(document: dict[str, object], name: str) -> dict[str, object]:
+            return next(item for item in document["gates"] if item["name"] == name)
+
+        load_mutations = (
+            lambda value: gate(value, "gateway_overhead")["metrics"]["gateway_results"].__setitem__("request_errors", False),
+            lambda value: gate(value, "gateway_overhead")["metrics"]["gateway_results"].__setitem__("invalid_problem_responses", False),
+            lambda value: gate(value, "sse_500_concurrent_memory")["metrics"].__setitem__("premature_completions", False),
+        )
+        for index, operation in enumerate(load_mutations):
+            with self.subTest(domain="load", index=index):
+                self.mutate(self.fixture.load_path, operation)
+                with self.assertRaisesRegex(MODULE.EvidenceError, "load_gate_metrics_invalid"):
+                    self.finalize(f"boolean-load-counter-{index}")
+                self.fixture.load_path.write_bytes(original_load)
+
+        original_failure = self.fixture.failure_path.read_bytes()
+
+        def make_exit_boolean(document: dict[str, object]) -> None:
+            automated = next(item for item in document["results"] if item["kind"] == "automated")
+            automated["logs"][0]["exit_code"] = False
+
+        self.mutate(self.fixture.failure_path, make_exit_boolean)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "failure_automated_logs_invalid"):
+            self.finalize("boolean-failure-exit")
+        self.fixture.failure_path.write_bytes(original_failure)
+
     def test_rejects_wrong_commit_and_digest(self) -> None:
         cases = (
             (
@@ -1705,6 +1755,60 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(MODULE.EvidenceError, code):
                     self.finalize(f"output-{index}")
                 path.write_bytes(original)
+
+    def test_rejects_missing_or_incoherent_load_pool_partition(self) -> None:
+        original = self.fixture.load_path.read_bytes()
+        cases = (
+            lambda value: value["environment"].pop(
+                "gateway_db_completion_pool_max_connections"
+            ),
+            lambda value: value["environment"].__setitem__(
+                "gateway_db_regular_pool_max_connections", 0
+            ),
+            lambda value: value["environment"].__setitem__(
+                "gateway_db_regular_pool_max_connections", 25
+            ),
+            lambda value: value["environment"].__setitem__(
+                "gateway_db_completion_pool_max_connections", True
+            ),
+        )
+        for index, operation in enumerate(cases):
+            with self.subTest(index=index):
+                self.mutate(self.fixture.load_path, operation)
+                with self.assertRaisesRegex(
+                    MODULE.EvidenceError, "load_environment_invalid"
+                ):
+                    self.finalize(f"load-pool-partition-{index}")
+                self.fixture.load_path.write_bytes(original)
+
+    def test_rejects_coherent_but_wrong_load_pool_partition(self) -> None:
+        original = self.fixture.load_path.read_bytes()
+        cases = (
+            (31, 23, 8),
+            (32, 23, 9),
+            (40, 32, 8),
+        )
+        for index, (total, regular, completion) in enumerate(cases):
+            with self.subTest(
+                total=total,
+                regular=regular,
+                completion=completion,
+            ):
+                self.mutate(
+                    self.fixture.load_path,
+                    lambda value: value["environment"].update(
+                        {
+                            "gateway_db_pool_max_connections": total,
+                            "gateway_db_regular_pool_max_connections": regular,
+                            "gateway_db_completion_pool_max_connections": completion,
+                        }
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    MODULE.EvidenceError, "load_environment_invalid"
+                ):
+                    self.finalize(f"load-pool-profile-{index}")
+                self.fixture.load_path.write_bytes(original)
 
     def test_rejects_automated_scope_and_failed_claims(self) -> None:
         original_failure = self.fixture.failure_path.read_bytes()

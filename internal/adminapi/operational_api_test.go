@@ -374,10 +374,12 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pool := isolatedAdminAPIPool(t, ctx, databaseURL)
+	trafficReady := true
 	api, err := New(
 		pool, "https://console.example.test", 12*time.Hour,
 		slog.New(slog.NewJSONHandler(io.Discard, nil)), testAdminSecretManager(t, pool),
 		WithRole("api"),
+		WithSystemReadiness(func(context.Context) bool { return trafficReady }),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -898,16 +900,35 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	selfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
 		"kind": "local", "environment_id": environment.ID,
 	}, cookie, csrf, "https://console.example.test")
-	if selfTest.Code != http.StatusAccepted || !bytes.Contains(selfTest.Body.Bytes(), []byte(`"state":"passed"`)) {
+	if selfTest.Code != http.StatusAccepted || !bytes.Contains(selfTest.Body.Bytes(), []byte(`"state":"passed"`)) ||
+		!bytes.Contains(selfTest.Body.Bytes(), []byte(`"environment_id":"`+environment.ID+`"`)) {
 		t.Fatalf("self-test status/body=%d %s", selfTest.Code, selfTest.Body.String())
 	}
 	var selfTestDocument struct {
 		ID string `json:"id"`
 	}
 	decodeResponse(t, selfTest, &selfTestDocument)
-	selfTestGet := performGET(handler, "/admin/v1/self-tests/"+selfTestDocument.ID, cookie)
+	selfTestGet := performGET(handler, "/admin/v1/self-tests/"+selfTestDocument.ID+baseQuery, cookie)
 	if selfTestGet.Code != http.StatusOK || !bytes.Contains(selfTestGet.Body.Bytes(), []byte(`"active_configuration"`)) {
 		t.Fatalf("self-test get status/body=%d %s", selfTestGet.Code, selfTestGet.Body.String())
+	}
+	selfTestWithoutEnvironment := performGET(handler, "/admin/v1/self-tests/"+selfTestDocument.ID, cookie)
+	if selfTestWithoutEnvironment.Code != http.StatusBadRequest {
+		t.Fatalf("environment-free self-test get status/body=%d %s", selfTestWithoutEnvironment.Code, selfTestWithoutEnvironment.Body.String())
+	}
+	siblingEnvironmentResponse := performJSON(t, handler, http.MethodPost, "/admin/v1/applications/"+application.ID+"/environments", map[string]string{
+		"slug": "staging", "display_name": "Staging", "kind": "staging",
+	}, cookie, csrf, "https://console.example.test")
+	if siblingEnvironmentResponse.Code != http.StatusCreated {
+		t.Fatalf("create sibling environment status/body=%d %s", siblingEnvironmentResponse.Code, siblingEnvironmentResponse.Body.String())
+	}
+	var siblingEnvironment struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, siblingEnvironmentResponse, &siblingEnvironment)
+	crossEnvironmentSelfTest := performGET(handler, "/admin/v1/self-tests/"+selfTestDocument.ID+"?environment_id="+url.QueryEscape(siblingEnvironment.ID), cookie)
+	if crossEnvironmentSelfTest.Code != http.StatusNotFound {
+		t.Fatalf("cross-environment self-test get status/body=%d %s", crossEnvironmentSelfTest.Code, crossEnvironmentSelfTest.Body.String())
 	}
 	unsupportedSelfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
 		"kind": "openrouter", "environment_id": environment.ID,
@@ -915,12 +936,15 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if unsupportedSelfTest.Code != http.StatusBadRequest {
 		t.Fatalf("unsupported self-test status/body=%d %s", unsupportedSelfTest.Code, unsupportedSelfTest.Body.String())
 	}
+	var credentialSelfTestCalls int
 	api.operations.selfTests = credentialSelfTestRunnerFixture(func(
 		_ context.Context,
 		input credentialSelfTestInput,
 	) credentialSelfTestResult {
+		credentialSelfTestCalls++
 		if input.Scope.OrganizationID != session.OrganizationID || input.Scope.ApplicationID != application.ID ||
 			input.Scope.EnvironmentID != environment.ID || input.Kind != "upstream" ||
+			input.ConfigRevisionID != fixture.revisionID ||
 			input.UpstreamID != "primary" || input.ModelID != "canary" || input.MaxCostNano != 1_000_000 {
 			return failedCredentialSelfTest(nil, "fixture", "The test runner received the wrong tenant-scoped input.")
 		}
@@ -928,21 +952,33 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 			passedSelfTestCheck("fixture", "The credential-aware fixture completed."),
 		}}
 	})
+	wrongRevisionSelfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
+		"kind": "upstream", "environment_id": environment.ID,
+		"config_revision_id": id.Must(id.ConfigRevision),
+		"upstream":           "primary", "model": "canary", "max_cost_nano_usd": 1_000_000,
+	}, cookie, csrf, "https://console.example.test")
+	if wrongRevisionSelfTest.Code != http.StatusConflict || credentialSelfTestCalls != 0 {
+		t.Fatalf("revision-mismatched self-test status/calls/body=%d/%d %s",
+			wrongRevisionSelfTest.Code, credentialSelfTestCalls, wrongRevisionSelfTest.Body.String())
+	}
 	credentialSelfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
 		"kind": "upstream", "environment_id": environment.ID,
-		"upstream": "primary", "model": "canary", "max_cost_nano_usd": 1_000_000,
+		"config_revision_id": fixture.revisionID,
+		"upstream":           "primary", "model": "canary", "max_cost_nano_usd": 1_000_000,
 	}, cookie, csrf, "https://console.example.test")
 	if credentialSelfTest.Code != http.StatusAccepted ||
-		!bytes.Contains(credentialSelfTest.Body.Bytes(), []byte(`"state":"passed"`)) {
+		!bytes.Contains(credentialSelfTest.Body.Bytes(), []byte(`"state":"passed"`)) ||
+		credentialSelfTestCalls != 1 {
 		t.Fatalf("credential self-test status/body=%d %s", credentialSelfTest.Code, credentialSelfTest.Body.String())
 	}
 	var credentialSelfTestDocument struct {
 		ID string `json:"id"`
 	}
 	decodeResponse(t, credentialSelfTest, &credentialSelfTestDocument)
-	credentialSelfTestGet := performGET(handler, "/admin/v1/self-tests/"+credentialSelfTestDocument.ID, cookie)
+	credentialSelfTestGet := performGET(handler, "/admin/v1/self-tests/"+credentialSelfTestDocument.ID+baseQuery, cookie)
 	if credentialSelfTestGet.Code != http.StatusOK ||
 		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`"kind":"upstream"`)) ||
+		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`"config_revision_id":"`+fixture.revisionID+`"`)) ||
 		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`credential-aware fixture completed`)) {
 		t.Fatalf("credential self-test get status/body=%d %s", credentialSelfTestGet.Code, credentialSelfTestGet.Body.String())
 	}
@@ -1218,9 +1254,18 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 
 	system := performGET(handler, "/admin/v1/system", cookie)
 	if system.Code != http.StatusOK || !bytes.Contains(system.Body.Bytes(), []byte(`"role":"api"`)) ||
+		!bytes.Contains(system.Body.Bytes(), []byte(`"mutation_ready":true`)) ||
 		!bytes.Contains(system.Body.Bytes(), []byte(`"ready":true`)) {
 		t.Fatalf("system status/body=%d %s", system.Code, system.Body.String())
 	}
+	trafficReady = false
+	degradedTraffic := performGET(handler, "/admin/v1/system", cookie)
+	if degradedTraffic.Code != http.StatusOK ||
+		!bytes.Contains(degradedTraffic.Body.Bytes(), []byte(`"mutation_ready":true`)) ||
+		!bytes.Contains(degradedTraffic.Body.Bytes(), []byte(`"ready":false`)) {
+		t.Fatalf("degraded traffic status/body=%d %s", degradedTraffic.Code, degradedTraffic.Body.String())
+	}
+	trafficReady = true
 	doctor := performGET(handler, "/admin/v1/system/doctor", cookie)
 	if doctor.Code != http.StatusOK ||
 		!bytes.Contains(doctor.Body.Bytes(), []byte(`"report_schema":1`)) ||

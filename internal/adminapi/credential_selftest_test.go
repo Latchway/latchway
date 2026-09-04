@@ -69,7 +69,8 @@ func TestProductionCredentialSelfTestsOpenRouter(t *testing.T) {
 	}
 	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
 	result := runner.Run(context.Background(), credentialSelfTestInput{
-		Scope: scope, Kind: "openrouter", UpstreamID: "openrouter", ModelID: "canary",
+		Scope: scope, ConfigRevisionID: snapshot.revision,
+		Kind: "openrouter", UpstreamID: "openrouter", ModelID: "canary",
 		MaxCostNano: 10_000_000,
 	})
 	if result.State != "passed" || !validCredentialSelfTestResultForTest(result) {
@@ -136,7 +137,8 @@ func TestProductionCredentialSelfTestsOpenAIResponses(t *testing.T) {
 	}
 	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
 	result := runner.Run(context.Background(), credentialSelfTestInput{
-		Scope: scope, Kind: "upstream", UpstreamID: "primary", ModelID: "assistant_default",
+		Scope: scope, ConfigRevisionID: snapshot.revision,
+		Kind: "upstream", UpstreamID: "primary", ModelID: "assistant_default",
 		MaxCostNano: 10_000_000,
 	})
 	if result.State != "passed" || len(result.Checks) != 8 {
@@ -197,7 +199,8 @@ func TestProductionCredentialSelfTestsOpenAIEmbeddings(t *testing.T) {
 	}
 	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
 	result := runner.Run(context.Background(), credentialSelfTestInput{
-		Scope: scope, Kind: "upstream", UpstreamID: "embeddings", ModelID: "search_vectors",
+		Scope: scope, ConfigRevisionID: snapshot.revision,
+		Kind: "upstream", UpstreamID: "embeddings", ModelID: "search_vectors",
 		// One Embeddings request fits; an incorrectly doubled request charge would not.
 		MaxCostNano: 6_000_000,
 	})
@@ -275,7 +278,8 @@ func TestProductionCredentialSelfTestsAnthropicMessages(t *testing.T) {
 	}
 	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
 	result := runner.Run(context.Background(), credentialSelfTestInput{
-		Scope: scope, Kind: "upstream", UpstreamID: "anthropic", ModelID: "assistant",
+		Scope: scope, ConfigRevisionID: snapshot.revision,
+		Kind: "upstream", UpstreamID: "anthropic", ModelID: "assistant",
 		MaxCostNano: 10_000_000,
 	})
 	if result.State != "passed" || len(result.Checks) != 8 {
@@ -339,7 +343,7 @@ func TestProductionCredentialSelfTestsFailBeforeDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := runner.Run(context.Background(), credentialSelfTestInput{
-		Scope: configuration.TenantScope{}, Kind: "openrouter",
+		Scope: configuration.TenantScope{}, ConfigRevisionID: snapshot.revision, Kind: "openrouter",
 		UpstreamID: "openrouter", ModelID: "canary", MaxCostNano: 1,
 	})
 	if result.State != "failed" || len(result.Checks) != 3 || result.Checks[2].Name != "budget" {
@@ -347,6 +351,30 @@ func TestProductionCredentialSelfTestsFailBeforeDispatch(t *testing.T) {
 	}
 	if targets.acquisitions != 0 {
 		t.Fatalf("budget failure acquired %d targets", targets.acquisitions)
+	}
+}
+
+func TestProductionCredentialSelfTestsRejectRevisionMismatchBeforeDispatch(t *testing.T) {
+	t.Parallel()
+	snapshot := credentialSelfTestSnapshotFixture{revision: id.Must(id.ConfigRevision)}
+	targets := &credentialSelfTestTargetFixture{}
+	runner, err := newProductionCredentialSelfTests(
+		credentialSelfTestSnapshotLoaderFixture{snapshot: snapshot},
+		&credentialSelfTestSecretFixture{}, targets,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := runner.Run(context.Background(), credentialSelfTestInput{
+		ConfigRevisionID: id.Must(id.ConfigRevision), Kind: "upstream",
+		UpstreamID: "primary", ModelID: "canary", MaxCostNano: 1,
+	})
+	if result.State != "failed" || len(result.Checks) != 1 ||
+		result.Checks[0].Name != "active_configuration" {
+		t.Fatalf("Run() = %+v, want pre-dispatch revision failure", result)
+	}
+	if targets.acquisitions != 0 {
+		t.Fatalf("revision failure acquired %d targets", targets.acquisitions)
 	}
 }
 
@@ -391,13 +419,20 @@ func TestCredentialSelfTestKeyAndStoredResultValidation(t *testing.T) {
 	now := time.Now().UTC()
 	completed := now.Add(time.Second)
 	valid := selfTestDocument{
-		ID: id.Must(id.Prefix("tst")), Kind: "openrouter", State: "passed",
+		ID: id.Must(id.Prefix("tst")), EnvironmentID: id.Must(id.Environment),
+		ConfigRevisionID: id.Must(id.ConfigRevision),
+		Kind:             "openrouter", State: "passed",
 		CreatedAt: now, CompletedAt: &completed,
 		Checks: []selfTestCheck{{Name: "usage", State: "passed", SafeDetail: "safe"}},
 	}
 	if !validStoredSelfTest(valid) {
 		t.Fatal("valid stored self-test rejected")
 	}
+	valid.EnvironmentID = ""
+	if validStoredSelfTest(valid) {
+		t.Fatal("legacy stored self-test without environment binding accepted")
+	}
+	valid.EnvironmentID = id.Must(id.Environment)
 	valid.Checks[0].SafeDetail = strings.Repeat("x", 2049)
 	if validStoredSelfTest(valid) {
 		t.Fatal("oversized safe detail accepted")

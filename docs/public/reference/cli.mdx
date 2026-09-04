@@ -6,7 +6,7 @@ audience: "reference"
 pageType: "reference"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-04"
 owner: "core-api"
 ---
 
@@ -21,10 +21,20 @@ and do not open PostgreSQL.
 export LATCHWAY_SERVER=https://gateway.example.com
 export LATCHWAY_ADMIN_API_TOKEN='value-from-a-secret-manager'
 
+latchway readiness
 latchway --output table status
 latchway --output json status
 latchway login
 ```
+
+`readiness` is an unauthenticated, read-only, four-second probe of
+`${LATCHWAY_SERVER}/readyz`. It accepts only an exact canonical HTTPS origin,
+or canonical loopback HTTP for local operation. Success requires HTTP 200,
+`status: ready`, and exactly the current `database`, `schema`, `active_configuration`,
+`quota_completion_pool`, `master_key`, `signing_key`, and `worker_heartbeat`
+checks with state `ok`. Redirects, oversized bodies, non-JSON content, and
+malformed or extended documents fail closed. Output contains only those fixed
+names and states; response content and transport details are never printed.
 
 `login` validates the environment-supplied bearer and prints safe principal,
 organization, capability, and expiry metadata. It does not accept a password or
@@ -51,8 +61,14 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway migrate up` | Apply embedded forward-only migrations |
 | `latchway migrate status` | Compare current and available schema |
 | `latchway doctor` | Run local deployment diagnostics |
+| `latchway readiness` | Probe the remote unauthenticated readiness contract |
 | `latchway version` | Print build, contract, and protocol metadata |
 | `latchway status` | Read authenticated remote system status |
+
+The local `doctor` command uses one transient database connection and does not
+represent the serving process's pool allocation. Use `readiness` or the Admin
+doctor when verifying that process's reserved completion capacity and live
+pool pressure.
 
 `latchway develop` prints exact loopback URLs for identity tokens,
 challenge-bound debug evidence, and the bounded sample request helper. In AI

@@ -186,7 +186,17 @@ export LATCHWAY_MASTER_KEY=$master_key
 export LATCHWAY_PUBLIC_ORIGIN=http://localhost:8080
 export LATCHWAY_ROLE=all
 export LATCHWAY_MIGRATE_ON_START=false
-export LATCHWAY_DB_MAX_CONNECTIONS=5
+gateway_db_pool_max_connections=5
+gateway_db_regular_pool_max_connections=3
+gateway_db_completion_pool_max_connections=2
+if ((gateway_db_regular_pool_max_connections < 1 ||
+     gateway_db_completion_pool_max_connections < 1 ||
+     gateway_db_regular_pool_max_connections != gateway_db_pool_max_connections - gateway_db_completion_pool_max_connections)); then
+  echo "gateway database pool partition is incoherent" >&2
+  exit 2
+fi
+export LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections
+export LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections
 
 start_postgres() {
   local name=$1
@@ -242,6 +252,7 @@ run_cli() {
     --env LATCHWAY_ROLE \
     --env LATCHWAY_MIGRATE_ON_START \
     --env LATCHWAY_DB_MAX_CONNECTIONS \
+    --env LATCHWAY_DB_COMPLETION_CONNECTIONS \
     "$image" --output json "$@" >"$output"
 }
 
@@ -317,8 +328,17 @@ start_gateway_and_capture() {
     --env LATCHWAY_ROLE \
     --env LATCHWAY_MIGRATE_ON_START \
     --env LATCHWAY_DB_MAX_CONNECTIONS \
+    --env LATCHWAY_DB_COMPLETION_CONNECTIONS \
     "$image" >/dev/null
   gateway_created=true
+  local observed_total observed_completion
+  observed_total=$(docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$gateway")
+  observed_completion=$(docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$gateway")
+  if [[ "$observed_total" != "LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections" ||
+        "$observed_completion" != "LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections" ]]; then
+    echo "operational gateway pool environment does not match the exact aggregate/completion partition" >&2
+    exit 1
+  fi
   local published port ready=false
   published=$(docker port "$gateway" 8080/tcp)
   port=${published##*:}

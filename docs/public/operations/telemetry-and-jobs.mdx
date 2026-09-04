@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-04"
 owner: "core-operations"
 ---
 
@@ -19,7 +19,7 @@ authoritative quota, replay, configuration, or audit store.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /healthz` | Process liveness |
-| `GET /readyz` | Database, migrations, active configuration, key material, and required worker-heartbeat readiness |
+| `GET /readyz` | Database, migrations, active configuration, reserved quota-completion capacity, key material, and required worker-heartbeat readiness |
 | `GET /metrics` | Prometheus exposition backed by OpenTelemetry metrics |
 
 Authenticated operators can run the canonical extended diagnostic through the
@@ -43,6 +43,12 @@ freshness; they do not certify every individual request. The reported
 `embedded_self`, not fetched from a release service. See
 [Operational views](/administration/observability#system-health) for the exact
 claim made by each check.
+
+When a distinct quota-completion pool is configured, doctor probes it through
+`quota_completion_pool_connectivity` and reports its instantaneous pressure
+separately through `quota_completion_pool_saturation`. The CLI's intentional
+one-connection, single-pool diagnostic remains compatible and does not invent
+a second pool; it is not a measurement of the serving process's allocation.
 
 `/metrics` is unauthenticated at the application router. Restrict it at the
 private network, service mesh, load balancer, or scrape identity boundary; its
@@ -120,13 +126,24 @@ replicas but keep the combined connection budget below the PostgreSQL limit:
 
 ```text
 maximum connections
-  = maximum API replicas × API pool size
-  + maximum worker replicas × worker pool size
-  + migration, backup, administration, and maintenance headroom
+  = maximum API replicas × API aggregate pool ceiling
+  + maximum worker replicas × worker aggregate pool ceiling
+
+planned peak database demand
+  = maximum connections
+  + migration, backup, administration, maintenance, and rollout slots
+
+planned peak database demand ≤ 80% of usable PostgreSQL connections
 ```
 
-Leave at least 20 percent database headroom in addition to explicit operational
-slots. A connection pooler does not replace this end-to-end budget.
+The per-replica aggregate ceiling is `LATCHWAY_DB_MAX_CONNECTIONS`.
+`LATCHWAY_DB_COMPLETION_CONNECTIONS` reserves a subset for terminal quota
+lifecycle updates; it does not create connections beyond the aggregate value.
+The defaults split 20 into five completion-reserved and 15 regular connections.
+Budget every possible replica plus explicit operational and rollout slots, and
+keep that planned peak at or below 80% of usable PostgreSQL capacity so at
+least 20% remains free. A connection pooler does not replace this end-to-end
+budget.
 
 ## Alert baseline
 
@@ -135,7 +152,8 @@ migration drift, process-local configuration-cache warnings, signing/JWKS
 refresh failure, stale usage/retention/reconciliation jobs, settlement backlog,
 reservation recovery, self-test rejection or recovery, attestation failure-rate
 shifts, quota-denial anomalies, upstream failure/latency, stream saturation,
-database pool exhaustion, and backup age. Alert on the stated doctor check; do
+aggregate database pool exhaustion, completion-pool saturation, and backup
+age. Alert on the stated doctor check; do
 not relabel a durable JWKS refresh observation as a live provider probe or a
 dependency-inventory check as physical-device verification.
 

@@ -7,14 +7,13 @@ import {
   NoContentSchema,
   queryPath,
   RevisionSchema,
-  SystemStatusSchema,
   type AdminSessionMetadata,
   type AdminSessionMetadataPage,
-  type DoctorReport,
-  type SystemStatus
+  type DoctorReport
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import {
@@ -52,7 +51,7 @@ function localProblem(error: unknown): AdminProblem {
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
   return problem ? <div className="control-notice control-notice--error" role="alert">
     <strong>{problem.title}</strong><span>{problem.detail}</span>
-    <small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>
+    <small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>
     {problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}
   </div> : null;
 }
@@ -68,8 +67,9 @@ function downloadText(contents: string, filename: string): void {
 
 export function SettingsPage() {
   const consoleSession = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
+  const refreshCompatibility = consoleCompatibility.refresh;
   const workspace = useOptionalWorkspace();
-  const [status, setStatus] = useState<SystemStatus>();
   const [doctor, setDoctor] = useState<DoctorReport>();
   const [sessions, setSessions] = useState<AdminSessionMetadataPage>();
   const [problem, setProblem] = useState<AdminProblem>();
@@ -89,9 +89,10 @@ export function SettingsPage() {
   const canActivateConfiguration = consoleSession.data?.session?.capabilities.includes("activate_configuration") ?? false;
   const environment = workspace?.environment;
   const environmentID = environment?.id;
+  const status = consoleCompatibility.status;
   const compatibility = useMemo(
-    () => status ? evaluateSettingsCompatibility(status, doctor) : undefined,
-    [doctor, status]
+    () => status ? evaluateSettingsCompatibility(status) : undefined,
+    [status]
   );
   const expectedActivationPhrase = environment ? `ACTIVATE ${environment.slug}` : "";
   const expectedRevokePhrase = revokeTarget ? `REVOKE ${revokeTarget.id}` : "";
@@ -108,9 +109,9 @@ export function SettingsPage() {
     setProblem(undefined);
     setNotice(undefined);
     try {
-      const nextStatus = (await adminRequest("/admin/v1/system", SystemStatusSchema, { signal })).data;
+      const nextStatus = await refreshCompatibility();
+      if (!nextStatus) return;
       if (signal?.aborted) return;
-      setStatus(nextStatus);
       const doctorRequest = adminRequest("/admin/v1/system/doctor", DoctorReportSchema, { signal });
       const sessionRequest = canManageOwners && nextStatus.server_capabilities.includes("admin_session_management")
         ? adminRequest(
@@ -136,7 +137,7 @@ export function SettingsPage() {
     } finally {
       if (!signal?.aborted) setBusy(undefined);
     }
-  }, [canManageOwners, configured]);
+  }, [canManageOwners, configured, refreshCompatibility]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -182,7 +183,7 @@ export function SettingsPage() {
   }
 
   async function stageImport(): Promise<void> {
-    if (!currentImportDocument || !environmentID) return;
+    if (!consoleCompatibility.mutationAllowed || !currentImportDocument || !environmentID) return;
     setBusy("stage"); setProblem(undefined); setNotice(undefined);
     try {
       const result = await stageConfigurationImport({ document: currentImportDocument, environmentID });
@@ -195,7 +196,7 @@ export function SettingsPage() {
   }
 
   async function activateImport(): Promise<void> {
-    if (!currentImportDocument || !environmentID || !reviewed || activationPhrase !== expectedActivationPhrase) return;
+    if (!consoleCompatibility.mutationAllowed || !currentImportDocument || !environmentID || !reviewed || activationPhrase !== expectedActivationPhrase) return;
     setBusy("activate"); setProblem(undefined); setNotice(undefined);
     try {
       if (!currentStaged) return;
@@ -216,7 +217,7 @@ export function SettingsPage() {
   }
 
   async function revokeSession(): Promise<void> {
-    if (!revokeTarget || revokePhrase !== expectedRevokePhrase) return;
+    if (!consoleCompatibility.mutationAllowed || !revokeTarget || revokePhrase !== expectedRevokePhrase) return;
     setBusy("revoke"); setProblem(undefined); setNotice(undefined);
     try {
       await adminRequest(`/admin/v1/admin-sessions/${revokeTarget.id}/revoke`, NoContentSchema, { method: "POST" });
@@ -234,7 +235,7 @@ export function SettingsPage() {
 
   if (!configured) return <section className="empty-state"><h1>Sign in to inspect instance settings.</h1></section>;
 
-  const mutationAllowed = compatibility?.readOnlySafeMode === false;
+  const mutationAllowed = consoleCompatibility.mutationAllowed;
   const importAllowed = mutationAllowed && canActivateConfiguration && environment?.status === "active";
   const sessionMutationAllowed = mutationAllowed && canManageOwners
     && status?.server_capabilities.includes("admin_session_management") === true;
@@ -243,19 +244,20 @@ export function SettingsPage() {
     <section className="page-heading" aria-labelledby="settings-heading"><div>
       <p className="eyebrow">Administration</p><h1 id="settings-heading">Settings and compatibility</h1>
       <p>Inspect the running contract, privacy posture, configuration transfer workflow, and credential-free administrator sessions through the canonical Admin API.</p>
-    </div><button className="secondary-action" disabled={Boolean(busy)} onClick={() => void refresh()} type="button">{busy === "load" ? "Refreshing…" : "Refresh settings"}</button></section>
+    </div><button className="secondary-action" disabled={Boolean(busy) || consoleCompatibility.isFetching} onClick={() => void refresh()} type="button">{busy === "load" || consoleCompatibility.isFetching ? "Refreshing…" : "Refresh settings"}</button></section>
 
     <ProblemNotice problem={problem} />
     {notice ? <div className="control-notice" role="status"><strong>Settings update</strong><span>{notice}</span></div> : null}
 
     {compatibility ? <section aria-labelledby="compatibility-heading" className="detail-card">
       <div className="detail-card__heading"><div><p className="eyebrow">Negotiated compatibility</p><h2 id="compatibility-heading">Server and console contract</h2></div><span className={`state-badge state-badge--${compatibility.readOnlySafeMode ? "degraded" : "available"}`}>{compatibility.readOnlySafeMode ? "read-only safe mode" : "compatible"}</span></div>
-      {compatibility.readOnlySafeMode ? <div className="control-notice control-notice--error" role="status"><strong>Read-only safe mode is active</strong><span>Configuration activation and session revocation are disabled. Reads and redaction-safe export remain available.</span><ul>{compatibility.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : <div className="control-notice" role="status"><strong>Mutation compatibility confirmed</strong><span>Contract {consoleContractVersion}, protocol {consoleProtocolVersion}, readiness, and all required v1 server capabilities are present.</span></div>}
+      {compatibility.readOnlySafeMode ? <div className="control-notice control-notice--error" role="status"><strong>Read-only safe mode is active</strong><span>Configuration activation and session revocation are disabled. Reads and redaction-safe export remain available.</span><ul>{compatibility.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : <div className="control-notice" role="status"><strong>Mutation compatibility confirmed</strong><span>Contract {consoleContractVersion}, protocol {consoleProtocolVersion}, administrative database/schema readiness, and all required v1 server capabilities are present.</span></div>}
       <dl className="system-status-grid">
         <div><dt>Server build</dt><dd>{status?.server_version}</dd></div><div><dt>Console contract</dt><dd>{consoleContractVersion}</dd></div>
         <div><dt>Server contract</dt><dd>{status?.contract_version}</dd></div><div><dt>Protocols</dt><dd>{status?.protocol_versions.join(", ")}</dd></div>
         <div><dt>Required protocol</dt><dd>{consoleProtocolVersion}</dd></div><div><dt>Database schema</dt><dd>{status?.database_schema_version}</dd></div>
-        <div><dt>Process role</dt><dd>{status?.role}</dd></div><div><dt>Traffic ready</dt><dd>{status?.ready ? "Yes" : "No"}</dd></div>
+        <div><dt>Process role</dt><dd>{status?.role}</dd></div><div><dt>Admin mutations ready</dt><dd>{status?.mutation_ready ? "Yes" : "No"}</dd></div>
+        <div><dt>Traffic ready</dt><dd>{status?.ready ? "Yes" : "No"}</dd></div>
         <div><dt>Live refresh hints</dt><dd>{status?.server_capabilities.includes("admin_event_stream") ? "SSE capability negotiated" : "Polling and manual refresh fallback"}</dd></div>
       </dl>
       <h3>Negotiated server capabilities</h3><ul aria-label="Negotiated server capabilities" className="tag-list">{status?.server_capabilities.map((capability) => <li key={capability}><code>{capability}</code></li>)}</ul>

@@ -397,13 +397,14 @@ resource "aws_ecs_task_definition" "main" {
         { name = "LATCHWAY_LOG_LEVEL", value = "info" },
         { name = "LATCHWAY_MIGRATE_ON_START", value = tostring(var.migrate_on_start) },
         { name = "LATCHWAY_DB_MAX_CONNECTIONS", value = tostring(var.db_connections_per_task) },
+        { name = "LATCHWAY_DB_COMPLETION_CONNECTIONS", value = tostring(var.db_completion_connections_per_task) },
         { name = "LATCHWAY_PUBLIC_ORIGIN", value = var.public_origin },
         { name = "LATCHWAY_SHUTDOWN_TIMEOUT", value = "30s" },
       ]
       secrets = local.runtime_secrets
 
       healthCheck = {
-        command     = ["CMD", "/latchway", "doctor", "--output", "json"]
+        command     = ["CMD", "/latchway", "--server", "http://127.0.0.1:8080", "--output", "json", "readiness"]
         interval    = 30
         timeout     = 5
         retries     = 3
@@ -422,6 +423,13 @@ resource "aws_ecs_task_definition" "main" {
   ])
 
   depends_on = [aws_iam_role_policy.secrets]
+
+  lifecycle {
+    precondition {
+      condition     = var.db_completion_connections_per_task < var.db_connections_per_task
+      error_message = "db_completion_connections_per_task must be less than the aggregate db_connections_per_task budget."
+    }
+  }
 }
 
 # This is intentionally the public HTTPS entry point. Tasks and PostgreSQL

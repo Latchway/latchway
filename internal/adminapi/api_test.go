@@ -75,6 +75,21 @@ func TestWithConfigurationStore(t *testing.T) {
 	}
 }
 
+func TestWithSystemReadiness(t *testing.T) {
+	t.Parallel()
+	api := &API{}
+	check := func(context.Context) bool { return true }
+	if err := WithSystemReadiness(check)(api); err != nil {
+		t.Fatalf("WithSystemReadiness() error = %v", err)
+	}
+	if api.systemReadiness == nil || !api.systemReadiness(context.Background()) {
+		t.Fatal("WithSystemReadiness() did not retain the supplied evaluator")
+	}
+	if err := WithSystemReadiness(nil)(api); err == nil {
+		t.Fatal("WithSystemReadiness(nil) succeeded")
+	}
+}
+
 func TestFailureLimiterUsesSlidingWindow(t *testing.T) {
 	t.Parallel()
 

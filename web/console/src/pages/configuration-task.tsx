@@ -11,6 +11,7 @@ import {
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
 import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
+import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import { applyConfigurationSliceChange, type JSONRecord } from "./configuration-slice";
 
@@ -28,6 +29,7 @@ export function localTaskProblem(detail: string, title = "Configuration task is 
 export function useConfigurationTask(area: string) {
   const queryClient = useQueryClient();
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const environment = workspace?.environment;
   const [published, setPublished] = useState<{ data: ConfigurationRevision; etag?: string }>();
@@ -44,9 +46,16 @@ export function useConfigurationTask(area: string) {
   const source = response?.data;
   const activeDraft = draft?.revision.environment_id === environment?.id ? draft : undefined;
   const canConfigure = session.data?.mode === "configured"
+    && consoleCompatibility.mutationAllowed
     && (session.data.session?.capabilities.includes("activate_configuration") ?? false)
     && workspace?.application?.status !== "disabled"
     && environment?.status !== "disabled";
+  const canManageSecrets = session.data?.mode === "configured"
+    && consoleCompatibility.mutationAllowed
+    && (session.data.session?.capabilities.includes("manage_secrets") ?? false);
+  const canRunSelfTests = session.data?.mode === "configured"
+    && consoleCompatibility.mutationAllowed
+    && (session.data.session?.capabilities.includes("run_self_tests") ?? false);
 
   async function refreshLatest(): Promise<void> {
     if (!environment) return;
@@ -107,8 +116,11 @@ export function useConfigurationTask(area: string) {
     application: workspace?.application,
     busy,
     canConfigure,
+    canManageSecrets,
+    canRunSelfTests,
     configuration,
     environment,
+    mutationAllowed: consoleCompatibility.mutationAllowed,
     problem,
     publish,
     setDraft,

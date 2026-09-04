@@ -139,6 +139,8 @@ func RelayResponse(
 		return outcome, err
 	}
 
+	readController := newResponseReadController(ctx, abortUpstream)
+	defer readController.Close()
 	buffer := make([]byte, relayBufferBytes)
 	firstBytePending := true
 	firstTokenPending := true
@@ -168,7 +170,7 @@ func RelayResponse(
 			}
 			timeoutError = ErrResponseFirstByteTimeout
 		}
-		count, readErr, waitErr := readResponseChunk(ctx, body, buffer, readTimeout, timeoutError, abortUpstream)
+		count, readErr, waitErr := readController.Read(body, buffer, readTimeout, timeoutError)
 		if waitErr != nil {
 			return outcome, waitErr
 		}
@@ -266,45 +268,82 @@ func RelayResponse(
 	}
 }
 
-func readResponseChunk(
-	ctx context.Context,
+// responseReadController owns one reusable timeout and one context callback for
+// the complete response. Sparse streams may contain many chunks, so allocating
+// both mechanisms for every Read would make a healthy long-lived stream's heap
+// grow in proportion to its heartbeat count until the next garbage collection.
+type responseReadController struct {
+	ctx              context.Context
+	abort            func()
+	timer            *time.Timer
+	timerDone        chan struct{}
+	contextAbortDone chan struct{}
+	stopContextAbort func() bool
+	timerArmed       bool
+}
+
+func newResponseReadController(ctx context.Context, abort func()) *responseReadController {
+	controller := &responseReadController{
+		ctx: ctx, abort: abort,
+		timerDone: make(chan struct{}, 1), contextAbortDone: make(chan struct{}),
+	}
+	controller.timer = time.AfterFunc(time.Hour, func() {
+		controller.abort()
+		controller.timerDone <- struct{}{}
+	})
+	if !controller.timer.Stop() {
+		<-controller.timerDone
+	}
+	controller.stopContextAbort = context.AfterFunc(ctx, func() {
+		controller.abort()
+		close(controller.contextAbortDone)
+	})
+	return controller
+}
+
+func (controller *responseReadController) Read(
 	body *onceReadCloser,
 	buffer []byte,
 	readTimeout time.Duration,
 	timeoutError error,
-	abort func(),
 ) (int, error, error) {
-	if err := ctx.Err(); err != nil {
-		abort()
+	if err := controller.ctx.Err(); err != nil {
+		controller.abort()
 		return 0, nil, err
 	}
-
-	idleExpired := false
-	timerDone := make(chan struct{})
-	timer := time.AfterFunc(readTimeout, func() {
-		idleExpired = true
-		abort()
-		close(timerDone)
-	})
-	contextAbortDone := make(chan struct{})
-	stopContextAbort := context.AfterFunc(ctx, func() {
-		abort()
-		close(contextAbortDone)
-	})
+	if controller.timerArmed {
+		controller.abort()
+		return 0, nil, ErrInvalidResponseRelay
+	}
+	// The preceding Read always stopped or synchronously drained this timer.
+	// A true result would mean overlapping reads and is rejected fail-closed.
+	if controller.timer.Reset(readTimeout) {
+		controller.timer.Stop()
+		controller.abort()
+		return 0, nil, ErrInvalidResponseRelay
+	}
+	controller.timerArmed = true
 	count, readErr := body.Read(buffer)
-	if !timer.Stop() {
-		<-timerDone
-	}
-	if !stopContextAbort() {
-		<-contextAbortDone
-	}
-	if idleExpired {
+	if !controller.timer.Stop() {
+		<-controller.timerDone
+		controller.timerArmed = false
 		return 0, nil, timeoutError
 	}
-	if err := ctx.Err(); err != nil {
+	controller.timerArmed = false
+	if err := controller.ctx.Err(); err != nil {
 		return 0, nil, err
 	}
 	return count, readErr, nil
+}
+
+func (controller *responseReadController) Close() {
+	if controller.timerArmed && !controller.timer.Stop() {
+		<-controller.timerDone
+	}
+	controller.timerArmed = false
+	if !controller.stopContextAbort() {
+		<-controller.contextAbortDone
+	}
 }
 
 type onceReadCloser struct {

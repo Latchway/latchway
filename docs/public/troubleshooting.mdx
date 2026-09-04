@@ -6,14 +6,17 @@ audience: "mixed"
 pageType: "troubleshooting"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-04"
 owner: "support"
 ---
 
 ## `/readyz` returns 503
 
-Readiness checks the database, migration version, active configuration,
-master and signing-key availability, and the worker heartbeat when required.
+Readiness checks the database, migration version, active configuration, the
+reserved quota-completion pool, master and signing-key availability, and the
+worker heartbeat when required. `quota_completion_pool: unavailable` means the
+distinct terminal-write pool could not accept its bounded probe; inspect
+PostgreSQL connectivity and settlement pressure before adding traffic.
 
 ```bash
 latchway doctor

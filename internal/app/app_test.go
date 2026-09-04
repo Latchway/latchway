@@ -33,6 +33,25 @@ func TestSelectRoleDefinesExactProcessResponsibilities(t *testing.T) {
 	}
 }
 
+func TestReservationConcurrencyPreservesRegularPoolHeadroom(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		regularConnections int32
+		want               int64
+	}{
+		{regularConnections: 1, want: 1},
+		{regularConnections: 2, want: 1},
+		{regularConnections: 3, want: 1},
+		{regularConnections: 4, want: 2},
+		{regularConnections: 24, want: 12},
+	} {
+		if got := reservationConcurrency(test.regularConnections); got != test.want {
+			t.Fatalf("reservationConcurrency(%d) = %d, want %d", test.regularConnections, got, test.want)
+		}
+	}
+}
+
 func TestRunRoleAPIStartsOnlyHTTP(t *testing.T) {
 	t.Parallel()
 

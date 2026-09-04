@@ -11,11 +11,24 @@ core and SDK successor histories are delivered to `main` and their remote
 heads were verified. Strict release controls cover all six repositories, and
 the explicit `single_maintainer_v1` profile permits a lower-assurance launch
 without an independent reviewer while keeping deferred controls `unverified`.
-Neither profile is claimed as applied live. npm 2FA is `auth-and-writes`; the
-inert client bootstrap is public, but four namespace records and every stable
-`1.0.0` package remain unpublished. App Intent/extension and physical Android/Google
-Play evidence remain explicitly deferred. No candidate is tagged, published,
-product-released, or production-proven**.
+Its 13 exact environments and non-secret policy sentinels are applied live;
+strict-profile rulesets are not. npm 2FA is `auth-and-writes`; all five inert
+namespace records and their exact tokenless trusted publishers are configured,
+but every stable `1.0.0` package remains unpublished. App Intent/extension,
+Apple distribution, and physical Android/Google Play evidence remain explicitly
+deferred. No candidate is tagged, published, product-released, or
+production-proven**.
+
+This ledger distinguishes two decisions. The authorized
+`single_maintainer_v1` first-publication profile requires GHCR and package
+publication, supply-chain receipts, and exact-image Docker Compose plus Google
+Cloud Run evidence. It intentionally leaves independent review,
+Apple/Android/browser/provider evidence, AWS, Fly.io, Cloudflare Containers,
+operational-resilience drills, and Mintlify production `unverified`. The
+original A-to-Z Definition of Done still requires those domains. Therefore a
+passing selected profile may authorize lower-assurance public artifacts, but
+it cannot close this strict completion ledger or support production-ready,
+fully-evidence-gated, independently reviewed, or `release-qualified` wording.
 
 This checked-in file is a source-status ledger. It is not the immutable
 candidate-bound completion report produced by the protected release workflow.
@@ -31,6 +44,7 @@ deployments, or protected evidence that does not exist.
 | Database | Current runtime source includes schema `29`, a terminal-validator function-body replacement; the frozen contract/source checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` remains schema `28`; schema `27` remains at prior checkpoint `77069816dd68174052e7ebc163911883f8f07e7e` |
 | Contract bundle | Reproducible SHA-256 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` at contract/core checkpoint `cd47229eac32f4a93a0779903d927526b77817d6` |
 | Core implementation source | `8bf4d9dede1490c3129f7f745f1017875bd4a005`, a contract-preserving descendant of the frozen contract checkpoint |
+| Current release-candidate worktree | Uncommitted pool-remediation, Console, deployment-evidence, and finalizer successor based on `86dae658676e7187a8db6a0deda3f8429ca6ab76`; it is not yet a release coordinate. Protected run `33755044849`, attempt `1`, passed verification at that base commit and failed the unchanged isolated load gate before image construction. |
 | SDK source tuple | JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`; Swift `92a394acbc00d1af6d258372f22b11ddae8e1750`; Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4`; React Native `ba23c750ec662834b4d480940c4067508723defb` |
 | SDK documentation bundles | JavaScript `f4e814289055bad88d508dde862ebdbd105b03483db807c2f128b0681da07711`; Swift `c0cdad255cde507faaad173f9a2dba05a29e6be53130f07a25c2e4e831498f00`; Android `1a13c6834b960dbfc7fb91c390167624eadbf5f6e8d12325bd82423cc4f4a7f7`; React Native `db7c9a569a86ec2f88750de80a1bc2f44dceb0c6db2d9f1613a309dcbbed37a2` |
 | Public documentation source | This checked-in canonical tree imports the final bundles based on core implementation `8bf4d9dede1490c3129f7f745f1017875bd4a005`; the generated mirror must bind its exact source through `.latchway-docs-source.json` |
@@ -48,13 +62,13 @@ authorize version 1.
 | Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 29 with consolidated terminal-validation reads, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, retry-cost treatment, physical-attempt quota accounting, and the deterministic released contract bundle at the exact checkpoint above | Protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter plus local load/failure checks pass against the current source gateway | Protected immutable-image provider, load, and destructive-failure evidence |
-| Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. Complete local core gates pass. | Deployment operator acceptance on the final image |
+| Admin/operator | The checkpoint includes the family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, scoped actions, Admin-session inventory/revoke in API/CLI/Console, server-capability negotiation with read-only safe mode, bounded redaction-safe YAML/JSON configuration transfer with exact numeric preservation and strong-ETag activation review, and authenticated SSE refresh hints with reconnect and polling fallback. The successor adds the strict seven-check readiness CLI plus fail-closed first-run template resumption, active-revision/self-test endpoint binding, revision-drift checks, `manage_secrets` capability gates, platform-specific native examples, and application/environment task-state isolation. Console ESLint, both TypeScript checks, 292/292 unit tests, and 37 browser cases across Chromium, Firefox, WebKit, and mobile WebKit pass; the real-stack-only browser case remains intentionally opt-in. | Final integrated core gate and deployment operator acceptance on the final image |
 | SDKs | JavaScript `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` passes its full `pnpm check`, 71 offline release tests (70 pass and one skip), and 51 Playwright tests. Android `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` passes 106 offline release tests (105 pass and one skip), its full 665-actionable-task Gradle gate, publication smoke, and 8/8 locked semantic slice. React Native `ba23c750ec662834b4d480940c4067508723defb` passes 103 Vitest, 62 Node, 19 Python, and 8/8 dependency-scan tests plus Swift bridge 5/5, Robolectric 6/6, locked iOS 10/10, locked Android 8/8, and a real CocoaPods/TurboModule build. Swift `92a394acbc00d1af6d258372f22b11ddae8e1750` passes 65 offline release tests (64 pass and one skip), 166/166 XCTest, SwiftOpenAI 11/11, Foundation Models 12/12, App Extensions 4/4 (193 Swift tests total), external SwiftPM consumer, and four CocoaPods lint gates. React Native retains its Debug-only native App Intent delegated request and fail-closed Release fixture; the final head was not physically rerun. | Hosted React Native replay rejection; operator-deferred physical invocation of the Debug App Intent/extension path; protected Apple distribution/extension-matrix proof and native isolation; physical Android/Google Play proof; tags, protected evidence, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
-| Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows. Cloudflare provider evidence uses bounded cursor pagination with strict schema, duplicate, cursor-cycle, record-count, and byte limits rather than Wrangler's one-page JSON listing. | Protected exact-image cloud/resilience runs |
-| Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
+| Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows. The selected first-publication path is GHCR followed by exact-image Docker Compose and manual-first Google Cloud Run in project `latchway`; GCP Terraform remains optional. Cloudflare provider evidence uses bounded cursor pagination with strict schema, duplicate, cursor-cycle, record-count, and byte limits rather than Wrangler's one-page JSON listing. | Protected exact-image Compose/Cloud Run runs for the selected profile; the other cloud and resilience domains remain deferred |
+| Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, and attestations; independent review remains required only for later strict assurance |
 | Documentation | This canonical tree imports all four final SDK bundles and retains the task-oriented deployment and release-image guidance. The generated mirror must bind its exact source through `.latchway-docs-source.json`. | Route `docs.latchway.dev`, deploy through protected controls, then collect production-deployment and post-deploy receipts |
-| Release controls and npm | Strict desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. The explicit lower-assurance profile permits single-maintainer v1 without marking deferred review as passed. npm 2FA is `auth-and-writes`; the inert client bootstrap is public. | Apply and verify the selected live profile, clean the accidental bootstrap `latest` alias, bootstrap the other four namespace coordinates, and install exact trusted publishers; add a distinct reviewer later to complete strict assurance |
+| Release controls and npm | Strict desired state covers six repositories and 51 environments. Docs alone requires CODEOWNERS review, one approval, and a written docs-not-required check. The explicit lower-assurance profile permits single-maintainer v1 without marking deferred review as passed. Its 13 environments and policy sentinels are live. npm 2FA is `auth-and-writes`; all five exact inert placeholders and trusted publishers are verified without npm tokens. | Execute the protected selected-profile release and add a distinct reviewer later to complete strict assurance |
 
 ## Schema-29 runtime validation boundary
 
@@ -181,6 +195,32 @@ receipts. The current convergence run:
   required to bind the exact canonical source through
   `.latchway-docs-source.json` before conformance is accepted.
 
+Protected release-candidate run `33755044849`, attempt `1`, at base commit
+`86dae658676e7187a8db6a0deda3f8429ca6ab76` passed its complete verification
+job and failed the unchanged isolated load gate; image construction,
+publication, and signing were skipped. The current uncommitted successor
+partitions the aggregate PostgreSQL budget into regular and quota-completion
+pools, bounds reservation admission, reuses the response relay timer/callback,
+and hardens readiness, deployment evidence, the Console, and the selected-
+profile finalizer. On 2026-09-04 it passed complete uncached normal and race Go
+suites against local PostgreSQL 18 and every Makefile fuzz-smoke target. The
+complete current working tree then passed integrated `mise exec -- make check`:
+generated SQL, workflow lint, Go vet and all Go packages against PostgreSQL 18,
+all 548 Python release/workflow cases, Console ESLint, Admin API generation,
+both TypeScript checks, 292/292 unit tests, deterministic production build
+verification, and 37 browser cases across Chromium, Firefox, WebKit, and mobile
+WebKit, with the real-stack-only case intentionally skipped. Image, unchanged
+local load, and protected-candidate reruns are still required on the committed
+successor; this local result does not authorize publication or GCP resource
+creation.
+
+The reconciled canonical public tree separately passes its full local check:
+generated references and SDK bundles, 233-page structure and metadata, Vale
+with zero findings across 253 files, Mintlify build and link validation, and
+media-alt inspection across 235 MDX files. Existing color output recommends
+AAA improvement while meeting the configured accessibility gate. This is not a
+Mintlify production-deployment receipt.
+
 Core `cd47229eac32f4a93a0779903d927526b77817d6` passes the full current
 `make check`, including generated-source checks, all Go tests and vet, the
 complete Python release/tool suite, Console lint/typecheck/tests, the
@@ -216,6 +256,16 @@ public-tag, registry, Docker Compose, Google Cloud Run, and supply-chain evidenc
 enumerated in the release-profile policy. It keeps this section's remaining
 domains `unverified`, retains `profile_status: incomplete`, and cannot claim
 production readiness or `release-qualified`.
+
+Its protected finalizer may set only profile-scoped `publication_ready` to
+true after authenticating the exact source, candidate, core-publication,
+public-tag, selected-registry, and supply-chain runs. The fresh signer binds
+immutable certificate run/path/digest/ref/runner fields, accepts only canonical
+duplicate-free JSON, preserves the unchanged failed strict report and its exact
+all-domain evidence-window failure, and independently reconstructs the
+one-field profile-local projection. That outcome still fixes
+`release_qualified`, `fully_evidence_gated`, and `independently_reviewed` to
+false. It has not been produced for any candidate.
 
 One immutable candidate still requires all of the following before the later
 strict-full completion claim:
@@ -279,16 +329,17 @@ App Attest and predecessor signed-launch observations remain separately bound
 to their stated commits.
 
 The user authorized a scoped non-force push of the six audited source-branch
-histories and separately requested GHCR and npm publication work. npm account
-2FA is now `auth-and-writes`; the inert client bootstrap is public, but the
-other four namespace records and every stable `1.0.0` coordinate remain
-unpublished. The six-repository strict GitHub desired state is not live, and
-the reviewer-free lower-assurance profile also remains unapplied. That
-authorization permits reviewed namespace bootstrap and execution of the
-explicit profile, but it does not by itself authorize an unauthenticated stable
-tag or package. A lower-assurance public version 1 launch becomes eligible only
-after the selected protected workflow authenticates all required profile
-evidence. It remains ineligible for production-ready, independently reviewed,
-or `release-qualified` claims. Only the later strict finalizer may produce the
-immutable completion report after every strict domain closes without skips,
-stale evidence, or coordinate drift.
+histories and separately requested GHCR and package publication work. npm
+account 2FA is `auth-and-writes`; all five namespaces contain only the exact
+`0.0.0-bootstrap.0` placeholder, their bootstrap and `latest` aliases are
+verified, and every stable `1.0.0` coordinate remains unpublished. The
+selected profile's 13 reviewer-free, self-review-permitted, main-only
+environments and exact non-secret sentinels are live; strict-profile rulesets
+are not. That authorization permits execution of the explicit profile, but it
+does not by itself authenticate a stable tag or package. A lower-assurance
+public version 1 launch becomes eligible only after the selected protected
+workflow authenticates all required profile evidence. It remains ineligible
+for production-ready, independently reviewed, or `release-qualified` claims.
+Only the later strict finalizer may produce the immutable completion report
+after every strict domain closes without skips, stale evidence, or coordinate
+drift.

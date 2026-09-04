@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-03"
+lastVerified: "2026-09-04"
 owner: "core-operations"
 ---
 
@@ -149,6 +149,7 @@ same verified GHCR digest you will use for the service:
 | Service account | `latchway-migrator@PROJECT_ID.iam.gserviceaccount.com` |
 | Container command | `/latchway` |
 | Container arguments | `migrate`, `up` as separate arguments |
+| Container CPU / memory | `1` vCPU / `512 MiB` |
 | Tasks / parallelism / retries | `1` / `1` / `0` |
 | Task timeout | `900` seconds |
 | Secret environment variable | `LATCHWAY_DATABASE_URL` → `latchway-database-url`, version `1` |
@@ -174,9 +175,10 @@ export LATCHWAY_PUBLIC_ORIGIN='https://latchway-PROJECT_NUMBER.asia-southeast1.r
 
 gcloud run jobs create latchway-migrate \
   --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
-  --image "$LATCHWAY_IMAGE" \
+  --container latchway-migrate --image "$LATCHWAY_IMAGE" \
   --service-account "latchway-migrator@$LATCHWAY_GCP_PROJECT.iam.gserviceaccount.com" \
   --command /latchway --args=migrate,up \
+  --cpu 1 --memory 512Mi \
   --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 900s \
   --set-secrets=LATCHWAY_DATABASE_URL=latchway-database-url:1
 
@@ -220,9 +222,11 @@ Under **Variables and Secrets**, add the non-secret environment values:
 
 | Variable | Value |
 | --- | --- |
+| `LATCHWAY_ROLE` | `all` |
 | `LATCHWAY_PUBLIC_ORIGIN` | The exact `https://latchway-PROJECT_NUMBER.REGION.run.app` origin |
 | `LATCHWAY_MIGRATE_ON_START` | `false` — the explicit job already migrated |
-| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` |
+| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` aggregate connections per instance |
+| `LATCHWAY_DB_COMPLETION_CONNECTIONS` | `5`, reserved inside the aggregate total; regular work receives `15` |
 | `LATCHWAY_SHUTDOWN_TIMEOUT` | `8s` |
 | `LATCHWAY_LOG_LEVEL` | `info` |
 
@@ -243,13 +247,13 @@ Cloud Shell equivalent for the external TLS database path:
 ```bash
 gcloud run deploy latchway \
   --project "$LATCHWAY_GCP_PROJECT" --region "$LATCHWAY_GCP_REGION" \
-  --image "$LATCHWAY_IMAGE" \
+  --container latchway --image "$LATCHWAY_IMAGE" \
   --service-account "latchway-runtime@$LATCHWAY_GCP_PROJECT.iam.gserviceaccount.com" \
   --no-invoker-iam-check --ingress all \
   --execution-environment gen2 --no-cpu-throttling --min 1 --max 3 \
   --cpu 2 --memory 2Gi --concurrency 100 --timeout 3600s --port 8080 \
   --command /latchway --args=serve,--role,all \
-  --set-env-vars="LATCHWAY_PUBLIC_ORIGIN=$LATCHWAY_PUBLIC_ORIGIN,LATCHWAY_MIGRATE_ON_START=false,LATCHWAY_DB_MAX_CONNECTIONS=20,LATCHWAY_SHUTDOWN_TIMEOUT=8s,LATCHWAY_LOG_LEVEL=info" \
+  --set-env-vars="LATCHWAY_ROLE=all,LATCHWAY_LOG_LEVEL=info,LATCHWAY_MIGRATE_ON_START=false,LATCHWAY_PUBLIC_ORIGIN=$LATCHWAY_PUBLIC_ORIGIN,LATCHWAY_SHUTDOWN_TIMEOUT=8s,LATCHWAY_DB_MAX_CONNECTIONS=20,LATCHWAY_DB_COMPLETION_CONNECTIONS=5" \
   --set-secrets=LATCHWAY_DATABASE_URL=latchway-database-url:1,LATCHWAY_MASTER_KEY=latchway-master-key:1,LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=latchway-admin-bootstrap-token:1 \
   --startup-probe=httpGet.path=/readyz,httpGet.port=8080,initialDelaySeconds=1,periodSeconds=3,timeoutSeconds=3,failureThreshold=40 \
   --liveness-probe=httpGet.path=/healthz,httpGet.port=8080,periodSeconds=15,timeoutSeconds=3,failureThreshold=3
@@ -276,7 +280,8 @@ curl --fail --show-error "$LATCHWAY_PUBLIC_ORIGIN/readyz"
 Inspect the ready revision's resolved image digest and compare it with the
 verified release record, including its `linux/amd64` manifest. An image tag or a
 healthy unrelated revision is not sufficient. Readiness checks PostgreSQL,
-schema, active-environment configuration, key material, and worker heartbeat.
+schema, active-environment configuration, the reserved quota-completion pool,
+key material, and worker heartbeat.
 An empty installation can be ready for owner setup; this does not prove a
 client application has been configured.
 
@@ -310,8 +315,15 @@ authenticated client request, and an SSE response through the canonical origin.
   idle costs. Check [Cloud Run pricing](https://cloud.google.com/run/pricing),
   [Cloud SQL pricing](https://cloud.google.com/sql/pricing), and your database
   provider's price before creating resources.
-- At three instances and 20 connections each, budget 60 application database
-  connections plus migrations, administration, backup, and rollout overlap.
+- At three instances and an aggregate 20 connections each, the application
+  ceiling is 60 connections. The five completion connections per instance are
+  inside that ceiling, leaving 45 regular and 15 completion-reserved
+  connections across three instances; do not budget 60 + 15. Add migrations,
+  administration, backup, maintenance, and rollout overlap, then keep the
+  planned peak at or below 80% of usable PostgreSQL connections for 20%
+  headroom.
+  The service template and Terraform set both pool values explicitly; override
+  both together rather than expecting the runtime default to recompute one.
   Cloud Run can temporarily exceed a configured maximum; treat it as a scaling
   control, not a hard database-connection guarantee. See Google's
   [maximum-instance behavior](https://docs.cloud.google.com/run/docs/configuring/max-instances).
@@ -371,3 +383,20 @@ keyless WIF identity are maintainer release-verification machinery. Ordinary
 adopters do not need them to deploy manually. A manual deployment remains
 subject to its own operating checks; it does not automatically create the
 project's signed provider receipt or satisfy deferred external evidence.
+
+The selected maintainer receipt is fixed to project `latchway`, region
+`asia-southeast1`, service `latchway`, job `latchway-migrate`, and Cloud SQL
+connection `latchway:asia-southeast1:latchway-postgres`. It proves public
+ingress, unauthenticated Cloud Run invocation, and that exact managed connector
+over the `/cloudsql/...` Unix socket. The pinned `gcloud` collector consumes
+Cloud Run's v1/Knative JSON compatibility shape: the Cloud SQL connection is an
+exact `run.googleapis.com/cloudsql-instances` annotation on the desired service
+template, ready revision, job execution template, and created execution. It
+rejects VPC annotations and any explicit volume or mount in that v1 shape.
+
+Terraform uses Cloud Run API v2 instead. Its private-IP/VPC service and job
+represent the same managed socket with a `cloudSqlInstance` volume and
+`/cloudsql` volume mount. That is a separate production-oriented adopter
+topology, not an alternative JSON shape accepted by the selected receipt. The
+receipt identity cannot read Secret Manager payloads, so it does not attest the
+database URL contents even though it verifies the pinned secret references.

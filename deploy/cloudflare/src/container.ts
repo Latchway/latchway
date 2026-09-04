@@ -39,6 +39,10 @@ function runtimeEnvironment(env: Env): Record<string, string> {
       env,
       "LATCHWAY_DB_MAX_CONNECTIONS",
     ),
+    LATCHWAY_DB_COMPLETION_CONNECTIONS: requiredString(
+      env,
+      "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+    ),
     LATCHWAY_SHUTDOWN_TIMEOUT: requiredString(
       env,
       "LATCHWAY_SHUTDOWN_TIMEOUT",

@@ -8,7 +8,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE_COLLECTOR = ROOT / "scripts/load-runtime-diagnostics.py"
-EXPECTED_SHA = "76213e8540d9a8eb2252f93e60902dfaa039a93d98c587cb0c37b534c66f30d5"
+EXPECTED_SHA = "878846993b35ce529a7bbe74b19c592f973c0d7a31b0e572c6552f5c3c299424"
 if hashlib.sha256(BASE_COLLECTOR.read_bytes()).hexdigest() != EXPECTED_SHA:
     raise RuntimeError("COLLECTOR_SOURCE_CHANGED")
 SPEC = importlib.util.spec_from_file_location("base_memory_collector", BASE_COLLECTOR)

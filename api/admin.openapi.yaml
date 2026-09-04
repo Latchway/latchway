@@ -1559,6 +1559,7 @@ paths:
       summary: Return a redacted self-test result.
       parameters:
         - $ref: '#/components/parameters/SelfTestID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
       responses:
         '200':
           description: Current or terminal self-test state.
@@ -3115,6 +3116,7 @@ components:
       properties:
         kind: { type: string, enum: [local, upstream, openrouter] }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        config_revision_id: { $ref: '#/components/schemas/RevisionID', description: Exact immutable active revision the server must bind before any provider dispatch. }
         upstream: { $ref: '#/components/schemas/Identifier', description: Active server-owned upstream identifier. }
         model: { $ref: '#/components/schemas/Identifier', description: Active configured model identifier, not a client-selected physical model string. }
         max_cost_nano_usd: { type: integer, minimum: 0, maximum: 1000000000 }
@@ -3123,10 +3125,11 @@ components:
             kind: { const: local }
           not:
             anyOf:
+              - required: [config_revision_id]
               - required: [upstream]
               - required: [model]
               - required: [max_cost_nano_usd]
-        - required: [upstream, model, max_cost_nano_usd]
+        - required: [config_revision_id, upstream, model, max_cost_nano_usd]
           properties:
             kind: { enum: [upstream, openrouter] }
             max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
@@ -3186,10 +3189,12 @@ components:
     SelfTestRun:
       type: object
       additionalProperties: false
-      required: [id, kind, state, created_at, checks]
+      required: [id, environment_id, kind, state, created_at, checks]
       properties:
         id: { $ref: '#/components/schemas/SelfTestID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID', description: Exact environment that owns and contextualizes the self-test run. }
         schedule_id: { $ref: '#/components/schemas/SelfTestScheduleID' }
+        config_revision_id: { $ref: '#/components/schemas/RevisionID', description: Exact immutable configuration revision used by the self-test. }
         kind: { type: string, enum: [local, upstream, openrouter] }
         state: { type: string, enum: [queued, running, passed, failed, canceled] }
         created_at: { type: string, format: date-time }
@@ -3205,10 +3210,17 @@ components:
               name: { type: string }
               state: { type: string, enum: [pending, passed, failed, skipped] }
               safe_detail: { type: string, maxLength: 2048 }
+      oneOf:
+        - properties:
+            kind: { const: local }
+          not: { required: [config_revision_id] }
+        - properties:
+            kind: { enum: [upstream, openrouter] }
+          required: [config_revision_id]
     SystemStatus:
       type: object
       additionalProperties: false
-      required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready, server_capabilities]
+      required: [server_version, contract_version, protocol_versions, role, database_schema_version, mutation_ready, ready, server_capabilities]
       properties:
         server_version: { type: string }
         contract_version: { type: string, const: 1.0.0 }
@@ -3223,7 +3235,8 @@ components:
           items: false
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
-        ready: { type: boolean }
+        mutation_ready: { type: boolean, description: True only when the regular administrative database pool is reachable and the schema is current. }
+        ready: { type: boolean, description: Full traffic readiness using the exact same dependency evaluation as /readyz. }
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.

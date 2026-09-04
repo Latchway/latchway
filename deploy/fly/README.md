@@ -39,9 +39,12 @@ flyctl deploy --app replace-with-your-latchway-app \
 
 The release command applies forward migrations once before the rolling
 deployment. Two 2 vCPU / 2 GiB Machines run the combined API/worker role; the
-database-backed worker leases are multi-replica safe. With the default 20
-connections per Machine, reserve at least 40 application connections plus
-operational headroom.
+database-backed worker leases are multi-replica safe. Each Machine has an
+aggregate ceiling of 20 connections: five are completion-reserved inside that
+total and 15 serve regular work. Two Machines therefore reserve 40 application
+connections, not 50. Add migration, administration, backup, maintenance, and
+rollout demand, then keep the planned peak at or below 80% of usable PostgreSQL
+connections for 20% headroom.
 The rolling strategy permits at most one unavailable Machine. Fly sends
 SIGTERM, waits 35 seconds before forcing the Machine down, and Latchway drains
 for 30 seconds.

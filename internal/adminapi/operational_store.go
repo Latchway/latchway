@@ -300,13 +300,15 @@ type selfTestCheck struct {
 }
 
 type selfTestDocument struct {
-	ID          string          `json:"id"`
-	ScheduleID  string          `json:"schedule_id,omitempty"`
-	Kind        string          `json:"kind"`
-	State       string          `json:"state"`
-	CreatedAt   time.Time       `json:"created_at"`
-	CompletedAt *time.Time      `json:"completed_at,omitempty"`
-	Checks      []selfTestCheck `json:"checks"`
+	ID               string          `json:"id"`
+	EnvironmentID    string          `json:"environment_id"`
+	ScheduleID       string          `json:"schedule_id,omitempty"`
+	ConfigRevisionID string          `json:"config_revision_id,omitempty"`
+	Kind             string          `json:"kind"`
+	State            string          `json:"state"`
+	CreatedAt        time.Time       `json:"created_at"`
+	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
+	Checks           []selfTestCheck `json:"checks"`
 }
 
 func (store *operationalStore) listUsers(
@@ -2224,12 +2226,13 @@ func validAuditChangeOperation(operation string) bool {
 }
 
 type startSelfTestInput struct {
-	Kind        string
-	Environment string
-	Upstream    string
-	Model       string
-	MaxCost     int64
-	RequestID   string
+	Kind             string
+	Environment      string
+	ConfigRevisionID string
+	Upstream         string
+	Model            string
+	MaxCost          int64
+	RequestID        string
 }
 
 func (store *operationalStore) startSelfTest(
@@ -2246,11 +2249,12 @@ func (store *operationalStore) startSelfTest(
 	}
 	switch input.Kind {
 	case "local":
-		if input.Upstream != "" || input.Model != "" || input.MaxCost != 0 {
+		if input.ConfigRevisionID != "" || input.Upstream != "" || input.Model != "" || input.MaxCost != 0 {
 			return selfTestDocument{}, errOperationalInvalid
 		}
 	case "upstream", "openrouter":
-		if store.selfTests == nil || !selfTestIdentifierPattern.MatchString(input.Upstream) ||
+		if store.selfTests == nil || id.Validate(input.ConfigRevisionID, id.ConfigRevision) != nil ||
+			!selfTestIdentifierPattern.MatchString(input.Upstream) ||
 			!selfTestIdentifierPattern.MatchString(input.Model) || input.MaxCost < 1 ||
 			input.MaxCost > maximumSelfTestCostNanoUSD {
 			return selfTestDocument{}, errOperationalInvalid
@@ -2328,7 +2332,8 @@ func (store *operationalStore) startSelfTest(
 	}
 	completedAt := now.UTC()
 	run := selfTestDocument{
-		ID: selfTestID, Kind: "local", State: state, CreatedAt: now.UTC(),
+		ID: selfTestID, EnvironmentID: input.Environment,
+		Kind: "local", State: state, CreatedAt: now.UTC(),
 		CompletedAt: &completedAt, Checks: checks,
 	}
 	payload, err := json.Marshal(run)
@@ -2367,9 +2372,10 @@ func (store *operationalStore) startSelfTest(
 func (store *operationalStore) getSelfTest(
 	ctx context.Context,
 	principal adminauth.Principal,
+	environmentID string,
 	selfTestID string,
 ) (selfTestDocument, error) {
-	if id.Validate(selfTestID, id.Prefix("tst")) != nil {
+	if id.Validate(environmentID, id.Environment) != nil || id.Validate(selfTestID, id.Prefix("tst")) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
 	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
@@ -2380,8 +2386,8 @@ func (store *operationalStore) getSelfTest(
 		SELECT payload
 		FROM jobs
 		WHERE organization_id = $1 AND job_type = 'run_scheduled_self_test'
-		  AND payload->>'id' = $2
-	`, principal.OrganizationID, selfTestID).Scan(&payload)
+		  AND environment_id = $2 AND payload->>'id' = $3
+	`, principal.OrganizationID, environmentID, selfTestID).Scan(&payload)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return selfTestDocument{}, errOperationalNotFound
 	}
@@ -2390,7 +2396,7 @@ func (store *operationalStore) getSelfTest(
 	}
 	var run selfTestDocument
 	if len(payload) == 0 || len(payload) > 64<<10 || json.Unmarshal(payload, &run) != nil ||
-		run.ID != selfTestID || !validStoredSelfTest(run) {
+		run.ID != selfTestID || run.EnvironmentID != environmentID || !validStoredSelfTest(run) {
 		return selfTestDocument{}, errOperationalCorrupt
 	}
 	return run, nil

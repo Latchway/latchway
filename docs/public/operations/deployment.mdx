@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-03"
+lastVerified: "2026-09-04"
 owner: "core-operations"
 ---
 
@@ -152,8 +152,8 @@ longest supported stream.
 2. Back up PostgreSQL and prove a restore in isolation.
 3. Run `migrate up`, then require `migrate status` to report `up_to_date=true`
    and `current` equal to `available`.
-4. Require `/healthz` and `/readyz`; readiness includes required worker
-   heartbeat state.
+4. Require `/healthz` and `/readyz`; readiness includes quota-completion
+   capacity and required worker-heartbeat state.
 5. Keep the platform request timeout longer than the maximum supported stream.
 6. Match `SIGTERM` draining to the platform deadline: normally at least the
    configured 30-second default, or the Cloud Run guide's explicit `8s` drain

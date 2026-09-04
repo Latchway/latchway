@@ -59,6 +59,7 @@ type API struct {
 	eventStream     adminEventStreamSettings
 	policyResolver  *policy.Resolver
 	role            string
+	systemReadiness func(context.Context) bool
 	diagnostics     diagnostics.Dependencies
 }
 
@@ -76,6 +77,20 @@ func WithRole(role string) Option {
 		default:
 			return errors.New("admin API process role is invalid")
 		}
+	}
+}
+
+// WithSystemReadiness binds the authenticated system status to the same full
+// process-readiness evaluator used by /readyz. Without this runtime-only
+// dependency the Admin API fails closed for full traffic readiness; mutation
+// readiness remains the independently evaluated regular database/schema check.
+func WithSystemReadiness(check func(context.Context) bool) Option {
+	return func(api *API) error {
+		if check == nil {
+			return errors.New("admin API system-readiness check is nil")
+		}
+		api.systemReadiness = check
+		return nil
 	}
 }
 

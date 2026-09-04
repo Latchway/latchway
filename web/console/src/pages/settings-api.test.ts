@@ -13,6 +13,7 @@ describe("Settings canonical Admin API contracts", () => {
     const status = {
       contract_version: "1.0.0",
       database_schema_version: "27",
+      mutation_ready: true,
       protocol_versions: [1, 2],
       ready: true,
       role: "all",

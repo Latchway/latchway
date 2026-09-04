@@ -39,7 +39,7 @@
               "requireLicensed": true,
               "allowTestingResponses": false,
               "minimumVersionCode": 1,
-              "maximumVersionCode": 0,
+              "maximumVersionCode": 1,
               "credentialSource": "metadata"
             }
           }

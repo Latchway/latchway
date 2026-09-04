@@ -11,6 +11,8 @@
     "postgresql_max_connections": 100,
     "postgresql_network": "replace-with-measured-low-latency-network-placement",
     "gateway_db_pool_max_connections": 32,
+    "gateway_db_regular_pool_max_connections": 24,
+    "gateway_db_completion_pool_max_connections": 8,
     "body_logging_disabled": true,
     "warm_configuration_cache": true
   },

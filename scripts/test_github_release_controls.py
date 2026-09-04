@@ -88,6 +88,10 @@ class FixtureGitHub:
         if environment is not None and "/rulesets/" not in path:
             if environment == self.missing_environment:
                 raise CONTROLS.NotFound("github_resource_not_found")
+            desired_environment = self.environments[environment]
+            profile_administration = CONTROLS.is_single_maintainer_administration(
+                self.fixture["repository"]["name"], desired_environment
+            )
             return {
                 "can_admins_bypass": self.admins_can_bypass,
                 "deployment_branch_policy": (
@@ -101,24 +105,28 @@ class FixtureGitHub:
                         "custom_branch_policies": False,
                     }
                 ),
-                "protection_rules": [
-                    {
-                        "type": "required_reviewers",
-                        "prevent_self_review": True,
-                        "reviewers": (
-                            []
-                            if self.reviewer_mode == "missing"
-                            else [
-                                {
-                                    "type": "User",
-                                    "reviewer": {
-                                        "id": self.fixture["reviewer"]["id"]
-                                    },
-                                }
-                            ]
-                        ),
-                    }
-                ],
+                "protection_rules": (
+                    []
+                    if profile_administration
+                    else [
+                        {
+                            "type": "required_reviewers",
+                            "prevent_self_review": True,
+                            "reviewers": (
+                                []
+                                if self.reviewer_mode == "missing"
+                                else [
+                                    {
+                                        "type": "User",
+                                        "reviewer": {
+                                            "id": self.fixture["reviewer"]["id"]
+                                        },
+                                    }
+                                ]
+                            ),
+                        }
+                    ]
+                ),
             }
         if path.startswith("/repos/Latchway/latchway/rulesets/"):
             identifier = int(path.rsplit("/", 1)[1])
@@ -231,7 +239,10 @@ class FixtureGitHub:
             if self.variable_mode != "missing":
                 result.append(
                     {
-                        "name": CONTROLS.POLICY_VARIABLE_NAME,
+                        "name": CONTROLS.environment_policy_variable_name(
+                            self.fixture["repository"]["name"],
+                            self.environments[environment],
+                        ),
                         "value": desired,
                     }
                 )
@@ -343,15 +354,45 @@ class GitHubReleaseControlTests(unittest.TestCase):
             ["LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN"],
         )
         policy_ids = []
+        profile_administration_environments = []
         environment_counts = {}
         for repository in self.manifest["repositories"]:
             environment_counts[repository["name"]] = len(repository["environments"])
             for environment in repository["environments"]:
                 expected = (
-                    f"{self.manifest['control_id']}:{repository['name']}:"
-                    f"{environment['name']}"
+                    CONTROLS.single_maintainer_administration_policy_id(
+                        repository["name"]
+                    )
+                    if CONTROLS.is_single_maintainer_administration(
+                        repository["name"], environment
+                    )
+                    else (
+                        f"{self.manifest['control_id']}:{repository['name']}:"
+                        f"{environment['name']}"
+                    )
                 )
                 self.assertEqual(environment["policy_id"], expected)
+                if CONTROLS.is_single_maintainer_administration(
+                    repository["name"], environment
+                ):
+                    profile_administration_environments.append(
+                        (repository["name"], environment["name"])
+                    )
+                    self.assertEqual(
+                        CONTROLS.environment_policy_variable_name(
+                            repository["name"], environment
+                        ),
+                        CONTROLS.PROFILE_POLICY_VARIABLE_NAME,
+                    )
+                    self.assertEqual(
+                        environment["reviewers"],
+                        {"minimum": 0, "source": "profile_policy"},
+                    )
+                    self.assertIs(environment["prevent_self_review"], False)
+                    self.assertEqual(
+                        environment["secrets"]["required_names"],
+                        ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
+                    )
                 self.assertEqual(
                     environment["secrets"]["required_names"],
                     environment["secrets"]["allowed_names"],
@@ -365,15 +406,28 @@ class GitHubReleaseControlTests(unittest.TestCase):
                 )
                 policy_ids.append(expected)
         self.assertEqual(len(policy_ids), len(set(policy_ids)))
-        self.assertEqual(len(policy_ids), 51)
+        self.assertEqual(len(policy_ids), 56)
+        self.assertEqual(
+            profile_administration_environments,
+            [
+                (repository, "single-maintainer-v1-administration")
+                for repository in (
+                    "latchway",
+                    "latchway-js",
+                    "latchway-ios-sdk",
+                    "latchway-android",
+                    "latchway-react-native-sdk",
+                )
+            ],
+        )
         self.assertEqual(
             environment_counts,
             {
-                "latchway": 22,
-                "latchway-js": 3,
-                "latchway-ios-sdk": 5,
-                "latchway-android": 10,
-                "latchway-react-native-sdk": 10,
+                "latchway": 23,
+                "latchway-js": 4,
+                "latchway-ios-sdk": 6,
+                "latchway-android": 11,
+                "latchway-react-native-sdk": 11,
                 "latchway-docs": 1,
             },
         )
@@ -412,7 +466,16 @@ class GitHubReleaseControlTests(unittest.TestCase):
         environment = schema["$defs"]["environment"]
         self.assertEqual(
             environment["properties"]["reviewers"]["properties"]["minimum"],
-            {"const": 1},
+            {"type": "integer", "enum": [0, 1]},
+        )
+        profile = environment["allOf"][0]
+        self.assertEqual(
+            profile["then"]["properties"]["reviewers"]["properties"]["minimum"],
+            {"const": 0},
+        )
+        self.assertEqual(
+            profile["then"]["properties"]["prevent_self_review"],
+            {"const": False},
         )
 
     def test_manual_validator_rejects_topology_or_secret_weakening(self):
@@ -703,7 +766,11 @@ class GitHubReleaseControlTests(unittest.TestCase):
         self.assertTrue(
             all(
                 method == "PATCH"
-                and path.endswith("/variables/LATCHWAY_RELEASE_CONTROL_POLICY_ID")
+                and path.rsplit("/", 1)[-1]
+                in {
+                    CONTROLS.POLICY_VARIABLE_NAME,
+                    CONTROLS.PROFILE_POLICY_VARIABLE_NAME,
+                }
                 and body["value"].endswith(CONTROLS.QUARANTINE_SUFFIX)
                 for method, path, body in client.calls
             )
@@ -761,7 +828,7 @@ class GitHubReleaseControlTests(unittest.TestCase):
                     for item in mutations
                     if "/variables" in item["path"]
                 ]
-                self.assertEqual(len(sentinel_mutations), 22)
+                self.assertEqual(len(sentinel_mutations), 23)
                 self.assertTrue(
                     all(item["method"] == expected_method for item in sentinel_mutations)
                 )
@@ -1102,10 +1169,21 @@ class GitHubReleaseControlTests(unittest.TestCase):
         payload = CONTROLS.canonical_bytes(evidence)
         self.assertEqual(payload, CONTROLS.canonical_bytes(json.loads(payload)))
         actions = [item["action"] for item in evidence["actions"]]
-        self.assertEqual(actions.count("ensure_release_control_policy_sentinel"), 51)
-        self.assertEqual(actions.count("verify_configuration_variable_names"), 51)
+        self.assertEqual(actions.count("ensure_release_control_policy_sentinel"), 56)
+        self.assertEqual(actions.count("verify_configuration_variable_names"), 56)
         self.assertEqual(actions.count("ensure_repository_ruleset"), 12)
         self.assertEqual(actions.count("ensure_npm_trusted_publisher"), 5)
+        profile_sentinels = {
+            item["repository"]
+            for item in evidence["actions"]
+            if item["action"] == "ensure_release_control_policy_sentinel"
+            and item["name"] == "single-maintainer-v1-administration"
+            and item["variable"] == CONTROLS.PROFILE_POLICY_VARIABLE_NAME
+        }
+        self.assertEqual(
+            profile_sentinels,
+            CONTROLS.SINGLE_MAINTAINER_PRODUCT_REPOSITORIES,
+        )
         release_evidence = next(
             action
             for action in evidence["actions"]

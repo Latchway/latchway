@@ -25,10 +25,11 @@ func (store *Store) settleInitialFinalAttempt(
 		outcome.Cost.Known {
 		return false, nil
 	}
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin initial final settlement")
 	if err != nil {
-		return true, persistenceFailure("begin initial final settlement", err)
+		return true, err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 
 	expected := attempt.reservation

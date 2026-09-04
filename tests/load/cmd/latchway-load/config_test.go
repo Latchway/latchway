@@ -34,6 +34,8 @@ func TestExampleConfigIsStrictAndMeetsContractFloor(t *testing.T) {
 	if cfg.Environment.PostgreSQLCPUMillicores != 4000 || cfg.Environment.PostgreSQLMemoryBytes != 4<<30 ||
 		cfg.Environment.PostgreSQLMemorySwapBytes != 4<<30 ||
 		cfg.Environment.PostgreSQLMaxConnections != 100 || cfg.Environment.GatewayDBPoolMaxConnections != 32 ||
+		cfg.Environment.GatewayDBRegularPoolMaxConnections != 24 ||
+		cfg.Environment.GatewayDBCompletionPoolMaxConnections != 8 ||
 		cfg.Quota.Fixture.NonStreamLoadRequests != 6000 {
 		t.Fatalf("example config omitted exact database/pool/quota fixture facts: environment=%+v quota=%+v", cfg.Environment, cfg.Quota.Fixture)
 	}
@@ -119,6 +121,26 @@ func TestEnvironmentRejectsGatewayPoolBeyondPostgreSQLBudget(t *testing.T) {
 	cfg.Environment.GatewayDBPoolMaxConnections = cfg.Environment.PostgreSQLMaxConnections + 1
 	if err := cfg.validate(t.TempDir()); err == nil || !strings.Contains(err.Error(), "gateway DB pool") {
 		t.Fatalf("oversized gateway pool validation error = %v", err)
+	}
+}
+
+func TestEnvironmentRejectsIncoherentGatewayPoolPartition(t *testing.T) {
+	t.Parallel()
+	for _, mutate := range []func(*environment){
+		func(value *environment) { value.GatewayDBRegularPoolMaxConnections = 0 },
+		func(value *environment) { value.GatewayDBCompletionPoolMaxConnections = 0 },
+		func(value *environment) { value.GatewayDBRegularPoolMaxConnections++ },
+		func(value *environment) { value.GatewayDBCompletionPoolMaxConnections++ },
+	} {
+		cfg := validTestConfig(t)
+		cfg.Metadata = evidenceMetadata{
+			LocalDockerImageID: "sha256:" + testImageHash,
+			Deployment:         "isolated evidence environment", Operator: "load-test-runner",
+		}
+		mutate(&cfg.Environment)
+		if err := cfg.validate(t.TempDir()); err == nil || !strings.Contains(err.Error(), "regular/completion") {
+			t.Fatalf("incoherent gateway pool partition validation error = %v", err)
+		}
 	}
 }
 

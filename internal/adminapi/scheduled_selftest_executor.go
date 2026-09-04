@@ -195,7 +195,9 @@ func (executor *ScheduledSelfTestExecutor) prepareExecution(
 			var run selfTestDocument
 			if len(existingResult) == 0 || len(existingResult) > 64<<10 ||
 				json.Unmarshal(existingResult, &run) != nil || !validStoredSelfTest(run) ||
-				run.ID != existingSelfTestID || run.ScheduleID != execution.scheduleID {
+				run.ID != existingSelfTestID || run.ScheduleID != execution.scheduleID ||
+				run.EnvironmentID != execution.environmentID ||
+				run.ConfigRevisionID != execution.revisionID {
 				return scheduledSelfTestExecution{}, errors.New("stored scheduled self-test result is invalid")
 			}
 			execution.terminal = true
@@ -212,7 +214,9 @@ func (executor *ScheduledSelfTestExecutor) prepareExecution(
 			return scheduledSelfTestExecution{}, errors.New("read scheduled self-test recovery time")
 		}
 		run := selfTestDocument{
-			ID: existingSelfTestID, ScheduleID: execution.scheduleID, Kind: execution.kind,
+			ID: existingSelfTestID, ScheduleID: execution.scheduleID,
+			EnvironmentID:    execution.environmentID,
+			ConfigRevisionID: execution.revisionID, Kind: execution.kind,
 			State: "failed", CreatedAt: existingStartedAt.UTC(), CompletedAt: utcTimePointer(completedAt),
 			Checks: []selfTestCheck{{
 				Name: "execution_recovery", State: "failed",
@@ -425,7 +429,9 @@ func (executor *ScheduledSelfTestExecutor) persistExecutionResult(
 		return errors.New("read scheduled self-test completion time")
 	}
 	run := selfTestDocument{
-		ID: execution.selfTestID, ScheduleID: execution.scheduleID, Kind: execution.kind,
+		ID: execution.selfTestID, ScheduleID: execution.scheduleID,
+		EnvironmentID:    execution.environmentID,
+		ConfigRevisionID: execution.revisionID, Kind: execution.kind,
 		State: result.State, CreatedAt: execution.startedAt.UTC(), CompletedAt: utcTimePointer(completedAt),
 		Checks: append([]selfTestCheck(nil), result.Checks...),
 	}

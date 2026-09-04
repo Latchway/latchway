@@ -13,6 +13,9 @@ vi.mock("../api/admin", async (importOriginal) => ({
 vi.mock("../api/session", () => ({
   useConsoleSession: () => ({ data: { mode: "configured", session: { capabilities: ["activate_configuration"], organization_id: "org_0123456789abcdef" } } })
 }));
+vi.mock("../app/console-compatibility-context", () => ({
+  useConsoleCompatibility: () => ({ mutationAllowed: true })
+}));
 
 import { ConfigurationAreaEditor } from "./configuration-area-pages";
 import { configurationAreas, type JSONRecord } from "./configuration-slice";

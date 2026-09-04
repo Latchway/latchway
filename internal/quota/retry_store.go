@@ -35,7 +35,7 @@ func (store *Store) SettleForRetry(ctx context.Context, attempt Attempt, outcome
 // attempt data-plane remains source-compatible until the route executor opts
 // into retry lifecycle methods.
 func (store *Store) SettleFinalAttempt(ctx context.Context, attempt Attempt, outcome Outcome) error {
-	if store != nil && store.pool != nil && store.newID != nil && ctx != nil &&
+	if store != nil && store.completionPool != nil && store.newID != nil && ctx != nil &&
 		attempt.number == 1 && attempt.validate() == nil && outcome.validate() == nil {
 		handled, err := store.settleInitialFinalAttempt(ctx, attempt, outcome)
 		if handled {
@@ -376,10 +376,11 @@ func (store *Store) BeginRetryAttempt(
 		return Attempt{}, false, err
 	}
 	nextNumber := previous.number + 1
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginReservationTx(ctx, "begin retry attempt")
 	if err != nil {
-		return Attempt{}, false, persistenceFailure("begin retry attempt", err)
+		return Attempt{}, false, err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 	reservation, err := lockReservation(ctx, tx, previous.reservation)
 	if err != nil {
@@ -1630,15 +1631,16 @@ func (store *Store) settleRetryLifecycle(
 	outcome Outcome,
 	final bool,
 ) error {
-	if store == nil || store.pool == nil || store.newID == nil || ctx == nil ||
+	if store == nil || store.completionPool == nil || store.newID == nil || ctx == nil ||
 		attempt.validate() != nil || outcome.validate() != nil ||
 		(!final && outcome.Status != AttemptFailed && outcome.Status != AttemptTimedOut) {
 		return ErrInvalidInput
 	}
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin retry quota settlement")
 	if err != nil {
-		return persistenceFailure("begin retry quota settlement", err)
+		return err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 	reservation, err := lockReservation(ctx, tx, attempt.reservation)
 	if err != nil {

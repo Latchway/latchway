@@ -16,9 +16,14 @@ import (
 )
 
 const (
-	ReportSchemaVersion = 1
-	defaultTimeout      = 5 * time.Second
+	ReportSchemaVersion        = 1
+	defaultTimeout             = 5 * time.Second
+	completionPoolProbeTimeout = 500 * time.Millisecond
 )
+
+type poolPinger interface {
+	Ping(context.Context) error
+}
 
 type CheckState string
 
@@ -186,7 +191,13 @@ type SupportBundle struct {
 type Dependencies struct {
 	MasterKey          func(context.Context) error
 	ConfigurationCache func(time.Time) configuration.ActiveSnapshotCacheStatus
-	Now                func() time.Time
+	// CompletionPool is the separately reserved quota-lifecycle pool. When it
+	// is present, the existing database pool facts remain aggregate totals so
+	// operators cannot accidentally treat DB_MAX_CONNECTIONS as a per-pool
+	// allowance. Separate checks surface completion-pool connectivity and
+	// saturation.
+	CompletionPool *pgxpool.Pool
+	Now            func() time.Time
 }
 
 // Run executes bounded, body-free checks. Database/provider errors are
@@ -222,15 +233,20 @@ func Run(parent context.Context, pool *pgxpool.Pool, role string, dependencies D
 	report.Database = "reachable"
 	report.Facts.Database.Reachable = true
 	report.Facts.Database.LatencyMS = maxInt64(0, time.Since(pingStarted).Milliseconds())
-	poolStats := pool.Stat()
-	report.Facts.Database.PoolMaximum = poolStats.MaxConns()
-	report.Facts.Database.PoolTotal = poolStats.TotalConns()
-	report.Facts.Database.PoolAcquired = poolStats.AcquiredConns()
-	report.Facts.Database.PoolIdle = poolStats.IdleConns()
-	if poolStats.MaxConns() > 0 {
-		report.Facts.Database.PoolUtilizationPPM = int64(poolStats.AcquiredConns()) * 1_000_000 / int64(poolStats.MaxConns())
-	}
 	report.Checks = append(report.Checks, passedCheck("database_connectivity", "PostgreSQL accepted a bounded probe."))
+	separateCompletionPool := dependencies.CompletionPool != nil && dependencies.CompletionPool != pool
+	completionPoolReachable := false
+	if separateCompletionPool {
+		completionProbeErr := probeCompletionPool(ctx, dependencies.CompletionPool, completionPoolProbeTimeout)
+		appendCompletionPoolConnectivityCheck(
+			&report,
+			completionProbeErr,
+		)
+		completionPoolReachable = completionProbeErr == nil
+	}
+	completionUtilization, _ := collectPoolFacts(
+		pool, dependencies.CompletionPool, &report.Facts.Database,
+	)
 
 	current, available, migrationErr := database.NewMigrator(pool).Status(ctx)
 	report.SchemaVersion = current
@@ -260,8 +276,41 @@ func Run(parent context.Context, pool *pgxpool.Pool, role string, dependencies D
 	collectQuota(ctx, pool, &report)
 	appendCompatibilityCheck(&report)
 	appendPoolCheck(&report)
+	if separateCompletionPool {
+		appendCompletionPoolCheck(&report, completionUtilization, completionPoolReachable)
+	}
 	report.OverallState = overall(report.Checks)
 	return report
+}
+
+// collectPoolFacts preserves the public v1 diagnostic shape while treating
+// DB_MAX_CONNECTIONS as the aggregate per-process budget. The completion pool
+// is counted only when it is a distinct pool, which keeps single-pool CLI and
+// test callers source-compatible.
+func collectPoolFacts(primary, completion *pgxpool.Pool, facts *DatabaseFacts) (int64, bool) {
+	if primary == nil || facts == nil {
+		return 0, false
+	}
+	pools := []*pgxpool.Pool{primary}
+	separateCompletionPool := completion != nil && completion != primary
+	if separateCompletionPool {
+		pools = append(pools, completion)
+	}
+	completionUtilization := int64(0)
+	for index, candidate := range pools {
+		stats := candidate.Stat()
+		facts.PoolMaximum += stats.MaxConns()
+		facts.PoolTotal += stats.TotalConns()
+		facts.PoolAcquired += stats.AcquiredConns()
+		facts.PoolIdle += stats.IdleConns()
+		if index == 1 && stats.MaxConns() > 0 {
+			completionUtilization = int64(stats.AcquiredConns()) * 1_000_000 / int64(stats.MaxConns())
+		}
+	}
+	if facts.PoolMaximum > 0 {
+		facts.PoolUtilizationPPM = int64(facts.PoolAcquired) * 1_000_000 / int64(facts.PoolMaximum)
+	}
+	return completionUtilization, separateCompletionPool
 }
 
 func Bundle(report Report, source string) SupportBundle {
@@ -804,12 +853,50 @@ func appendCompatibilityCheck(report *Report) {
 func appendPoolCheck(report *Report) {
 	utilization := report.Facts.Database.PoolUtilizationPPM
 	if utilization >= 900_000 {
-		report.Checks = append(report.Checks, failedCheck("connection_pool_saturation", "The PostgreSQL pool is at least 90% acquired.", "Reduce request pressure or review the bounded pool and database capacity."))
+		report.Checks = append(report.Checks, failedCheck("connection_pool_saturation", "The aggregate PostgreSQL connection budget is at least 90% acquired.", "Reduce request pressure or review the bounded per-process pool budget and database capacity."))
 	} else if utilization >= 750_000 {
-		report.Checks = append(report.Checks, warningCheck("connection_pool_saturation", "The PostgreSQL pool is at least 75% acquired.", "Review sustained concurrency before raising pool limits."))
+		report.Checks = append(report.Checks, warningCheck("connection_pool_saturation", "The aggregate PostgreSQL connection budget is at least 75% acquired.", "Review sustained concurrency before raising the per-process pool budget."))
 	} else {
-		report.Checks = append(report.Checks, passedCheck("connection_pool_saturation", "The PostgreSQL pool is below the diagnostic saturation threshold."))
+		report.Checks = append(report.Checks, passedCheck("connection_pool_saturation", "The aggregate PostgreSQL connection budget is below the diagnostic saturation threshold."))
 	}
+}
+
+func appendCompletionPoolCheck(report *Report, utilization int64, reachable bool) {
+	if !reachable {
+		report.Checks = append(report.Checks, failedCheck("quota_completion_pool_saturation", "Reserved quota-completion pool pressure could not be measured because its connectivity probe failed.", "Restore completion-pool connectivity before interpreting its saturation."))
+		return
+	}
+	if utilization >= 900_000 {
+		report.Checks = append(report.Checks, failedCheck("quota_completion_pool_saturation", "The reserved quota-completion pool is at least 90% acquired.", "Reduce request pressure and inspect quota settlement latency before changing the aggregate database budget."))
+	} else if utilization >= 750_000 {
+		report.Checks = append(report.Checks, warningCheck("quota_completion_pool_saturation", "The reserved quota-completion pool is at least 75% acquired.", "Inspect sustained settlement latency and PostgreSQL lock pressure."))
+	} else {
+		report.Checks = append(report.Checks, passedCheck("quota_completion_pool_saturation", "The reserved quota-completion pool is below the diagnostic saturation threshold."))
+	}
+}
+
+func probeCompletionPool(parent context.Context, pool poolPinger, timeout time.Duration) error {
+	if parent == nil || pool == nil || timeout <= 0 {
+		return errors.New("completion pool probe is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	return pool.Ping(ctx)
+}
+
+func appendCompletionPoolConnectivityCheck(report *Report, err error) {
+	if err != nil {
+		report.Checks = append(report.Checks, failedCheck(
+			"quota_completion_pool_connectivity",
+			"The reserved quota-completion pool did not accept a bounded probe.",
+			"Inspect PostgreSQL connectivity and terminal quota-settlement pressure before accepting traffic.",
+		))
+		return
+	}
+	report.Checks = append(report.Checks, passedCheck(
+		"quota_completion_pool_connectivity",
+		"The reserved quota-completion pool accepted a bounded probe.",
+	))
 }
 
 func countJobStatus(items []JobStatusCount, status string) int64 {

@@ -32,6 +32,19 @@ NPM_REGISTRY = "https://registry.npmjs.org/"
 NPM_SCOPE_REGISTRY_OPTION = f"--@latchway:registry={NPM_REGISTRY}"
 APPLY_CONFIRMATION = "apply-latchway-release-controls-v1"
 POLICY_VARIABLE_NAME = "LATCHWAY_RELEASE_CONTROL_POLICY_ID"
+PROFILE_POLICY_VARIABLE_NAME = "LATCHWAY_RELEASE_PROFILE_POLICY_ID"
+SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT = (
+    "single-maintainer-v1-administration"
+)
+SINGLE_MAINTAINER_PRODUCT_REPOSITORIES = frozenset(
+    {
+        "latchway",
+        "latchway-js",
+        "latchway-ios-sdk",
+        "latchway-android",
+        "latchway-react-native-sdk",
+    }
+)
 QUARANTINE_SUFFIX = ":quarantine-v1"
 QUARANTINE_MUTATION_REASONS = {
     "create_environment_for_policy_quarantine",
@@ -145,10 +158,16 @@ EXPECTED_ENVIRONMENTS = {
         "release-failure-evidence": [],
         "release-load-evidence": [],
         "security-evidence": ["INDEPENDENT_SECURITY_REVIEW_TOKEN"],
+        SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT: [
+            "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+        ],
     },
     "latchway-js": {
         "npm": [],
         "release-administration": ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
+        SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT: [
+            "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+        ],
         "github-release": [],
     },
     "latchway-ios-sdk": {
@@ -159,6 +178,9 @@ EXPECTED_ENVIRONMENTS = {
         ],
         "physical-evidence-signing": [],
         "release-administration": ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
+        SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT: [
+            "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+        ],
         "cocoapods-trunk": ["COCOAPODS_TRUNK_TOKEN"],
         "github-release": [],
     },
@@ -178,6 +200,9 @@ EXPECTED_ENVIRONMENTS = {
         ],
         "maven-publication-verification": [],
         "release-administration": ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
+        SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT: [
+            "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+        ],
         "maven-central-signing": [
             "LATCHWAY_SIGNING_KEY",
             "LATCHWAY_SIGNING_PASSWORD",
@@ -209,6 +234,9 @@ EXPECTED_ENVIRONMENTS = {
         ],
         "npm": [],
         "release-administration": ["LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"],
+        SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT: [
+            "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+        ],
         "github-release": [],
     },
     "latchway-docs": {
@@ -632,6 +660,33 @@ def validate_string_list(
     return result
 
 
+def is_single_maintainer_administration(
+    repository: str, environment: Mapping[str, Any]
+) -> bool:
+    return (
+        repository in SINGLE_MAINTAINER_PRODUCT_REPOSITORIES
+        and environment.get("name")
+        == SINGLE_MAINTAINER_ADMINISTRATION_ENVIRONMENT
+    )
+
+
+def single_maintainer_administration_policy_id(repository: str) -> str:
+    if repository not in SINGLE_MAINTAINER_PRODUCT_REPOSITORIES:
+        raise ControlError("single_maintainer_administration_repository_invalid")
+    return (
+        f"latchway-release-profile-v1:{repository}:"
+        "single_maintainer_v1:administration"
+    )
+
+
+def environment_policy_variable_name(
+    repository: str, environment: Mapping[str, Any]
+) -> str:
+    if is_single_maintainer_administration(repository, environment):
+        return PROFILE_POLICY_VARIABLE_NAME
+    return POLICY_VARIABLE_NAME
+
+
 def validate_manifest(value: Any) -> dict[str, Any]:
     manifest = require_object(value, "manifest_not_object")
     require_keys(
@@ -713,13 +768,22 @@ def validate_manifest(value: Any) -> dict[str, Any]:
                 "environment_fields_invalid",
             )
             environment_name = environment["name"]
+            profile_administration = is_single_maintainer_administration(
+                name, environment
+            )
+            expected_policy_id = (
+                single_maintainer_administration_policy_id(name)
+                if profile_administration
+                else f"{manifest['control_id']}:{name}:{environment_name}"
+            )
+            expected_prevent_self_review = not profile_administration
             if (
                 not isinstance(environment_name, str)
                 or NAME.fullmatch(environment_name) is None
                 or environment_name in environment_names
-                or environment["policy_id"]
-                != f"{manifest['control_id']}:{name}:{environment_name}"
-                or environment["prevent_self_review"] is not True
+                or environment["policy_id"] != expected_policy_id
+                or environment["prevent_self_review"]
+                is not expected_prevent_self_review
             ):
                 raise ControlError("environment_identity_invalid")
             environment_names.add(environment_name)
@@ -730,10 +794,15 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             require_keys(
                 reviewers, {"minimum", "source"}, "environment_reviewers_invalid"
             )
+            expected_reviewer_policy = (
+                (0, "profile_policy")
+                if profile_administration
+                else (1, "command_line")
+            )
             if (
-                reviewers["minimum"] != 1
-                or isinstance(reviewers["minimum"], bool)
-                or reviewers["source"] != "command_line"
+                isinstance(reviewers["minimum"], bool)
+                or (reviewers["minimum"], reviewers["source"])
+                != expected_reviewer_policy
             ):
                 raise ControlError("environment_reviewers_invalid")
 
@@ -1540,8 +1609,10 @@ def inspect_github(
     mutations: list[dict[str, Any]] = []
     destructive_drift = False
     organization = manifest["organization"]
-    expected_reviewers = {
-        (reviewer.github_type, reviewer.identifier) for reviewer in reviewers
+    policy_variable_names = {
+        environment_policy_variable_name(repository["name"], environment)
+        for repository in manifest["repositories"]
+        for environment in repository["environments"]
     }
 
     actions_app = require_object(
@@ -1605,30 +1676,32 @@ def inspect_github(
             visible_repositories,
         )
     organization_variable_names = set(organization_variable_scopes)
-    organization_policy_fallback_absent = (
-        POLICY_VARIABLE_NAME not in organization_variable_names
+    organization_policy_fallbacks = (
+        policy_variable_names & organization_variable_names
     )
-    if not organization_policy_fallback_absent:
-        checks.append(
-            finding(
-                organization,
-                "organization_variable",
-                POLICY_VARIABLE_NAME,
-                "drift",
-                "organization_policy_sentinel_fallback_requires_manual_remediation",
+    organization_policy_fallback_absent = not organization_policy_fallbacks
+    for policy_variable_name in sorted(policy_variable_names):
+        if policy_variable_name in organization_policy_fallbacks:
+            checks.append(
+                finding(
+                    organization,
+                    "organization_variable",
+                    policy_variable_name,
+                    "drift",
+                    "organization_policy_sentinel_fallback_requires_manual_remediation",
+                )
             )
-        )
-        destructive_drift = True
-    else:
-        checks.append(
-            finding(
-                organization,
-                "organization_variable",
-                POLICY_VARIABLE_NAME,
-                "passed",
-                "organization_policy_sentinel_fallback_absent",
+            destructive_drift = True
+        else:
+            checks.append(
+                finding(
+                    organization,
+                    "organization_variable",
+                    policy_variable_name,
+                    "passed",
+                    "organization_policy_sentinel_fallback_absent",
+                )
             )
-        )
 
     protected_secret_names = {
         secret_name
@@ -1793,29 +1866,38 @@ def inspect_github(
         }
         if len(repository_variable_names) != len(repository_variables):
             raise ControlError("repository_variable_list_invalid")
-        if POLICY_VARIABLE_NAME in repository_variable_names:
-            checks.append(
-                finding(
-                    repository,
-                    "repository_variable",
-                    POLICY_VARIABLE_NAME,
-                    "drift",
-                    "repository_policy_sentinel_fallback_requires_manual_remediation",
+        repository_policy_variable_names = {
+            environment_policy_variable_name(repository, environment)
+            for environment in desired_repository["environments"]
+        }
+        repository_policy_fallbacks = (
+            repository_policy_variable_names & repository_variable_names
+        )
+        for policy_variable_name in sorted(repository_policy_variable_names):
+            if policy_variable_name in repository_policy_fallbacks:
+                checks.append(
+                    finding(
+                        repository,
+                        "repository_variable",
+                        policy_variable_name,
+                        "drift",
+                        "repository_policy_sentinel_fallback_requires_manual_remediation",
+                    )
                 )
-            )
-            destructive_drift = True
+                destructive_drift = True
+            else:
+                checks.append(
+                    finding(
+                        repository,
+                        "repository_variable",
+                        policy_variable_name,
+                        "passed",
+                        "repository_policy_sentinel_fallback_absent",
+                    )
+                )
+        if repository_policy_fallbacks:
             repository_sealing_blockers.append(
                 "repository_policy_sentinel_fallback"
-            )
-        else:
-            checks.append(
-                finding(
-                    repository,
-                    "repository_variable",
-                    POLICY_VARIABLE_NAME,
-                    "passed",
-                    "repository_policy_sentinel_fallback_absent",
-                )
             )
 
         desired_repository_variable_names = {
@@ -2083,8 +2165,26 @@ def inspect_github(
 
         for desired_environment in desired_repository["environments"]:
             name = desired_environment["name"]
+            profile_administration = is_single_maintainer_administration(
+                repository, desired_environment
+            )
+            environment_reviewers = [] if profile_administration else list(reviewers)
+            expected_environment_reviewers = {
+                (reviewer.github_type, reviewer.identifier)
+                for reviewer in environment_reviewers
+            }
+            policy_variable_name = environment_policy_variable_name(
+                repository, desired_environment
+            )
             path = environment_path(organization, repository, name)
-            environment_sealing_blockers = list(repository_sealing_blockers)
+            environment_sealing_blockers = [
+                blocker
+                for blocker in repository_sealing_blockers
+                if not (
+                    profile_administration
+                    and blocker == "independent_reviewer_unavailable"
+                )
+            ]
             try:
                 remote = require_object(
                     client.get(path), "environment_response_invalid"
@@ -2108,7 +2208,9 @@ def inspect_github(
                             if policy_fallback_requires_shadow
                             else "create_protected_environment"
                         ),
-                        environment_body(desired_environment, reviewers),
+                        environment_body(
+                            desired_environment, environment_reviewers
+                        ),
                     )
                 )
                 if policy_fallback_requires_shadow:
@@ -2118,7 +2220,7 @@ def inspect_github(
                             path + "/variables",
                             "quarantine_release_control_policy_sentinel",
                             {
-                                "name": POLICY_VARIABLE_NAME,
+                                "name": policy_variable_name,
                                 "value": quarantine_policy_value(
                                     desired_environment
                                 ),
@@ -2144,7 +2246,7 @@ def inspect_github(
                             if policy_fallback_requires_shadow
                             else "release_control_policy_sentinel_withheld_until_environment_exact"
                         ),
-                        variable=POLICY_VARIABLE_NAME,
+                        variable=policy_variable_name,
                         blockers=sorted(
                             set(
                                 environment_sealing_blockers
@@ -2249,8 +2351,8 @@ def inspect_github(
                 )
 
             actual, prevent, wait_timer = actual_reviewers(remote)
-            extras = sorted(actual - expected_reviewers)
-            missing = sorted(expected_reviewers - actual)
+            extras = sorted(actual - expected_environment_reviewers)
+            missing = sorted(expected_environment_reviewers - actual)
             if extras:
                 checks.append(
                     finding(
@@ -2260,7 +2362,10 @@ def inspect_github(
                         "drift",
                         "unknown_reviewer_requires_manual_remediation",
                         actual=[{"type": item[0], "id": item[1]} for item in sorted(actual)],
-                        expected=[reviewer.api_value() for reviewer in reviewers],
+                        expected=[
+                            reviewer.api_value()
+                            for reviewer in environment_reviewers
+                        ],
                     )
                 )
                 destructive_drift = True
@@ -2274,7 +2379,10 @@ def inspect_github(
                         "drift",
                         "reviewer_policy_drift",
                         actual=[{"type": item[0], "id": item[1]} for item in sorted(actual)],
-                        expected=[reviewer.api_value() for reviewer in reviewers],
+                        expected=[
+                            reviewer.api_value()
+                            for reviewer in environment_reviewers
+                        ],
                         prevent_self_review=prevent,
                     )
                 )
@@ -2282,8 +2390,16 @@ def inspect_github(
                     mutation(
                         "PUT",
                         path,
-                        "add_required_reviewers",
-                        environment_body(desired_environment, reviewers, wait_timer),
+                        (
+                            "remove_required_reviewers_for_profile"
+                            if profile_administration
+                            else "add_required_reviewers"
+                        ),
+                        environment_body(
+                            desired_environment,
+                            environment_reviewers,
+                            wait_timer,
+                        ),
                     )
                 )
                 environment_sealing_blockers.append("reviewer_policy_not_exact")
@@ -2295,7 +2411,10 @@ def inspect_github(
                         name,
                         "passed",
                         "reviewer_policy_exact",
-                        reviewers=[reviewer.api_value() for reviewer in reviewers],
+                        reviewers=[
+                            reviewer.api_value()
+                            for reviewer in environment_reviewers
+                        ],
                     )
                 )
 
@@ -2442,7 +2561,7 @@ def inspect_github(
             unknown_variables = sorted(
                 actual_variable_names
                 - allowed_variable_names
-                - {POLICY_VARIABLE_NAME}
+                - {policy_variable_name}
             )
             missing_variables = sorted(
                 required_variable_names - actual_variable_names
@@ -2451,7 +2570,7 @@ def inspect_github(
                 (
                     variable
                     for variable in normalized_variables
-                    if variable["name"] == POLICY_VARIABLE_NAME
+                    if variable["name"] == policy_variable_name
                 ),
                 None,
             )
@@ -2465,7 +2584,7 @@ def inspect_github(
                         "unknown_environment_variable_requires_manual_remediation",
                         actual=sorted(variable_names),
                         allowed=sorted(
-                            allowed_variable_names | {POLICY_VARIABLE_NAME}
+                            allowed_variable_names | {policy_variable_name}
                         ),
                     )
                 )
@@ -2572,7 +2691,7 @@ def inspect_github(
                                 else "release_control_policy_sentinel_withheld_until_environment_exact"
                             )
                         ),
-                        variable=POLICY_VARIABLE_NAME,
+                        variable=policy_variable_name,
                         blockers=seal_blockers,
                     )
                 )
@@ -2584,7 +2703,7 @@ def inspect_github(
                             path + "/variables",
                             "quarantine_release_control_policy_sentinel",
                             {
-                                "name": POLICY_VARIABLE_NAME,
+                                "name": policy_variable_name,
                                 "value": quarantine_policy_value(
                                     desired_environment
                                 ),
@@ -2598,7 +2717,7 @@ def inspect_github(
                             path + "/variables",
                             "add_release_control_policy_sentinel",
                             {
-                                "name": POLICY_VARIABLE_NAME,
+                                "name": policy_variable_name,
                                 "value": desired_environment["policy_id"],
                             },
                         )
@@ -2623,7 +2742,7 @@ def inspect_github(
                                 else "release_control_policy_sentinel_restore_withheld_until_environment_exact"
                             )
                         ),
-                        variable=POLICY_VARIABLE_NAME,
+                        variable=policy_variable_name,
                         blockers=seal_blockers,
                     )
                 )
@@ -2631,10 +2750,10 @@ def inspect_github(
                     mutations.append(
                         mutation(
                             "PATCH",
-                            path + "/variables/" + quoted(POLICY_VARIABLE_NAME),
+                            path + "/variables/" + quoted(policy_variable_name),
                             "restore_release_control_policy_sentinel",
                             {
-                                "name": POLICY_VARIABLE_NAME,
+                                "name": policy_variable_name,
                                 "value": desired_environment["policy_id"],
                             },
                         )
@@ -2647,7 +2766,7 @@ def inspect_github(
                         name,
                         "drift",
                         "release_control_policy_sentinel_quarantine_scheduled",
-                        variable=POLICY_VARIABLE_NAME,
+                        variable=policy_variable_name,
                         blockers=seal_blockers,
                     )
                 )
@@ -2655,10 +2774,10 @@ def inspect_github(
                 mutations.append(
                     mutation(
                         "PATCH",
-                        path + "/variables/" + quoted(POLICY_VARIABLE_NAME),
+                        path + "/variables/" + quoted(policy_variable_name),
                         "quarantine_release_control_policy_sentinel",
                         {
-                            "name": POLICY_VARIABLE_NAME,
+                            "name": policy_variable_name,
                             "value": quarantine_policy_value(
                                 desired_environment
                             ),
@@ -2673,7 +2792,7 @@ def inspect_github(
                         name,
                         "passed",
                         "release_control_policy_sentinel_exact",
-                        variable=POLICY_VARIABLE_NAME,
+                        variable=policy_variable_name,
                     )
                 )
 
@@ -3127,7 +3246,11 @@ def plan_evidence(
         | set(manifest["forbidden_secret_names"])
     )
     protected_variable_names = sorted(
-        {POLICY_VARIABLE_NAME}
+        {
+            environment_policy_variable_name(repository["name"], environment)
+            for repository in manifest["repositories"]
+            for environment in repository["environments"]
+        }
         | {
             variable_name
             for repository in manifest["repositories"]
@@ -3158,7 +3281,10 @@ def plan_evidence(
             | set(manifest["forbidden_secret_names"])
         )
         repository_variable_names = sorted(
-            {POLICY_VARIABLE_NAME}
+            {
+                environment_policy_variable_name(repository["name"], environment)
+                for environment in repository["environments"]
+            }
             | {
                 variable_name
                 for environment in repository["environments"]
@@ -3193,7 +3319,9 @@ def plan_evidence(
                         "action": "ensure_release_control_policy_sentinel",
                         "repository": repository["name"],
                         "name": environment["name"],
-                        "variable": POLICY_VARIABLE_NAME,
+                        "variable": environment_policy_variable_name(
+                            repository["name"], environment
+                        ),
                         "value": environment["policy_id"],
                     },
                     {

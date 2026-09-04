@@ -69,7 +69,12 @@ platform autoscaler:
 | Request routing | Random selection among the four fixed identities | Routing is not locality-aware or load-aware, and each selected stopped instance can cold-start |
 | Idle lifecycle | Ten-minute sleep timer for each container | Instances 1–3 can sleep after inactivity and restart in another location |
 | Required worker | A one-minute Cron Trigger calls `instance-0` | Each successful trigger reactivates or keeps one combined API/worker container warm; the platform does not guarantee uninterrupted runtime |
-| Database pool | Five connections per identity | The four-identity application ceiling reserves up to 20 application connections |
+| Database pool | Five aggregate connections per identity, including two completion-reserved connections | The four-identity ceiling is 20 total: eight completion-reserved and 12 regular; do not add the reservation to the total |
+
+Include migration, administration, backup, maintenance, and rollout demand,
+then keep planned peak use at or below 80% of usable PostgreSQL connections so
+at least 20% remains free. Change the aggregate and completion settings
+together; the completion value must remain at least one and below the total.
 
 Cloudflare bills Containers for provisioned memory and disk while an instance
 is active, active CPU time, and network egress. Workers, Durable Objects, and

@@ -1,51 +1,36 @@
 import type { DoctorReport, SystemStatus } from "../api/admin";
+import {
+  consoleContractVersion,
+  consoleProtocolVersion,
+  evaluateConsoleCompatibility,
+  optionalConsoleServerCapabilities,
+  requiredConsoleServerCapabilities,
+  type ConsoleCompatibility
+} from "../api/console-compatibility";
 
-export const consoleContractVersion = "1.0.0";
-export const consoleProtocolVersion = 2;
-export const requiredSettingsServerCapabilities = [
-  "app_attest",
-  "play_integrity",
-  "firebase_app_check",
-  "turnstile",
-  "component_delegation",
-  "cost_limits",
-  "openai_responses",
-  "openai_chat",
-  "openai_embeddings",
-  "anthropic_messages",
-  "opaque_http",
-  "configuration_import_export",
-  "admin_session_management"
-] as const;
-export const optionalSettingsServerCapabilities = ["admin_event_stream"] as const;
+export { consoleContractVersion, consoleProtocolVersion };
+export const requiredSettingsServerCapabilities = requiredConsoleServerCapabilities;
+export const optionalSettingsServerCapabilities = optionalConsoleServerCapabilities;
+export type SettingsCompatibility = ConsoleCompatibility;
 
-export interface SettingsCompatibility {
-  contractCompatible: boolean;
-  missingCapabilities: string[];
-  protocolCompatible: boolean;
-  readOnlySafeMode: boolean;
-  reasons: string[];
-}
-
+// Kept as the Settings-facing adapter because the doctor report provides an
+// independent display-time consistency check. The application-wide mutation
+// gate intentionally depends only on the canonical /admin/v1/system contract.
 export function evaluateSettingsCompatibility(
   status: SystemStatus,
   doctor?: DoctorReport
 ): SettingsCompatibility {
-  const missingCapabilities = requiredSettingsServerCapabilities.filter(
-    (capability) => !status.server_capabilities.includes(capability)
-  );
-  const contractCompatible = status.contract_version === consoleContractVersion
+  const result = evaluateConsoleCompatibility(status);
+  const reasons = [...result.reasons];
+  const contractCompatible = result.contractCompatible
     && (!doctor || doctor.facts.runtime.contract_version === consoleContractVersion);
-  const protocolCompatible = status.protocol_versions.includes(consoleProtocolVersion)
+  const protocolCompatible = result.protocolCompatible
     && (!doctor || doctor.facts.runtime.protocol_versions.includes(consoleProtocolVersion));
-  const reasons: string[] = [];
-  if (!contractCompatible) reasons.push(`Contract ${consoleContractVersion} is required.`);
-  if (!protocolCompatible) reasons.push(`Protocol ${consoleProtocolVersion} is required.`);
-  if (missingCapabilities.length > 0) reasons.push(`Missing server capabilities: ${missingCapabilities.join(", ")}.`);
-  if (!status.ready) reasons.push("The server is not ready for mutations.");
+  if (result.contractCompatible && !contractCompatible) reasons.push(`Doctor contract ${consoleContractVersion} is required.`);
+  if (result.protocolCompatible && !protocolCompatible) reasons.push(`Doctor protocol ${consoleProtocolVersion} is required.`);
   return {
+    ...result,
     contractCompatible,
-    missingCapabilities,
     protocolCompatible,
     readOnlySafeMode: reasons.length > 0,
     reasons

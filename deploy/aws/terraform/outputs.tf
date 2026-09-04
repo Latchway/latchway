@@ -34,6 +34,32 @@ output "admin_bootstrap_secret_arn" {
   value = aws_secretsmanager_secret.admin_bootstrap.arn
 }
 
+output "configured_steady_state_application_database_connections" {
+  description = "Configured steady-state aggregate application connection ceiling across maximum_tasks ECS tasks; completion connections are included, not added. Rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * var.db_connections_per_task
+}
+
+output "configured_steady_state_regular_application_database_connections" {
+  description = "Configured steady-state regular-work connection ceiling across maximum_tasks ECS tasks. Rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * (var.db_connections_per_task - var.db_completion_connections_per_task)
+}
+
+output "configured_steady_state_completion_application_database_connections" {
+  description = "Configured steady-state completion-reserved connection ceiling across maximum_tasks ECS tasks; this is already included in configured_steady_state_application_database_connections. Rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * var.db_completion_connections_per_task
+}
+
 output "maximum_application_database_connections" {
-  value = var.maximum_tasks * var.db_connections_per_task
+  description = "Compatibility alias for configured_steady_state_application_database_connections. Despite the legacy maximum name, rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * var.db_connections_per_task
+}
+
+output "maximum_regular_application_database_connections" {
+  description = "Compatibility alias for configured_steady_state_regular_application_database_connections. Despite the legacy maximum name, rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * (var.db_connections_per_task - var.db_completion_connections_per_task)
+}
+
+output "maximum_completion_application_database_connections" {
+  description = "Compatibility alias for configured_steady_state_completion_application_database_connections. Despite the legacy maximum name, rollout and provider overshoot are excluded."
+  value       = var.maximum_tasks * var.db_completion_connections_per_task
 }

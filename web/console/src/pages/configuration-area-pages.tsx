@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { adminRequest, RevisionSchema, type ConfigurationPlan, type ConfigurationRevision, type ConfigurationValidation } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { ConfigurationRouteSearchSchema } from "../app/route-search";
 import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
@@ -28,7 +29,7 @@ import {
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
+  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
 }
 
 function localProblem(detail: string, title = "Resource edit is invalid"): AdminProblem {
@@ -45,6 +46,7 @@ function PlanResult({ plan }: { plan?: ConfigurationPlan }) {
 
 function ConfigurationAreaEditor({ definition }: { definition: ConfigurationAreaDefinition }) {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const routeSearch = ConfigurationRouteSearchSchema.parse(workspace?.search ?? {});
   const routeEnvironmentID = routeSearch.environment_id;
@@ -70,7 +72,7 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
   const dirty = changed || editorChanged;
   const sourceMatchesEnvironment = source?.environment_id === environmentID;
   useDirtyEditProtection(dirty);
-  const canConfigure = session.data?.session?.capabilities.includes("activate_configuration") ?? false;
+  const canConfigure = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
 
   function clearTransient(): void {
     setEditorKey(undefined); setEditorValue(""); setEditorInitialValue(""); setDeletionTarget(undefined); setDeletionConfirmation(""); setValidation(undefined); setPlan(undefined); setResult(undefined);
@@ -150,7 +152,7 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
   }
 
   async function submit(activate: boolean): Promise<void> {
-    if (!source || !document || !collection || !changed || !sourceMatchesEnvironment) return;
+    if (!canConfigure || !source || !document || !collection || !changed || !sourceMatchesEnvironment) return;
     setBusy(true); setProblem(undefined); setValidation(undefined); setPlan(undefined); setResult(undefined);
     try {
       const applied = await applyConfigurationSliceChange({ activate, description: `Admin console ${definition.title} targeted edit`, document, environmentID, sourceRevisionID: source.id });

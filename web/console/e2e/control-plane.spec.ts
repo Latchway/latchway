@@ -102,6 +102,7 @@ async function installAdminFixture(
     }
   };
   let createdRevisionDocument: unknown = configurationDocument;
+  let createdStandaloneRevision = false;
   let activeConfigurationDocument: unknown = configurationDocument;
   let activeConfigurationRevisionID = ids.activeRevision;
   let activeConfigurationVersion = 2;
@@ -130,6 +131,21 @@ async function installAdminFixture(
     if (url.pathname === "/admin/v1/auth/session") return authenticated ? json(route, 200, session) : problem(route, "authentication_required", 401, "Sign in.");
     if (url.pathname === "/admin/v1/auth/login") { authenticated = true; return json(route, 200, session, { "X-CSRF-Token": csrf }); }
     if (url.pathname === "/admin/v1/auth/logout") { authenticated = false; return route.fulfill({ status: 204 }); }
+    if (url.pathname === "/admin/v1/system") return json(route, 200, {
+      contract_version: "1.0.0",
+      database_schema_version: "28",
+      mutation_ready: true,
+      protocol_versions: [1, 2],
+      ready: true,
+      role: "all",
+      server_capabilities: [
+        "app_attest", "play_integrity", "firebase_app_check", "turnstile",
+        "component_delegation", "cost_limits", "openai_responses", "openai_chat",
+        "openai_embeddings", "anthropic_messages", "opaque_http",
+        "configuration_import_export", "admin_session_management", "admin_event_stream"
+      ],
+      server_version: "1.0.0"
+    });
     if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }], page: { has_more: false } });
     if (url.pathname === "/admin/v1/administrators" && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; administratorBodies.push(body);
@@ -185,7 +201,12 @@ async function installAdminFixture(
       secretItems = secretItems.filter((item) => item.id !== currentID);
       return route.fulfill({ status: 204 });
     }
-    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, { items: [{ activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }], page: { has_more: false } });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, {
+      items: [createdStandaloneRevision
+        ? { created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "valid", validation: { checked_at: instant, issues: [], valid: true }, version: 1 }
+        : { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }],
+      page: { has_more: false }
+    });
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       if (body.base_revision_id === activeConfigurationRevisionID) {
@@ -194,10 +215,11 @@ async function installAdminFixture(
       }
       const document = body.document as unknown;
       createdRevisionDocument = document;
+      createdStandaloneRevision = true;
       revisionBodies.push(document);
       return json(route, 201, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.revision, state: "draft", version: 1 }, { ETag: '"revision-etag"' });
     }
-    if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: activeConfigurationRevisionID, state: "active", version: activeConfigurationVersion }, { ETag: '"active-revision-etag"' });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: activeConfigurationRevisionID, state: "active", validation: { checked_at: instant, issues: [], valid: true }, version: activeConfigurationVersion }, { ETag: '"active-revision-etag"' });
     if (url.pathname === `/admin/v1/environments/${ids.environment}/rollback` && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; rollbackBodies.push({ audit_reason: request.headers()["x-latchway-audit-reason"], etag: request.headers()["if-match"], ...body });
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 3 }, { ETag: '"restored-revision-etag"' });
@@ -205,7 +227,12 @@ async function installAdminFixture(
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/plan`) return problem(route, "resource_not_found", 404, "No active configuration exists.");
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}` && request.method() === "GET") return json(route, 200, { created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "valid", version: 1 }, { ETag: '"revision-etag"' });
-    if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/activate`) return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
+    if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/activate`) {
+      activeConfigurationDocument = createdRevisionDocument;
+      activeConfigurationRevisionID = ids.revision;
+      activeConfigurationVersion = 1;
+      return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
+    }
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "PATCH") {
       activeConfigurationDocument = JSON.parse(request.postData() ?? "{}");
       configurationPatchBodies.push(activeConfigurationDocument);
@@ -241,10 +268,10 @@ async function installAdminFixture(
     const requestDetail = {
       attempts: [{ attempt_number: 1, completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", first_byte_at: "2026-08-29T00:00:00.500Z", first_token_at: "2026-08-29T00:00:00.750Z", http_status: 200, id: ids.attempt, model: "openai/gpt", route: "primary", started_at: instant, status: "succeeded", upstream: "openrouter", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "upstream_reported" }],
       completed_at: "2026-08-29T00:00:03Z",
-      config_revision_id: ids.activeRevision,
+      config_revision_id: activeConfigurationRevisionID,
       decision_stages: [{
         completed_at: "2026-08-29T00:00:00.010Z",
-        config_revision_id: ids.activeRevision,
+        config_revision_id: activeConfigurationRevisionID,
         duration_ms: 10,
         number: 1,
         outcome: "succeeded",
@@ -252,7 +279,7 @@ async function installAdminFixture(
         started_at: instant
       }, {
         completed_at: "2026-08-29T00:00:00.020Z",
-        config_revision_id: ids.activeRevision,
+        config_revision_id: activeConfigurationRevisionID,
         duration_ms: 10,
         number: 2,
         outcome: "succeeded",
@@ -260,7 +287,7 @@ async function installAdminFixture(
         started_at: "2026-08-29T00:00:00.010Z"
       }, {
         completed_at: "2026-08-29T00:00:00.030Z",
-        config_revision_id: ids.activeRevision,
+        config_revision_id: activeConfigurationRevisionID,
         duration_ms: 10,
         number: 3,
         outcome: "succeeded",
@@ -268,7 +295,7 @@ async function installAdminFixture(
         started_at: "2026-08-29T00:00:00.020Z"
       }, {
         completed_at: "2026-08-29T00:00:00.040Z",
-        config_revision_id: ids.activeRevision,
+        config_revision_id: activeConfigurationRevisionID,
         duration_ms: 10,
         model: "assistant_default",
         number: 4,
@@ -280,7 +307,7 @@ async function installAdminFixture(
         upstream: "openrouter"
       }, {
         completed_at: "2026-08-29T00:00:00.050Z",
-        config_revision_id: ids.activeRevision,
+        config_revision_id: activeConfigurationRevisionID,
         duration_ms: 10,
         limit_algorithm: "calendar",
         limit_maximum: 100,
@@ -296,7 +323,7 @@ async function installAdminFixture(
       feature: "assistant",
       id: ids.request,
       installation_id: "ins_0123456789abcdef",
-      protocol: "openai_chat",
+      protocol: "openai_responses",
       selected_limit_plan: "free",
       selected_model: "assistant_default",
       selected_physical_model: "gpt-5-mini",
@@ -357,12 +384,12 @@ async function installAdminFixture(
       selfTestSchedules = [disabled];
       return json(route, 200, disabled);
     }
-    if (url.pathname === `/admin/v1/self-tests/${ids.selfTest}` && request.method() === "GET" && selfTestRun) return json(route, 200, selfTestRun);
+    if (url.pathname === `/admin/v1/self-tests/${ids.selfTest}` && request.method() === "GET" && url.searchParams.get("environment_id") === selfTestRun?.environment_id && selfTestRun) return json(route, 200, selfTestRun);
     if (url.pathname === "/admin/v1/self-tests") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       selfTestBodies.push(body);
       const kind = typeof body.kind === "string" ? body.kind : "local";
-      selfTestRun = { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind, state: "passed" };
+      selfTestRun = { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, environment_id: body.environment_id, id: ids.selfTest, kind, state: "passed", ...(kind === "local" ? {} : { config_revision_id: body.config_revision_id }) };
       return json(route, 202, selfTestRun);
     }
     if (url.pathname === `/admin/v1/users/${ids.user}` && request.method() === "GET") return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: userStatus, ...(userOverride ? { limit_plan_override: userOverride } : {}) });
@@ -473,6 +500,30 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1);
 });
 
+test("first-run exposes only the evidence fields for each selected platform scope", async ({ page }) => {
+  await installAdminFixture(page, { includePrimarySecret: false });
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /Setup wizard/ }).click();
+
+  const scopes = [
+    { android: false, apple: true, value: "ios", web: false },
+    { android: true, apple: false, value: "android", web: false },
+    { android: false, apple: false, value: "web", web: true },
+    { android: false, apple: true, value: "react_native_ios", web: false },
+    { android: true, apple: false, value: "react_native_android", web: false },
+    { android: true, apple: true, value: "react_native_both", web: false }
+  ] as const;
+  for (const scope of scopes) {
+    await page.getByLabel("Platform scope").selectOption(scope.value);
+    await expect(page.getByLabel("App ID prefix")).toHaveCount(scope.apple ? 1 : 0);
+    await expect(page.getByLabel("Package name")).toHaveCount(scope.android ? 1 : 0);
+    await expect(page.getByLabel("Exact browser origin")).toHaveCount(scope.web ? 1 : 0);
+  }
+});
+
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
   const fixture = await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
@@ -495,6 +546,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
   );
+  await page.getByLabel("Exact version code").fill("123");
   await page.getByLabel("Input price (nano-USD per million tokens)").fill("250000");
   await page.getByLabel("Output price (nano-USD per million tokens)").fill("2000000");
   await page.getByRole("button", { name: "Create application and environment" }).click();
@@ -514,7 +566,10 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   ]);
   expect(generated.spec.attestationPolicies[0]?.platforms).toMatchObject({
     react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { environment: "production", allowedValidationCategories: [4], allowedBundleVersions: ["234"] } },
-    react_native_android: { minimumTrustLevel: "device_verified" }
+    react_native_android: {
+      minimumTrustLevel: "device_verified",
+      playIntegrity: { maximumVersionCode: 123, minimumVersionCode: 123 }
+    }
   });
   expect(generated.spec.inputAccountingProfiles[0]).toMatchObject({
     protocol: "openai_responses", physicalModel: "gpt-5-mini",
@@ -535,22 +590,44 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   const snippets = await page.locator("pre").allTextContents();
   expect(snippets).toHaveLength(1);
   expect(snippets.every((snippet) => snippet.includes(ids.application))).toBe(true);
+  expect(snippets[0]).toContain('import { createLatchwayClient } from "@latchway/react-native";');
   expect(snippets[0]).toContain("baseURL: gatewayURL");
   expect(snippets[0]).toContain('identityProvider: "firebase"');
+  expect(snippets[0]).toContain("apple:");
+  expect(snippets[0]).toContain('rootKeychainAccessGroup: "YOUR_FULLY_RESOLVED_PRIVATE_APP_ID_GROUP"');
   expect(snippets[0]).toContain('playIntegrityCloudProjectNumber: "123456789"');
   expect(snippets[0]).toContain('latchway.fetch("/v1/responses"');
   expect(snippets[0]).toContain('latchwayFeature: "assistant"');
   expect(snippets.join("\n")).not.toContain("applicationID: \"mobile-app\"");
   expect(snippets.join("\n")).not.toContain("window.location.origin");
+  const activeConfigurationSteps = [
+    "Identity provider",
+    "Attestation & components",
+    "Upstream target",
+    "Feature and route",
+    "Limits",
+    "SDK snippets"
+  ];
+  for (const label of activeConfigurationSteps) {
+    await expect(page.getByRole("listitem").filter({ hasText: label })).not.toHaveClass(/wizard-progress__done/);
+  }
   await page.getByLabel("Secret value").fill("test-only-upstream-key");
   await page.getByRole("button", { name: "Add credential" }).click();
   await expect(page.getByRole("button", { name: "Credential added" })).toBeVisible();
   await expect(page.getByLabel("Secret value")).toHaveValue("");
   await page.getByRole("button", { name: "Validate and activate with ETag" }).click();
   await expect(page.getByText(/is active/)).toBeVisible();
+  for (const label of activeConfigurationSteps) {
+    await expect(page.getByRole("listitem").filter({ hasText: label })).toHaveClass(/wizard-progress__done/);
+  }
   await page.getByRole("button", { name: "Run bounded upstream self-test" }).click();
   await expect(page.getByText(/Self-test .*passed/)).toBeVisible();
+  await page.getByRole("button", { name: "Check durable client request" }).click();
+  await expect(page.getByText(/Verified durable request/)).toContainText(ids.request);
+  await expect(page.getByRole("listitem").filter({ hasText: "Verified sample request" }))
+    .toHaveClass(/wizard-progress__done/);
   expect(fixture.selfTestBodies).toEqual([{
+    config_revision_id: ids.revision,
     environment_id: ids.environment,
     kind: "upstream",
     max_cost_nano_usd: 10_000_000,
@@ -820,6 +897,7 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   });
   await immediateSelfTest.locator('input[name="environment"]').fill(ids.environment);
   await immediateSelfTest.locator('select[name="kind"]').selectOption("openrouter");
+  await immediateSelfTest.locator('input[name="config_revision_id"]').fill(ids.activeRevision);
   await immediateSelfTest.locator('input[name="upstream"]').fill("openrouter");
   await immediateSelfTest.locator('input[name="model"]').fill("canary");
   await expect(immediateSelfTest.locator('input[name="max_cost_nano_usd"]')).toHaveValue("10000000");
@@ -827,6 +905,7 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   await expect(page.getByRole("heading", { name: "openrouter self-test" })).toBeVisible();
   await expect(page.getByText("Bounded provider usage passed.")).toBeVisible();
   expect(fixture.selfTestBodies).toEqual([{
+    config_revision_id: ids.activeRevision,
     environment_id: ids.environment,
     kind: "openrouter",
     max_cost_nano_usd: 10_000_000,

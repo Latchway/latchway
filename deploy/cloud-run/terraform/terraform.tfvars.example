@@ -1,5 +1,5 @@
-project_id    = "replace-with-project-id"
-region        = "asia-southeast1"
+project_id                       = "replace-with-project-id"
+region                           = "asia-southeast1"
 service_image                    = "ghcr.io/latchway/latchway@sha256:replace-with-current-service-digest"
 migration_image                  = "ghcr.io/latchway/latchway@sha256:replace-with-next-migration-digest"
 migration_approved_service_image = "ghcr.io/latchway/latchway@sha256:replace-with-current-service-digest"
@@ -7,10 +7,12 @@ service_revision_name            = "latchway-release-id"
 previous_service_revision_name   = null
 service_traffic_percent          = 100
 public_origin                    = "https://ai.example.com"
+deploy_service                   = false
 
-database_edition           = "ENTERPRISE"
-min_instances               = 1
-max_instances               = 10
-db_connections_per_instance = 20
-inject_admin_bootstrap_token = true
-migrate_on_start             = true
+database_edition                      = "ENTERPRISE"
+min_instances                          = 1
+max_instances                          = 3
+db_connections_per_instance            = 20
+db_completion_connections_per_instance = 5
+inject_admin_bootstrap_token           = false
+migrate_on_start                       = false

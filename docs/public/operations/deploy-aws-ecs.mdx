@@ -97,9 +97,14 @@ curl --fail --show-error https://ai.example.com/readyz
 
 Require every running task to resolve to the reviewed ECR digest and at least
 two tasks to be healthy. Exercise one authenticated request and one SSE stream.
-At maximum scale, reserve `maximum_tasks × db_connections_per_task` application
-connections plus separate migration, maintenance, backup, and operator
-headroom.
+At maximum scale, reserve `maximum_tasks × db_connections_per_task` aggregate
+application connections. `db_completion_connections_per_task` is reserved
+inside that number and Terraform requires it to be smaller; it is never
+additive. Include migration, maintenance, backup, operator, and rollout demand
+and keep the planned peak at or below 80% of usable PostgreSQL connections.
+Set both Terraform pool inputs together when changing the split. The ECS
+container health check uses the bounded loopback `latchway readiness` probe so
+it observes the serving process without opening another database pool.
 
 Keep the timing relationship ordered: Latchway's drain timeout is shorter than
 the ECS stop timeout, which is no longer than ALB target deregistration. The

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/id"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -25,10 +26,12 @@ const (
 type identifierSource func(id.Prefix) (string, error)
 
 type StoreConfig struct {
-	Pool           *pgxpool.Pool
-	ReservationTTL time.Duration
-	NewID          func(id.Prefix) (string, error)
-	OnDenial       func(context.Context, DenialObservation)
+	Pool                      *pgxpool.Pool
+	CompletionPool            *pgxpool.Pool
+	MaxConcurrentReservations int64
+	ReservationTTL            time.Duration
+	NewID                     func(id.Prefix) (string, error)
+	OnDenial                  func(context.Context, DenialObservation)
 }
 
 // DenialObservation contains only bounded configuration dimensions. It omits
@@ -45,14 +48,30 @@ type DenialObservation struct {
 // upstream callback, response body, or transport, which makes it structurally
 // impossible for this package to retain a transaction during upstream I/O.
 type Store struct {
-	pool           *pgxpool.Pool
-	reservationTTL time.Duration
-	newID          identifierSource
-	onDenial       func(context.Context, DenialObservation)
+	pool                 *pgxpool.Pool
+	completionPool       *pgxpool.Pool
+	reservationAdmission *semaphore.Weighted
+	completionAdmission  *semaphore.Weighted
+	reservationTTL       time.Duration
+	newID                identifierSource
+	onDenial             func(context.Context, DenialObservation)
 }
 
 func NewStore(config StoreConfig) (*Store, error) {
 	if config.Pool == nil {
+		return nil, ErrInvalidInput
+	}
+	if config.CompletionPool == nil {
+		config.CompletionPool = config.Pool
+	}
+	regularMaximum := int64(config.Pool.Config().MaxConns)
+	completionMaximum := int64(config.CompletionPool.Config().MaxConns)
+	if config.MaxConcurrentReservations == 0 {
+		config.MaxConcurrentReservations = regularMaximum
+	}
+	if regularMaximum < 1 || completionMaximum < 1 ||
+		config.MaxConcurrentReservations < 1 ||
+		config.MaxConcurrentReservations > regularMaximum {
 		return nil, ErrInvalidInput
 	}
 	if config.ReservationTTL == 0 {
@@ -65,9 +84,60 @@ func NewStore(config StoreConfig) (*Store, error) {
 		config.NewID = id.New
 	}
 	return &Store{
-		pool: config.Pool, reservationTTL: config.ReservationTTL, newID: config.NewID,
+		pool: config.Pool, completionPool: config.CompletionPool,
+		reservationAdmission: semaphore.NewWeighted(config.MaxConcurrentReservations),
+		completionAdmission:  semaphore.NewWeighted(completionMaximum),
+		reservationTTL:       config.ReservationTTL, newID: config.NewID,
 		onDenial: config.OnDenial,
 	}, nil
+}
+
+func acquireStoreAdmission(ctx context.Context, admission *semaphore.Weighted) (func(), error) {
+	if ctx == nil || admission == nil {
+		return nil, ErrInvalidInput
+	}
+	if err := admission.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	// A token and cancellation can become ready together. Do not start a new
+	// transaction after the caller's authority has already expired.
+	if err := ctx.Err(); err != nil {
+		admission.Release(1)
+		return nil, err
+	}
+	return func() { admission.Release(1) }, nil
+}
+
+func (store *Store) beginReservationTx(ctx context.Context, operation string) (pgx.Tx, func(), error) {
+	if store == nil || store.pool == nil || operation == "" {
+		return nil, nil, ErrInvalidInput
+	}
+	release, err := acquireStoreAdmission(ctx, store.reservationAdmission)
+	if err != nil {
+		return nil, nil, persistenceFailure(operation, err)
+	}
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		release()
+		return nil, nil, persistenceFailure(operation, err)
+	}
+	return tx, release, nil
+}
+
+func (store *Store) beginCompletionTx(ctx context.Context, operation string) (pgx.Tx, func(), error) {
+	if store == nil || store.completionPool == nil || operation == "" {
+		return nil, nil, ErrInvalidInput
+	}
+	release, err := acquireStoreAdmission(ctx, store.completionAdmission)
+	if err != nil {
+		return nil, nil, persistenceFailure(operation, err)
+	}
+	tx, err := store.completionPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		release()
+		return nil, nil, persistenceFailure(operation, err)
+	}
+	return tx, release, nil
 }
 
 type reserveIDs struct {
@@ -382,10 +452,11 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	pricing := pricingForRequest(prepared)
 	reservationKey := reservationIdempotencyKey(fingerprint, pricing, hasHardCostReservation(prepared.rules))
 
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginReservationTx(ctx, "begin quota reservation")
 	if err != nil {
-		return Reservation{}, persistenceFailure("begin quota reservation", err)
+		return Reservation{}, err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 
 	requestedAt, err := transactionTime(ctx, tx)
@@ -1951,7 +2022,7 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 // noncanonical state roll back the tentative batch and use the exhaustive
 // classifier below.
 func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
-	if store == nil || store.pool == nil || ctx == nil || attempt.validate() != nil {
+	if store == nil || store.completionPool == nil || ctx == nil || attempt.validate() != nil {
 		return ErrInvalidInput
 	}
 	if attempt.number == 1 {
@@ -2012,10 +2083,11 @@ const markInitialLogicalStreamingSQL = `
 `
 
 func (store *Store) markInitialFirstByte(ctx context.Context, attempt Attempt) (bool, error) {
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin first-byte record")
 	if err != nil {
-		return true, persistenceFailure("begin first-byte record", err)
+		return true, err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 
 	expected := attempt.reservation
@@ -2171,13 +2243,14 @@ func initialAttemptEntriesUnchanged(entries []lockedEntry) bool {
 }
 
 func (store *Store) markFirstByteSlow(ctx context.Context, attempt Attempt) error {
-	if store == nil || store.pool == nil || ctx == nil || attempt.validate() != nil {
+	if store == nil || store.completionPool == nil || ctx == nil || attempt.validate() != nil {
 		return ErrInvalidInput
 	}
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin first-byte record")
 	if err != nil {
-		return persistenceFailure("begin first-byte record", err)
+		return err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 	reservation, err := lockReservation(ctx, tx, attempt.reservation)
 	if err != nil {
@@ -2295,13 +2368,14 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 }
 
 func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reservation, failureCode string) error {
-	if store == nil || store.pool == nil || ctx == nil || reservation.validate() != nil || !validFailureCode(failureCode) {
+	if store == nil || store.completionPool == nil || ctx == nil || reservation.validate() != nil || !validFailureCode(failureCode) {
 		return ErrInvalidInput
 	}
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin quota release")
 	if err != nil {
-		return persistenceFailure("begin quota release", err)
+		return err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 	lockedReservation, err := lockReservation(ctx, tx, reservation)
 	if err != nil {
@@ -2394,7 +2468,7 @@ const (
 )
 
 func (store *Store) expirePendingBatch(ctx context.Context, limit int, mode pendingExpiryMode) (int64, error) {
-	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || limit < 1 || limit > maximumExpiryBatch {
+	if store == nil || store.completionPool == nil || store.newID == nil || ctx == nil || limit < 1 || limit > maximumExpiryBatch {
 		return 0, ErrInvalidInput
 	}
 	if mode != pendingExpiryAny && mode != pendingExpiryUndispatched &&
@@ -2416,10 +2490,11 @@ func (store *Store) expirePendingBatch(ctx context.Context, limit int, mode pend
 }
 
 func (store *Store) expireOne(ctx context.Context, mode pendingExpiryMode) (bool, error) {
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, releaseAdmission, err := store.beginCompletionTx(ctx, "begin expired reservation recovery")
 	if err != nil {
-		return false, persistenceFailure("begin expired reservation recovery", err)
+		return false, err
 	}
+	defer releaseAdmission()
 	defer rollback(tx)
 	now, err := transactionTime(ctx, tx)
 	if err != nil {

@@ -5,10 +5,14 @@ import {
   buildClientAccessDocument,
   buildConnectionDocument,
   buildUsagePlanDocument,
+  clientPlatformReadiness,
   describeLimit,
   specRecords,
   usdToNanoUSD
 } from "./task-configuration-builders";
+
+const validCertificateDigest = "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU";
+const metadataPlayCredential = { type: "metadata" } as const;
 
 function documentFixture(): JSONRecord {
   return {
@@ -44,7 +48,7 @@ describe("task-oriented configuration builders", () => {
     const original = documentFixture();
     const result = buildConnectionDocument(original, {
       authentication: "bearer",
-      baseURL: "https://api.example.test/v1/",
+      baseURL: "https://api.example.test/v1",
       connectionID: "primary",
       inputPriceUSDPerMillion: "0.25",
       maximumContextTokens: 128_000,
@@ -73,10 +77,38 @@ describe("task-oriented configuration builders", () => {
     expect(specRecords(original, "upstreams")).toEqual([]);
     expect(() => buildConnectionDocument(original, {
       authentication: "none", baseURL: "http://127.0.0.1:19090", connectionID: "local", inputPriceUSDPerMillion: "0", maximumContextTokens: 1, maximumFramingTokensPerMessage: 0, maximumFramingTokensPerRequest: 0, modelID: "local_model", outputPriceUSDPerMillion: "0", physicalModel: "fixture", protocol: "openai_responses", providerType: "openai_compatible", requestPriceUSD: "0"
-    })).toThrow("HTTPS is required");
+    })).toThrow("canonical HTTPS");
     expect(() => buildConnectionDocument(original, {
       authentication: "none", baseURL: "https://api.anthropic.com", connectionID: "mismatched", inputPriceUSDPerMillion: "0", maximumContextTokens: 1, maximumFramingTokensPerMessage: 0, maximumFramingTokensPerRequest: 0, modelID: "mismatched_model", outputPriceUSDPerMillion: "0", physicalModel: "fixture", protocol: "openai_responses", providerType: "anthropic", requestPriceUSD: "0"
     })).toThrow("matches the connection type");
+  });
+
+  it.each([
+    "https://operator:secret@api.example.test/v1",
+    "https://api.example.test/v1?token=secret",
+    "https://api.example.test/v1#fragment",
+    "https://api.example.test/v1%2Fmodels",
+    "https://api.example.test/v1//models",
+    "https://api.example.test/v1/../models",
+    "https://API.example.test/v1",
+    "https://api.example.test:443/v1",
+    "https://api.example.test/v1/"
+  ])("rejects a non-canonical or credential-bearing guided upstream URL: %s", (baseURL) => {
+    expect(() => buildConnectionDocument(documentFixture(), {
+      authentication: "none",
+      baseURL,
+      connectionID: "primary",
+      inputPriceUSDPerMillion: "0",
+      maximumContextTokens: 1,
+      maximumFramingTokensPerMessage: 0,
+      maximumFramingTokensPerRequest: 0,
+      modelID: "assistant_default",
+      outputPriceUSDPerMillion: "0",
+      physicalModel: "fixture",
+      protocol: "openai_responses",
+      providerType: "openai_compatible",
+      requestPriceUSD: "0"
+    })).toThrow("Upstream URL");
   });
 
   it.each([
@@ -86,7 +118,15 @@ describe("task-oriented configuration builders", () => {
     },
     {
       expectedProvider: "play_integrity",
-      input: { androidCertificateDigest: "A".repeat(43), androidCloudProjectNumber: 123456, androidPackageName: "com.example.habitify", androidVersionCode: 42, platform: "android" as const }
+      input: { androidCertificateDigest: validCertificateDigest, androidCloudProjectNumber: 123456, androidPackageName: "com.example.habitify", androidVersionCode: 42, platform: "android" as const, playIntegrityCredential: metadataPlayCredential }
+    },
+    {
+      expectedProvider: "app_attest",
+      input: { appIDPrefix: "TEAM123", appleBundleID: "com.example.habitify", appleBundleVersion: "42", appleValidationCategory: 4 as const, platform: "react_native_ios" as const }
+    },
+    {
+      expectedProvider: "play_integrity",
+      input: { androidCertificateDigest: validCertificateDigest, androidCloudProjectNumber: 123456, androidPackageName: "com.example.habitify", androidVersionCode: 42, platform: "react_native_android" as const, playIntegrityCredential: metadataPlayCredential }
     },
     {
       expectedProvider: "firebase_app_check",
@@ -94,16 +134,97 @@ describe("task-oriented configuration builders", () => {
     }
   ])("builds a production $input.platform root component and required verification policy", ({ expectedProvider, input }) => {
     const result = buildClientAccessDocument(documentFixture(), {
-      attestationPolicyID: `${input.platform}_clients`,
+      attestationPolicyID: "existing",
       componentID: `${input.platform}_main`,
       environmentKind: "production",
       featureID: "assistant",
       ...input
     });
     expect(specRecords(result, "componentDefinitions")[0]).toMatchObject({ allowedFeatures: ["assistant"], attestation: { provider: expectedProvider, strategy: "direct" }, familyRole: "root", platform: input.platform });
-    expect(specRecords(result, "attestationPolicies").find((policy) => policy.id === `${input.platform}_clients`)).toMatchObject({ id: `${input.platform}_clients`, platforms: { [input.platform]: { mode: "required", provider: expectedProvider } } });
-    expect(specRecords(result, "features").find((feature) => feature.id === "assistant")?.attestationPolicy).toBe(`${input.platform}_clients`);
-    expect(JSON.stringify(specRecords(result, "attestationPolicies").find((policy) => policy.id === `${input.platform}_clients`))).not.toContain("debug");
+    expect(specRecords(result, "attestationPolicies").find((policy) => policy.id === "existing")).toMatchObject({
+      id: "existing",
+      platforms: {
+        [input.platform]: {
+          minimumTrustLevel: expectedProvider === "play_integrity" ? "device_verified" :
+            expectedProvider === "firebase_app_check" ? "web_risk_verified" : "app_verified",
+          mode: "required",
+          provider: expectedProvider
+        }
+      }
+    });
+    expect(specRecords(result, "features").find((feature) => feature.id === "assistant")?.attestationPolicy).toBe("existing");
+    expect(specRecords(result, "attestationPolicies").find((policy) => policy.id === "existing")?.platforms).toMatchObject({ node: { mode: "disabled", provider: "debug" } });
+  });
+
+  it("builds Cloudflare Turnstile web trust with an exact origin, hostname, action, and logical secret reference", () => {
+    const result = buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing",
+      componentID: "web_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "web",
+      turnstileExpectedAction: "latchway_session",
+      turnstileSecretName: "turnstile_private",
+      webOrigin: "https://app.example.test",
+      webVerificationProvider: "turnstile"
+    });
+    const policy = specRecords(result, "attestationPolicies").find((candidate) => candidate.id === "existing");
+    expect(policy).toMatchObject({
+      platforms: {
+        web: {
+          allowedOrigins: ["https://app.example.test"],
+          minimumTrustLevel: "web_risk_verified",
+          mode: "required",
+          provider: "turnstile",
+          secretRef: "secret/turnstile_private",
+          turnstile: { allowedHostnames: ["app.example.test"], expectedAction: "latchway_session" }
+        }
+      }
+    });
+    expect(specRecords(result, "componentDefinitions")[0]).toMatchObject({ attestation: { provider: "turnstile", strategy: "direct" }, identifiers: { origins: ["https://app.example.test"] }, platform: "web" });
+    expect(JSON.stringify(result)).not.toContain("siteverify-secret-value");
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing", componentID: "web_main", environmentKind: "production", featureID: "assistant", platform: "web", turnstileExpectedAction: "spaces are invalid", turnstileSecretName: "turnstile_private", webOrigin: "https://app.example.test", webVerificationProvider: "turnstile"
+    })).toThrow("Turnstile action");
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing", componentID: "web_main", environmentKind: "production", featureID: "assistant", platform: "web", turnstileExpectedAction: "latchway_session", turnstileSecretName: "turnstile_private", webOrigin: "https://operator:secret@app.example.test", webVerificationProvider: "turnstile"
+    })).toThrow("Browser origin");
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing", componentID: "web_main", environmentKind: "development", featureID: "assistant", platform: "web", turnstileExpectedAction: "latchway_session", turnstileSecretName: "turnstile_private", webOrigin: "ftp://localhost", webVerificationProvider: "turnstile"
+    })).toThrow("Browser origin");
+  });
+
+  it.each([
+    { environmentKind: "production" as const, origin: "https://App.Example.Test" },
+    { environmentKind: "production" as const, origin: "https://app.example.test/" },
+    { environmentKind: "staging" as const, origin: "http://localhost:3000" },
+    { environmentKind: "development" as const, origin: "http://localhost:0" },
+    { environmentKind: "production" as const, origin: "https://app..example.test" }
+  ])("rejects a non-exact browser origin $origin in $environmentKind", ({ environmentKind, origin }) => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing",
+      componentID: "web_main",
+      environmentKind,
+      featureID: "assistant",
+      firebaseAppID: "1:123456:web:abcdef",
+      firebaseProjectNumber: "123456",
+      platform: "web",
+      webOrigin: origin
+    })).toThrow(/browser origin/i);
+  });
+
+  it("accepts exact loopback HTTP only for a development browser surface", () => {
+    const result = buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing",
+      componentID: "web_main",
+      environmentKind: "development",
+      featureID: "assistant",
+      firebaseAppID: "1:123456:web:abcdef",
+      firebaseProjectNumber: "123456",
+      platform: "web",
+      webOrigin: "http://127.0.0.1:3000"
+    });
+    expect(specRecords(result, "componentDefinitions")[0]?.identifiers).toEqual({ origins: ["http://127.0.0.1:3000"] });
   });
 
   it("adds Firebase user authentication with the application surface when explicitly requested", () => {
@@ -111,7 +232,7 @@ describe("task-oriented configuration builders", () => {
       appIDPrefix: "TEAM123",
       appleBundleID: "com.example.habitify",
       appleBundleVersion: "42",
-      attestationPolicyID: "ios_clients",
+      attestationPolicyID: "existing",
       componentID: "ios_main",
       environmentKind: "production",
       featureID: "assistant",
@@ -120,6 +241,41 @@ describe("task-oriented configuration builders", () => {
       platform: "ios"
     });
     expect(specRecords(result, "identityProviders")).toEqual([{ id: "firebase", projectId: "habitify-prod", type: "firebase" }]);
+  });
+
+  it.each([
+    { category: 2 as const, environmentKind: "staging" as const, expected: "production" },
+    { category: 3 as const, environmentKind: "development" as const, expected: "development" },
+    { category: 4 as const, environmentKind: "development" as const, expected: "production" },
+    { category: 5 as const, environmentKind: "staging" as const, expected: "production" }
+  ])("derives App Attest environment from Apple validation category $category", ({ category, environmentKind, expected }) => {
+    const result = buildClientAccessDocument(documentFixture(), {
+      appIDPrefix: "TEAM123",
+      appleBundleID: "com.example.habitify",
+      appleBundleVersion: "42",
+      appleValidationCategory: category,
+      attestationPolicyID: "existing",
+      componentID: "ios_main",
+      environmentKind,
+      featureID: "assistant",
+      platform: "ios"
+    });
+    const policy = specRecords(result, "attestationPolicies").find((candidate) => candidate.id === "existing");
+    expect(policy).toMatchObject({ platforms: { ios: { appAttest: { environment: expected } } } });
+  });
+
+  it("rejects development-signed App Attest in a production environment", () => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      appIDPrefix: "TEAM123",
+      appleBundleID: "com.example.habitify",
+      appleBundleVersion: "42",
+      appleValidationCategory: 3,
+      attestationPolicyID: "existing",
+      componentID: "ios_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "ios"
+    })).toThrow("Production environments require");
   });
 
   it("adds a platform to an existing feature policy without dropping its other platform selections", () => {
@@ -135,6 +291,182 @@ describe("task-oriented configuration builders", () => {
     });
     const policy = specRecords(result, "attestationPolicies").find((candidate) => candidate.id === "existing");
     expect(policy?.platforms).toMatchObject({ ios: { mode: "required", provider: "app_attest" }, node: { mode: "disabled", provider: "debug" } });
+  });
+
+  it("refuses to silently rebind an existing feature to a different verification policy", () => {
+    const original = documentFixture();
+    expect(() => buildClientAccessDocument(original, {
+      appIDPrefix: "TEAM123",
+      appleBundleID: "com.example.habitify",
+      appleBundleVersion: "42",
+      attestationPolicyID: "replacement",
+      componentID: "ios_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "ios"
+    })).toThrow("selected feature's existing verification policy");
+    expect(specRecords(original, "features")[0]?.attestationPolicy).toBe("existing");
+    expect(specRecords(original, "attestationPolicies").map((policy) => policy.id)).toEqual(["existing"]);
+  });
+
+  it.each([
+    { appleBundleID: "com..example.habitify", appleBundleVersion: "42", expected: "Bundle ID" },
+    { appleBundleID: "com.-example.habitify", appleBundleVersion: "42", expected: "Bundle ID" },
+    { appleBundleID: "com.example.habitify", appleBundleVersion: "42..1", expected: "CFBundleVersion" }
+  ])("rejects non-canonical Apple proof identity values", ({ appleBundleID, appleBundleVersion, expected }) => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      appIDPrefix: "TEAM123",
+      appleBundleID,
+      appleBundleVersion,
+      attestationPolicyID: "existing",
+      componentID: "ios_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "ios"
+    })).toThrow(expected);
+  });
+
+  it("persists exact Play version bounds and the selected server credential source", () => {
+    const result = buildClientAccessDocument(documentFixture(), {
+      androidCertificateDigest: validCertificateDigest,
+      androidCloudProjectNumber: 123456,
+      androidPackageName: "com.example.habitify",
+      androidVersionCode: 42,
+      attestationPolicyID: "existing",
+      componentID: "android_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "android",
+      playIntegrityCredential: { secretName: "play_integrity_service_account", type: "service_account" }
+    });
+    const policy = specRecords(result, "attestationPolicies").find((candidate) => candidate.id === "existing");
+    expect(policy).toMatchObject({
+      platforms: {
+        android: {
+          playIntegrity: {
+            allowTestingResponses: false,
+            certificateSha256Digests: [validCertificateDigest],
+            cloudProjectNumber: 123456,
+            credentialSource: "service_account",
+            maximumVersionCode: 42,
+            minimumVersionCode: 42,
+            packageName: "com.example.habitify",
+            requireLicensed: true
+          },
+          secretRef: "secret/play_integrity_service_account"
+        }
+      }
+    });
+  });
+
+  it.each([
+    { androidCertificateDigest: "A".repeat(43), androidPackageName: "com.example.habitify", expected: "nonzero canonical" },
+    { androidCertificateDigest: validCertificateDigest, androidPackageName: "com..example", expected: "Android package name" }
+  ])("rejects invalid Android proof identity values", ({ androidCertificateDigest, androidPackageName, expected }) => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      androidCertificateDigest,
+      androidCloudProjectNumber: 123456,
+      androidPackageName,
+      androidVersionCode: 42,
+      attestationPolicyID: "existing",
+      componentID: "android_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "android",
+      playIntegrityCredential: metadataPlayCredential
+    })).toThrow(expected);
+  });
+
+  it("requires an explicit Play Integrity credential source", () => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      androidCertificateDigest: validCertificateDigest,
+      androidCloudProjectNumber: 123456,
+      androidPackageName: "com.example.habitify",
+      androidVersionCode: 42,
+      attestationPolicyID: "existing",
+      componentID: "android_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "android"
+    })).toThrow("credential source");
+  });
+
+  it.each(["0", "012345", "18446744073709551616"])("rejects non-canonical Firebase project number %s", (firebaseProjectNumber) => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      attestationPolicyID: "existing",
+      componentID: "web_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      firebaseAppID: "1:123456:web:abcdef",
+      firebaseProjectNumber,
+      platform: "web",
+      webOrigin: "https://app.example.test"
+    })).toThrow("Firebase project number");
+  });
+
+  it("requires an exact positive Android version code in the guided flow", () => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      androidCertificateDigest: validCertificateDigest,
+      androidCloudProjectNumber: 123456,
+      androidPackageName: "com.example.habitify",
+      androidVersionCode: 0,
+      attestationPolicyID: "existing",
+      componentID: "android_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "android",
+      playIntegrityCredential: metadataPlayCredential
+    })).toThrow("Version code must be a positive safe integer");
+  });
+
+  it("requires a canonical Play cloud project number compatible with the native SDKs", () => {
+    expect(() => buildClientAccessDocument(documentFixture(), {
+      androidCertificateDigest: validCertificateDigest,
+      androidCloudProjectNumber: 1,
+      androidPackageName: "com.example.habitify",
+      androidVersionCode: 42,
+      attestationPolicyID: "existing",
+      componentID: "android_main",
+      environmentKind: "production",
+      featureID: "assistant",
+      platform: "react_native_android",
+      playIntegrityCredential: metadataPlayCredential
+    })).toThrow("Cloud project number must contain 6 through 19");
+  });
+
+  it("reports readiness separately for every exact native, React Native, and web platform binding", () => {
+    const document = documentFixture();
+    const spec = document.spec as JSONRecord;
+    spec.identityProviders = [{ id: "firebase", projectId: "habitify-prod", type: "firebase" }];
+    spec.attestationPolicies = [{
+      id: "clients",
+      platforms: {
+        android: { mode: "required", provider: "play_integrity", playIntegrity: {} },
+        ios: { appAttest: {}, mode: "required", provider: "app_attest" },
+        react_native_android: { mode: "required", provider: "play_integrity", playIntegrity: {} },
+        react_native_ios: { appAttest: {}, mode: "required", provider: "app_attest" },
+        web: { firebaseAppCheck: {}, mode: "required", provider: "firebase_app_check" }
+      }
+    }];
+    spec.features = [{ ...(spec.features as JSONRecord[])[0], attestationPolicy: "clients" }];
+    spec.componentDefinitions = [
+      { allowedFeatures: ["assistant"], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: "ios_main", kind: "main_app", platform: "ios" },
+      { allowedFeatures: ["assistant"], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: "android_main", kind: "android_app", platform: "android" },
+      { allowedFeatures: ["assistant"], attestation: { provider: "firebase_app_check", strategy: "direct" }, familyRole: "root", id: "web_main", kind: "browser", platform: "web" },
+      { allowedFeatures: ["assistant"], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: "react_native_ios_main", kind: "main_app", platform: "react_native_ios" },
+      { allowedFeatures: ["assistant"], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: "react_native_android_main", kind: "android_app", platform: "react_native_android" }
+    ];
+
+    const cards = clientPlatformReadiness(document);
+    expect(cards.map(({ key }) => key)).toEqual(["ios", "android", "web", "react_native_ios", "react_native_android"]);
+    expect(cards.every(({ ready }) => ready)).toBe(true);
+    expect(cards.find(({ key }) => key === "react_native_ios")?.configured).toContain("react_native_ios_main");
+    expect(cards.find(({ key }) => key === "react_native_android")?.test).toContain("react_native_android");
+
+    (spec.componentDefinitions as JSONRecord[])[4]!.attestation = { provider: "debug", strategy: "direct" };
+    const unavailable = clientPlatformReadiness(document).find(({ key }) => key === "react_native_android");
+    expect(unavailable?.ready).toBe(false);
+    expect(unavailable?.missing).toContain("A feature granted by the root component and bound to the same verification policy");
   });
 
   it("turns common operator limits into hard runtime rules with readable summaries", () => {

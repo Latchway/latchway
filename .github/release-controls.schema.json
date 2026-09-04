@@ -175,18 +175,18 @@
         "name": { "$ref": "#/$defs/name" },
         "policy_id": {
           "type": "string",
-          "pattern": "^latchway-release-controls-v1:latchway(?:-js|-ios-sdk|-android|-react-native-sdk|-docs)?:[a-z0-9][a-z0-9_-]*$"
+          "pattern": "^(?:latchway-release-controls-v1:latchway(?:-js|-ios-sdk|-android|-react-native-sdk|-docs)?:[a-z0-9][a-z0-9_-]*|latchway-release-profile-v1:latchway(?:-js|-ios-sdk|-android|-react-native-sdk)?:single_maintainer_v1:administration)$"
         },
         "reviewers": {
           "type": "object",
           "additionalProperties": false,
           "required": ["minimum", "source"],
           "properties": {
-            "minimum": { "const": 1 },
-            "source": { "const": "command_line" }
+            "minimum": { "type": "integer", "enum": [0, 1] },
+            "source": { "enum": ["command_line", "profile_policy"] }
           }
         },
-        "prevent_self_review": { "const": true },
+        "prevent_self_review": { "type": "boolean" },
         "deployment": {
           "type": "object",
           "additionalProperties": false,
@@ -237,7 +237,45 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": { "const": "single-maintainer-v1-administration" }
+            },
+            "required": ["name"]
+          },
+          "then": {
+            "properties": {
+              "policy_id": {
+                "pattern": "^latchway-release-profile-v1:latchway(?:-js|-ios-sdk|-android|-react-native-sdk)?:single_maintainer_v1:administration$"
+              },
+              "reviewers": {
+                "properties": {
+                  "minimum": { "const": 0 },
+                  "source": { "const": "profile_policy" }
+                }
+              },
+              "prevent_self_review": { "const": false }
+            }
+          },
+          "else": {
+            "properties": {
+              "policy_id": {
+                "pattern": "^latchway-release-controls-v1:latchway(?:-js|-ios-sdk|-android|-react-native-sdk|-docs)?:[a-z0-9][a-z0-9_-]*$"
+              },
+              "reviewers": {
+                "properties": {
+                  "minimum": { "const": 1 },
+                  "source": { "const": "command_line" }
+                }
+              },
+              "prevent_self_review": { "const": true }
+            }
+          }
+        }
+      ]
     },
     "tagRuleset": {
       "type": "object",

@@ -40,8 +40,12 @@ vi.mock("../api/session", () => ({
     }
   })
 }));
+vi.mock("../app/console-compatibility-context", () => ({
+  useConsoleCompatibility: () => ({ mutationAllowed: true })
+}));
 
 import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, InstallationsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { SelfTestSchema } from "../api/admin";
 import { dispatchAdminRefresh } from "../api/admin-events";
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
 
@@ -527,7 +531,7 @@ describe("rich usage and route-simulator views", () => {
 
   it("restores selected self-test run and schedule IDs while keeping bearer material local", async () => {
     const environmentID = "env_0123456789abcdef";
-    const run = { checks: [{ name: "usage", safe_detail: "Bounded usage passed.", state: "passed" }], completed_at: "2026-08-29T00:00:01Z", created_at: "2026-08-29T00:00:00Z", id: "tst_0123456789abcdef", kind: "upstream", state: "passed" };
+    const run = { checks: [{ name: "usage", safe_detail: "Bounded usage passed.", state: "passed" }], completed_at: "2026-08-29T00:00:01Z", config_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: "tst_0123456789abcdef", kind: "upstream", state: "passed" };
     const schedule = {
       application_id: "app_0123456789abcdef", authorization_credential_id: "tok_0123456789abcdef", config_revision_id: "rev_0123456789abcdef",
       created_at: "2026-08-29T00:00:00Z", daily_cost_limit_nano_usd: 240_000_000, environment_id: environmentID,
@@ -535,7 +539,7 @@ describe("rich usage and route-simulator views", () => {
       next_run_at: "2026-08-29T01:00:00Z", status: "active", updated_at: "2026-08-29T00:00:00Z", upstream: "primary"
     };
     adminRequestMock.mockImplementation(async (path: string) => {
-      if (path === `/admin/v1/self-tests/${run.id}`) return { data: run };
+      if (path === `/admin/v1/self-tests/${run.id}?environment_id=${environmentID}`) return { data: run };
       if (path.startsWith("/admin/v1/self-test-schedules?")) return { data: { items: [schedule], page: { has_more: false } } };
       if (path === `/admin/v1/self-test-schedules/${schedule.id}`) return { data: schedule };
       throw new Error(`Unexpected request ${path}`);
@@ -554,6 +558,25 @@ describe("rich usage and route-simulator views", () => {
     await user.click(screen.getByRole("button", { name: "Close schedule" }));
     expect(updateSearch).toHaveBeenLastCalledWith({ schedule_id: undefined });
     expect(JSON.stringify(updateSearch.mock.calls)).not.toContain("tok_0123456789abcdef");
+  });
+
+  it("fails closed when a restored self-test belongs to another environment", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const runID = "tst_0123456789abcdef";
+    adminRequestMock.mockResolvedValue({ data: {
+      checks: [{ name: "usage", state: "passed" }], completed_at: "2026-08-29T00:00:01Z",
+      config_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
+      environment_id: "env_fedcba9876543210", id: runID, kind: "upstream", state: "passed"
+    } });
+
+    renderInWorkspace(<SelfTestsPage />, { environment_id: environmentID, self_test_id: runID });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Self-test context mismatch");
+    expect(screen.queryByRole("heading", { name: "upstream self-test" })).not.toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenCalledWith(
+      `/admin/v1/self-tests/${runID}?environment_id=${environmentID}`,
+      SelfTestSchema
+    );
   });
 
   it("links a selected pseudonymous user to an exact Installation Family filter", async () => {

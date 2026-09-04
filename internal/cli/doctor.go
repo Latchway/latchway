@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const doctorPoolMaxConnections int32 = 1
+
 func doctorCommand(opts *options) *cobra.Command {
 	var supportBundlePath string
 	command := &cobra.Command{
@@ -26,7 +28,10 @@ func doctorCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pool, err := database.Open(cmd.Context(), cfg.DatabaseURL, cfg.DBMaxConnections)
+			// Doctor is an out-of-process diagnostic, not a view of the serving
+			// process's pools. Keep its sequential probe to one connection so an
+			// operator check cannot duplicate the configured per-replica budget.
+			pool, err := database.Open(cmd.Context(), cfg.DatabaseURL, doctorPoolMaxConnections)
 			if err != nil {
 				return err
 			}

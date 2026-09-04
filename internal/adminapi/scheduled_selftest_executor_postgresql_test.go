@@ -89,7 +89,10 @@ func TestScheduledSelfTestExecutorPostgreSQL(t *testing.T) {
 			t.Fatalf("provider dispatches=%d, want 1", service.runCount())
 		}
 		run := readScheduledExecutorRun(t, ctx, pool, fixture.jobID)
-		if run.State != "passed" || run.ScheduleID != fixture.scheduleID || run.Checks[0].SafeDetail != "Bounded provider usage passed." {
+		if run.State != "passed" || run.ScheduleID != fixture.scheduleID ||
+			run.EnvironmentID != fixture.environmentID ||
+			run.ConfigRevisionID != fixture.revisionID ||
+			run.Checks[0].SafeDetail != "Bounded provider usage passed." {
 			t.Fatalf("completed run=%+v", run)
 		}
 		var audits int
@@ -118,7 +121,9 @@ func TestScheduledSelfTestExecutorPostgreSQL(t *testing.T) {
 			t.Fatalf("recovery processed=%d dispatches=%d err=%v", processed, service.runCount(), err)
 		}
 		run := readScheduledExecutorRun(t, ctx, pool, fixture.jobID)
-		if run.State != "failed" || len(run.Checks) != 1 || run.Checks[0].Name != "execution_recovery" ||
+		if run.State != "failed" || run.EnvironmentID != fixture.environmentID ||
+			run.ConfigRevisionID != fixture.revisionID ||
+			len(run.Checks) != 1 || run.Checks[0].Name != "execution_recovery" ||
 			run.Checks[0].SafeDetail != "A previous worker stopped after the durable dispatch marker; the request was not repeated." {
 			t.Fatalf("recovered run=%+v", run)
 		}
@@ -291,7 +296,9 @@ func assertScheduledExecutorPermanentRejection(
 		t.Fatalf("rejection processed=%d dispatches=%d err=%v", processed, service.runCount(), err)
 	}
 	run := readScheduledExecutorRun(t, ctx, pool, fixture.jobID)
-	if run.State != "failed" || len(run.Checks) != 1 || run.Checks[0].Name != wantCheck || len(run.Checks[0].SafeDetail) == 0 {
+	if run.State != "failed" || run.EnvironmentID != fixture.environmentID ||
+		run.ConfigRevisionID != fixture.revisionID ||
+		len(run.Checks) != 1 || run.Checks[0].Name != wantCheck || len(run.Checks[0].SafeDetail) == 0 {
 		t.Fatalf("rejected run=%+v", run)
 	}
 	var status, reason string

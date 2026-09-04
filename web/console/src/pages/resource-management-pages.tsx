@@ -23,6 +23,7 @@ import {
   type UserOverrideResource
 } from "../api/resources";
 import { useConsoleSession } from "../api/session";
+import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 
 const applicationIDPattern = /^app_[A-Za-z0-9_-]{16,128}$/;
@@ -36,7 +37,7 @@ function PageHeading({ eyebrow, title, children }: { eyebrow: string; title: str
 }
 
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
+  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
 }
 
 function AccessRequired({ resource }: { resource: string }) {
@@ -61,6 +62,7 @@ function paginationButton(label: string, busy: boolean, action: () => void) {
 
 export function ApplicationsPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const [page, setPage] = useState<ApplicationResourcePage>();
   const [lifecycleTarget, setLifecycleTarget] = useState<ApplicationResource>();
   const [lifecycleReason, setLifecycleReason] = useState("");
@@ -69,7 +71,7 @@ export function ApplicationsPage() {
   const [busy, setBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired resource="applications" />;
   const organizationID = session.data.session?.organization_id ?? "";
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
+  const canConfigure = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("activate_configuration") ?? false);
 
   async function load(cursor?: string): Promise<void> {
     setBusy(true); setProblem(undefined); setLifecycleTarget(undefined); setLifecycleReason(""); setLifecycleAcknowledged(false);
@@ -79,7 +81,7 @@ export function ApplicationsPage() {
   }
 
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); setBusy(true); setProblem(undefined);
+    event.preventDefault(); if (!canConfigure) return; setBusy(true); setProblem(undefined);
     const form = event.currentTarget; const data = new FormData(form);
     try {
       const created = (await adminRequest("/admin/v1/applications", ApplicationResourceSchema, { method: "POST", body: {
@@ -97,6 +99,7 @@ export function ApplicationsPage() {
   }
 
   async function setApplicationEnabled(item: ApplicationResource, enabled: boolean): Promise<void> {
+    if (!canConfigure) return;
     const reason = lifecycleReason.trim();
     if (!enabled && (!lifecycleAcknowledged || reason.length < 1 || reason.length > 500)) {
       setProblem(invalidResourceProblem("A bounded reason and explicit credential-revocation acknowledgement are required."));
@@ -118,7 +121,7 @@ export function ApplicationsPage() {
     <PageHeading eyebrow="Workspace" title="Applications">Browse tenant-scoped applications, create resources, and control whether application traffic is eligible.</PageHeading>
     {canConfigure ? <form className="control-form" onSubmit={(event) => void create(event)}><h2>Create application</h2><div className="form-field-grid"><label>Display name<input maxLength={200} name="display_name" required /></label><label>Slug<input maxLength={63} name="slug" pattern={resourceSlugPattern} required /></label></div><button className="primary-action" disabled={busy} type="submit">{busy ? "Working…" : "Create application"}</button></form> : <div className="control-notice"><strong>Read-only session</strong><span>The activate_configuration capability is required to create applications.</span></div>}
     <div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load applications</button></div>
-    {lifecycleTarget ? <form className="control-form destructive-confirmation" onSubmit={(event) => { event.preventDefault(); void setApplicationEnabled(lifecycleTarget, false); }}><h2>Disable {lifecycleTarget.display_name}</h2><p>Disabling this application denies its traffic immediately and revokes active legacy and component session and refresh credentials in every environment. Re-enabling later restores future eligibility only; revoked credentials stay revoked.</p><p>Application ID: <code>{lifecycleTarget.id}</code></p><label>Reason<textarea maxLength={500} required rows={3} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label><label className="check-field"><input checked={lifecycleAcknowledged} onChange={(event) => setLifecycleAcknowledged(event.target.checked)} type="checkbox" />I understand active credentials in this application will be revoked.</label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !lifecycleAcknowledged || lifecycleReason.trim().length === 0} type="submit">Disable application</button><button className="secondary-action" disabled={busy} onClick={() => selectApplicationLifecycle()} type="button">Cancel</button></div></form> : null}
+    {lifecycleTarget ? <form className="control-form destructive-confirmation" onSubmit={(event) => { event.preventDefault(); void setApplicationEnabled(lifecycleTarget, false); }}><h2>Disable {lifecycleTarget.display_name}</h2><p>Disabling this application denies its traffic immediately and revokes active legacy and component session and refresh credentials in every environment. Re-enabling later restores future eligibility only; revoked credentials stay revoked.</p><p>Application ID: <code>{lifecycleTarget.id}</code></p><label>Reason<textarea maxLength={500} required rows={3} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label><label className="check-field"><input checked={lifecycleAcknowledged} onChange={(event) => setLifecycleAcknowledged(event.target.checked)} type="checkbox" />I understand active credentials in this application will be revoked.</label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !canConfigure || !lifecycleAcknowledged || lifecycleReason.trim().length === 0} type="submit">Disable application</button><button className="secondary-action" disabled={busy} onClick={() => selectApplicationLifecycle()} type="button">Cancel</button></div></form> : null}
     <ProblemNotice problem={problem} />
     {page ? <><Table headers={["Application", "Status", "Slug", "Created", "Actions"]} rows={page.items.map((item) => [<><strong>{item.display_name}</strong><br /><small>{item.id}</small></>, <><span className="state-badge">{item.status}</span>{item.status === "disabled" ? <><br /><small>{displayInstant(item.disabled_at)}</small></> : null}</>, item.slug, displayInstant(item.created_at), item.status === "disabled" ? <button className="small-action" disabled={busy || !canConfigure} onClick={() => void setApplicationEnabled(item, true)} type="button">Enable</button> : <button className="small-action small-action--danger" disabled={busy || !canConfigure} onClick={() => selectApplicationLifecycle(item)} type="button">Disable</button>])} />{page.page.has_more && page.page.next_cursor ? paginationButton("Next page", busy, () => void load(page.page.next_cursor)) : null}</> : null}
   </div>;
@@ -126,6 +129,7 @@ export function ApplicationsPage() {
 
 export function EnvironmentsPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const [applicationID, setApplicationID] = useState("");
   const [items, setItems] = useState<EnvironmentResource[]>();
   const [lifecycleTarget, setLifecycleTarget] = useState<EnvironmentResource>();
@@ -134,7 +138,7 @@ export function EnvironmentsPage() {
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired resource="environments" />;
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
+  const canConfigure = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("activate_configuration") ?? false);
 
   function validApplication(): boolean {
     if (applicationIDPattern.test(applicationID)) return true;
@@ -150,7 +154,7 @@ export function EnvironmentsPage() {
   }
 
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); if (!validApplication()) return;
+    event.preventDefault(); if (!canConfigure || !validApplication()) return;
     setBusy(true); setProblem(undefined); const form = event.currentTarget; const data = new FormData(form);
     try {
       const created = (await adminRequest(`/admin/v1/applications/${applicationID}/environments`, EnvironmentResourceSchema, { method: "POST", body: {
@@ -165,6 +169,7 @@ export function EnvironmentsPage() {
   }
 
   async function setEnvironmentEnabled(item: EnvironmentResource, enabled: boolean): Promise<void> {
+    if (!canConfigure) return;
     const reason = lifecycleReason.trim();
     if (!enabled && (!lifecycleAcknowledged || reason.length < 1 || reason.length > 500)) {
       setProblem(invalidResourceProblem("A bounded reason and explicit credential-revocation acknowledgement are required."));
@@ -186,7 +191,7 @@ export function EnvironmentsPage() {
     <PageHeading eyebrow="Workspace" title="Environments">Browse application environments, create deployment scopes, and control traffic eligibility independently.</PageHeading>
     <div className="filter-bar"><label>Application ID<input pattern="app_[A-Za-z0-9_-]{16,128}" required value={applicationID} onChange={(event) => { setApplicationID(event.target.value); setItems(undefined); selectEnvironmentLifecycle(); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load environments</button></div>
     {canConfigure ? <form className="control-form" onSubmit={(event) => void create(event)}><h2>Create environment</h2><div className="form-field-grid"><label>Display name<input maxLength={200} name="display_name" required /></label><label>Slug<input maxLength={63} name="slug" pattern={resourceSlugPattern} required /></label><label>Kind<select defaultValue="production" name="kind"><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div><button className="primary-action" disabled={busy || !applicationIDPattern.test(applicationID)} type="submit">{busy ? "Working…" : "Create environment"}</button></form> : <div className="control-notice"><strong>Read-only session</strong><span>The activate_configuration capability is required to create environments.</span></div>}
-    {lifecycleTarget ? <form className="control-form destructive-confirmation" onSubmit={(event) => { event.preventDefault(); void setEnvironmentEnabled(lifecycleTarget, false); }}><h2>Disable {lifecycleTarget.display_name}</h2><p>Disabling this environment denies its traffic immediately and revokes active legacy and component session and refresh credentials in this environment. Re-enabling later does not restore those credentials.</p><p>Environment ID: <code>{lifecycleTarget.id}</code></p><label>Reason<textarea maxLength={500} required rows={3} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label><label className="check-field"><input checked={lifecycleAcknowledged} onChange={(event) => setLifecycleAcknowledged(event.target.checked)} type="checkbox" />I understand active credentials in this environment will be revoked.</label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !lifecycleAcknowledged || lifecycleReason.trim().length === 0} type="submit">Disable environment</button><button className="secondary-action" disabled={busy} onClick={() => selectEnvironmentLifecycle()} type="button">Cancel</button></div></form> : null}
+    {lifecycleTarget ? <form className="control-form destructive-confirmation" onSubmit={(event) => { event.preventDefault(); void setEnvironmentEnabled(lifecycleTarget, false); }}><h2>Disable {lifecycleTarget.display_name}</h2><p>Disabling this environment denies its traffic immediately and revokes active legacy and component session and refresh credentials in this environment. Re-enabling later does not restore those credentials.</p><p>Environment ID: <code>{lifecycleTarget.id}</code></p><label>Reason<textarea maxLength={500} required rows={3} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label><label className="check-field"><input checked={lifecycleAcknowledged} onChange={(event) => setLifecycleAcknowledged(event.target.checked)} type="checkbox" />I understand active credentials in this environment will be revoked.</label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !canConfigure || !lifecycleAcknowledged || lifecycleReason.trim().length === 0} type="submit">Disable environment</button><button className="secondary-action" disabled={busy} onClick={() => selectEnvironmentLifecycle()} type="button">Cancel</button></div></form> : null}
     <ProblemNotice problem={problem} />
     {items ? <Table headers={["Environment", "Status", "Kind", "Created", "Actions"]} rows={items.map((item) => [<><strong>{item.display_name}</strong><br /><small>{item.id}</small></>, <><span className="state-badge">{item.status}</span>{item.status === "disabled" ? <><br /><small>{displayInstant(item.disabled_at)}</small></> : null}</>, item.kind, displayInstant(item.created_at), item.status === "disabled" ? <button className="small-action" disabled={busy || !canConfigure} onClick={() => void setEnvironmentEnabled(item, true)} type="button">Enable</button> : <button className="small-action small-action--danger" disabled={busy || !canConfigure} onClick={() => selectEnvironmentLifecycle(item)} type="button">Disable</button>])} /> : null}
   </div>;
@@ -194,6 +199,7 @@ export function EnvironmentsPage() {
 
 export function SecretsPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const [environmentID, setEnvironmentID] = useState("");
   const [page, setPage] = useState<SecretResourcePage>();
   const [rotationTarget, setRotationTarget] = useState<SecretResource>();
@@ -202,7 +208,8 @@ export function SecretsPage() {
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired resource="secrets" />;
-  const canManage = session.data.session?.capabilities.includes("manage_secrets") ?? false;
+  const canInspect = session.data.session?.capabilities.includes("manage_secrets") ?? false;
+  const canManage = consoleCompatibility.mutationAllowed && canInspect;
 
   function validEnvironment(): boolean {
     if (environmentIDPattern.test(environmentID)) return true;
@@ -218,7 +225,7 @@ export function SecretsPage() {
   }
 
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); if (!validEnvironment()) return;
+    event.preventDefault(); if (!canManage || !validEnvironment()) return;
     const form = event.currentTarget; const data = new FormData(form); const valueField = form.elements.namedItem("value");
     const name = String(data.get("name")); const value = String(data.get("value"));
     if (valueField instanceof HTMLInputElement) valueField.value = "";
@@ -231,7 +238,7 @@ export function SecretsPage() {
   }
 
   async function rotate(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); if (!rotationTarget) return;
+    event.preventDefault(); if (!canManage || !rotationTarget) return;
     const form = event.currentTarget; const data = new FormData(form); const valueField = form.elements.namedItem("rotation_value");
     const value = String(data.get("rotation_value"));
     if (valueField instanceof HTMLInputElement) valueField.value = "";
@@ -244,7 +251,7 @@ export function SecretsPage() {
   }
 
   async function destroy(): Promise<void> {
-    if (!deletionTarget || deletionConfirmation !== deletionTarget.name) return;
+    if (!canManage || !deletionTarget || deletionConfirmation !== deletionTarget.name) return;
     const currentSecret = page?.items.find((secret) => secret.name === deletionTarget.name);
     if (!currentSecret || currentSecret.id !== deletionTarget.id) {
       setDeletionTarget(undefined); setDeletionConfirmation("");
@@ -262,19 +269,20 @@ export function SecretsPage() {
 
   return <div className="control-page">
     <PageHeading eyebrow="AI Configuration" title="Secrets">Manage encrypted provider-secret metadata. Plaintext is accepted only by a password input, never persisted in browser storage, and cleared from the form before the request completes.</PageHeading>
-    {!canManage ? <div className="control-notice"><strong>Capability required</strong><span>The manage_secrets capability is required to list or mutate secret metadata.</span></div> : <>
+    {!canInspect ? <div className="control-notice"><strong>Capability required</strong><span>The manage_secrets capability is required to list or mutate secret metadata.</span></div> : <>
       <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => { setEnvironmentID(event.target.value); setPage(undefined); setRotationTarget(undefined); setDeletionTarget(undefined); setDeletionConfirmation(""); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load secret metadata</button></div>
-      <form className="control-form" onSubmit={(event) => void create(event)}><h2>Create write-only secret</h2><div className="form-field-grid"><label>Secret name<input autoComplete="off" maxLength={63} name="name" pattern={resourceIdentifierPattern} required /></label><label>Secret value<input autoComplete="new-password" maxLength={1_048_576} name="value" required type="password" /></label></div><button className="primary-action" disabled={busy || !environmentIDPattern.test(environmentID)} type="submit">{busy ? "Working…" : "Create secret"}</button></form>
+      {canManage ? <form className="control-form" onSubmit={(event) => void create(event)}><h2>Create write-only secret</h2><div className="form-field-grid"><label>Secret name<input autoComplete="off" maxLength={63} name="name" pattern={resourceIdentifierPattern} required /></label><label>Secret value<input autoComplete="new-password" maxLength={1_048_576} name="value" required type="password" /></label></div><button className="primary-action" disabled={busy || !environmentIDPattern.test(environmentID)} type="submit">{busy ? "Working…" : "Create secret"}</button></form> : null}
     </>}
     <ProblemNotice problem={problem} />
-    {rotationTarget ? <form className="control-form" onSubmit={(event) => void rotate(event)}><h2>Rotate {rotationTarget.name}</h2><p>The current version ID is checked by the server. The replacement value is write-only and this input is cleared immediately on submission.</p><label>Replacement secret value<input autoComplete="new-password" maxLength={1_048_576} name="rotation_value" required type="password" /></label><div className="button-row"><button className="primary-action" disabled={busy} type="submit">Rotate secret</button><button className="secondary-action" disabled={busy} onClick={() => setRotationTarget(undefined)} type="button">Cancel</button></div></form> : null}
-    {deletionTarget ? <section className="control-form destructive-confirmation" aria-labelledby="secret-deletion-title"><h2 id="secret-deletion-title">Permanently delete {deletionTarget.name}</h2><p>This tombstones every version of the logical secret. The name cannot be reused, and deletion succeeds only when the exact current version is unreferenced.</p><p>Current secret ID: <code>{deletionTarget.id}</code></p><label>Type <strong>{deletionTarget.name}</strong> to confirm<input autoComplete="off" maxLength={63} value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} /></label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || deletionConfirmation !== deletionTarget.name} onClick={() => void destroy()} type="button">Permanently delete secret</button><button className="secondary-action" disabled={busy} onClick={() => { setDeletionTarget(undefined); setDeletionConfirmation(""); }} type="button">Cancel deletion</button></div></section> : null}
+    {rotationTarget && canManage ? <form className="control-form" onSubmit={(event) => void rotate(event)}><h2>Rotate {rotationTarget.name}</h2><p>The current version ID is checked by the server. The replacement value is write-only and this input is cleared immediately on submission.</p><label>Replacement secret value<input autoComplete="new-password" maxLength={1_048_576} name="rotation_value" required type="password" /></label><div className="button-row"><button className="primary-action" disabled={busy || !canManage} type="submit">Rotate secret</button><button className="secondary-action" disabled={busy} onClick={() => setRotationTarget(undefined)} type="button">Cancel</button></div></form> : null}
+    {deletionTarget ? <section className="control-form destructive-confirmation" aria-labelledby="secret-deletion-title"><h2 id="secret-deletion-title">Permanently delete {deletionTarget.name}</h2><p>This tombstones every version of the logical secret. The name cannot be reused, and deletion succeeds only when the exact current version is unreferenced.</p><p>Current secret ID: <code>{deletionTarget.id}</code></p><label>Type <strong>{deletionTarget.name}</strong> to confirm<input autoComplete="off" maxLength={63} value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} /></label><div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !canManage || deletionConfirmation !== deletionTarget.name} onClick={() => void destroy()} type="button">Permanently delete secret</button><button className="secondary-action" disabled={busy} onClick={() => { setDeletionTarget(undefined); setDeletionConfirmation(""); }} type="button">Cancel deletion</button></div></section> : null}
     {page ? <><Table headers={["Name", "Version", "Algorithm", "Created", "Rotated", "Actions"]} rows={page.items.map((secret) => [<><strong>{secret.name}</strong><br /><small>{secret.id}</small></>, secret.version, secret.algorithm, displayInstant(secret.created_at), displayInstant(secret.rotated_at), <div className="resource-actions"><button className="small-action" disabled={busy || !canManage} onClick={() => { setRotationTarget(secret); setDeletionTarget(undefined); setDeletionConfirmation(""); }} type="button">Rotate</button><button className="small-action small-action--danger" disabled={busy || !canManage} onClick={() => { setDeletionTarget(secret); setDeletionConfirmation(""); setRotationTarget(undefined); }} type="button">Delete unreferenced</button></div>])} />{page.page.has_more && page.page.next_cursor ? paginationButton("Next page", busy, () => void load(page.page.next_cursor)) : null}</> : null}
   </div>;
 }
 
 export function UserOverridesPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const [environmentID, setEnvironmentID] = useState("");
   const [userID, setUserID] = useState("");
   const [user, setUser] = useState<UserOverrideResource>();
@@ -282,7 +290,7 @@ export function UserOverridesPage() {
   const [busy, setBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired resource="user overrides" />;
   const canInspect = session.data.session?.capabilities.includes("inspect_users") ?? false;
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
+  const canConfigure = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("activate_configuration") ?? false);
 
   function identifiersValid(): boolean {
     if (environmentIDPattern.test(environmentID) && userIDPattern.test(userID)) return true;
@@ -298,7 +306,7 @@ export function UserOverridesPage() {
   }
 
   async function replace(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); if (!identifiersValid()) return;
+    event.preventDefault(); if (!canConfigure || !identifiersValid()) return;
     const data = new FormData(event.currentTarget); const localExpiry = String(data.get("expires_at") ?? "");
     const body: { expires_at?: string; limit_plan: string; reason: string } = { limit_plan: String(data.get("limit_plan")), reason: String(data.get("reason")) };
     if (localExpiry) {
@@ -312,7 +320,7 @@ export function UserOverridesPage() {
   }
 
   async function clear(): Promise<void> {
-    if (!identifiersValid()) return;
+    if (!canConfigure || !identifiersValid()) return;
     setBusy(true); setProblem(undefined);
     try {
       await adminRequest(queryPath(`/admin/v1/users/${userID}/limit-override`, { environment_id: environmentID }), z.undefined(), { method: "DELETE" });
@@ -366,6 +374,7 @@ function structuralDiffPaths(before: unknown, after: unknown, path = "$"): strin
 
 export function ConfigurationRevisionsPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const [environmentID, setEnvironmentID] = useState("");
   const [page, setPage] = useState<ConfigurationRevisionResourcePage>();
@@ -376,6 +385,7 @@ export function ConfigurationRevisionsPage() {
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   const canConfigure = session.data?.mode === "configured"
+    && consoleCompatibility.mutationAllowed
     && (session.data.session?.capabilities.includes("activate_configuration") ?? false)
     && workspace?.application?.status !== "disabled"
     && workspace?.environment?.status !== "disabled";
@@ -406,6 +416,7 @@ export function ConfigurationRevisionsPage() {
   }
 
   async function rollback(target: ConfigurationRevisionResource, reason: string): Promise<void> {
+    if (!canConfigure) return;
     const trimmedReason = reason.trim();
     if (!trimmedReason || trimmedReason.length > 500 || /[\r\n\0]/.test(trimmedReason)) {
       setProblem(invalidResourceProblem("Provide a 1-500 character rollback reason without line breaks."));
@@ -446,7 +457,7 @@ export function ConfigurationRevisionsPage() {
     <ProblemNotice problem={problem} />
     {active ? <p className="resource-result">Active revision: <code>{active.id}</code> (version {active.version})</p> : page ? <div className="control-notice"><strong>No active revision</strong><span>History can be inspected, but rollback requires an active ETag precondition.</span></div> : null}
     {item ? <section className="detail-card"><div className="detail-card__heading"><div><h2>Revision {item.version}</h2><p><code>{item.id}</code></p></div><span className="state-badge">{item.id === active?.id ? "active" : item.state}</span></div><dl><div><dt>Created</dt><dd>{displayInstant(item.created_at)}</dd></div><div><dt>Created by</dt><dd>{item.created_by}</dd></div><div><dt>First activated</dt><dd>{displayInstant(item.activated_at)}</dd></div><div><dt>Validation</dt><dd>{item.validation ? item.validation.valid ? "valid" : "invalid" : "not recorded"}</dd></div></dl>{unpublished ? <div className="control-notice"><strong>Unpublished server revision</strong><span>It does not affect traffic. The Admin API has no abandon/delete operation, so this audited revision cannot be removed from the console.</span><button className="small-action" disabled type="button">Abandon unavailable</button></div> : null}<details><summary>Inspect redaction-safe configuration document</summary><pre>{JSON.stringify(item.document, null, 2)}</pre></details><div className="button-row"><button className="primary-action" disabled={busy || !rollbackAllowed} onClick={() => { setRollbackTarget(item); setRollbackReason(""); }} type="button">Review rollback</button>{!canConfigure ? <small>The activate_configuration capability is required.</small> : !item.activated_at ? <small>Only a previously activated valid revision can be restored.</small> : item.id === active?.id ? <small>This revision is already active.</small> : !validStrongETag(activeETag) ? <small>A strong active-revision ETag is required.</small> : null}</div></section> : page ? <div className="control-notice"><strong>No revisions</strong><span>This environment has no configuration history.</span></div> : null}
-    {rollbackTarget && active ? <section aria-labelledby="rollback-review-heading" className="publish-review publish-review--valid"><p className="eyebrow">Rollback review</p><h2 id="rollback-review-heading">Replace active revision {active.version} with revision {rollbackTarget.version}?</h2><div className="impact-grid"><div><strong>Traffic changes atomically</strong><span>The target document becomes active after a fresh strong-ETag check.</span></div><div><strong>{rollbackPaths.length} structural path change(s)</strong><span>Values remain hidden from this review; inspect both redaction-safe documents above if needed.</span></div><div><strong>Rollback creates new activation evidence</strong><span>Revoked credentials and external side effects are not restored.</span></div></div>{rollbackPaths.length ? <ul>{rollbackPaths.slice(0, 100).map((path) => <li key={path}><code>{path}</code></li>)}</ul> : <p>No document field changes were detected; only revision identity would change.</p>}{rollbackPaths.length > 100 ? <p>Showing the first 100 changed paths.</p> : null}<label>Operator reason<textarea maxLength={500} onChange={(event) => setRollbackReason(event.target.value)} required rows={3} value={rollbackReason} /></label><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => { setRollbackTarget(undefined); setRollbackReason(""); }} type="button">Cancel rollback</button><button className="primary-action primary-action--danger" disabled={busy || !rollbackReason.trim()} onClick={() => void rollback(rollbackTarget, rollbackReason)} type="button">Confirm rollback to revision {rollbackTarget.version}</button></div></section> : null}
+    {rollbackTarget && active ? <section aria-labelledby="rollback-review-heading" className="publish-review publish-review--valid"><p className="eyebrow">Rollback review</p><h2 id="rollback-review-heading">Replace active revision {active.version} with revision {rollbackTarget.version}?</h2><div className="impact-grid"><div><strong>Traffic changes atomically</strong><span>The target document becomes active after a fresh strong-ETag check.</span></div><div><strong>{rollbackPaths.length} structural path change(s)</strong><span>Values remain hidden from this review; inspect both redaction-safe documents above if needed.</span></div><div><strong>Rollback creates new activation evidence</strong><span>Revoked credentials and external side effects are not restored.</span></div></div>{rollbackPaths.length ? <ul>{rollbackPaths.slice(0, 100).map((path) => <li key={path}><code>{path}</code></li>)}</ul> : <p>No document field changes were detected; only revision identity would change.</p>}{rollbackPaths.length > 100 ? <p>Showing the first 100 changed paths.</p> : null}<label>Operator reason<textarea maxLength={500} onChange={(event) => setRollbackReason(event.target.value)} required rows={3} value={rollbackReason} /></label><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => { setRollbackTarget(undefined); setRollbackReason(""); }} type="button">Cancel rollback</button><button className="primary-action primary-action--danger" disabled={busy || !canConfigure || !rollbackReason.trim()} onClick={() => void rollback(rollbackTarget, rollbackReason)} type="button">Confirm rollback to revision {rollbackTarget.version}</button></div></section> : null}
     {page ? <div className="button-row">{paginationButton("Newest", busy, () => void load())}{page.page.has_more && page.page.next_cursor ? paginationButton("Next older revision", busy, () => void load(page.page.next_cursor)) : null}</div> : null}
   </div>;
 }

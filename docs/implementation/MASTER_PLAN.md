@@ -18,11 +18,13 @@ The six-repository strict release-control desired state is implemented,
 including the docs-only review policy. An explicit `single_maintainer_v1`
 profile permits a lower-assurance launch without a distinct reviewer while
 keeping the strict profile unchanged, every deferred control `unverified`, and
-the product ineligible for a `release-qualified` claim. Neither profile is
-claimed as applied live. npm uses `auth-and-writes` 2FA; the inert
-`@latchway/client@0.0.0-bootstrap.0` namespace record is public, but its
-unexpected `latest` alias requires cleanup and the other four namespace records
-plus every stable `1.0.0` npm package remain unpublished. The canonical
+the product ineligible for a `release-qualified` claim. Its 13 exact
+reviewer-free, self-review-permitted, main-only environments and non-secret
+policy sentinels are applied live; strict-profile rulesets are not. npm uses
+`auth-and-writes` 2FA. All five namespace records contain only the exact
+`0.0.0-bootstrap.0` placeholder, their bootstrap and `latest` aliases are
+verified, and their tokenless trusted publishers are configured. Every stable
+`1.0.0` npm package remains unpublished. The canonical
 `docs.latchway.dev` custom domain and DNS
 are not yet live. Release promotion remains blocked on live controls,
 publication, and protected exact-candidate evidence.
@@ -85,7 +87,7 @@ checkpoint. It is not rewritten by this plan.
 ### Phase 0: Reconcile architecture and completion policy — source complete
 
 - [x] Reconcile the master, status, compatibility, and completion ledgers.
-- [x] Preserve legacy ADRs without number collisions and record ADRs 0017–0034.
+- [x] Preserve legacy ADRs without number collisions and record ADRs 0017–0035.
 - [x] Replace installation-only active architecture with family/component
   terminology and fail-closed release-domain validation.
 - [x] Establish the strict framework compatibility registry, schema, generator,
@@ -369,8 +371,8 @@ complete; protected execution open
   zero-source-review policy for product repositories. The lower-assurance
   `single_maintainer_v1` profile keeps strict review unchanged but does not
   require an independent reviewer. npm account 2FA is now `auth-and-writes`;
-  the inert client bootstrap exists, while four namespace records and every
-  stable `1.0.0` coordinate remain unpublished.
+  all five exact inert namespace placeholders and tokenless trusted publishers
+  are configured, while every stable `1.0.0` coordinate remains unpublished.
 - [x] Audit and non-force push the exact core and four SDK successor histories,
   then verify those remote `main` heads.
 - [x] Require the generated docs mirror to bind the exact canonical source in
@@ -415,17 +417,20 @@ version string may substitute for protected exact-candidate evidence. The
 selected profile's protected publication workflow must authenticate every
 required producer and exact-candidate artifact before an immutable `v1.0.0`
 product tag, GHCR image, or SDK package is published. Under
-`single_maintainer_v1`, those public artifacts retain the explicit deferred-
-assurance label, `profile_status: incomplete`, `publication_ready: false`, and
-`release_qualified: false`. Only the later strict post-publication finalizer may
-close every domain and authorize release-qualified claims.
+`single_maintainer_v1`, the unauthenticated structural projection retains
+`publication_ready: false`. After the scoped public artifacts and required
+observations exist, only the protected profile finalizer may set profile-scoped
+`publication_ready` to true. That authenticated result still retains the
+explicit deferred-assurance label and `profile_status: incomplete`, and fixes
+`release_qualified`, `fully_evidence_gated`, and `independently_reviewed` to
+false. Only the later strict post-publication finalizer may close every domain
+and authorize release-qualified claims.
 
 Offline/local device build, install, and launch may proceed when it does not
 contact ngrok or a live provider and does not collect Apple App Attest evidence.
-The operator supplied the scoped ngrok authorization, but no tunnel, service,
-provider, App Attest, or protected-device evidence was started or collected
-under that authorization. App Intent/extension invocation and physical
-Android/Google Play evidence are explicitly deferred for later operator
-submission. Apple distribution-derived proof remains open but was not
-explicitly deferred; none of these gates may be inferred from local builds or
-earlier observations.
+The operator supplied the scoped ngrok authorization. Historical observations
+remain bound only to their stated commits; they do not qualify the final
+candidate. App Intent/extension invocation, Apple distribution, and physical
+Android/Google Play evidence are explicitly deferred under
+`single_maintainer_v1`; none of these gates may be inferred from local builds
+or earlier observations.

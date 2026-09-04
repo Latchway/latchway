@@ -6,6 +6,7 @@ interface ImmediateOperationConfirmationProps {
   busy: boolean;
   confirmLabel: string;
   credentialRestoration: ReactNode;
+  disabled?: boolean;
   heading: ReactNode;
   onCancel: () => void;
   onConfirm: (reason: string | undefined) => void;
@@ -22,6 +23,7 @@ export function ImmediateOperationConfirmation({
   busy,
   confirmLabel,
   credentialRestoration,
+  disabled = false,
   heading,
   onCancel,
   onConfirm,
@@ -39,7 +41,7 @@ export function ImmediateOperationConfirmation({
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!canConfirm || busy) return;
+    if (!canConfirm || busy || disabled) return;
     onConfirm(requiresReason ? boundedReason : undefined);
   }
 
@@ -53,6 +55,6 @@ export function ImmediateOperationConfirmation({
     </div>
     {requiresReason ? <label>Operator reason<input autoComplete="off" maxLength={reasonMaximumLength} required value={reason} onChange={(event) => setReason(event.target.value)} /></label> : null}
     <label className="check-field"><input autoFocus checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" />{acknowledgement}</label>
-    <div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || !canConfirm} type="submit">{confirmLabel}</button><button className="secondary-action" disabled={busy} onClick={onCancel} type="button">Cancel</button></div>
+    <div className="button-row"><button className="primary-action primary-action--danger" disabled={busy || disabled || !canConfirm} type="submit">{confirmLabel}</button><button className="secondary-action" disabled={busy} onClick={onCancel} type="button">Cancel</button></div>
   </form>;
 }

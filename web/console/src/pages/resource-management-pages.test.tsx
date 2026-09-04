@@ -20,6 +20,9 @@ vi.mock("../api/session", () => ({
     }
   })
 }));
+vi.mock("../app/console-compatibility-context", () => ({
+  useConsoleCompatibility: () => ({ mutationAllowed: true })
+}));
 
 import {
   ApplicationsPage,

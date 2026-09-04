@@ -177,17 +177,33 @@ func runServerOwnedProviderVerify(cmd *cobra.Command, opts *options, control *co
 		values.serverMaxCostNano < 1 || values.serverMaxCostNano > 1_000_000_000 {
 		return errors.New("server-owned verification environment, selection, or cost bound is invalid")
 	}
-	request := map[string]any{
-		"kind": kind, "environment_id": values.environmentID, "upstream": values.upstream,
-		"model": values.model, "max_cost_nano_usd": values.serverMaxCostNano,
-	}
 	client, err := newControlAPIClient(opts, control.tokenEnvironment)
 	if err != nil {
 		return err
 	}
+	var active configurationRevisionCLI
+	if _, err := client.do(
+		cmd.Context(), http.MethodGet,
+		"/admin/v1/environments/"+values.environmentID+"/config",
+		nil, nil, http.StatusOK, &active,
+	); err != nil {
+		return err
+	}
+	if active.EnvironmentID != values.environmentID || active.State != "active" ||
+		id.Validate(active.ID, id.ConfigRevision) != nil {
+		return errors.New("admin API returned an invalid active configuration revision")
+	}
+	request := map[string]any{
+		"kind": kind, "environment_id": values.environmentID, "config_revision_id": active.ID,
+		"upstream": values.upstream, "model": values.model,
+		"max_cost_nano_usd": values.serverMaxCostNano,
+	}
 	var run selfTestRunCLI
 	if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/self-tests", nil, request, http.StatusAccepted, &run); err != nil {
 		return err
+	}
+	if run.EnvironmentID != values.environmentID || run.ConfigRevisionID != active.ID {
+		return errors.New("self-test result did not match the exact requested environment and active configuration revision")
 	}
 	return printSelfTest(opts, run)
 }

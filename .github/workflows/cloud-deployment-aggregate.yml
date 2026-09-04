@@ -361,6 +361,23 @@ jobs:
               match = re.search(r"(?:@)?sha256:([0-9a-f]{64})$", str(value))
               return match.group(1) if match else None
 
+          def require_database_pool(value, expected, platform):
+              fields = {
+                  "aggregate_max_connections",
+                  "regular_max_connections",
+                  "completion_max_connections",
+              }
+              if not isinstance(value, dict) or set(value) != fields:
+                  fail(f"{platform} database-pool claim is invalid")
+              aggregate = value["aggregate_max_connections"]
+              regular = value["regular_max_connections"]
+              completion = value["completion_max_connections"]
+              if (any(type(item) is not int for item in (aggregate, regular, completion)) or
+                      not 2 <= aggregate <= 500 or regular < 1 or completion < 1 or
+                      completion >= aggregate or regular + completion != aggregate or
+                      (aggregate, regular, completion) != expected):
+                  fail(f"{platform} database-pool claim is invalid")
+
           def extract(path):
               payload = path.read_bytes()
               if payload[:8] != bytes.fromhex("1f8b080000000000"):
@@ -387,8 +404,14 @@ jobs:
 
           candidate = load(candidate_path)
           image_value = candidate.get("image") if isinstance(candidate, dict) else None
+          platform_values = image_value.get("platforms") if isinstance(image_value, dict) else None
           contract = candidate.get("contract") if isinstance(candidate, dict) else None
-          if (not isinstance(image_value, dict) or not isinstance(contract, dict) or
+          if (not isinstance(image_value, dict) or set(image_value) != {"repository", "index_digest", "platforms"} or
+                  not digest_pattern.fullmatch(str(image_value.get("index_digest", ""))) or
+                  not isinstance(platform_values, dict) or set(platform_values) != {"linux/amd64", "linux/arm64"} or
+                  any(not digest_pattern.fullmatch(str(value)) for value in platform_values.values()) or
+                  len({image_value["index_digest"], *platform_values.values()}) != 3 or
+                  not isinstance(contract, dict) or
                   candidate.get("candidate_commit") != commit or candidate.get("intended_tag") != release or candidate.get("status") != "passed"):
               fail("candidate identity is invalid")
           image = str(image_value.get("repository")) + "@" + str(image_value.get("index_digest"))
@@ -522,7 +545,7 @@ jobs:
               readiness_checks = readiness.get("checks") if isinstance(readiness, dict) else None
               if (health.get("status") != "ok" or not isinstance(build, dict) or build.get("commit") != commit or build.get("contract_version") != contract_version or
                       readiness.get("status") != "ready" or not isinstance(readiness_checks, dict) or any(readiness_checks.get(name) != "ok" for name in
-                      ("database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"))):
+                      ("database", "schema", "active_configuration", "quota_completion_pool", "master_key", "signing_key", "worker_heartbeat"))):
                   fail(f"{platform} HTTP release semantics are invalid")
               if (not isinstance(shutdown, dict) or shutdown.get("signal") != "SIGTERM" or shutdown.get("exit_code") != 0 or
                       shutdown.get("readiness_restored") is not True or not isinstance(shutdown.get("before"), dict) or not isinstance(shutdown.get("after"), dict) or
@@ -531,10 +554,15 @@ jobs:
 
               control = values["control_plane.json"]
               expected_index_digest = image_digest(image)
+              require_database_pool(
+                  control.get("database_pool") if isinstance(control, dict) else None,
+                  (5, 3, 2) if platform == "cloudflare_containers" else (20, 15, 5),
+                  platform,
+              )
               if platform == "compose":
                   gateway = control.get("gateway") if isinstance(control, dict) else None
                   repo_digests = control.get("image", {}).get("RepoDigests") if isinstance(control, dict) else None
-                  if (set(control) != {"platform", "project", "gateway", "image"} or control.get("platform") != platform or control.get("project") != manifest["provider_resource_id"] or
+                  if (set(control) != {"platform", "project", "gateway", "image", "database_pool"} or control.get("platform") != platform or control.get("project") != manifest["provider_resource_id"] or
                           not isinstance(gateway, dict) or gateway.get("State", {}).get("Running") is not True or gateway.get("State", {}).get("Health", {}).get("Status") != "healthy" or
                           expected_index_digest not in {image_digest(item) for item in repo_digests or []} or execution.get("exit_code") != 0 or
                           execution.get("migration_container_exit_code") != 0 or shutdown.get("method") != "compose_sigterm_restart" or
@@ -543,18 +571,26 @@ jobs:
               elif platform == "cloud_run":
                   service, revision, migration_job = control.get("service"), control.get("revision"), control.get("migration_job")
                   containers = service.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []) if isinstance(service, dict) else []
+                  revision_containers = revision.get("spec", {}).get("containers", []) if isinstance(revision, dict) else []
                   job_containers = migration_job.get("spec", {}).get("template", {}).get("spec", {}).get("template", {}).get("spec", {}).get("containers", []) if isinstance(migration_job, dict) else []
                   conditions = execution.get("status", {}).get("conditions", [])
-                  if (set(control) != {"platform", "service", "revision", "migration_job"} or control.get("platform") != platform or
-                          not containers or image_digest(containers[0].get("image")) != expected_index_digest or not job_containers or image_digest(job_containers[0].get("image")) != expected_index_digest or
-                          image_digest(revision.get("status", {}).get("imageDigest")) != expected_index_digest or not any(isinstance(item, dict) and item.get("type") in ("Completed", "Ready") and str(item.get("status")).lower() == "true" for item in conditions) or
+                  expected_amd64_digest = image_digest(platform_values["linux/amd64"])
+                  resolved_digest = image_digest(revision.get("status", {}).get("imageDigest")) if isinstance(revision, dict) else None
+                  if (set(control) != {"platform", "service", "revision", "migration_job", "database_pool"} or control.get("platform") != platform or
+                          len(containers) != 1 or image_digest(containers[0].get("image")) != expected_index_digest or
+                          len(revision_containers) != 1 or image_digest(revision_containers[0].get("image")) != expected_index_digest or
+                          len(job_containers) != 1 or image_digest(job_containers[0].get("image")) != expected_index_digest or
+                          resolved_digest not in {expected_index_digest, expected_amd64_digest} or
+                          image_digest(shutdown.get("before", {}).get("image_digest")) != resolved_digest or
+                          image_digest(shutdown.get("after", {}).get("image_digest")) != resolved_digest or
+                          not any(isinstance(item, dict) and item.get("type") in ("Completed", "Ready") and str(item.get("status")).lower() == "true" for item in conditions) or
                           shutdown.get("method") != "cloud_run_revision_rollout" or shutdown.get("platform_timeout_seconds") != 10 or shutdown.get("application_timeout_seconds") != 8):
                       fail("Cloud Run deployment semantics are invalid")
               elif platform == "aws":
                   service, definition, tasks = control.get("service"), control.get("task_definition"), control.get("tasks")
                   definitions = definition.get("containerDefinitions") if isinstance(definition, dict) else None
                   stopped = execution.get("stopped_task")
-                  if (set(control) != {"platform", "service", "task_definition", "tasks"} or control.get("platform") != platform or not isinstance(service, dict) or
+                  if (set(control) != {"platform", "service", "task_definition", "tasks", "database_pool"} or control.get("platform") != platform or not isinstance(service, dict) or
                           service.get("status") != "ACTIVE" or service.get("runningCount") != service.get("desiredCount") or type(service.get("desiredCount")) is not int or service["desiredCount"] < 2 or
                           not isinstance(definitions, list) or len(definitions) != 1 or image_digest(definitions[0].get("image")) != expected_index_digest or definitions[0].get("stopTimeout") != 35 or definitions[0].get("readonlyRootFilesystem") is not True or
                           not isinstance(tasks, list) or len(tasks) < 2 or any(item.get("lastStatus") != "RUNNING" or image_digest(item.get("containers", [{}])[0].get("imageDigest")) != expected_index_digest for item in tasks if isinstance(item, dict)) or
@@ -563,7 +599,7 @@ jobs:
                       fail("AWS deployment semantics are invalid")
               elif platform == "fly_io":
                   machines = control.get("machines") if isinstance(control, dict) else None
-                  if (set(control) != {"platform", "app", "machines"} or control.get("platform") != platform or not isinstance(machines, list) or len(machines) < 2 or
+                  if (set(control) != {"platform", "app", "machines", "database_pool"} or control.get("platform") != platform or not isinstance(machines, list) or len(machines) < 2 or
                           any(not isinstance(item, dict) or item.get("state") != "started" or image_digest(item.get("image_ref", {}).get("digest")) != expected_index_digest for item in machines) or
                           execution.get("exit_code") != 0 or execution.get("machine_id") not in {item.get("id") for item in machines} or
                           shutdown.get("method") != "fly_machine_restart" or shutdown.get("platform_timeout_seconds") != 35 or shutdown.get("application_timeout_seconds") != 30 or
@@ -577,7 +613,7 @@ jobs:
                   mirror = container.get("mirror") if isinstance(container, dict) else None
                   instances = container.get("instances") if isinstance(container, dict) else None
                   mirror_digest = image_digest(mirror.get("manifest_digest")) if isinstance(mirror, dict) else None
-                  if (set(control) != {"platform", "worker", "container"} or control.get("platform") != platform or not isinstance(worker, dict) or worker.get("status") != "ready" or
+                  if (set(control) != {"platform", "worker", "container", "database_pool"} or control.get("platform") != platform or not isinstance(worker, dict) or worker.get("status") != "ready" or
                           worker.get("resource_id") != manifest["provider_resource_id"] or not isinstance(application, dict) or application.get("id") != manifest["provider_resource_id"] or
                           application.get("state") not in ("active", "ready") or not isinstance(canonical, dict) or canonical.get("index_digest") != image_value.get("index_digest") or
                           canonical.get("config_digest") != mirror.get("config_digest") or canonical.get("layers") != mirror.get("layers") or
@@ -730,6 +766,7 @@ jobs:
             --evidence-root "$RUNNER_TEMP/cloud-final" \
             --coordinates "$RUNNER_TEMP/release-coordinates.json" \
             --trusted-root "$RUNNER_TEMP/cloud-authenticated/github-attestation-trusted-root.jsonl" \
+            --candidate-manifest "$candidate" \
             --core-commit "$CANDIDATE_COMMIT" \
             --core-release "$INTENDED_TAG" \
             --contract-version "$contract_version" \

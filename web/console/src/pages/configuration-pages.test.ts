@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildFirstRunTemplate, type FirstRunTemplateInput, type SetupPlatformScope } from "./configuration-pages";
 import { buildNativeSnippets, buildNativeTemplate, type NativeTemplateInput } from "./native-template";
 import nativeTemplateFixture from "./native-template.fixture.json";
 
@@ -33,6 +34,138 @@ function nativeTemplateInput(overrides: Partial<NativeTemplateInput> = {}): Nati
     ...overrides
   };
 }
+
+function firstRunTemplateInput(platformScope: SetupPlatformScope): FirstRunTemplateInput {
+  const apple = ["ios", "native_both", "react_native_ios", "react_native_both"].includes(platformScope);
+  const android = ["android", "native_both", "react_native_android", "react_native_both"].includes(platformScope);
+  return {
+    application: "mobile-app",
+    environment: "production",
+    environmentKind: "production",
+    organization: "example",
+    firebaseProject: "example-mobile",
+    platformScope,
+    ...(apple ? {
+      appIDPrefix: "TEAM1234",
+      appleDistribution: "app_store" as const,
+      bundleID: "com.example.mobile",
+      bundleVersion: "234"
+    } : {}),
+    ...(android ? {
+      androidVersionCode: 42,
+      certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      cloudProject: 123456789,
+      packageName: "com.example.mobile.android",
+      playIntegrityCredential: { type: "metadata" as const }
+    } : {}),
+    ...(platformScope === "web" ? {
+      firebaseAppID: "1:123456789:web:abc123",
+      firebaseProjectNumber: "123456789",
+      webOrigin: "https://app.example.com"
+    } : {}),
+    upstreamURL: "https://fixture.example.test/v1",
+    physicalModel: "fixture-model",
+    maximumFramingTokensPerRequest: 8,
+    maximumFramingTokensPerMessage: 4,
+    maximumContextTokens: 4096,
+    authentication: { type: "none" },
+    inputNanoUsdPerMillion: 0,
+    outputNanoUsdPerMillion: 0,
+    requestNanoUsd: 0,
+    dailyInputTokenMaximum: 1000,
+    dailyOutputTokenMaximum: 1000,
+    dailyTotalTokenMaximum: 2000,
+    perRequestInputTokenMaximum: 100
+  };
+}
+
+describe("platform-scoped first-run template", () => {
+  it.each([
+    ["ios", ["ios"], ["ios-main"]],
+    ["android", ["android"], ["android-main"]],
+    ["web", ["web"], ["web-main"]],
+    ["react_native_ios", ["react_native_ios"], ["react-native-ios-main"]],
+    ["react_native_android", ["react_native_android"], ["react-native-android-main"]],
+    ["react_native_both", ["react_native_android", "react_native_ios"], ["react-native-android-main", "react-native-ios-main"]]
+  ] as const)("emits only %s evidence and Component Definitions", (scope, expectedPlatforms, expectedComponents) => {
+    const text = buildFirstRunTemplate(firstRunTemplateInput(scope));
+    const document = JSON.parse(text) as {
+      metadata: { description: string };
+      spec: {
+        attestationPolicies: Array<{ id: string; platforms: Record<string, unknown> }>;
+        componentDefinitions: Array<{ id: string; platform: string }>;
+        features: Array<{ attestationPolicy: string }>;
+      };
+    };
+
+    expect(Object.keys(document.spec.attestationPolicies[0]?.platforms ?? {}).sort()).toEqual(expectedPlatforms);
+    expect(document.spec.componentDefinitions.map((component) => component.id).sort()).toEqual(expectedComponents);
+    expect(document.spec.componentDefinitions.map((component) => component.platform).sort()).toEqual(expectedPlatforms);
+    expect(document.metadata.description).toContain("production gateway");
+    expect(text).not.toContain("latchway.unused");
+
+    const includesApple = expectedPlatforms.some((platform) => platform.endsWith("ios"));
+    const includesAndroid = expectedPlatforms.some((platform) => platform.endsWith("android"));
+    expect(text.includes('"appAttest"')).toBe(includesApple);
+    expect(text.includes('"playIntegrity"')).toBe(includesAndroid);
+    expect(text.includes('"firebaseAppCheck"')).toBe(scope === "web");
+    expect(document.spec.features[0]?.attestationPolicy).toBe(scope === "web" ? "web" : "native");
+  });
+
+  it("pins the exact Web origin and Firebase App Check application without native-proof claims", () => {
+    const document = JSON.parse(buildFirstRunTemplate(firstRunTemplateInput("web"))) as {
+      spec: {
+        attestationPolicies: Array<{ platforms: { web: Record<string, unknown> } }>;
+        componentDefinitions: Array<Record<string, unknown>>;
+      };
+    };
+    expect(document.spec.attestationPolicies[0]?.platforms.web).toEqual({
+      allowedOrigins: ["https://app.example.com"],
+      firebaseAppCheck: { allowedAppIds: ["1:123456789:web:abc123"], projectNumber: "123456789" },
+      minimumTrustLevel: "web_risk_verified",
+      mode: "required",
+      provider: "firebase_app_check"
+    });
+    expect(document.spec.componentDefinitions).toEqual([{
+      allowedFeatures: ["assistant"],
+      attestation: { provider: "firebase_app_check", strategy: "direct" },
+      familyRole: "root",
+      id: "web-main",
+      identifiers: { origins: ["https://app.example.com"] },
+      kind: "browser",
+      platform: "web"
+    }]);
+    expect(JSON.stringify(document)).not.toMatch(/appAttest|playIntegrity|device_verified/u);
+  });
+
+  it("requires only the evidence selected by the platform scope", () => {
+    expect(() => buildFirstRunTemplate(firstRunTemplateInput("ios"))).not.toThrow();
+    expect(() => buildFirstRunTemplate(firstRunTemplateInput("android"))).not.toThrow();
+    expect(() => buildFirstRunTemplate(firstRunTemplateInput("web"))).not.toThrow();
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("ios"), bundleID: undefined })).toThrow(/Bundle ID/u);
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("android"), cloudProject: undefined })).toThrow(/Cloud project number/u);
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("react_native_android"), cloudProject: 1 })).toThrow(/Cloud project number/u);
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("web"), firebaseAppID: undefined })).toThrow(/Firebase project number/u);
+  });
+
+  it("uses the canonical 3–255 character App Attest bundle-ID grammar", () => {
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("ios"), bundleID: "a.b" })).not.toThrow();
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("ios"), bundleID: `a${"b".repeat(254)}` })).not.toThrow();
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("ios"), bundleID: `a${"b".repeat(255)}` })).toThrow(/Bundle ID/u);
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("ios"), bundleID: "-invalid" })).toThrow(/Bundle ID/u);
+  });
+
+  it("rejects a non-HTTPS production Web origin while allowing exact development loopback", () => {
+    expect(() => buildFirstRunTemplate({ ...firstRunTemplateInput("web"), webOrigin: "http://app.example.com" })).toThrow(/canonical HTTPS/u);
+    const development = buildFirstRunTemplate({
+      ...firstRunTemplateInput("web"),
+      environment: "development",
+      environmentKind: "development",
+      webOrigin: "http://127.0.0.1:5173"
+    });
+    expect(development).toContain('"http://127.0.0.1:5173"');
+  });
+});
 
 describe("native setup template", () => {
   it("binds all native platforms and trusted Responses accounting", () => {

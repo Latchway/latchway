@@ -6,7 +6,7 @@ audience: "reference"
 pageType: "reference"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-04"
 owner: "core-operations"
 ---
 
@@ -29,12 +29,17 @@ immutable PostgreSQL-backed environment revisions, not process variables.
 | `LATCHWAY_SHUTDOWN_TIMEOUT` | `30s` | Positive Go duration used for graceful draining. Platform termination grace must be at least this long. |
 | `LATCHWAY_READ_TIMEOUT` | `15s` | Positive Go duration for the HTTP server read/header boundary. |
 | `LATCHWAY_IDLE_TIMEOUT` | `90s` | Positive Go duration for idle HTTP connections. Route-specific upstream/stream timeouts remain revisioned configuration. |
-| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` | Integer from 2 through 500 per process. Budget the maximum across every API and worker replica. |
+| `LATCHWAY_DB_MAX_CONNECTIONS` | `20` | Aggregate integer ceiling from 2 through 500 per process. It includes both the regular and completion pools; budget this total across every API and worker replica. The accepted minimum `2` is functional but leaves one connection in each pool and therefore no spare regular connection while a reservation is blocked; use at least `3` for production headroom. |
+| `LATCHWAY_DB_COMPLETION_CONNECTIONS` | One quarter of `LATCHWAY_DB_MAX_CONNECTIONS`, rounded up; `5` when the aggregate default is `20` | Integer reserved inside the aggregate ceiling for terminal quota-lifecycle work. It must be at least 1 and strictly less than `LATCHWAY_DB_MAX_CONNECTIONS`; the remainder serves regular work. It is never additive. |
 | `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Empty unless bootstrapping | When present, 32–2048 bytes. High-entropy, one-time first-owner input. Remove it after bootstrap; retaining it cannot reopen a consumed flow. |
 | `LATCHWAY_ADMIN_SESSION_LIFETIME` | `12h` | Go duration from 5 minutes through 30 days. A shorter value reduces browser-session lifetime. |
 
 Whitespace-only values are treated as absent for variables with defaults. An
 invalid value fails configuration loading rather than falling back silently.
+Deployment templates set both database-pool variables explicitly. When you
+override either one in a template, override both together; the runtime's
+one-quarter completion default applies only when
+`LATCHWAY_DB_COMPLETION_CONNECTIONS` is actually absent.
 
 <Warning>
   Changing `LATCHWAY_MASTER_KEY` in place is not key rotation. A mismatched key

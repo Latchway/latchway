@@ -758,6 +758,34 @@
               "INDEPENDENT_SECURITY_REVIEW_WORKFLOW"
             ]
           }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "single-maintainer-v1-administration",
+          "policy_id": "latchway-release-profile-v1:latchway:single_maintainer_v1:administration",
+          "prevent_self_review": false,
+          "reviewers": {
+            "minimum": 0,
+            "source": "profile_policy"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
+          }
         }
       ],
       "name": "latchway",
@@ -957,6 +985,34 @@
             "source": "command_line"
           },
           "secrets": {
+            "allowed_names": [],
+            "required_names": []
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "single-maintainer-v1-administration",
+          "policy_id": "latchway-release-profile-v1:latchway-js:single_maintainer_v1:administration",
+          "prevent_self_review": false,
+          "reviewers": {
+            "minimum": 0,
+            "source": "profile_policy"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          },
+          "variables": {
             "allowed_names": [],
             "required_names": []
           }
@@ -1317,6 +1373,34 @@
               "LATCHWAY_IOS_WIDGET_BINARY_SHA256",
               "LATCHWAY_REGISTRATION_DEVICE_GRANT_SHA256"
             ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "single-maintainer-v1-administration",
+          "policy_id": "latchway-release-profile-v1:latchway-ios-sdk:single_maintainer_v1:administration",
+          "prevent_self_review": false,
+          "reviewers": {
+            "minimum": 0,
+            "source": "profile_policy"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
           }
         }
       ],
@@ -1833,6 +1917,34 @@
               "LATCHWAY_COLLECTOR_TRUST_ROOT_SHA256",
               "LATCHWAY_IDENTITY_PROVIDER"
             ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "single-maintainer-v1-administration",
+          "policy_id": "latchway-release-profile-v1:latchway-android:single_maintainer_v1:administration",
+          "prevent_self_review": false,
+          "reviewers": {
+            "minimum": 0,
+            "source": "profile_policy"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
           }
         }
       ],
@@ -2437,6 +2549,34 @@
               "LATCHWAY_ANDROID_UPLOAD_CERTIFICATE_SHA256",
               "LATCHWAY_REACT_NATIVE_AAB_VERIFIER_SHA256"
             ]
+          }
+        },
+        {
+          "deployment": {
+            "branches": [
+              "main"
+            ],
+            "mode": "selected",
+            "tags": []
+          },
+          "name": "single-maintainer-v1-administration",
+          "policy_id": "latchway-release-profile-v1:latchway-react-native-sdk:single_maintainer_v1:administration",
+          "prevent_self_review": false,
+          "reviewers": {
+            "minimum": 0,
+            "source": "profile_policy"
+          },
+          "secrets": {
+            "allowed_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "required_names": [
+              "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ]
+          },
+          "variables": {
+            "allowed_names": [],
+            "required_names": []
           }
         }
       ],

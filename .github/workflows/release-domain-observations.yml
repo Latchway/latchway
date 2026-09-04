@@ -14,6 +14,14 @@ on:
           - supply_chain
           - public_tags
           - public_registries
+      release_profile:
+        description: Fixed release profile for public tags and registries
+        required: false
+        default: strict_full
+        type: choice
+        options:
+          - strict_full
+          - single_maintainer_v1
       candidate_commit:
         description: Exact core candidate commit
         required: true
@@ -119,6 +127,7 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
           IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
           ANDROID_PHYSICAL_RUN_ID: ${{ inputs.android_physical_run_id }}
@@ -136,6 +145,12 @@ jobs:
           for value in "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
+          case "$RELEASE_PROFILE:$EVIDENCE_DOMAIN" in
+            strict_full:*) ;;
+            single_maintainer_v1:public_tags) ;;
+            single_maintainer_v1:public_registries) ;;
+            *) exit 1 ;;
+          esac
           if [[ "$EVIDENCE_DOMAIN" == live_sdk_conformance || "$EVIDENCE_DOMAIN" == physical_devices ]]; then
             for value in "$IOS_PHYSICAL_RUN_ID" "$ANDROID_PHYSICAL_RUN_ID" "$REACT_NATIVE_PHYSICAL_RUN_ID"; do
               [[ "$value" =~ ^[1-9][0-9]{0,19}$ ]]
@@ -144,7 +159,7 @@ jobs:
               [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]]
             done
           fi
-          if [[ "$EVIDENCE_DOMAIN" == public_registries ]]; then
+          if [[ "$EVIDENCE_DOMAIN" == public_registries && "$RELEASE_PROFILE" == strict_full ]]; then
             [[ "$DOCUMENTATION_PRODUCTION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
             [[ "$DOCUMENTATION_PRODUCTION_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
           else
@@ -668,6 +683,7 @@ jobs:
           REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
           DOCUMENTATION_RUN_ID: ${{ inputs.documentation_production_run_id }}
           DOCUMENTATION_RUN_ATTEMPT: ${{ inputs.documentation_production_run_attempt }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
         run: |
           set -Eeuo pipefail
           umask 077
@@ -870,6 +886,7 @@ jobs:
               env -u GH_TOKEN -u GITHUB_TOKEN docker image rm "$reference" >/dev/null
             done
             jq --exit-status '. == {"auths":{}}' "$DOCKER_CONFIG/config.json" >/dev/null
+            if [[ "$RELEASE_PROFILE" == strict_full ]]; then
             repository=Latchway/latchway-docs
             workflow_path=.github/workflows/mintlify-production-evidence.yml
             documentation_authority="$RUNNER_TEMP/documentation-authority"
@@ -987,6 +1004,7 @@ jobs:
             capture_existing \
               "$RUNNER_TEMP/documentation-production/latchway-mintlify-production-evidence.attestation.sigstore.json" \
               "public-registries/documentation/latchway-mintlify-production-evidence.attestation.sigstore.json" 2097152
+            fi
             capture_run() {
               local id="$1" repository="$2" run_id="$3" attempt="$4" relative
               [[ "$run_id" =~ ^[1-9][0-9]{0,19}$ && "$attempt" =~ ^[1-9][0-9]{0,5}$ ]]
@@ -995,8 +1013,23 @@ jobs:
               capture_command "$relative" 2097152 gh api --method GET \
                 "repos/$repository/actions/runs/$run_id/attempts/$attempt"
             }
+            capture_owner_run() {
+              local id="$1" repository="$2" run_id="$3" relative
+              [[ "$run_id" =~ ^[1-9][0-9]{0,15}$ ]]
+              (( run_id <= 9007199254740991 ))
+              relative="public-registries/$id/runs/owner-$run_id.json"
+              test -e "$capture/$relative" && return 0
+              capture_command "$relative" 2097152 gh api --method GET \
+                "repos/$repository/actions/runs/$run_id"
+            }
             requires_subject_attestation() {
               local id="$1" name="$2"
+              if [[ "${RELEASE_PROFILE:-strict_full}" == single_maintainer_v1 ]]; then
+                case "$id" in
+                  javascript|react_native|ios|android) return 0 ;;
+                  *) return 1 ;;
+                esac
+              fi
               case "$id:$name" in
                 javascript:*) return 0 ;;
                 react_native:latchway-react-native-*.tgz|react_native:docs-bundle-*.tar.gz|react_native:package-evidence.json|react_native:build-reproducibility.json|react_native:published-dependency-evidence.json|react_native:npm-registry-version.json|react_native:npm-registry-view.json|react_native:npm-attestations.json|react_native:npm-audit-signatures.json|react_native:npm-registry-evidence-manifest.json|react_native:post-publish-evidence.json|react_native:npm-release-adoption-*.json) return 0 ;;
@@ -1009,6 +1042,10 @@ jobs:
               repository="Latchway/$(repository_name "$id")"
               tag=$(coordinate "$id" intended_tag)
               commit=$(coordinate "$id" commit)
+              signer_workflow=.github/workflows/release.yml
+              if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+                signer_workflow=.github/workflows/single-maintainer-release.yml
+              fi
               root="public-registries/$id"
               capture_command "$root/release.json" 2097152 gh api --method GET \
                 -H 'X-GitHub-Api-Version: 2026-03-10' "repos/$repository/releases/tags/$tag"
@@ -1031,7 +1068,7 @@ jobs:
                 if requires_subject_attestation "$id" "$name"; then
                   capture_command "$root/attestations/$name.json" 2097152 \
                     gh attestation verify "$capture/$root/assets/$name" --repo "$repository" \
-                    --signer-workflow "$repository/.github/workflows/release.yml" \
+                    --signer-workflow "$repository/$signer_workflow" \
                     --source-digest "$commit" --signer-digest "$commit" --source-ref refs/heads/main \
                     --deny-self-hosted-runners --format json
                 fi
@@ -1046,6 +1083,9 @@ jobs:
                     | base64 --decode | jq --raw-output '.predicate.runDetails.metadata.invocationId')
                   [[ "$invocation" =~ ^https://github.com/$repository/actions/runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)$ ]]
                   capture_run "$id" "$repository" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+                  if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+                    continue
+                  fi
                   shopt -s nullglob
                   adoptions=("$capture/$root/assets"/npm-release-adoption-"$package_id"-*.json)
                   (( ${#adoptions[@]} >= 1 ))
@@ -1061,6 +1101,12 @@ jobs:
                   done
                   shopt -u nullglob
                 done
+                if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+                  adoption="$capture/$root/assets/single-maintainer-npm-adoption.json"
+                  test -f "$adoption" && test ! -L "$adoption"
+                  owner=$(jq --raw-output '.transaction.owner_run_id' "$adoption")
+                  capture_owner_run "$id" "$repository" "$owner"
+                fi
               elif [[ "$id" == react_native ]]; then
                 attestation="$capture/$root/assets/npm-attestations.json"
                 test -f "$attestation"
@@ -1117,6 +1163,7 @@ jobs:
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
         run: |
           set -Eeuo pipefail
           if [[ "$EVIDENCE_DOMAIN" == supply_chain ]]; then
@@ -1785,6 +1832,7 @@ jobs:
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
           LATCHWAY_MAVEN_SIGNING_FINGERPRINT: ${{ vars.LATCHWAY_MAVEN_SIGNING_FINGERPRINT }}
         run: |
@@ -1796,8 +1844,13 @@ jobs:
           else
             capture=(--github-authority-directory "$RUNNER_TEMP/github-authority")
           fi
+          profile_arguments=()
+          if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+            profile_arguments=(--release-profile single_maintainer_v1)
+          fi
           python3 latchway/scripts/release-domain-observer.py \
             --domain "$EVIDENCE_DOMAIN" \
+            "${profile_arguments[@]}" \
             --source-conformance "$RUNNER_TEMP/authority/source/latchway-cross-repository.json" \
             --candidate-manifest "$RUNNER_TEMP/authority/candidate/latchway-candidate.json" \
             --output-directory "$RUNNER_TEMP/non-sdk/raw" \
@@ -1994,6 +2047,7 @@ jobs:
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
           LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
           LATCHWAY_LIVE_SDK_ENVIRONMENT: ${{ vars.LATCHWAY_LIVE_SDK_ENVIRONMENT }}
@@ -2040,11 +2094,17 @@ jobs:
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
         run: |
+          profile_arguments=()
+          if [[ "$RELEASE_PROFILE" == single_maintainer_v1 ]]; then
+            profile_arguments=(--release-profile single_maintainer_v1)
+          fi
           python3 latchway/scripts/release-domain-evidence.py \
             --produce \
             --domain "$EVIDENCE_DOMAIN" \
+            "${profile_arguments[@]}" \
             --source-conformance "$RUNNER_TEMP/authority/source/latchway-cross-repository.json" \
             --candidate-manifest "$RUNNER_TEMP/authority/candidate/latchway-candidate.json" \
             --raw-directory "$RUNNER_TEMP/unsigned/raw" \

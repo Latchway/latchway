@@ -3,12 +3,18 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/configuration"
 )
+
+type poolPingFunc func(context.Context) error
+
+func (ping poolPingFunc) Ping(ctx context.Context) error { return ping(ctx) }
 
 func TestUnavailableReportAndSupportBundleAreStructurallyRedacted(t *testing.T) {
 	t.Parallel()
@@ -49,6 +55,120 @@ func TestOverallStateDoesNotTreatSkippedAsFailure(t *testing.T) {
 	}
 	if state := overall([]Check{warningCheck("a", "A", "R")}); state != OverallDegraded {
 		t.Fatalf("overall = %q", state)
+	}
+}
+
+func TestPoolFactsAggregateDistinctCompletionReserve(t *testing.T) {
+	t.Parallel()
+
+	newPool := func(maximum int32) *pgxpool.Pool {
+		t.Helper()
+		cfg, err := pgxpool.ParseConfig("postgres://diagnostics:secret@127.0.0.1/latchway?sslmode=disable")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.MaxConns = maximum
+		pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		return pool
+	}
+	regular := newPool(24)
+	completion := newPool(8)
+	facts := DatabaseFacts{}
+	completionUtilization, separate := collectPoolFacts(regular, completion, &facts)
+	if !separate || completionUtilization != 0 || facts.PoolMaximum != 32 ||
+		facts.PoolTotal != 0 || facts.PoolAcquired != 0 || facts.PoolIdle != 0 ||
+		facts.PoolUtilizationPPM != 0 {
+		t.Fatalf("aggregate pool facts = %+v, completion=%d separate=%t", facts, completionUtilization, separate)
+	}
+
+	singleFacts := DatabaseFacts{}
+	if utilization, gotSeparate := collectPoolFacts(regular, regular, &singleFacts); gotSeparate ||
+		utilization != 0 || singleFacts.PoolMaximum != 24 {
+		t.Fatalf("single pool facts = %+v, completion=%d separate=%t", singleFacts, utilization, gotSeparate)
+	}
+}
+
+func TestCompletionPoolCheckUsesIndependentSaturationThreshold(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		utilization int64
+		want        CheckState
+	}{
+		{utilization: 749_999, want: CheckPassed},
+		{utilization: 750_000, want: CheckWarning},
+		{utilization: 900_000, want: CheckFailed},
+	} {
+		report := Report{}
+		appendCompletionPoolCheck(&report, test.utilization, true)
+		if got := checkStateByID(t, report.Checks, "quota_completion_pool_saturation"); got != test.want {
+			t.Fatalf("completion utilization %d check = %q, want %q", test.utilization, got, test.want)
+		}
+	}
+	report := Report{}
+	appendCompletionPoolCheck(&report, 0, false)
+	if got := checkStateByID(t, report.Checks, "quota_completion_pool_saturation"); got != CheckFailed {
+		t.Fatalf("unreachable completion pool saturation check = %q, want %q", got, CheckFailed)
+	}
+}
+
+func TestCompletionPoolConnectivityProbeIsBoundedAndRedacted(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		probe  poolPingFunc
+		failed bool
+	}{
+		{
+			name:  "available",
+			probe: func(context.Context) error { return nil },
+		},
+		{
+			name:   "closed",
+			probe:  func(context.Context) error { return errors.New("private database address and closed-pool detail") },
+			failed: true,
+		},
+		{
+			name: "fully acquired",
+			probe: func(ctx context.Context) error {
+				<-ctx.Done()
+				return ctx.Err()
+			},
+			failed: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			started := time.Now()
+			err := probeCompletionPool(context.Background(), test.probe, 10*time.Millisecond)
+			if test.failed != (err != nil) {
+				t.Fatalf("probe error = %v, failed=%t", err, test.failed)
+			}
+			if time.Since(started) > time.Second {
+				t.Fatal("completion-pool probe exceeded its independent bound")
+			}
+
+			report := Report{}
+			appendCompletionPoolConnectivityCheck(&report, err)
+			want := CheckPassed
+			if test.failed {
+				want = CheckFailed
+			}
+			if got := checkStateByID(t, report.Checks, "quota_completion_pool_connectivity"); got != want {
+				t.Fatalf("connectivity check = %q, want %q", got, want)
+			}
+			encoded, marshalErr := json.Marshal(report.Checks)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if strings.Contains(string(encoded), "private database") || strings.Contains(string(encoded), "closed-pool detail") {
+				t.Fatalf("completion-pool check disclosed dependency error: %s", encoded)
+			}
+		})
 	}
 }
 

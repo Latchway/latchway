@@ -31,6 +31,14 @@ import (
 
 const clientAccessTokenAudience = "latchway-data-plane"
 
+func reservationConcurrency(regularConnections int32) int64 {
+	maximum := int64(regularConnections) / 2
+	if maximum < 1 {
+		return 1
+	}
+	return maximum
+}
+
 // Run starts only the responsibilities selected by cfg.Role. Worker-only
 // replicas construct the gateway signing-key envelope required for rotation,
 // but never construct HTTP, administrative, identity, policy, or upstream
@@ -44,11 +52,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		logger = slog.Default()
 	}
 
-	pool, err := database.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConnections)
+	databasePools, err := database.OpenPartitioned(
+		ctx,
+		cfg.DatabaseURL,
+		cfg.DBMaxConnections,
+		cfg.DBCompletionConnections,
+	)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer databasePools.Close()
+	// All ordinary process dependencies remain on the regular pool. Only the
+	// quota store receives the completion pool for terminal lifecycle writes.
+	pool := databasePools.Regular
 
 	migrator := database.NewMigrator(pool)
 	if cfg.MigrateOnStart {
@@ -82,7 +98,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	// Both the data plane and maintenance runtime use this same store in the
 	// all role. Its methods remain transactionally safe across split replicas.
 	quotaStore, err := quota.NewStore(quota.StoreConfig{
-		Pool: pool,
+		Pool:                      pool,
+		CompletionPool:            databasePools.Completion,
+		MaxConcurrentReservations: reservationConcurrency(pool.Config().MaxConns),
 		OnDenial: func(observationCtx context.Context, observation quota.DenialObservation) {
 			observability.RecordQuotaDenial(observationCtx, telemetry.Labels{
 				Application: observation.ApplicationID, Environment: observation.EnvironmentID,
@@ -97,7 +115,10 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	var api apiRuntime
 	if selection.api {
 		var targetCache *dataplane.TargetCache
-		api, targetCache, err = newAPIRuntime(ctx, cfg, logger, pool, quotaStore, envelope, identityKeyCache, observability)
+		api, targetCache, err = newAPIRuntime(
+			ctx, cfg, logger, pool, databasePools.Completion, quotaStore,
+			envelope, identityKeyCache, observability,
+		)
 		if err != nil {
 			return err
 		}
@@ -125,6 +146,7 @@ func newAPIRuntime(
 	cfg config.Config,
 	logger *slog.Logger,
 	pool *pgxpool.Pool,
+	completionPool *pgxpool.Pool,
 	quotaStore *quota.Store,
 	envelope *secrets.EnvironmentMasterKey,
 	identityKeyCache identity.RemoteKeyDocumentCache,
@@ -149,6 +171,25 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct configuration store: %w", err)
 	}
+	var keyManager *session.SigningKeyManager
+	readinessChecks := server.ReadinessChecks{
+		QuotaCompletionPool: func(checkCtx context.Context) error {
+			return completionPool.Ping(checkCtx)
+		},
+		MasterKey: func(checkCtx context.Context) error {
+			return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
+		},
+		SigningKey: func(checkCtx context.Context) error {
+			if keyManager == nil {
+				return errors.New("client signing-key manager is unavailable")
+			}
+			_, checkErr := keyManager.PublicJWKS(checkCtx)
+			return checkErr
+		},
+		WorkerHeartbeat: func(checkCtx context.Context) error {
+			return worker.CheckRecentHeartbeat(checkCtx, pool, 90*time.Second)
+		},
+	}
 	targetCache := dataplane.NewTargetCache()
 	keepTargetCache := false
 	defer func() {
@@ -159,9 +200,13 @@ func newAPIRuntime(
 	adminAPI, err := adminapi.New(
 		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
 		adminapi.WithRole(string(cfg.Role)),
+		adminapi.WithSystemReadiness(func(checkCtx context.Context) bool {
+			return server.ReadinessReady(checkCtx, pool, readinessChecks)
+		}),
 		adminapi.WithConfigurationStore(configurationStore),
 		adminapi.WithCredentialSelfTests(secretStore, targetCache),
 		adminapi.WithDiagnosticDependencies(diagnostics.Dependencies{
+			CompletionPool: completionPool,
 			MasterKey: func(checkCtx context.Context) error {
 				return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
 			},
@@ -171,7 +216,7 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
 	}
-	keyManager, err := session.NewSigningKeyManager(session.SigningKeyManagerConfig{
+	keyManager, err = session.NewSigningKeyManager(session.SigningKeyManagerConfig{
 		Pool: pool, Envelope: envelope,
 	})
 	if err != nil {
@@ -267,19 +312,8 @@ func newAPIRuntime(
 
 	httpServer, err := server.New(cfg, pool, logger, server.Handlers{
 		AdminAPI: adminAPI.Handler(), ClientAPI: clientAPI.Handler(), DataPlane: dataPlane.Handler(),
-		Metrics: observability,
-		Readiness: server.ReadinessChecks{
-			MasterKey: func(checkCtx context.Context) error {
-				return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
-			},
-			SigningKey: func(checkCtx context.Context) error {
-				_, checkErr := keyManager.PublicJWKS(checkCtx)
-				return checkErr
-			},
-			WorkerHeartbeat: func(checkCtx context.Context) error {
-				return worker.CheckRecentHeartbeat(checkCtx, pool, 90*time.Second)
-			},
-		},
+		Metrics:   observability,
+		Readiness: readinessChecks,
 	})
 	if err != nil {
 		_ = targetCache.Close()

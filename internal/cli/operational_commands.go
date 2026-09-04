@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/spf13/cobra"
@@ -379,13 +380,15 @@ type selfTestCheckCLI struct {
 }
 
 type selfTestRunCLI struct {
-	ID          string             `json:"id"`
-	ScheduleID  string             `json:"schedule_id,omitempty"`
-	Kind        string             `json:"kind"`
-	State       string             `json:"state"`
-	CreatedAt   string             `json:"created_at"`
-	CompletedAt string             `json:"completed_at,omitempty"`
-	Checks      []selfTestCheckCLI `json:"checks"`
+	ID               string             `json:"id"`
+	EnvironmentID    string             `json:"environment_id"`
+	ScheduleID       string             `json:"schedule_id,omitempty"`
+	ConfigRevisionID string             `json:"config_revision_id,omitempty"`
+	Kind             string             `json:"kind"`
+	State            string             `json:"state"`
+	CreatedAt        string             `json:"created_at"`
+	CompletedAt      string             `json:"completed_at,omitempty"`
+	Checks           []selfTestCheckCLI `json:"checks"`
 }
 
 type selfTestScheduleCLI struct {
@@ -416,12 +419,40 @@ type selfTestSchedulePageCLI struct {
 }
 
 type systemStatusCLI struct {
-	ServerVersion         string `json:"server_version"`
-	ContractVersion       string `json:"contract_version"`
-	ProtocolVersions      []int  `json:"protocol_versions"`
-	Role                  string `json:"role"`
-	DatabaseSchemaVersion string `json:"database_schema_version"`
-	Ready                 bool   `json:"ready"`
+	ServerVersion         string   `json:"server_version"`
+	ContractVersion       string   `json:"contract_version"`
+	ProtocolVersions      []int    `json:"protocol_versions"`
+	Role                  string   `json:"role"`
+	DatabaseSchemaVersion string   `json:"database_schema_version"`
+	MutationReady         bool     `json:"mutation_ready"`
+	Ready                 bool     `json:"ready"`
+	ServerCapabilities    []string `json:"server_capabilities"`
+}
+
+var requiredServerCapabilitiesCLI = []string{
+	"app_attest",
+	"play_integrity",
+	"firebase_app_check",
+	"turnstile",
+	"component_delegation",
+	"cost_limits",
+	"openai_responses",
+	"openai_chat",
+	"openai_embeddings",
+	"anthropic_messages",
+	"opaque_http",
+	"configuration_import_export",
+	"admin_session_management",
+	"admin_event_stream",
+}
+
+func validSystemStatusCLI(status systemStatusCLI) bool {
+	return status.ServerVersion != "" && utf8.ValidString(status.ServerVersion) &&
+		status.ContractVersion == buildinfo.ContractVersion &&
+		slices.Equal(status.ProtocolVersions, buildinfo.SupportedProtocolVersions()) &&
+		(status.Role == "all" || status.Role == "api" || status.Role == "worker") &&
+		status.DatabaseSchemaVersion != "" && utf8.ValidString(status.DatabaseSchemaVersion) &&
+		slices.Equal(status.ServerCapabilities, requiredServerCapabilitiesCLI)
 }
 
 func addControlTokenFlag(command *cobra.Command, values *controlCommandOptions) {
@@ -1014,6 +1045,9 @@ func newStatusCommand(opts *options) *cobra.Command {
 			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/system", nil, nil, http.StatusOK, &status); err != nil {
 				return err
 			}
+			if !validSystemStatusCLI(status) {
+				return errors.New("admin API returned an incompatible system status document")
+			}
 			if opts.output == "json" {
 				return printControlJSON(opts, status)
 			}
@@ -1021,9 +1055,9 @@ func newStatusCommand(opts *options) *cobra.Command {
 			for index, version := range status.ProtocolVersions {
 				versions[index] = strconv.Itoa(version)
 			}
-			return printControlTable(opts, []string{"SERVER", "CONTRACT", "PROTOCOLS", "ROLE", "SCHEMA", "READY"}, [][]string{{
+			return printControlTable(opts, []string{"SERVER", "CONTRACT", "PROTOCOLS", "ROLE", "SCHEMA", "MUTATION READY", "TRAFFIC READY", "CAPABILITIES"}, [][]string{{
 				status.ServerVersion, status.ContractVersion, strings.Join(versions, ","), status.Role,
-				status.DatabaseSchemaVersion, boolLabel(status.Ready),
+				status.DatabaseSchemaVersion, boolLabel(status.MutationReady), boolLabel(status.Ready), strings.Join(status.ServerCapabilities, ","),
 			}})
 		},
 	}

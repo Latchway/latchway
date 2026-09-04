@@ -43,6 +43,7 @@ import {
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import {
   AnalyticsRouteSearchSchema,
   type AnalyticsRouteSearch,
@@ -67,6 +68,7 @@ import { ImmediateOperationConfirmation } from "../components/immediate-operatio
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 const environmentInputPattern = environmentPattern.source;
 const revisionPattern = "rev_[A-Za-z0-9_-]{16,128}";
+const revisionInputPattern = revisionPattern;
 const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
 const identifierInputPattern = identifierPattern.source;
 
@@ -263,7 +265,7 @@ function ProblemNotice({ problem }: { problem?: AdminProblem }) {
     <div className="control-notice control-notice--error" role="alert">
       <strong>{problem.title}</strong>
       <span>{problem.detail}</span>
-      <small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>
+      <small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>
       {problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}
     </div>
   ) : null;
@@ -367,6 +369,7 @@ const operationLabels: Record<UserOperationAction, string> = {
 
 export function UsersPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const routeSearch = UserRouteSearchSchema.parse(workspace?.search ?? {});
   const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
@@ -398,7 +401,7 @@ export function UsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  const canMutate = session.data.session?.capabilities.includes("revoke_installations") ?? false;
+  const canMutate = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("revoke_installations") ?? false);
 
   function clearSelectedUser(): void {
     setSelected(undefined); setEffective(undefined); setImpact(undefined); setCompletion("");
@@ -458,6 +461,7 @@ export function UsersPage() {
   }
 
   async function reviewOperation(user: ApplicationUser, action: UserOperationAction): Promise<void> {
+    if (!canMutate) return;
     setBusy(true); setProblem(undefined); setCompletion("");
     try {
       const result = await getUserOperationImpact(user.id, environment, action);
@@ -466,7 +470,7 @@ export function UsersPage() {
   }
 
   async function performOperation(user: ApplicationUser): Promise<void> {
-    if (!impact) return;
+    if (!canMutate || !impact) return;
     setBusy(true); setProblem(undefined); setCompletion("");
     try {
       const confirmation = { acknowledge_immediate_effect: true as const, impact_token: impact.impact_token, reason };
@@ -515,7 +519,7 @@ export function UsersPage() {
       <p>Every operation starts with a fresh application-wide impact preview. State changes between review and confirmation are rejected.</p>
       <div className="button-row"><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, selected.status === "blocked" ? "unblock" : "block")} type="button">Review {selected.status === "blocked" ? "unblock" : "block"}</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_reauthentication")} type="button">Review reauthentication</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_app_reverification")} type="button">Review app reverification</button></div>
       {impact ? <section className="request-explanation"><h4>{operationLabels[impact.action]} impact</h4><p>{impact.summary}</p><dl><div><dt>Immediate</dt><dd>{impact.immediate ? "Yes" : "No"}</dd></div><div><dt>Reversible</dt><dd>{impact.reversible ? "Yes" : "No"}</dd></div><div><dt>Current status</dt><dd>{impact.current_status}</dd></div><div><dt>Access effect</dt><dd>{impact.access_effect}</dd></div></dl><Table headers={["Active user sessions", "User refresh tokens", "Component sessions", "Component refresh tokens", "Installation families", "Client components"]} rows={[[impact.counts.active_session_grants, impact.counts.active_refresh_tokens, impact.counts.active_component_sessions, impact.counts.active_component_refresh_tokens, impact.counts.active_installation_families, impact.counts.active_client_components]]} />
-        {!impact.applicable ? <p role="status">This operation does not apply to the user's current state. Review a different action.</p> : <form onSubmit={(event) => { event.preventDefault(); void performOperation(selected); }}><label>Operator reason<textarea maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} /></label><label>Type the exact user ID to confirm<input required value={typedConfirmation} onChange={(event) => setTypedConfirmation(event.target.value)} /></label><label><input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" /> I acknowledge the immediate application-wide effect described above.</label><button className="primary-action" disabled={busy || !acknowledged || typedConfirmation !== selected.id || !reason.trim()} type="submit">Confirm {operationLabels[impact.action]}</button></form>}
+        {!impact.applicable ? <p role="status">This operation does not apply to the user's current state. Review a different action.</p> : <form onSubmit={(event) => { event.preventDefault(); void performOperation(selected); }}><label>Operator reason<textarea maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} /></label><label>Type the exact user ID to confirm<input required value={typedConfirmation} onChange={(event) => setTypedConfirmation(event.target.value)} /></label><label><input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" /> I acknowledge the immediate application-wide effect described above.</label><button className="primary-action" disabled={busy || !canMutate || !acknowledged || typedConfirmation !== selected.id || !reason.trim()} type="submit">Confirm {operationLabels[impact.action]}</button></form>}
       </section> : null}
       {completion ? <p className="control-notice" role="status">{completion}</p> : null}
     </aside> : null}
@@ -524,6 +528,7 @@ export function UsersPage() {
 
 export function InstallationsPage() {
   const session = useConsoleSession();
+  const consoleCompatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const routeSearch = InstallationRouteSearchSchema.parse(workspace?.search ?? {});
   const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
@@ -545,7 +550,7 @@ export function InstallationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonicalSearchKey, session.data?.mode]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  const canRevoke = session.data.session?.capabilities.includes("revoke_installations") ?? false;
+  const canRevoke = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("revoke_installations") ?? false);
 
   async function restore(search: InstallationRouteSearch): Promise<void> {
     if (!search.environment_id) return;
@@ -577,6 +582,7 @@ export function InstallationsPage() {
     else setSelected(installation);
   }
   async function revoke(installation: Installation, reason: string): Promise<void> {
+    if (!canRevoke) return;
     setBusy(true); setProblem(undefined);
     try {
       const result = await adminRequest(`/admin/v1/installations/${installation.id}/revoke`, InstallationSchema, { method: "POST", body: { reason } });
@@ -596,7 +602,7 @@ export function InstallationsPage() {
       <button className="link-button" onClick={() => selectInstallation(item)} type="button">{item.id}</button>, item.platform, item.status, item.trust_level, time(item.last_seen_at),
       <button className="small-action" disabled={!canRevoke || busy || item.status === "revoked"} onClick={() => setRevocationTarget(item)} type="button">Review revoke</button>
     ])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => { const next = InstallationRouteSearchSchema.parse({ ...routeSearch, cursor: page.page.next_cursor, environment_id: environment, installation_id: undefined }); if (workspace) workspace.updateSearch({ cursor: next.cursor, environment_id: next.environment_id, installation_id: undefined }, { replace: false }); else void restore(next); }} type="button">Next page</button> : null}</> : null}
-    {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this installation's trust and credential boundary." affectedScope={<><code>{revocationTarget.id}</code>, its sessions, refresh tokens, and attestation keys</>} busy={busy} confirmLabel="Revoke installation credentials" credentialRestoration="Never. Revoked sessions, refresh tokens, and attestation keys stay revoked; the client must establish a new installation identity." heading="Revoke this installation?" key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={(reason) => { if (reason) void revoke(revocationTarget, reason); }} requiresReason reversibility="No. Installation revocation is terminal." summary="The server revokes this installation together with its active sessions, refresh tokens, and attestation keys in one operation." timing="Immediately after the server accepts the revocation" /> : null}
+    {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this installation's trust and credential boundary." affectedScope={<><code>{revocationTarget.id}</code>, its sessions, refresh tokens, and attestation keys</>} busy={busy} confirmLabel="Revoke installation credentials" credentialRestoration="Never. Revoked sessions, refresh tokens, and attestation keys stay revoked; the client must establish a new installation identity." disabled={!canRevoke} heading="Revoke this installation?" key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={(reason) => { if (reason) void revoke(revocationTarget, reason); }} requiresReason reversibility="No. Installation revocation is terminal." summary="The server revokes this installation together with its active sessions, refresh tokens, and attestation keys in one operation." timing="Immediately after the server accepts the revocation" /> : null}
     {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>Installation detail</h2><button className="small-action" onClick={() => { setRevocationTarget(undefined); if (workspace) workspace.updateSearch({ installation_id: undefined }); else setSelected(undefined); }} type="button">Close</button></div><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
   </div>;
 }
@@ -1212,7 +1218,7 @@ export function RouteSimulatorPage() {
 }
 
 export function SelfTestsPage() {
-  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const routeSearch = SelfTestRouteSearchSchema.parse(workspace?.search ?? {}); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local"); const [runEnvironment, setRunEnvironment] = useState(routeSearch.environment_id ?? "");
+  const session = useConsoleSession(); const consoleCompatibility = useConsoleCompatibility(); const workspace = useOptionalWorkspace(); const routeSearch = SelfTestRouteSearchSchema.parse(workspace?.search ?? {}); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local"); const [runEnvironment, setRunEnvironment] = useState(routeSearch.environment_id ?? "");
   const [scheduleKind, setScheduleKind] = useState<"upstream" | "openrouter">("upstream"); const [scheduleEnvironment, setScheduleEnvironment] = useState(routeSearch.environment_id ?? ""); const [schedules, setSchedules] = useState<SelfTestSchedule[]>(); const [selectedSchedule, setSelectedSchedule] = useState<SelfTestSchedule>();
   const canonicalSearchKey = JSON.stringify({ environment_id: routeSearch.environment_id, schedule_id: routeSearch.schedule_id, self_test_id: routeSearch.self_test_id });
   useEffect(() => {
@@ -1229,15 +1235,16 @@ export function SelfTestsPage() {
     if (session.data?.mode === "configured" && routeSearch.environment_id) void restoreSelfTests(routeSearch);
   }, session.data?.mode === "configured" && Boolean(routeSearch.environment_id));
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  const canRun = session.data.session?.capabilities.includes("run_self_tests") ?? false;
+  const canInspectSelfTests = session.data.session?.capabilities.includes("run_self_tests") ?? false;
+  const canRun = consoleCompatibility.mutationAllowed && canInspectSelfTests;
   async function restoreSelfTests(search: SelfTestRouteSearch): Promise<void> {
     if (!search.environment_id) return;
     setBusy(true); setProblem(undefined);
     try {
       let restoredRun: SelfTestRun | undefined;
       if (search.self_test_id) {
-        const response = await adminRequest(`/admin/v1/self-tests/${search.self_test_id}`, SelfTestSchema);
-        if (response.data.id !== search.self_test_id) throw new Error("self_test_context");
+        const response = await adminRequest(queryPath(`/admin/v1/self-tests/${search.self_test_id}`, { environment_id: search.environment_id }), SelfTestSchema);
+        if (response.data.id !== search.self_test_id || response.data.environment_id !== search.environment_id) throw new Error("self_test_context");
         restoredRun = response.data;
       }
       const page = await adminRequest(queryPath("/admin/v1/self-test-schedules", { environment_id: search.environment_id }), SelfTestSchedulePageSchema);
@@ -1255,20 +1262,22 @@ export function SelfTestsPage() {
     } finally { setBusy(false); }
   }
   async function start(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
+    event.preventDefault(); if (!canRun) return; setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
     try {
       const body: Record<string, string | number> = { kind, environment_id: runEnvironment };
       if (kind !== "local") {
+        body.config_revision_id = String(form.get("config_revision_id"));
         body.upstream = String(form.get("upstream")); body.model = String(form.get("model"));
         body.max_cost_nano_usd = Number(form.get("max_cost_nano_usd"));
       }
       const created = (await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body })).data;
+      if (created.environment_id !== runEnvironment || (kind !== "local" && created.config_revision_id !== body.config_revision_id)) throw new Error("self_test_context");
       setRun(created);
       if (workspace) workspace.updateSearch({ environment_id: runEnvironment, self_test_id: created.id }, { replace: false });
     }
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
-  async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { const refreshed = (await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data; if (refreshed.id !== run.id) throw new Error("self_test_context"); setRun(refreshed); } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The refreshed self-test did not match the selected run ID.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); } }
+  async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { const refreshed = (await adminRequest(queryPath(`/admin/v1/self-tests/${run.id}`, { environment_id: run.environment_id }), SelfTestSchema)).data; if (refreshed.id !== run.id || refreshed.environment_id !== run.environment_id) throw new Error("self_test_context"); setRun(refreshed); } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The refreshed self-test did not match the selected run and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); } }
   async function loadSchedules(): Promise<void> {
     if (!environmentPattern.test(scheduleEnvironment)) return;
     const search = SelfTestRouteSearchSchema.parse({ ...routeSearch, environment_id: scheduleEnvironment, schedule_id: undefined });
@@ -1286,7 +1295,7 @@ export function SelfTestsPage() {
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
   async function createSchedule(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); setBusy(true); setProblem(undefined); const element = event.currentTarget; const form = new FormData(element); const bearerToken = String(form.get("authorization_token")); const tokenInput = element.elements.namedItem("authorization_token"); if (tokenInput instanceof HTMLInputElement) tokenInput.value = "";
+    event.preventDefault(); if (!canRun) return; setBusy(true); setProblem(undefined); const element = event.currentTarget; const form = new FormData(element); const bearerToken = String(form.get("authorization_token")); const tokenInput = element.elements.namedItem("authorization_token"); if (tokenInput instanceof HTMLInputElement) tokenInput.value = "";
     try {
       const created = (await adminRequest("/admin/v1/self-test-schedules", SelfTestScheduleSchema, { method: "POST", body: {
         daily_cost_limit_nano_usd: Number(form.get("daily_cost_limit_nano_usd")), environment_id: scheduleEnvironment,
@@ -1304,7 +1313,7 @@ export function SelfTestsPage() {
     catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The selected schedule did not match the requested schedule and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
   }
   async function disableSchedule(): Promise<void> {
-    if (!selectedSchedule) return; setBusy(true); setProblem(undefined);
+    if (!canRun || !selectedSchedule) return; setBusy(true); setProblem(undefined);
     try {
       const disabled = (await adminRequest(`/admin/v1/self-test-schedules/${selectedSchedule.id}`, SelfTestScheduleSchema, { method: "DELETE" })).data;
       if (disabled.id !== selectedSchedule.id || disabled.environment_id !== selectedSchedule.environment_id) throw new Error("self_test_context");
@@ -1312,15 +1321,15 @@ export function SelfTestsPage() {
     } catch (error) { setProblem(error instanceof Error && error.message === "self_test_context" ? { code: "invalid_response", detail: "The disabled schedule did not match the selected schedule and environment.", retryable: true, status: 0, title: "Self-test context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
   }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
-    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required value={runEnvironment} onChange={(event) => setRunEnvironment(event.target.value)} /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the complete protocol-specific request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
+    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required value={runEnvironment} onChange={(event) => setRunEnvironment(event.target.value)} /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Configuration revision ID<input name="config_revision_id" pattern={revisionInputPattern} required /></label><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server rejects a revision that is not the exact active revision before any provider dispatch.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
     {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button><button className="small-action" disabled={busy} onClick={() => { if (workspace) workspace.updateSearch({ self_test_id: undefined }); else setRun(undefined); }} type="button">Close run</button></div></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
     <section className="detail-card"><h2>Scheduled credential-aware self-tests</h2><p>Each schedule pins one active configuration revision and one durable API-token ID. Browser session values and provider secret values are never stored in the schedule.</p>
-      <div className="filter-bar"><label>Scheduled environment ID<input pattern={environmentInputPattern} required value={scheduleEnvironment} onChange={(event) => { setScheduleEnvironment(event.target.value); setSchedules(undefined); setSelectedSchedule(undefined); }} /></label><button className="secondary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} onClick={() => void loadSchedules()} type="button">Load schedules</button></div>
-      <form className="control-form" onSubmit={(event) => void createSchedule(event)}><div className="form-field-grid"><label>Scheduled test kind<select value={scheduleKind} onChange={(event) => setScheduleKind(event.target.value as "upstream" | "openrouter")}><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label><label>Durable Admin API token<input autoComplete="off" maxLength={2048} minLength={32} name="authorization_token" required type="password" /><small>Enter an active token scoped to run_self_tests. It is sent once as Authorization Bearer and cleared immediately; only its stable credential ID is bound.</small></label></div>
+      <div className="filter-bar"><label>Scheduled environment ID<input pattern={environmentInputPattern} required value={scheduleEnvironment} onChange={(event) => { setScheduleEnvironment(event.target.value); setSchedules(undefined); setSelectedSchedule(undefined); }} /></label><button className="secondary-action" disabled={!canInspectSelfTests || busy || !environmentPattern.test(scheduleEnvironment)} onClick={() => void loadSchedules()} type="button">Load schedules</button></div>
+      {canRun ? <form className="control-form" onSubmit={(event) => void createSchedule(event)}><div className="form-field-grid"><label>Scheduled test kind<select value={scheduleKind} onChange={(event) => setScheduleKind(event.target.value as "upstream" | "openrouter")}><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label><label>Durable Admin API token<input autoComplete="off" maxLength={2048} minLength={32} name="authorization_token" required type="password" /><small>Enter an active token scoped to run_self_tests. It is sent once as Authorization Bearer and cleared immediately; only its stable credential ID is bound.</small></label></div>
         <div className="form-field-grid"><label>Scheduled upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Scheduled model ID<input name="model" pattern={identifierInputPattern} required /></label></div>
         <div className="form-field-grid"><label>Per-run maximum cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /></label><label>UTC-day maximum cost (nano-USD)<input defaultValue={240_000_000} max={10_000_000_000} min={1} name="daily_cost_limit_nano_usd" required type="number" /></label></div>
         <label>Cadence (seconds)<input defaultValue={3600} max={2_592_000} min={3600} name="interval_seconds" required step={1} type="number" /><small>Allowed range: one hour through 30 days. Missed intervals coalesce to one run.</small></label><button className="primary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} type="submit">Create schedule</button>
-      </form>
+      </form> : <div className="control-notice"><strong>Read-only safe mode</strong><span>Scheduled self-test creation is unavailable until Console compatibility is restored.</span></div>}
       {schedules ? <Table headers={["Schedule", "Target", "Cadence", "Per run / UTC day", "State"]} rows={schedules.map((schedule) => [<button className="table-link" onClick={() => void selectSchedule(schedule)} type="button">{schedule.id}</button>, `${schedule.upstream} / ${schedule.model}`, `${schedule.interval_seconds.toLocaleString()} s`, `${schedule.max_cost_nano_usd.toLocaleString()} / ${schedule.daily_cost_limit_nano_usd.toLocaleString()}`, schedule.status])} /> : null}
       {selectedSchedule ? <section className="detail-card"><div className="detail-card__heading"><div><h3>Schedule detail</h3><p>{selectedSchedule.id} · {selectedSchedule.status}</p></div><div className="button-row"><button className="secondary-action" disabled={!canRun || busy || selectedSchedule.status !== "active"} onClick={() => void disableSchedule()} type="button">Disable schedule</button><button className="small-action" disabled={busy} onClick={() => { if (workspace) workspace.updateSearch({ schedule_id: undefined }); else setSelectedSchedule(undefined); }} type="button">Close schedule</button></div></div><dl><div><dt>Application / environment</dt><dd>{selectedSchedule.application_id} / {selectedSchedule.environment_id}</dd></div><div><dt>Pinned configuration</dt><dd>{selectedSchedule.config_revision_id}</dd></div><div><dt>Authorization credential</dt><dd>{selectedSchedule.authorization_credential_id}</dd></div><div><dt>Target</dt><dd>{selectedSchedule.kind}: {selectedSchedule.upstream} / {selectedSchedule.model}</dd></div><div><dt>Cost ceilings</dt><dd>{selectedSchedule.max_cost_nano_usd.toLocaleString()} per run / {selectedSchedule.daily_cost_limit_nano_usd.toLocaleString()} per UTC day</dd></div><div><dt>Cadence</dt><dd>{selectedSchedule.interval_seconds.toLocaleString()} seconds</dd></div><div><dt>Next run</dt><dd>{selectedSchedule.next_run_at ? new Date(selectedSchedule.next_run_at).toLocaleString() : "Disabled"}</dd></div><div><dt>Last run</dt><dd>{selectedSchedule.last_self_test_id ?? "—"}</dd></div></dl></section> : null}
     </section>

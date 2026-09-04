@@ -1,4 +1,4 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   AdminSessionSchema,
@@ -86,5 +86,14 @@ export const consoleSessionQueryOptions = queryOptions({
 });
 
 export function useConsoleSession() {
-  return useQuery(consoleSessionQueryOptions);
+  const queryClient = useQueryClient();
+  const query = useQuery(consoleSessionQueryOptions);
+  // QueryState's counter advances for every accepted session observation even
+  // when two updates share a timestamp or structurally equal response body.
+  // Keeping it in the compatibility key prevents a previous session
+  // generation from lending mutation authority to a replacement generation.
+  const generation = queryClient.getQueryState(
+    consoleSessionQueryOptions.queryKey
+  )?.dataUpdateCount ?? 0;
+  return { ...query, generation };
 }

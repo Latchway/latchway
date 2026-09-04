@@ -20,19 +20,35 @@ Budget the maximum rather than the steady state:
 
 ```text
 maximum application connections
-  = maximum API replicas × API pool size
-  + maximum worker replicas × worker pool size
-  + migration, backup, administration, and maintenance slots
+  = maximum API replicas × API aggregate pool ceiling
+  + maximum worker replicas × worker aggregate pool ceiling
+
+planned peak database demand
+  = maximum application connections
+  + migration, backup, administration, maintenance, and rollout slots
+
+planned peak database demand ≤ 80% of usable PostgreSQL connections
 ```
 
-Leave at least 20 percent additional database headroom. Set
-`LATCHWAY_DB_MAX_CONNECTIONS` per process before raising replica maxima. Its
-accepted range is 2 through 500; the default is 20. A connection pooler can
-reduce churn but cannot replace the end-to-end budget.
+`LATCHWAY_DB_MAX_CONNECTIONS` is the aggregate ceiling per replica. Its
+accepted range is 2 through 500 and its default is 20.
+`LATCHWAY_DB_COMPLETION_CONNECTIONS` reserves connections inside that ceiling
+for terminal quota-lifecycle work; the default five leaves 15 regular
+connections. Never add the completion value to the aggregate total. Multiply
+the aggregate ceiling by every possible replica, include non-application and
+temporary rollout demand, and keep the result at or below 80% of usable
+PostgreSQL capacity so at least 20% remains free. A connection pooler can reduce
+churn but cannot replace this end-to-end budget.
+
+The accepted aggregate minimum of two produces one regular and one completion
+connection. It remains functional but has no spare regular connection while a
+reservation transaction is blocked. Use at least three in production; the
+deployment profiles use 20.
 
 ## Scale out
 
-1. Capture the current image digest, role counts, pool size, worker heartbeat,
+1. Capture the current image digest, role counts, aggregate and completion pool
+   sizes, worker heartbeat,
    database connection use, request/stream concurrency, latency, errors, and
    reservation backlog.
 2. Start with `serve --role all`. Separate `serve --role api` and
@@ -74,7 +90,7 @@ Compare the before/after interval for:
 
 - request rate and duration;
 - active requests and streams;
-- database pool pressure and readiness;
+- aggregate database pool pressure, completion-pool saturation, and readiness;
 - upstream attempts, time to first token, and bounded failure conditions;
 - quota/concurrency denials and active/reclaimed reservations;
 - worker-job duration, scheduled self-tests, and stale job checks.

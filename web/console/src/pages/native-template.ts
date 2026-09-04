@@ -9,9 +9,11 @@ export interface NativeTemplateInput {
   bundleVersion: string;
   appleDistribution: "development" | "testflight" | "app_store" | "ad_hoc_enterprise";
   packageName: string;
+  androidVersionCode?: number;
   clientSurface?: "native" | "react_native";
   cloudProject: number;
   certificateDigest: string;
+  playIntegrityCredential?: { type: "metadata" } | { type: "service_account"; secretName: string };
   upstreamURL: string;
   physicalModel: string;
   maximumFramingTokensPerRequest: number;
@@ -45,6 +47,15 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
     throw new Error("app_attest_environment_mismatch");
   }
   const clientSurface = input.clientSurface ?? "react_native";
+  const androidVersionCode = input.androidVersionCode ?? 1;
+  if (!Number.isSafeInteger(androidVersionCode) || androidVersionCode < 1) {
+    throw new Error("play_integrity_version_invalid");
+  }
+  const playIntegrityCredential = input.playIntegrityCredential ?? { type: "metadata" as const };
+  if (playIntegrityCredential.type === "service_account" &&
+    !/^[a-z][a-z0-9_-]{0,62}$/u.test(playIntegrityCredential.secretName)) {
+    throw new Error("play_integrity_secret_invalid");
+  }
   const iosPlatform = clientSurface === "react_native" ? "react_native_ios" : "ios";
   const androidPlatform = clientSurface === "react_native" ? "react_native_android" : "android";
   const iosDefinitionID = clientSurface === "react_native" ? "react-native-ios-main" : "ios-main";
@@ -61,7 +72,8 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
   };
   const playIntegritySelection = {
     provider: "play_integrity", mode: "required", minimumTrustLevel: "device_verified",
-    playIntegrity: { packageName: input.packageName, cloudProjectNumber: input.cloudProject, certificateSha256Digests: [input.certificateDigest], minimumDeviceIntegrity: "device", requireLicensed: true, allowTestingResponses: false, minimumVersionCode: 1, maximumVersionCode: 0, credentialSource: "metadata" }
+    ...(playIntegrityCredential.type === "service_account" ? { secretRef: `secret/${playIntegrityCredential.secretName}` } : {}),
+    playIntegrity: { packageName: input.packageName, cloudProjectNumber: input.cloudProject, certificateSha256Digests: [input.certificateDigest], minimumDeviceIntegrity: "device", requireLicensed: input.environmentKind === "production", allowTestingResponses: input.environmentKind !== "production", minimumVersionCode: androidVersionCode, maximumVersionCode: androidVersionCode, credentialSource: playIntegrityCredential.type }
   };
   return JSON.stringify({
     apiVersion: "latchway.dev/v1alpha1",

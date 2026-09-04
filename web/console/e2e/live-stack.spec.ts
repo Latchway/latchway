@@ -31,7 +31,7 @@ test.describe("real first-run control plane", () => {
     ).toBeVisible();
     await page.getByRole("link", { name: /Setup wizard/ }).click();
     await expect(
-      page.getByRole("heading", { name: "Configure React Native, iOS, and Android end to end." })
+      page.getByRole("heading", { name: "Configure your first client platform end to end." })
     ).toBeVisible();
 
     await page.getByLabel("Organization slug").fill("latchway-live");

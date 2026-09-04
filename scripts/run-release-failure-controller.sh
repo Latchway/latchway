@@ -102,6 +102,15 @@ role_label="dev.latchway.failure.role"
 scenario_timeout=300
 overall_timeout=1800
 drain_timeout=45
+gateway_db_pool_max_connections=16
+gateway_db_regular_pool_max_connections=12
+gateway_db_completion_pool_max_connections=4
+if ((gateway_db_regular_pool_max_connections < 1 ||
+     gateway_db_completion_pool_max_connections < 1 ||
+     gateway_db_regular_pool_max_connections != gateway_db_pool_max_connections - gateway_db_completion_pool_max_connections)); then
+  echo "gateway database pool partition is incoherent" >&2
+  exit 2
+fi
 network_created=false
 expected_network_id=
 tools_image_id=
@@ -126,6 +135,18 @@ record_created_container() {
   observed_id=$(timeout --signal=TERM --kill-after=5s 30s docker inspect --format '{{.Id}}' "$container")
   [[ "$observed_id" == "$reported_id" ]] || { echo "created failure container identity changed" >&2; exit 1; }
   expected_container_ids["$container"]=$reported_id
+}
+
+verify_gateway_pool_environment() {
+  local container=$1
+  local observed_total observed_completion
+  observed_total=$(timeout --signal=TERM --kill-after=5s 30s docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$container")
+  observed_completion=$(timeout --signal=TERM --kill-after=5s 30s docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$container")
+  if [[ "$observed_total" != "LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections" ||
+        "$observed_completion" != "LATCHWAY_DB_COMPLETION_CONNECTIONS=$gateway_db_completion_pool_max_connections" ]]; then
+    echo "failure gateway pool environment does not match the exact aggregate/completion partition" >&2
+    exit 1
+  fi
 }
 
 cleanup() {
@@ -222,7 +243,8 @@ gateway_environment="$temporary_root/gateway.env"
   printf 'LATCHWAY_PUBLIC_ORIGIN=http://127.0.0.1:18080\n'
   printf 'LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=%s\n' "$bootstrap_token"
   printf 'LATCHWAY_LOG_LEVEL=info\n'
-  printf 'LATCHWAY_DB_MAX_CONNECTIONS=16\n'
+  printf 'LATCHWAY_DB_MAX_CONNECTIONS=%s\n' "$gateway_db_pool_max_connections"
+  printf 'LATCHWAY_DB_COMPLETION_CONNECTIONS=%s\n' "$gateway_db_completion_pool_max_connections"
   printf 'LATCHWAY_SHUTDOWN_TIMEOUT=%ss\n' "$drain_timeout"
 } > "$gateway_environment"
 
@@ -261,6 +283,7 @@ created_container_id=$(timeout --signal=TERM --kill-after=5s 60s docker run --de
   --cpus 1 --memory 1g --memory-swap 1g --pids-limit 2048 --read-only --tmpfs /tmp:size=32m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true "$candidate_image_id")
 record_created_container "${apis[0]}" "$created_container_id"
+verify_gateway_pool_environment "${apis[0]}"
 
 timeout --signal=TERM --kill-after=5s 120s docker run --rm --network "$network" --read-only --tmpfs /tmp:size=8m,mode=1777 \
   --cpus 1 --memory 256m --memory-swap 256m --pids-limit 512 \
@@ -274,6 +297,7 @@ created_container_id=$(timeout --signal=TERM --kill-after=5s 60s docker run --de
   --cpus 1 --memory 1g --memory-swap 1g --pids-limit 2048 --read-only --tmpfs /tmp:size=32m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true "$candidate_image_id")
 record_created_container "${apis[1]}" "$created_container_id"
+verify_gateway_pool_environment "${apis[1]}"
 
 for index in 0 1; do
   created_container_id=$(timeout --signal=TERM --kill-after=5s 60s docker run --detach \
@@ -283,6 +307,7 @@ for index in 0 1; do
     --cpus 1 --memory 1g --memory-swap 1g --pids-limit 2048 --read-only --tmpfs /tmp:size=32m,mode=1777 \
     --cap-drop ALL --security-opt no-new-privileges:true "$candidate_image_id")
   record_created_container "${workers[$index]}" "$created_container_id"
+  verify_gateway_pool_environment "${workers[$index]}"
 done
 
 for api_ip in "${api_ips[@]}"; do
@@ -327,7 +352,9 @@ timeout --signal=TERM --kill-after=10s 240s docker run --rm \
     -postgres-memory-bytes 2147483648 \
     -postgres-memory-swap-bytes 2147483648 \
     -postgres-max-connections 100 \
-    -gateway-db-pool-max-connections 16
+    -gateway-db-pool-max-connections "$gateway_db_pool_max_connections" \
+    -gateway-db-regular-pool-max-connections "$gateway_db_regular_pool_max_connections" \
+    -gateway-db-completion-pool-max-connections "$gateway_db_completion_pool_max_connections"
 unset LATCHWAY_LOAD_BOOTSTRAP_TOKEN LATCHWAY_LOAD_ADMIN_PASSWORD
 
 created_container_id=$(timeout --signal=TERM --kill-after=5s 60s docker run --detach \

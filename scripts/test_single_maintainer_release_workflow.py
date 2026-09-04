@@ -61,6 +61,7 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
                 "semantic-handoff",
                 "supply-chain",
                 "attest-handoff",
+                "immutable-release-settings",
                 "stage-release",
                 "promote-oci",
                 "publish-release",
@@ -109,6 +110,58 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             )
         for name in ("source-gate", "plan", "semantic-handoff", "supply-chain"):
             self.assertNotIn("write", self.jobs[name]["permissions"].values())
+        administration = self.jobs["immutable-release-settings"]
+        self.assertEqual(
+            administration["environment"],
+            "single-maintainer-v1-administration",
+        )
+        self.assertEqual(administration["permissions"], {})
+        first = administration["steps"][0]
+        self.assertEqual(
+            first["env"]["OBSERVED_POLICY_ID"],
+            "${{ vars.LATCHWAY_RELEASE_PROFILE_POLICY_ID }}",
+        )
+        self.assertIn(
+            "latchway-release-profile-v1:latchway:single_maintainer_v1:administration",
+            first["run"],
+        )
+        self.assertEqual(
+            administration["steps"][1]["env"][
+                "LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+            ],
+            "${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}",
+        )
+        settings_script = administration["steps"][1]["run"]
+        for repository in (
+            "Latchway/latchway",
+            "Latchway/latchway-js",
+            "Latchway/latchway-ios-sdk",
+            "Latchway/latchway-android",
+            "Latchway/latchway-react-native-sdk",
+        ):
+            self.assertEqual(
+                len(
+                    re.findall(
+                        rf"^\s*{re.escape(repository)}(?: \\|; do)$",
+                        settings_script,
+                        flags=re.MULTILINE,
+                    )
+                ),
+                1,
+            )
+        self.assertIn('(( major > 2 || (major == 2 && minor >= 97) ))', settings_script)
+        self.assertIn(
+            '(keys | sort) == ["enabled","enforced_by_owner"]',
+            settings_script,
+        )
+        self.assertIn('.enabled == true', settings_script)
+        self.assertIn('(.enforced_by_owner | type) == "boolean"', settings_script)
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in administration["steps"]
+            )
+        )
 
     def test_source_free_handoff_is_stable_attested_and_reverified(self) -> None:
         artifact_name = "latchway-single-maintainer-v1-handoff-${{ github.run_id }}"
@@ -130,7 +183,8 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             action["with"]["subject-path"], "${{ runner.temp }}/handoff/*"
         )
         self.assertEqual(
-            set(self.jobs["stage-release"]["needs"]), {"plan", "attest-handoff"}
+            set(self.jobs["stage-release"]["needs"]),
+            {"plan", "attest-handoff", "immutable-release-settings"},
         )
         for name in ("stage-release", "promote-oci", "publish-release"):
             script = "\n".join(
@@ -212,6 +266,7 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
                 "semantic-handoff",
                 "supply-chain",
                 "attest-handoff",
+                "immutable-release-settings",
             )
             for step in self.jobs[name]["steps"]
         )
@@ -223,6 +278,7 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             "Verify exact multi-architecture digest signature provenance and SBOMs",
             "Retain only the verified source-free mutation handoff",
             "Attest the exact source-free core publication handoff",
+            "Preflight immutable-release settings for the complete product",
         ):
             self.assertIn(value, all_preflight_names)
         stage_names = [step.get("name", "") for step in self.jobs["stage-release"]["steps"]]
@@ -260,8 +316,22 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             for step in self.jobs["publish-release"]["steps"]
             if step.get("name") == "Publish and verify the profile-labeled GitHub release"
         )
-        self.assertIn("printf '{\"draft\":false}\\n'", publisher)
+        self.assertIn("jq --null-input '{draft:false}'", publisher)
         self.assertIn(".draft == false", publisher)
+        self.assertIn(".immutable == true", publisher)
+        self.assertIn("If-None-Match:", publisher)
+        self.assertIn("'^HTTP/[0-9.]+ 304( |$)'", publisher)
+        self.assertIn('gh release verify-asset "$tag"', publisher)
+        self.assertIn('gh release verify "$tag"', publisher)
+        publish_preflight = next(
+            step["run"]
+            for step in self.jobs["publish-release"]["steps"]
+            if step.get("name", "").startswith("Revalidate the exact handoff")
+        )
+        self.assertIn(
+            '(( major > 2 || (major == 2 && minor >= 97) ))',
+            publish_preflight,
+        )
 
     def test_workflow_is_resumable_and_never_destroys_coordinates(self) -> None:
         for forbidden in (
@@ -280,6 +350,16 @@ class SingleMaintainerReleaseWorkflowTests(unittest.TestCase):
             'for tag in 1.0.0 1.0 1 latest',
         ):
             self.assertIn(value, self.text)
+
+    def test_every_release_cli_call_has_an_explicit_repository(self) -> None:
+        commands = re.findall(
+            r"(?m)^\s*gh release[^\n]*",
+            self.text.replace("\\\n", " "),
+        )
+        self.assertTrue(commands)
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn('--repo "$GITHUB_REPOSITORY"', command)
 
 
 if __name__ == "__main__":

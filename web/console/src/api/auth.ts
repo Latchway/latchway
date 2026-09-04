@@ -53,6 +53,7 @@ export interface AdminProblem {
   code: string;
   detail: string;
   documentationURL?: string;
+  operationId?: string;
   requestId?: string;
   retryable: boolean;
   status: number;
@@ -64,6 +65,7 @@ const ProblemSchema = z
     code: z.string().regex(/^[a-z][a-z0-9_]{0,127}$/),
     detail: z.string().min(1).max(2048),
     documentation_url: z.url(),
+    operation_id: z.string().regex(/^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/).optional(),
     request_id: z.string().min(8).max(128),
     retryable: z.boolean(),
     status: z.number().int().min(400).max(599),
@@ -77,6 +79,20 @@ const ProblemSchema = z
       context.addIssue({
         code: "custom",
         message: "Problem documentation URLs must match the canonical error code."
+      });
+    }
+    if (problem.code === "operation_indeterminate" && !problem.operation_id) {
+      context.addIssue({
+        code: "custom",
+        message: "Indeterminate operations must include their canonical correlation ID.",
+        path: ["operation_id"]
+      });
+    }
+    if (problem.code !== "operation_indeterminate" && problem.operation_id) {
+      context.addIssue({
+        code: "custom",
+        message: "Only indeterminate operations may include a correlation ID.",
+        path: ["operation_id"]
       });
     }
   });
@@ -242,6 +258,7 @@ export function responseProblem(response: Response, payload: unknown): AdminProb
     code: safeText(parsed.data.code, 128),
     detail: safeText(parsed.data.detail, 2048),
     documentationURL: parsed.data.documentation_url,
+    ...(parsed.data.operation_id ? { operationId: parsed.data.operation_id } : {}),
     requestId: safeText(parsed.data.request_id, 128),
     retryable: parsed.data.retryable,
     status: response.status,

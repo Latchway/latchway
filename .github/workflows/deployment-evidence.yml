@@ -816,10 +816,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$GCP_PROJECT" =~ ^[a-z][a-z0-9:-]{4,62}$ ]]
-          [[ "$GCP_REGION" =~ ^[a-z0-9-]{2,32}$ ]]
-          [[ "$GCP_SERVICE" =~ ^[a-z][a-z0-9-]{0,48}$ ]]
-          [[ "$GCP_MIGRATION_JOB" =~ ^[a-z][a-z0-9-]{0,62}$ ]]
+          test "$GCP_PROJECT" = "latchway"
+          test "$GCP_REGION" = "asia-southeast1"
+          test "$GCP_SERVICE" = "latchway"
+          test "$GCP_MIGRATION_JOB" = "latchway-migrate"
           capture=/tmp/latchway-deployment-capture
           gcloud version --format=json > /tmp/gcloud-version.json
           gcloud projects describe "$GCP_PROJECT" --format=json > /tmp/gcp-identity.json
@@ -827,6 +827,210 @@ jobs:
           before_revision=$(jq -er '.status.latestReadyRevisionName' /tmp/cloud-run-before.json)
           gcloud run revisions describe "$before_revision" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-before-revision.json
           gcloud run jobs describe "$GCP_MIGRATION_JOB" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-migration-job.json
+          # Read-only preflight: no job execution or service mutation is allowed above this point.
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          root = Path(os.environ.get("CLOUD_RUN_PREFLIGHT_ROOT", "/tmp"))
+          load = lambda name: json.loads((root / name).read_text())
+          project, region = "latchway", "asia-southeast1"
+          runtime_account = "latchway-runtime@latchway.iam.gserviceaccount.com"
+          migrator_account = "latchway-migrator@latchway.iam.gserviceaccount.com"
+          cloud_sql_connection = "latchway:asia-southeast1:latchway-postgres"
+          cloud_sql_annotations = {
+              "run.googleapis.com/cloudsql-instances": cloud_sql_connection,
+          }
+          image, endpoint = os.environ["RELEASE_IMAGE"], os.environ["ENDPOINT"]
+          service = load("cloud-run-before.json")
+          revision = load("cloud-run-before-revision.json")
+          job = load("cloud-run-migration-job.json")
+          identity = load("gcp-identity.json")
+          if (identity.get("projectId") != project or identity.get("lifecycleState") != "ACTIVE" or
+                  not isinstance(identity.get("projectNumber"), str) or re.fullmatch(r"[1-9][0-9]*", identity["projectNumber"]) is None):
+              raise ValueError("Cloud Run preflight project identity is invalid")
+          def location(document):
+              labels = document.get("metadata", {}).get("labels", {}) if isinstance(document, dict) else {}
+              if labels.get("cloud.googleapis.com/location") != region:
+                  raise ValueError("Cloud Run preflight resource location is invalid")
+          def ready(document):
+              conditions = document.get("status", {}).get("conditions", []) if isinstance(document, dict) else []
+              return any(isinstance(item, dict) and item.get("type") == "Ready" and str(item.get("status")).lower() == "true" for item in conditions)
+          def probe(value, path, expected):
+              if not isinstance(value, dict) or any(key in value for key in ("tcpSocket", "grpc")):
+                  raise ValueError("Cloud Run preflight probe is invalid")
+              http_get = value.get("httpGet")
+              if (set(value) != {*expected, "httpGet"} or not isinstance(http_get, dict) or
+                      set(http_get) != {"path", "port"} or http_get.get("path") != path or
+                      type(http_get.get("port")) is not int or http_get["port"] != 8080 or
+                      any(type(value.get(key)) is not int or value[key] != number for key, number in expected.items())):
+                  raise ValueError("Cloud Run preflight probe is invalid")
+              return {**expected, "httpGet": {"path": path, "port": 8080}}
+          runtime_names = (
+              "LATCHWAY_ROLE", "LATCHWAY_LOG_LEVEL", "LATCHWAY_MIGRATE_ON_START",
+              "LATCHWAY_PUBLIC_ORIGIN", "LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY",
+              "LATCHWAY_SHUTDOWN_TIMEOUT", "LATCHWAY_DB_MAX_CONNECTIONS",
+              "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+          )
+          def environment(value):
+              if (not isinstance(value, list) or len(value) != len(runtime_names) or
+                      any(not isinstance(item, dict) for item in value) or
+                      {item.get("name") for item in value} != set(runtime_names)):
+                  raise ValueError("Cloud Run preflight runtime environment is not closed")
+              by_name = {item["name"]: item for item in value}
+              if len(by_name) != len(value):
+                  raise ValueError("Cloud Run preflight runtime environment contains duplicates")
+              expected_plain = {
+                  "LATCHWAY_ROLE": "all", "LATCHWAY_LOG_LEVEL": "info",
+                  "LATCHWAY_MIGRATE_ON_START": "false", "LATCHWAY_PUBLIC_ORIGIN": endpoint,
+                  "LATCHWAY_SHUTDOWN_TIMEOUT": "8s", "LATCHWAY_DB_MAX_CONNECTIONS": "20",
+                  "LATCHWAY_DB_COMPLETION_CONNECTIONS": "5",
+              }
+              for name, expected in expected_plain.items():
+                  if set(by_name[name]) != {"name", "value"} or by_name[name].get("value") != expected:
+                      raise ValueError("Cloud Run preflight runtime value is invalid")
+              secret_resources = {
+                  "LATCHWAY_DATABASE_URL": "latchway-database-url",
+                  "LATCHWAY_MASTER_KEY": "latchway-master-key",
+              }
+              for name, expected in secret_resources.items():
+                  item = by_name[name]
+                  reference = item.get("valueFrom", {}).get("secretKeyRef", {})
+                  if (set(item) != {"name", "valueFrom"} or not isinstance(reference, dict) or
+                          set(reference) != {"name", "key"} or reference.get("name") != expected or
+                          not isinstance(reference.get("key"), str) or re.fullmatch(r"[1-9][0-9]*", reference["key"]) is None):
+                      raise ValueError("Cloud Run preflight runtime secret is not pinned")
+              return by_name
+          annotations = {
+              "autoscaling.knative.dev/minScale": "1", "autoscaling.knative.dev/maxScale": "3",
+              "run.googleapis.com/cpu-throttling": "false", "run.googleapis.com/startup-cpu-boost": "true",
+              "run.googleapis.com/execution-environment": "gen2",
+              **cloud_sql_annotations,
+          }
+          harmless_run_annotations = {
+              "run.googleapis.com/client-name", "run.googleapis.com/client-version",
+              "run.googleapis.com/operation-id", "run.googleapis.com/creator",
+              "run.googleapis.com/lastModifier",
+          }
+          def direct_annotations(value, required, optional=None):
+              optional = optional or {}
+              if not isinstance(value, dict) or any(value.get(key) != expected for key, expected in required.items()):
+                  raise ValueError("Cloud Run preflight annotations are invalid")
+              if any(key in value and value[key] != expected for key, expected in optional.items()):
+                  raise ValueError("Cloud Run preflight optional annotation is invalid")
+              if ("run.googleapis.com/execution-environment" in value and
+                      value["run.googleapis.com/execution-environment"] != "gen2"):
+                  raise ValueError("Cloud Run preflight execution environment is invalid")
+              runtime_keys = {
+                  key for key in value
+                  if key.startswith("run.googleapis.com/") or key.startswith("autoscaling.knative.dev/")
+              }
+              if runtime_keys - set(required) - set(optional) - harmless_run_annotations - {"run.googleapis.com/execution-environment"}:
+                  raise ValueError("Cloud Run preflight has an unapproved runtime annotation")
+          def runtime_profile(spec, metadata):
+              if not isinstance(spec, dict) or not isinstance(metadata, dict):
+                  raise ValueError("Cloud Run preflight runtime profile is missing")
+              observed_annotations = metadata.get("annotations")
+              containers = spec.get("containers")
+              direct_annotations(observed_annotations, annotations)
+              if (set(spec) != {"serviceAccountName", "containerConcurrency", "timeoutSeconds", "containers"} or
+                      spec.get("serviceAccountName") != runtime_account or
+                      type(spec.get("containerConcurrency")) is not int or spec["containerConcurrency"] != 100 or
+                      type(spec.get("timeoutSeconds")) is not int or spec["timeoutSeconds"] != 3600 or
+                      not isinstance(containers, list) or len(containers) != 1 or not isinstance(containers[0], dict)):
+                  raise ValueError("Cloud Run preflight runtime profile is invalid")
+              container = containers[0]
+              if (set(container) != {"name", "image", "command", "args", "ports", "resources", "env", "startupProbe", "livenessProbe"} or
+                      container.get("name") != "latchway" or container.get("image") != image or
+                      container.get("command") != ["/latchway"] or
+                      container.get("args") != ["serve", "--role", "all"] or
+                      container.get("ports") != [{"name": "http1", "containerPort": 8080}] or
+                      container.get("resources") != {"limits": {"cpu": "2", "memory": "2Gi"}}):
+                  raise ValueError("Cloud Run preflight runtime container is invalid")
+              env = environment(container.get("env"))
+              return {
+                  "database_key": env["LATCHWAY_DATABASE_URL"]["valueFrom"]["secretKeyRef"]["key"],
+                  "startup": probe(container.get("startupProbe"), "/readyz", {
+                      "initialDelaySeconds": 1, "timeoutSeconds": 3, "periodSeconds": 3, "failureThreshold": 40,
+                  }),
+                  "liveness": probe(container.get("livenessProbe"), "/healthz", {
+                      "timeoutSeconds": 3, "periodSeconds": 15, "failureThreshold": 3,
+                  }),
+              }
+          location(service)
+          location(revision)
+          service_annotations = service.get("metadata", {}).get("annotations")
+          direct_annotations(
+              service_annotations,
+              {
+                  "run.googleapis.com/ingress": "all",
+                  "run.googleapis.com/invoker-iam-disabled": "true",
+              },
+              {"run.googleapis.com/ingress-status": "all"},
+          )
+          if service.get("metadata", {}).get("name") != "latchway" or not ready(service) or not ready(revision):
+              raise ValueError("Cloud Run preflight service is not ready")
+          status = service.get("status", {})
+          revision_name = revision.get("metadata", {}).get("name")
+          traffic = status.get("traffic")
+          if (status.get("url") != endpoint or status.get("latestReadyRevisionName") != revision_name or
+                  not isinstance(traffic, list) or len(traffic) != 1 or not isinstance(traffic[0], dict) or
+                  traffic[0].get("revisionName", traffic[0].get("revision", "")).rsplit("/", 1)[-1] != revision_name or
+                  type(traffic[0].get("percent")) is not int or traffic[0]["percent"] != 100):
+              raise ValueError("Cloud Run preflight traffic or endpoint binding is invalid")
+          desired = service.get("spec", {}).get("template", {})
+          desired_profile = runtime_profile(desired.get("spec"), desired.get("metadata"))
+          revision_profile = runtime_profile(revision.get("spec"), revision.get("metadata"))
+          if desired_profile != revision_profile:
+              raise ValueError("Cloud Run preflight desired and ready profiles differ")
+          location(job)
+          direct_annotations(job.get("metadata", {}).get("annotations", {}), {})
+          job_root = job.get("spec")
+          if not isinstance(job_root, dict) or set(job_root) != {"template"}:
+              raise ValueError("Cloud Run preflight migration job root is invalid")
+          job_template = job_root.get("template")
+          if (not isinstance(job_template, dict) or "spec" not in job_template or
+                  set(job_template) - {"metadata", "spec"}):
+              raise ValueError("Cloud Run preflight migration job template is invalid")
+          direct_annotations(
+              job_template.get("metadata", {}).get("annotations", {}),
+              cloud_sql_annotations,
+          )
+          job_outer = job_template.get("spec", {})
+          task_template = job_outer.get("template")
+          if (not isinstance(task_template, dict) or "spec" not in task_template or
+                  set(task_template) - {"metadata", "spec"}):
+              raise ValueError("Cloud Run preflight migration task template is invalid")
+          direct_annotations(task_template.get("metadata", {}).get("annotations", {}), {})
+          task = task_template.get("spec", {})
+          containers = task.get("containers")
+          timeout = task.get("timeoutSeconds")
+          if isinstance(timeout, str) and timeout.endswith("s"):
+              timeout = timeout[:-1]
+          if (job.get("metadata", {}).get("name") != "latchway-migrate" or
+                  set(job_outer) != {"taskCount", "parallelism", "template"} or
+                  type(job_outer.get("taskCount")) is not int or job_outer["taskCount"] != 1 or
+                  type(job_outer.get("parallelism")) is not int or job_outer["parallelism"] != 1 or
+                  set(task) != {"serviceAccountName", "timeoutSeconds", "maxRetries", "containers"} or
+                  task.get("serviceAccountName") != migrator_account or str(timeout) != "900" or
+                  type(task.get("maxRetries")) is not int or task["maxRetries"] != 0 or
+                  not isinstance(containers, list) or len(containers) != 1 or not isinstance(containers[0], dict)):
+              raise ValueError("Cloud Run preflight migration job profile is invalid")
+          container = containers[0]
+          job_env = container.get("env")
+          if (set(container) != {"name", "image", "command", "args", "resources", "env"} or
+                  container.get("name") != "latchway-migrate" or container.get("image") != image or
+                  container.get("command") != ["/latchway"] or
+                  container.get("args") != ["migrate", "up"] or not isinstance(job_env, list) or
+                  container.get("resources") != {"limits": {"cpu": "1", "memory": "512Mi"}} or
+                  len(job_env) != 1 or not isinstance(job_env[0], dict)):
+              raise ValueError("Cloud Run preflight migration job container is invalid")
+          item = job_env[0]
+          reference = item.get("valueFrom", {}).get("secretKeyRef", {})
+          if (set(item) != {"name", "valueFrom"} or item.get("name") != "LATCHWAY_DATABASE_URL" or
+                  not isinstance(reference, dict) or set(reference) != {"name", "key"} or
+                  reference.get("name") != "latchway-database-url" or reference.get("key") != desired_profile["database_key"]):
+              raise ValueError("Cloud Run preflight migration database binding is invalid")
+          PY
           migration_log_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           gcloud run jobs execute "$GCP_MIGRATION_JOB" --project "$GCP_PROJECT" --region "$GCP_REGION" --args=--output,json,migrate,status --wait --format=json > /tmp/cloud-run-migration-start.json
           execution_name=$(jq -er '.metadata.name // .name' /tmp/cloud-run-migration-start.json)
@@ -891,6 +1095,10 @@ jobs:
           gcloud secrets list --project "$GCP_PROJECT" --format=json > /tmp/gcp-secrets.json
           shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           marker="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_rollout_marker() {
+            gcloud run services update "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --remove-env-vars LATCHWAY_EVIDENCE_RUN_ID --quiet >/tmp/cloud-run-marker-cleanup.json
+          }
+          trap cleanup_rollout_marker EXIT
           gcloud run services update "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --update-env-vars "LATCHWAY_EVIDENCE_RUN_ID=$marker" --format=json > /tmp/cloud-run-probe.json
           gcloud run services update "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --remove-env-vars LATCHWAY_EVIDENCE_RUN_ID --format=json > /tmp/cloud-run-after.json
           after_revision=$(jq -er '.status.latestReadyRevisionName' /tmp/cloud-run-after.json)
@@ -899,7 +1107,7 @@ jobs:
           resource_id=$(jq -er '.metadata.selfLink | select(type == "string" and length > 0)' /tmp/cloud-run-after.json)
           export CAPTURE_DIR="$capture" RESOURCE_ID="$resource_id" SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished"
           python3 - <<'PY'
-          import json, os
+          import json, os, re
           from pathlib import Path
           out = Path(os.environ["CAPTURE_DIR"])
           load = lambda p: json.loads(Path(p).read_text())
@@ -913,62 +1121,336 @@ jobs:
           identity = load("/tmp/gcp-identity.json")
           gcloud_version = load("/tmp/gcloud-version.json")
           secrets = load("/tmp/gcp-secrets.json")
-          container = service["spec"]["template"]["spec"]["containers"][0]
-          env = {item["name"]: item for item in container.get("env", [])}
-          refs = []
-          for name in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"):
-              ref = env[name].get("valueFrom", {}).get("secretKeyRef", {})
-              refs.append({"name": name, "reference": ref.get("name", "")})
+          if (identity.get("projectId") != "latchway" or identity.get("lifecycleState") != "ACTIVE" or
+                  not isinstance(identity.get("projectNumber"), str) or re.fullmatch(r"[1-9][0-9]*", identity["projectNumber"]) is None or
+                  not isinstance(gcloud_version, dict) or not gcloud_version):
+              raise ValueError("Google Cloud project identity is not the fixed release project")
+          project, region = "latchway", "asia-southeast1"
+          service_name, job_name = "latchway", "latchway-migrate"
+          runtime_account = "latchway-runtime@latchway.iam.gserviceaccount.com"
+          migrator_account = "latchway-migrator@latchway.iam.gserviceaccount.com"
+          cloud_sql_connection = "latchway:asia-southeast1:latchway-postgres"
+          cloud_sql_annotations = {
+              "run.googleapis.com/cloudsql-instances": cloud_sql_connection,
+          }
+          secret_names = ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY")
+          secret_resources = {
+              "LATCHWAY_DATABASE_URL": "latchway-database-url",
+              "LATCHWAY_MASTER_KEY": "latchway-master-key",
+          }
+          runtime_names = (
+              "LATCHWAY_ROLE", "LATCHWAY_LOG_LEVEL", "LATCHWAY_MIGRATE_ON_START",
+              "LATCHWAY_PUBLIC_ORIGIN", *secret_names, "LATCHWAY_SHUTDOWN_TIMEOUT",
+              "LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS",
+          )
+          runtime_annotations = {
+              "autoscaling.knative.dev/minScale": "1",
+              "autoscaling.knative.dev/maxScale": "3",
+              "run.googleapis.com/cpu-throttling": "false",
+              "run.googleapis.com/startup-cpu-boost": "true",
+              "run.googleapis.com/execution-environment": "gen2",
+              **cloud_sql_annotations,
+          }
+          harmless_run_annotations = {
+              "run.googleapis.com/client-name", "run.googleapis.com/client-version",
+              "run.googleapis.com/operation-id", "run.googleapis.com/creator",
+              "run.googleapis.com/lastModifier",
+          }
+          def provider_location(document):
+              metadata = document.get("metadata") if isinstance(document, dict) else None
+              labels = metadata.get("labels") if isinstance(metadata, dict) else None
+              location = labels.get("cloud.googleapis.com/location") if isinstance(labels, dict) else None
+              if location != region:
+                  raise ValueError("Cloud Run provider location is not the release region")
+              return location
+          def provider_metadata(document, collection, expected_name=None):
+              metadata = document.get("metadata") if isinstance(document, dict) else None
+              if not isinstance(metadata, dict):
+                  raise ValueError("Cloud Run provider metadata is missing")
+              name = metadata.get("name")
+              if (not isinstance(name, str) or not name or
+                      expected_name is not None and name != expected_name or
+                      not isinstance(metadata.get("uid"), str) or not metadata["uid"] or
+                      not isinstance(metadata.get("selfLink"), str) or
+                      not metadata["selfLink"].endswith(f"/namespaces/{project}/{collection}/{name}")):
+                  raise ValueError("Cloud Run provider identity is invalid")
+              return {
+                  "name": name, "selfLink": metadata["selfLink"], "uid": metadata["uid"],
+                  "location": provider_location(document),
+              }
+          def provider_annotations(value, required, optional=None):
+              optional = optional or {}
+              if not isinstance(value, dict) or any(value.get(key) != expected for key, expected in required.items()):
+                  raise ValueError("Cloud Run annotations are not the release profile")
+              if any(key in value and value[key] != expected for key, expected in optional.items()):
+                  raise ValueError("Cloud Run optional annotation is not the release profile")
+              if ("run.googleapis.com/execution-environment" in value and
+                      value["run.googleapis.com/execution-environment"] != "gen2"):
+                  raise ValueError("Cloud Run execution environment is not gen2")
+              runtime_keys = {
+                  key for key in value
+                  if key.startswith("run.googleapis.com/") or key.startswith("autoscaling.knative.dev/")
+              }
+              if runtime_keys - set(required) - set(optional) - harmless_run_annotations - {"run.googleapis.com/execution-environment"}:
+                  raise ValueError("Cloud Run contains an unapproved runtime annotation")
+              return dict(required)
+          def provider_probe(value, path, expected):
+              if not isinstance(value, dict) or any(key in value for key in ("tcpSocket", "grpc")):
+                  raise ValueError("Cloud Run probe is missing or ambiguous")
+              http_get = value.get("httpGet")
+              if (set(value) != {*expected, "httpGet"} or not isinstance(http_get, dict) or
+                      set(http_get) != {"path", "port"} or
+                      http_get.get("path") != path or type(http_get.get("port")) is not int or
+                      http_get["port"] != 8080 or any(type(value.get(key)) is not int or value[key] != number for key, number in expected.items())):
+                  raise ValueError("Cloud Run probe is not the release profile")
+              return {**expected, "httpGet": {"path": path, "port": 8080}}
+          def provider_runtime_environment(environment):
+              if (not isinstance(environment, list) or len(environment) != len(runtime_names) or
+                      any(not isinstance(item, dict) for item in environment) or
+                      {item.get("name") for item in environment} != set(runtime_names)):
+                  raise ValueError("Cloud Run runtime environment is not the closed release profile")
+              by_name = {item["name"]: item for item in environment}
+              if len(by_name) != len(environment):
+                  raise ValueError("Cloud Run runtime environment contains duplicates")
+              expected_plain = {
+                  "LATCHWAY_ROLE": "all", "LATCHWAY_LOG_LEVEL": "info",
+                  "LATCHWAY_MIGRATE_ON_START": "false", "LATCHWAY_PUBLIC_ORIGIN": os.environ["ENDPOINT"],
+                  "LATCHWAY_SHUTDOWN_TIMEOUT": "8s", "LATCHWAY_DB_MAX_CONNECTIONS": "20",
+                  "LATCHWAY_DB_COMPLETION_CONNECTIONS": "5",
+              }
+              result = []
+              for name in runtime_names:
+                  item = by_name[name]
+                  if name in secret_names:
+                      ref = item.get("valueFrom", {}).get("secretKeyRef", {})
+                      if (set(item) != {"name", "valueFrom"} or not isinstance(ref, dict) or
+                              set(ref) != {"name", "key"} or ref.get("name") != secret_resources[name] or
+                              not isinstance(ref.get("key"), str) or re.fullmatch(r"[1-9][0-9]*", ref["key"]) is None):
+                          raise ValueError("Cloud Run runtime secret reference is not pinned")
+                      result.append({"name": name, "valueFrom": {"secretKeyRef": {"name": ref["name"], "key": ref["key"]}}})
+                  else:
+                      if set(item) != {"name", "value"} or item.get("value") != expected_plain[name]:
+                          raise ValueError("Cloud Run runtime value is not the release profile")
+                      result.append({"name": name, "value": item["value"]})
+              return result
+          def provider_database_environment(environment, expected_key):
+              if not isinstance(environment, list) or len(environment) != 1 or not isinstance(environment[0], dict):
+                  raise ValueError("Cloud Run migration secret environment is invalid")
+              item = environment[0]
+              ref = item.get("valueFrom", {}).get("secretKeyRef", {})
+              if (set(item) != {"name", "valueFrom"} or item.get("name") != "LATCHWAY_DATABASE_URL" or
+                      not isinstance(ref, dict) or set(ref) != {"name", "key"} or
+                      ref.get("name") != "latchway-database-url" or ref.get("key") != expected_key):
+                  raise ValueError("Cloud Run migration secret is not the runtime-pinned database version")
+              return [{"name": "LATCHWAY_DATABASE_URL", "valueFrom": {"secretKeyRef": {"name": ref["name"], "key": ref["key"]}}}]
+          def provider_runtime_spec(spec, annotations):
+              if not isinstance(spec, dict):
+                  raise ValueError("Cloud Run runtime spec is missing")
+              containers = spec.get("containers")
+              if (set(spec) != {"serviceAccountName", "containerConcurrency", "timeoutSeconds", "containers"} or
+                      spec.get("serviceAccountName") != runtime_account or
+                      type(spec.get("containerConcurrency")) is not int or spec["containerConcurrency"] != 100 or
+                      type(spec.get("timeoutSeconds")) is not int or spec["timeoutSeconds"] != 3600 or
+                      not isinstance(containers, list) or len(containers) != 1 or not isinstance(containers[0], dict)):
+                  raise ValueError("Cloud Run runtime spec is not the release profile")
+              container = containers[0]
+              if (set(container) != {"name", "image", "command", "args", "ports", "resources", "env", "startupProbe", "livenessProbe"} or
+                      container.get("name") != "latchway" or
+                      container.get("command") != ["/latchway"] or container.get("args") != ["serve", "--role", "all"] or
+                      container.get("ports") != [{"name": "http1", "containerPort": 8080}] or
+                      container.get("resources") != {"limits": {"cpu": "2", "memory": "2Gi"}}):
+                  raise ValueError("Cloud Run runtime container is not the release profile")
+              safe_container = {
+                  "name": "latchway", "image": container.get("image"), "command": ["/latchway"],
+                  "args": ["serve", "--role", "all"],
+                  "ports": [{"name": "http1", "containerPort": 8080}],
+                  "resources": {"limits": {"cpu": "2", "memory": "2Gi"}},
+                  "env": provider_runtime_environment(container.get("env")),
+                  "startupProbe": provider_probe(container.get("startupProbe"), "/readyz", {
+                      "initialDelaySeconds": 1, "timeoutSeconds": 3, "periodSeconds": 3, "failureThreshold": 40,
+                  }),
+                  "livenessProbe": provider_probe(container.get("livenessProbe"), "/healthz", {
+                      "timeoutSeconds": 3, "periodSeconds": 15, "failureThreshold": 3,
+                  }),
+              }
+              return {
+                  "serviceAccountName": runtime_account, "containerConcurrency": 100,
+                  "timeoutSeconds": 3600, "containers": [safe_container],
+              }, provider_annotations(annotations, runtime_annotations)
+          service_annotations = service.get("metadata", {}).get("annotations")
+          provider_annotations(
+              service_annotations,
+              {
+                  "run.googleapis.com/ingress": "all",
+                  "run.googleapis.com/invoker-iam-disabled": "true",
+              },
+              {"run.googleapis.com/ingress-status": "all"},
+          )
+          service_template = service.get("spec", {}).get("template", {})
+          desired_spec, desired_annotations = provider_runtime_spec(
+              service_template.get("spec"), service_template.get("metadata", {}).get("annotations"),
+          )
+          revision_spec, revision_annotations = provider_runtime_spec(
+              revision.get("spec"), revision.get("metadata", {}).get("annotations"),
+          )
+          if desired_spec != revision_spec or desired_annotations != revision_annotations:
+              raise ValueError("Cloud Run desired and latest-ready runtime profiles differ")
+          runtime_env = desired_spec["containers"][0]["env"]
+          env = {item["name"]: item for item in runtime_env}
+          aggregate, completion = int(env["LATCHWAY_DB_MAX_CONNECTIONS"]["value"]), int(env["LATCHWAY_DB_COMPLETION_CONNECTIONS"]["value"])
+          database_pool = {
+              "aggregate_max_connections": aggregate,
+              "regular_max_connections": aggregate - completion,
+              "completion_max_connections": completion,
+          }
+          database_key = env["LATCHWAY_DATABASE_URL"]["valueFrom"]["secretKeyRef"]["key"]
+          refs = [{"name": name, "reference": env[name]["valueFrom"]["secretKeyRef"]["name"]} for name in secret_names]
           referenced = {item["reference"] for item in refs}
           providers = []
           for item in secrets:
               resource = item.get("name", "") if isinstance(item, dict) else ""
               if resource in referenced or resource.rsplit("/", 1)[-1] in referenced:
                   providers.append({"resource_id": resource})
-          safe_env = []
-          for name in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY", "LATCHWAY_SHUTDOWN_TIMEOUT"):
-              item = env[name]
-              safe = {"name": name}
-              if "value" in item:
-                  safe["value"] = item["value"]
-              if "valueFrom" in item:
-                  ref = item["valueFrom"].get("secretKeyRef", {})
-                  safe["valueFrom"] = {"secretKeyRef": {"name": ref.get("name"), "key": ref.get("key")}}
-              safe_env.append(safe)
-          def containers(document):
-              current = document
-              for path in (
-                  ("spec", "template", "spec", "containers"),
-                  ("spec", "template", "spec", "template", "spec", "containers"),
-              ):
-                  current = document
-                  for key in path:
-                      current = current.get(key, {}) if isinstance(current, dict) else {}
-                  if isinstance(current, list) and current:
-                      return current
-              raise ValueError("Cloud Run container missing")
-          job_container = containers(migration_job)[0]
+          provider_annotations(migration_job.get("metadata", {}).get("annotations", {}), {})
+          job_root = migration_job.get("spec") if isinstance(migration_job, dict) else None
+          if not isinstance(job_root, dict) or set(job_root) != {"template"}:
+              raise ValueError("Cloud Run migration job root is not the release profile")
+          job_template = job_root.get("template")
+          if (not isinstance(job_template, dict) or "spec" not in job_template or
+                  set(job_template) - {"metadata", "spec"}):
+              raise ValueError("Cloud Run migration job template is not the release profile")
+          job_execution_annotations = provider_annotations(
+              job_template.get("metadata", {}).get("annotations", {}),
+              cloud_sql_annotations,
+          )
+          job_outer = job_template.get("spec")
+          if not isinstance(job_outer, dict) or set(job_outer) != {"taskCount", "parallelism", "template"}:
+              raise ValueError("Cloud Run migration job outer spec is not the release profile")
+          task_template = job_outer.get("template")
+          if (not isinstance(task_template, dict) or "spec" not in task_template or
+                  set(task_template) - {"metadata", "spec"}):
+              raise ValueError("Cloud Run migration task template is not the release profile")
+          provider_annotations(task_template.get("metadata", {}).get("annotations", {}), {})
+          task_spec = task_template.get("spec")
+          job_containers = task_spec.get("containers") if isinstance(task_spec, dict) else None
+          timeout = task_spec.get("timeoutSeconds") if isinstance(task_spec, dict) else None
+          if isinstance(timeout, str) and timeout.endswith("s"):
+              timeout = timeout[:-1]
+          if (type(job_outer.get("taskCount")) is not int or job_outer["taskCount"] != 1 or
+                  type(job_outer.get("parallelism")) is not int or job_outer["parallelism"] != 1 or
+                  not isinstance(task_spec, dict) or
+                  set(task_spec) != {"serviceAccountName", "timeoutSeconds", "maxRetries", "containers"} or
+                  task_spec.get("serviceAccountName") != migrator_account or
+                  str(timeout) != "900" or type(task_spec.get("maxRetries")) is not int or task_spec["maxRetries"] != 0 or
+                  not isinstance(job_containers, list) or len(job_containers) != 1 or not isinstance(job_containers[0], dict)):
+              raise ValueError("Cloud Run migration job is not the release profile")
+          job_container = job_containers[0]
+          job_env = provider_database_environment(job_container.get("env"), database_key)
+          if (set(job_container) != {"name", "image", "command", "args", "resources", "env"} or
+                  job_container.get("name") != "latchway-migrate" or
+                  job_container.get("command") != ["/latchway"] or
+                  job_container.get("args") != ["migrate", "up"] or
+                  job_container.get("resources") != {"limits": {"cpu": "1", "memory": "512Mi"}}):
+              raise ValueError("Cloud Run migration job command is not the release profile")
+          execution_annotations = provider_annotations(
+              execution.get("metadata", {}).get("annotations", {}),
+              cloud_sql_annotations,
+          )
+          execution_outer = execution.get("spec") if isinstance(execution, dict) else None
+          execution_template = execution_outer.get("template") if isinstance(execution_outer, dict) else None
+          if (not isinstance(execution_template, dict) or "spec" not in execution_template or
+                  set(execution_template) - {"metadata", "spec"}):
+              raise ValueError("Cloud Run migration execution template is not the release profile")
+          provider_annotations(execution_template.get("metadata", {}).get("annotations", {}), {})
+          execution_task = execution_template.get("spec")
+          execution_containers = execution_task.get("containers") if isinstance(execution_task, dict) else None
+          execution_timeout = execution_task.get("timeoutSeconds") if isinstance(execution_task, dict) else None
+          if isinstance(execution_timeout, str) and execution_timeout.endswith("s"):
+              execution_timeout = execution_timeout[:-1]
+          if (not isinstance(execution_outer, dict) or set(execution_outer) != {"taskCount", "parallelism", "template"} or
+                  type(execution_outer.get("taskCount")) is not int or execution_outer["taskCount"] != 1 or
+                  type(execution_outer.get("parallelism")) is not int or execution_outer["parallelism"] != 1 or
+                  not isinstance(execution_task, dict) or
+                  set(execution_task) != {"serviceAccountName", "timeoutSeconds", "maxRetries", "containers"} or
+                  execution_task.get("serviceAccountName") != migrator_account or
+                  str(execution_timeout) != "900" or type(execution_task.get("maxRetries")) is not int or execution_task["maxRetries"] != 0 or
+                  not isinstance(execution_containers, list) or len(execution_containers) != 1 or not isinstance(execution_containers[0], dict)):
+              raise ValueError("Cloud Run migration execution container is missing")
+          execution_container = execution_containers[0]
+          execution_env = provider_database_environment(execution_container.get("env"), database_key)
+          if (set(execution_container) != {"name", "image", "command", "args", "resources", "env"} or
+                  execution_container.get("name") != "latchway-migrate" or
+                  execution_container.get("command") != ["/latchway"] or
+                  execution_container.get("args") != ["--output", "json", "migrate", "status"] or
+                  execution_container.get("resources") != {"limits": {"cpu": "1", "memory": "512Mi"}}):
+              raise ValueError("Cloud Run migration execution override is not the status command")
+          def ready(document):
+              status = document.get("status") if isinstance(document, dict) else None
+              conditions = status.get("conditions", []) if isinstance(status, dict) else []
+              return any(isinstance(item, dict) and item.get("type") == "Ready" and str(item.get("status")).lower() == "true" for item in conditions)
+          service_status = service.get("status")
+          if (not isinstance(service_status, dict) or not isinstance(service_status.get("latestReadyRevisionName"), str) or
+                  service_status["latestReadyRevisionName"] != revision.get("metadata", {}).get("name") or
+                  not ready(revision)):
+              raise ValueError("Cloud Run latest-ready revision identity or readiness is invalid")
+          revision_name = service_status["latestReadyRevisionName"]
+          raw_traffic = service_status.get("traffic")
+          if not isinstance(raw_traffic, list) or len(raw_traffic) != 1 or not isinstance(raw_traffic[0], dict):
+              raise ValueError("Cloud Run traffic is not exclusively bound to the latest-ready revision")
+          traffic_item = raw_traffic[0]
+          revision_targets = [traffic_item.get(key) for key in ("revisionName", "revision") if isinstance(traffic_item.get(key), str)]
+          if (len(revision_targets) != 1 or revision_targets[0].rsplit("/", 1)[-1] != revision_name or
+                  type(traffic_item.get("percent")) is not int or traffic_item["percent"] != 100):
+              raise ValueError("Cloud Run traffic is not exclusively bound to the latest-ready revision")
+          safe_traffic = [{"revisionName": revision_name, "percent": 100}]
+          if not ready(service):
+              raise ValueError("Cloud Run service is not ready")
+          if service_status.get("url") != os.environ["ENDPOINT"]:
+              raise ValueError("Cloud Run service URL does not equal the evidence endpoint")
           service_safe = {
-              "metadata": {key: service.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
-              "spec": {"template": {"spec": {"containers": [{"image": container.get("image"), "env": safe_env}]}}},
-              "status": {key: service.get("status", {}).get(key) for key in ("conditions", "latestReadyRevisionName", "traffic", "url")},
+              "metadata": provider_metadata(service, "services", service_name),
+              "spec": {"template": {
+                  "metadata": {"annotations": desired_annotations}, "spec": desired_spec,
+              }},
+              "status": {
+                  "conditions": service_status.get("conditions"),
+                  "latestReadyRevisionName": revision_name,
+                  "traffic": safe_traffic,
+                  "url": service_status.get("url"),
+              },
           }
           revision_safe = {
-              "metadata": {key: revision.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "metadata": {**provider_metadata(revision, "revisions", revision_name), "annotations": revision_annotations},
+              "spec": revision_spec,
               "status": {key: revision.get("status", {}).get(key) for key in ("conditions", "imageDigest")},
           }
           job_safe = {
-              "metadata": {key: migration_job.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
-              "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": job_container.get("image")}]}}}}},
+              "metadata": provider_metadata(migration_job, "jobs", job_name),
+              "spec": {
+                  "executionTemplateAnnotations": job_execution_annotations,
+                  "taskCount": 1, "parallelism": 1, "serviceAccountName": migrator_account,
+                  "timeoutSeconds": 900, "maxRetries": 0,
+                  "containers": [{
+                      "name": "latchway-migrate", "image": job_container.get("image"),
+                      "command": ["/latchway"], "args": ["migrate", "up"],
+                      "resources": {"limits": {"cpu": "1", "memory": "512Mi"}}, "env": job_env,
+                  }],
+              },
           }
           execution_safe = {
-              "metadata": {key: execution.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "metadata": {
+                  **provider_metadata(execution, "executions"),
+                  "annotations": execution_annotations,
+              },
+              "spec": {"containers": [{
+                  "name": "latchway-migrate", "image": execution_container.get("image"),
+                  "command": ["/latchway"], "args": ["--output", "json", "migrate", "status"],
+                  "resources": {"limits": {"cpu": "1", "memory": "512Mi"}}, "env": execution_env,
+              }]},
               "status": {key: execution.get("status", {}).get(key) for key in ("conditions", "succeededCount", "failedCount", "completionTime")},
               "reported_status": migration_result["status"],
               "log_record": migration_result["record"],
           }
-          def ready(document):
-              return any(item.get("type") == "Ready" and str(item.get("status")).lower() == "true" for item in document.get("status", {}).get("conditions", []))
           def write(name, value):
               (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
           write("identity.json", {
@@ -982,6 +1464,16 @@ jobs:
           write("control_plane.json", {
               "platform": "cloud_run", "service": service_safe,
               "revision": revision_safe, "migration_job": job_safe,
+              "database_pool": database_pool,
+              "network_profile": {
+                  "mode": "cloud_sql_public_ip_connector",
+                  "ingress": "all",
+                  "invoker": "unauthenticated",
+                  "vpc_access": "none",
+                  "database_transport": "unix_socket",
+                  "cloud_sql_connection_name": cloud_sql_connection,
+                  "cloud_sql_socket_path": f"/cloudsql/{cloud_sql_connection}",
+              },
           })
           write("migration.json", {
               "command": ["/latchway", "--output", "json", "migrate", "status"],
@@ -996,13 +1488,29 @@ jobs:
           write("shutdown.json", {
               "method": "cloud_run_revision_rollout",
               "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
-              "signal": "SIGTERM", "platform_timeout_seconds": 10, "application_timeout_seconds": 8,
-              "exit_code": 0, "readiness_restored": ready(before_service) and ready(service),
+              "readiness_restored": ready(before_service) and ready(service),
               "before": {"image_digest": before_digest, "resource_id": before_revision["metadata"]["name"]},
               "after": {"image_digest": after_digest, "resource_id": revision["metadata"]["name"]},
           })
           PY
           printf '%s\n' "$resource_id" > /tmp/latchway-provider-resource-id
+          trap - EXIT
+          : > /tmp/latchway-cloud-run-steady-state-captured
+
+      - name: Restore Cloud Run steady-state rollout environment
+        if: always() && inputs.platform == 'cloud_run'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -f /tmp/latchway-cloud-run-steady-state-captured && ! -L /tmp/latchway-cloud-run-steady-state-captured ]]; then
+            exit 0
+          fi
+          test "$GCP_PROJECT" = "latchway"
+          test "$GCP_REGION" = "asia-southeast1"
+          test "$GCP_SERVICE" = "latchway"
+          gcloud run services update "$GCP_SERVICE" \
+            --project "$GCP_PROJECT" --region "$GCP_REGION" \
+            --remove-env-vars LATCHWAY_EVIDENCE_RUN_ID --quiet
 
       - name: Capture ECS migration, replica, secret, and replacement evidence
         if: inputs.platform == 'aws'
@@ -1105,7 +1613,7 @@ jobs:
           resource_id=$(jq -er '.services[0].serviceArn' /tmp/aws-service-after.json)
           export CAPTURE_DIR="$capture" RESOURCE_ID="$resource_id" SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" SHUTDOWN_TASK="$shutdown_task"
           python3 - <<'PY'
-          import json, os
+          import json, os, re
           from pathlib import Path
           out = Path(os.environ["CAPTURE_DIR"])
           load = lambda p: json.loads(Path(p).read_text())
@@ -1122,8 +1630,34 @@ jobs:
           migration_result = load("/tmp/aws-migration-status.json")
           aws_version = Path("/tmp/aws-version.txt").read_text().strip()
           container = definition["containerDefinitions"][0]
+          pool_names = ("LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS")
+          def provider_database_pool(environment):
+              if not isinstance(environment, list):
+                  raise ValueError("ECS environment is invalid")
+              selected = [item for item in environment if isinstance(item, dict) and item.get("name") in pool_names]
+              if len(selected) != 2 or {item.get("name") for item in selected} != set(pool_names):
+                  raise ValueError("ECS database pool settings are missing or duplicated")
+              values = {item["name"]: item.get("value") for item in selected}
+              if any(not isinstance(value, str) or re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", value) is None for value in values.values()):
+                  raise ValueError("ECS database pool settings are not canonical integers")
+              aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+              completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+              regular = aggregate - completion
+              if not (2 <= aggregate <= 500 and regular >= 1 and completion >= 1 and completion < aggregate and regular + completion == aggregate and (aggregate, regular, completion) == (20, 15, 5)):
+                  raise ValueError("ECS database pool partition is not the release profile")
+              return {
+                  "aggregate_max_connections": aggregate,
+                  "regular_max_connections": regular,
+                  "completion_max_connections": completion,
+              }
+          database_pool = provider_database_pool(container.get("environment"))
           refs = [{"name": item["name"], "reference": item["valueFrom"]} for item in container.get("secrets", []) if item.get("name") in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY")]
-          environment = [item for item in container.get("environment", []) if item.get("name") == "LATCHWAY_SHUTDOWN_TIMEOUT"]
+          safe_environment_names = {"LATCHWAY_SHUTDOWN_TIMEOUT", *pool_names}
+          environment = [
+              {"name": item.get("name"), "value": item.get("value")}
+              for item in container.get("environment", [])
+              if isinstance(item, dict) and item.get("name") in safe_environment_names
+          ]
           container_safe = {
               "name": container.get("name"), "image": container.get("image"),
               "stopTimeout": container.get("stopTimeout"),
@@ -1132,6 +1666,12 @@ jobs:
               "logConfiguration": container.get("logConfiguration"),
           }
           service_safe = {key: service.get(key) for key in ("serviceArn", "serviceName", "clusterArn", "status", "desiredCount", "runningCount", "taskDefinition")}
+          primary_deployments = [
+              {key: item.get(key) for key in ("id", "status", "taskDefinition", "desiredCount", "pendingCount", "runningCount", "rolloutState")}
+              for item in service.get("deployments", [])
+              if isinstance(item, dict) and item.get("status") == "PRIMARY"
+          ]
+          service_safe["deployments"] = primary_deployments
           def task_safe(task):
               return {
                   "taskArn": task.get("taskArn"), "taskDefinitionArn": task.get("taskDefinitionArn"),
@@ -1142,6 +1682,12 @@ jobs:
                   ],
               }
           migration_safe = task_safe(migration)
+          definition_arn = definition.get("taskDefinitionArn")
+          if (not isinstance(definition_arn, str) or not definition_arn or service.get("taskDefinition") != definition_arn or
+                  len(primary_deployments) != 1 or primary_deployments[0].get("taskDefinition") != definition_arn or
+                  any(item.get("taskDefinitionArn") != definition_arn for item in tasks) or
+                  migration.get("taskDefinitionArn") != definition_arn):
+              raise ValueError("ECS task definition is not bound to the stable service deployment and tasks")
           def write(name, value):
               (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
           write("identity.json", {
@@ -1156,6 +1702,7 @@ jobs:
               "platform": "aws", "service": service_safe,
               "task_definition": {"taskDefinitionArn": definition.get("taskDefinitionArn"), "containerDefinitions": [container_safe]},
               "tasks": [task_safe(item) for item in tasks],
+              "database_pool": database_pool,
           })
           write("migration.json", {
               "command": ["/latchway", "--output", "json", "migrate", "status"],
@@ -1239,14 +1786,42 @@ jobs:
           def digest(machine):
               ref = machine.get("image_ref", machine.get("imageRef", {}))
               return ref.get("digest", machine.get("config", {}).get("image", ""))
-          def machine_safe(machine):
+          pool_names = ("LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS")
+          def provider_database_pool(machine):
+              config = machine.get("config")
+              environment = config.get("env") if isinstance(config, dict) else None
+              if not isinstance(environment, dict):
+                  raise ValueError("Fly machine environment is invalid")
+              values = {name: environment.get(name) for name in pool_names}
+              if any(not isinstance(value, str) or re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", value) is None for value in values.values()):
+                  raise ValueError("Fly database pool settings are missing or are not canonical integers")
+              aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+              completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+              regular = aggregate - completion
+              if not (2 <= aggregate <= 500 and regular >= 1 and completion >= 1 and completion < aggregate and regular + completion == aggregate and (aggregate, regular, completion) == (20, 15, 5)):
+                  raise ValueError("Fly database pool partition is not the release profile")
+              return {
+                  "aggregate_max_connections": aggregate,
+                  "regular_max_connections": regular,
+                  "completion_max_connections": completion,
+              }, [{"name": name, "value": values[name]} for name in pool_names]
+          def machine_safe(machine, environment):
               checks = machine.get("checks", machine.get("Checks"))
               return {
                   "id": machine.get("id"), "state": machine.get("state"), "region": machine.get("region"),
                   "instance_id": machine.get("instance_id"), "image_ref": {"digest": digest(machine)},
-                  "checks": checks if isinstance(checks, list) else [],
+                  "checks": checks if isinstance(checks, list) else [], "environment": environment,
               }
-          running = [machine_safe(item) for item in machines if isinstance(item, dict) and item.get("state") == "started"]
+          running = []
+          observed_pools = []
+          for item in machines:
+              if isinstance(item, dict) and item.get("state") == "started":
+                  observed_pool, safe_environment = provider_database_pool(item)
+                  observed_pools.append(observed_pool)
+                  running.append(machine_safe(item, safe_environment))
+          if not observed_pools or any(item != observed_pools[0] for item in observed_pools):
+              raise ValueError("Fly database pool partition differs across running machines")
+          database_pool = observed_pools[0]
           app_safe = {key: app.get(key) for key in ("ID", "Name", "Status", "Hostname", "Organization")}
           def write(name, value):
               (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
@@ -1255,7 +1830,10 @@ jobs:
               "observed_at": os.environ["SHUTDOWN_FINISHED"],
               "provider_response": {"app": app_safe, "flyctl_version": fly_version},
           })
-          write("control_plane.json", {"platform": "fly_io", "app": app_safe, "machines": running})
+          write("control_plane.json", {
+              "platform": "fly_io", "app": app_safe, "machines": running,
+              "database_pool": database_pool,
+          })
           write("migration.json", {
               "command": ["/latchway", "--output", "json", "migrate", "status"],
               "status": status,
@@ -1324,6 +1902,7 @@ jobs:
             vars: {
               LATCHWAY_CONTAINER_INSTANCES: "4", LATCHWAY_ROLE: "all", LATCHWAY_LOG_LEVEL: "info",
               LATCHWAY_MIGRATE_ON_START: "true", LATCHWAY_DB_MAX_CONNECTIONS: "5",
+              LATCHWAY_DB_COMPLETION_CONNECTIONS: "2",
               LATCHWAY_SHUTDOWN_TIMEOUT: "30s"
             },
             durable_objects: {bindings: [{name: "LATCHWAY_CONTAINER", class_name: "LatchwayContainer"}]},
@@ -1558,6 +2137,95 @@ jobs:
           shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           "${wrangler[@]}" deployments list --name latchway --json > /tmp/cloudflare-deployments.json
           "${wrangler[@]}" versions list --name latchway --json > /tmp/cloudflare-versions.json
+          test "$(wc -c < /tmp/cloudflare-deployments.json)" -le 8388608
+          test "$(wc -c < /tmp/cloudflare-versions.json)" -le 8388608
+          # Retain a strict allowlist, not Wrangler's historical records. The
+          # fresh signer independently reconstructs this same active closure.
+          python3 - <<'PY'
+          import json, os, re
+          from datetime import datetime
+          from pathlib import Path
+
+          pool_names = ("LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS")
+          uuid = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+          rfc3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$")
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("duplicate Cloudflare provider JSON member")
+                  result[key] = value
+              return result
+          def load(path):
+              payload = Path(path).read_bytes()
+              if not 0 < len(payload) <= 8 * 1024 * 1024:
+                  raise ValueError("Cloudflare provider JSON size is invalid")
+              return json.loads(payload, object_pairs_hook=reject_duplicates)
+          def provider_time(value):
+              if not isinstance(value, str) or rfc3339.fullmatch(value) is None:
+                  raise ValueError("Cloudflare deployment timestamp is invalid")
+              try:
+                  return datetime.fromisoformat(value[:-1] + "+00:00")
+              except ValueError:
+                  raise ValueError("Cloudflare deployment timestamp is invalid") from None
+
+          deployments = load("/tmp/cloudflare-deployments.json")
+          versions = load("/tmp/cloudflare-versions.json")
+          if not isinstance(deployments, list) or not 1 <= len(deployments) <= 50 or any(not isinstance(item, dict) for item in deployments):
+              raise ValueError("Cloudflare deployments are invalid")
+          if not isinstance(versions, list) or not 1 <= len(versions) <= 50 or any(not isinstance(item, dict) for item in versions):
+              raise ValueError("Cloudflare versions are invalid")
+          deployment_times = [provider_time(item.get("created_on")) for item in deployments]
+          if len(deployment_times) != len(set(deployment_times)):
+              raise ValueError("Cloudflare deployment timestamps are not unique")
+          latest_index = max(range(len(deployments)), key=deployment_times.__getitem__)
+          latest = deployments[latest_index]
+          deployment_id = latest.get("id")
+          traffic = latest.get("versions")
+          if (not isinstance(deployment_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", deployment_id) is None or
+                  not isinstance(traffic, list) or len(traffic) != 1 or not isinstance(traffic[0], dict) or
+                  type(traffic[0].get("percentage")) not in (int, float) or traffic[0]["percentage"] != 100):
+              raise ValueError("Cloudflare active deployment is invalid or ambiguous")
+          active_version_id = traffic[0].get("version_id")
+          if not isinstance(active_version_id, str) or uuid.fullmatch(active_version_id) is None:
+              raise ValueError("Cloudflare active version ID is invalid")
+          matching = [item for item in versions if item.get("id") == active_version_id]
+          if len(matching) != 1:
+              raise ValueError("Cloudflare active version is missing or duplicated")
+          resources = matching[0].get("resources")
+          bindings = resources.get("bindings") if isinstance(resources, dict) else None
+          if not isinstance(bindings, list) or len(bindings) > 512:
+              raise ValueError("Cloudflare active version bindings are invalid")
+          selected = [item for item in bindings if isinstance(item, dict) and item.get("name") in pool_names]
+          if (len(selected) != 2 or {item.get("name") for item in selected} != set(pool_names) or
+                  any(item.get("type") != "plain_text" or not isinstance(item.get("text"), str) for item in selected)):
+              raise ValueError("Cloudflare database pool bindings are missing, duplicated, or not plain text")
+          values = {item["name"]: item["text"] for item in selected}
+          if any(re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", value) is None for value in values.values()):
+              raise ValueError("Cloudflare database pool bindings are not canonical integers")
+          aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+          completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+          regular = aggregate - completion
+          if not (2 <= aggregate <= 500 and regular >= 1 and completion >= 1 and completion < aggregate and regular + completion == aggregate and (aggregate, regular, completion) == (5, 3, 2)):
+              raise ValueError("Cloudflare database pool partition is not the release profile")
+          retained_deployments = [{
+              "id": deployment_id,
+              "created_on": latest["created_on"],
+              "versions": [{"version_id": active_version_id, "percentage": 100}],
+          }]
+          retained_versions = [{
+              "id": active_version_id,
+              "resources": {"bindings": [
+                  {"name": name, "type": "plain_text", "text": values[name]}
+                  for name in pool_names
+              ]},
+          }]
+          output = Path("/tmp/cloudflare-provider-raw")
+          for name, value in (("deployments.json", retained_deployments), ("versions.json", retained_versions)):
+              path = output / name
+              path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+              os.chmod(path, 0o644)
+          PY
           "${wrangler[@]}" --version > /tmp/cloudflare-wrangler-version.txt
           install -m 0644 /tmp/cloudflare-canonical-manifest.json /tmp/cloudflare-provider-raw/canonical-manifest.json
           install -m 0644 /tmp/cloudflare-mirror-manifest.json /tmp/cloudflare-provider-raw/mirror-manifest.json
@@ -1565,8 +2233,6 @@ jobs:
           install -m 0644 /tmp/cloudflare-applications.json /tmp/cloudflare-provider-raw/applications.json
           install -m 0644 /tmp/cloudflare-instances-before.json /tmp/cloudflare-provider-raw/instances-before.json
           install -m 0644 /tmp/cloudflare-instances-after.json /tmp/cloudflare-provider-raw/instances-after.json
-          install -m 0644 /tmp/cloudflare-deployments.json /tmp/cloudflare-provider-raw/deployments.json
-          install -m 0644 /tmp/cloudflare-versions.json /tmp/cloudflare-provider-raw/versions.json
           install -m 0644 /tmp/cloudflare-secrets.json /tmp/cloudflare-provider-raw/secrets.json
           install -m 0644 /tmp/cloudflare-migration.json /tmp/cloudflare-provider-raw/migration.json
           install -m 0644 /tmp/cloudflare-shutdown.json /tmp/cloudflare-provider-raw/shutdown.json
@@ -1576,6 +2242,7 @@ jobs:
           printf '%s\n' "$shutdown_started" > /tmp/cloudflare-provider-raw/shutdown-started.txt
           printf '%s\n' "$shutdown_finished" > /tmp/cloudflare-provider-raw/shutdown-finished.txt
           printf '%s\n' "$app_id" > /tmp/latchway-provider-resource-id
+          rm -f /tmp/cloudflare-deployments.json /tmp/cloudflare-versions.json
           rm -f "$cloudflare_api_headers"
 
       - name: Remove any temporary Cloudflare registry credential
@@ -1745,10 +2412,10 @@ jobs:
                   LATCHWAY_DATABASE_URL:"${LATCHWAY_DATABASE_URL:?}",LATCHWAY_MASTER_KEY:"${LATCHWAY_MASTER_KEY:?}",
                   LATCHWAY_PUBLIC_ORIGIN:"${LATCHWAY_PUBLIC_ORIGIN:?}",LATCHWAY_ADMIN_BOOTSTRAP_TOKEN:"${LATCHWAY_ADMIN_BOOTSTRAP_TOKEN:-}",
                   LATCHWAY_ROLE:"all",LATCHWAY_LOG_LEVEL:"${LATCHWAY_LOG_LEVEL:-info}",LATCHWAY_MIGRATE_ON_START:"false",
-                  LATCHWAY_DB_MAX_CONNECTIONS:"${LATCHWAY_DB_MAX_CONNECTIONS:-20}",LATCHWAY_SHUTDOWN_TIMEOUT:"30s",PORT:"8080"
+                  LATCHWAY_DB_MAX_CONNECTIONS:"${LATCHWAY_DB_MAX_CONNECTIONS:-20}",LATCHWAY_DB_COMPLETION_CONNECTIONS:"${LATCHWAY_DB_COMPLETION_CONNECTIONS:-5}",LATCHWAY_SHUTDOWN_TIMEOUT:"30s",PORT:"8080"
                 },
                 ports:["127.0.0.1:${LATCHWAY_PORT:-8080}:8080"],
-                healthcheck:{test:["CMD","/latchway","doctor","--output","json"],interval:"5s",timeout:"5s",retries:30,start_period:"5s"}
+                healthcheck:{test:["CMD","/latchway","--server","http://127.0.0.1:8080","--output","json","readiness"],interval:"5s",timeout:"5s",retries:30,start_period:"5s"}
               }
             },
             volumes:{"postgres-data":{}}
@@ -1756,8 +2423,14 @@ jobs:
           compose=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$RUNNER_TEMP/trusted-compose.json")
           "${compose[@]}" config --quiet
           "${compose[@]}" up -d --wait
-          gateway_id=$("${compose[@]}" ps -q latchway)
+          before_gateway_id=$("${compose[@]}" ps -q latchway)
           migration_id=$("${compose[@]}" ps -a -q migrate)
+          compose_provider_raw=/tmp/compose-provider-raw
+          mkdir -p "$compose_provider_raw"
+          docker inspect "$before_gateway_id" | jq '.[0] | {
+            Id, Config:{Image:.Config.Image},
+            State:{Running:.State.Running,ExitCode:.State.ExitCode,Health:{Status:.State.Health.Status}}
+          }' > "$compose_provider_raw/gateway-before.json"
           docker info --format '{{json .}}' > /tmp/docker-info.json
           docker image inspect "$CANDIDATE_LOCAL_IMAGE" > /tmp/image-inspect.json
           set +e
@@ -1767,16 +2440,26 @@ jobs:
           docker inspect "$migration_id" > /tmp/migration-inspect.json
           shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           before_digest="sha256:${RELEASE_IMAGE##*@sha256:}"
-          docker stop --time 35 "$gateway_id" >/dev/null
-          stopped_exit=$(docker inspect --format '{{.State.ExitCode}}' "$gateway_id")
-          "${compose[@]}" up -d --wait latchway
+          docker stop --time 35 "$before_gateway_id" >/dev/null
+          stopped_exit=$(docker inspect --format '{{.State.ExitCode}}' "$before_gateway_id")
+          docker inspect "$before_gateway_id" | jq '.[0] | {
+            Id, Config:{Image:.Config.Image},
+            State:{Running:.State.Running,ExitCode:.State.ExitCode,Health:{Status:(.State.Health.Status // null)}}
+          }' > "$compose_provider_raw/gateway-stopped.json"
+          "${compose[@]}" up -d --wait --force-recreate --no-deps latchway
           gateway_id=$("${compose[@]}" ps -q latchway)
+          test "$gateway_id" != "$before_gateway_id"
           docker inspect "$gateway_id" > /tmp/gateway-restored.json
+          docker inspect "$gateway_id" | jq '.[0] | {
+            Id, Config:{Image:.Config.Image},
+            State:{Running:.State.Running,ExitCode:.State.ExitCode,Health:{Status:.State.Health.Status}}
+          }' > "$compose_provider_raw/gateway-after.json"
           shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           export CAPTURE_DIR="$capture" RESOURCE_ID="$COMPOSE_PROJECT_NAME" MIGRATION_STATUS_EXIT="$migration_status_exit" RELEASE_IMAGE
           export SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" STOPPED_EXIT="$stopped_exit" BEFORE_DIGEST="$before_digest"
+          export BEFORE_GATEWAY_ID="$before_gateway_id"
           python3 - <<'PY'
-          import json, os
+          import json, os, re
           from pathlib import Path
           out = Path(os.environ["CAPTURE_DIR"])
           load = lambda p: json.loads(Path(p).read_text())
@@ -1785,6 +2468,33 @@ jobs:
           image = load("/tmp/image-inspect.json")[0]
           migration_container = load("/tmp/migration-inspect.json")[0]
           status = load("/tmp/migration-status.json")
+          pool_names = ("LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS")
+          def provider_database_pool(environment):
+              if not isinstance(environment, list):
+                  raise ValueError("Compose container environment is invalid")
+              selected = []
+              for item in environment:
+                  if not isinstance(item, str) or "=" not in item:
+                      continue
+                  name, value = item.split("=", 1)
+                  if name in pool_names:
+                      selected.append({"name": name, "value": value})
+              if len(selected) != 2 or {item["name"] for item in selected} != set(pool_names):
+                  raise ValueError("Compose database pool settings are missing or duplicated")
+              values = {item["name"]: item["value"] for item in selected}
+              if any(re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", value) is None for value in values.values()):
+                  raise ValueError("Compose database pool settings are not canonical integers")
+              aggregate = int(values["LATCHWAY_DB_MAX_CONNECTIONS"])
+              completion = int(values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+              regular = aggregate - completion
+              if not (2 <= aggregate <= 500 and regular >= 1 and completion >= 1 and completion < aggregate and regular + completion == aggregate and (aggregate, regular, completion) == (20, 15, 5)):
+                  raise ValueError("Compose database pool partition is not the release profile")
+              return {
+                  "aggregate_max_connections": aggregate,
+                  "regular_max_connections": regular,
+                  "completion_max_connections": completion,
+              }, [{"name": name, "value": values[name]} for name in pool_names]
+          database_pool, safe_pool_environment = provider_database_pool(gateway.get("Config", {}).get("Env"))
           def write(name, value):
               (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
           write("identity.json", {
@@ -1795,9 +2505,11 @@ jobs:
           write("control_plane.json", {
               "platform": "compose", "project": os.environ["RESOURCE_ID"],
               "gateway": {
+                  "Id": gateway["Id"],
                   "Config": {
                       "Image": gateway["Config"]["Image"], "User": gateway["Config"].get("User"),
                       "Labels": {"com.docker.compose.project": gateway["Config"].get("Labels", {}).get("com.docker.compose.project")},
+                      "Env": safe_pool_environment,
                   },
                   "State": {"Running": gateway["State"]["Running"], "Health": gateway["State"].get("Health")},
               },
@@ -1805,6 +2517,7 @@ jobs:
                   "Id": image.get("Id"), "RepoDigests": [os.environ["RELEASE_IMAGE"]],
                   "Os": image.get("Os"), "Architecture": image.get("Architecture"),
               },
+              "database_pool": database_pool,
           })
           write("migration.json", {
               "command": ["/latchway", "--output", "json", "migrate", "status"],
@@ -1830,7 +2543,7 @@ jobs:
               "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
               "exit_code": int(os.environ["STOPPED_EXIT"]),
               "readiness_restored": gateway["State"]["Running"] is True and gateway["State"].get("Health", {}).get("Status") == "healthy",
-              "before": {"image_digest": digest, "resource_id": os.environ["RESOURCE_ID"]},
+              "before": {"image_digest": digest, "resource_id": os.environ["BEFORE_GATEWAY_ID"]},
               "after": {"image_digest": digest, "resource_id": gateway["Id"]},
           })
           PY
@@ -1909,6 +2622,7 @@ jobs:
             /tmp/latchway-deployment-capture
             /tmp/latchway-deployment-started-at
             /tmp/latchway-provider-resource-id
+            /tmp/compose-provider-raw
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -2031,6 +2745,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           capture="$RUNNER_TEMP/provider/latchway-deployment-capture"
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
           finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           provider_resource_id=$(cat "$RUNNER_TEMP/provider/latchway-provider-resource-id")
           mkdir -p "$RUNNER_TEMP/validated"
@@ -2041,8 +2756,10 @@ jobs:
             --core-release "$INTENDED_TAG" --image "$RELEASE_IMAGE" --endpoint "$ENDPOINT" \
             --provider-resource-id "$provider_resource_id" --environment "$DEPLOYMENT_ENVIRONMENT"
           python3 scripts/deployment-evidence.py validate-capture --capture-dir "$capture" \
+            --candidate-manifest "$candidate" \
             --output "$RUNNER_TEMP/validated/latchway-deployment-validation.json"
           python3 scripts/deployment-evidence.py seal --capture-dir "$capture" \
+            --candidate-manifest "$candidate" \
             --output "$RUNNER_TEMP/validated/${PLATFORM}.tar.gz"
       - name: Retain validated unsigned deployment evidence for a fresh signer
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -2160,6 +2877,12 @@ jobs:
               regular(path, 64 * 1024 * 1024)
               return digest_bytes(path.read_bytes())
 
+          def image_digest(value):
+              if not isinstance(value, str):
+                  return None
+              match = re.search(r"(?:^|@)(sha256:[0-9a-f]{64})$", value)
+              return match.group(1) if match else None
+
           def parse_time(value):
               if not isinstance(value, str) or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", value) is None:
                   fail("invalid timestamp")
@@ -2247,7 +2970,15 @@ jobs:
 
           candidate = load(candidate_path)
           candidate_image = candidate.get("image") if isinstance(candidate, dict) else None
+          candidate_platforms = candidate_image.get("platforms") if isinstance(candidate_image, dict) else None
           if (not isinstance(candidate_image, dict) or
+                  set(candidate_image) != {"repository", "index_digest", "platforms"} or
+                  candidate_image.get("repository") != "ghcr.io/latchway/latchway" or
+                  not digest_pattern.fullmatch(str(candidate_image.get("index_digest", ""))) or
+                  not isinstance(candidate_platforms, dict) or
+                  set(candidate_platforms) != {"linux/amd64", "linux/arm64"} or
+                  any(not digest_pattern.fullmatch(str(value)) for value in candidate_platforms.values()) or
+                  len({candidate_image["index_digest"], *candidate_platforms.values()}) != 3 or
                   candidate_image.get("repository") + "@" + str(candidate_image.get("index_digest")) != image or
                   candidate.get("candidate_commit") != commit or candidate.get("intended_tag") != release or
                   candidate.get("status") != "passed"):
@@ -2267,7 +2998,12 @@ jobs:
               ]
               expected_raw = sorted(base_names + [f"cloudflare-provider-raw/{name}" for name in provider_names])
           elif platform == "compose":
-              expected_raw = sorted(base_names + [f"latchway-deployment-capture/{name}.json" for name in observation_names])
+              compose_provider_names = ["gateway-after.json", "gateway-before.json", "gateway-stopped.json"]
+              expected_raw = sorted(
+                  base_names +
+                  [f"latchway-deployment-capture/{name}.json" for name in observation_names] +
+                  [f"compose-provider-raw/{name}" for name in compose_provider_names]
+              )
           else:
               expected_raw = sorted(base_names + [f"latchway-deployment-capture/{name}.json" for name in ("identity", "control_plane", "migration", "secrets", "shutdown")])
           if raw_names != expected_raw:
@@ -2284,6 +3020,53 @@ jobs:
               for name in raw_observation_names:
                   if (raw_root / "latchway-deployment-capture" / f"{name}.json").read_bytes() != extracted[f"{name}.json"]:
                       fail("normalized capture is not byte-bound to provider raw data")
+              if platform == "compose":
+                  provider = raw_root / "compose-provider-raw"
+                  before = load(provider / "gateway-before.json")
+                  stopped = load(provider / "gateway-stopped.json")
+                  after = load(provider / "gateway-after.json")
+                  control = values["control_plane.json"]
+                  shutdown = values["shutdown.json"]
+                  gateway = control.get("gateway") if isinstance(control, dict) else None
+                  expected_provider_fields = {"Id", "Config", "State"}
+                  if any(not isinstance(item, dict) or set(item) != expected_provider_fields for item in (before, stopped, after)):
+                      fail("Compose provider lifecycle observation fields are invalid")
+                  before_id, stopped_id, after_id = before.get("Id"), stopped.get("Id"), after.get("Id")
+                  if (not isinstance(gateway, dict) or before_id == raw_resource or
+                          not isinstance(before_id, str) or not before_id or stopped_id != before_id or
+                          not isinstance(after_id, str) or not after_id or after_id == before_id or
+                          shutdown.get("before", {}).get("resource_id") != before_id or
+                          shutdown.get("after", {}).get("resource_id") != after_id or gateway.get("Id") != after_id or
+                          before.get("Config", {}).get("Image") != after.get("Config", {}).get("Image") or
+                          stopped.get("Config", {}).get("Image") != after.get("Config", {}).get("Image") or
+                          gateway.get("Config", {}).get("Image") != after.get("Config", {}).get("Image") or
+                          before.get("State", {}).get("Running") is not True or
+                          before.get("State", {}).get("Health", {}).get("Status") != "healthy" or
+                          stopped.get("State", {}).get("Running") is not False or
+                          type(stopped.get("State", {}).get("ExitCode")) is not int or
+                          stopped["State"]["ExitCode"] != 0 or
+                          type(shutdown.get("exit_code")) is not int or shutdown["exit_code"] != 0 or
+                          after.get("State", {}).get("Running") is not True or
+                          after.get("State", {}).get("Health", {}).get("Status") != "healthy"):
+                      fail("Compose replacement is not bound to distinct provider container identities")
+              elif platform == "cloud_run":
+                  control = values["control_plane.json"]
+                  service = control.get("service") if isinstance(control, dict) else None
+                  revision = control.get("revision") if isinstance(control, dict) else None
+                  migration_job = control.get("migration_job") if isinstance(control, dict) else None
+                  desired = service.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []) if isinstance(service, dict) else []
+                  active = revision.get("spec", {}).get("containers", []) if isinstance(revision, dict) else []
+                  job = migration_job.get("spec", {}).get("containers", []) if isinstance(migration_job, dict) else []
+                  index_digest = candidate_image["index_digest"]
+                  amd64_digest = candidate_platforms["linux/amd64"]
+                  resolved_digest = image_digest(revision.get("status", {}).get("imageDigest")) if isinstance(revision, dict) else None
+                  shutdown = values["shutdown.json"]
+                  if (len(desired) != 1 or len(active) != 1 or len(job) != 1 or
+                          any(image_digest(item.get("image")) != index_digest for item in (desired[0], active[0], job[0])) or
+                          resolved_digest not in {index_digest, amd64_digest} or
+                          image_digest(shutdown.get("before", {}).get("image_digest")) != resolved_digest or
+                          image_digest(shutdown.get("after", {}).get("image_digest")) != resolved_digest):
+                      fail("Cloud Run runtime digest is not bound to the authenticated candidate index or linux/amd64 child")
           else:
               raw = raw_root / "cloudflare-provider-raw"
               account_id = (raw / "account-id.txt").read_text(encoding="utf-8").strip()
@@ -2323,6 +3106,60 @@ jobs:
                       type(app_reduced["instances"]) is not int or app_reduced["instances"] < 1 or type(app_reduced["version"]) is not int or app_reduced["version"] < 1):
                   fail("Cloudflare application is invalid")
 
+              deployments = load(raw / "deployments.json")
+              versions = load(raw / "versions.json")
+              if not isinstance(deployments, list) or len(deployments) != 1 or not isinstance(versions, list) or len(versions) != 1:
+                  fail("Cloudflare raw artifact must retain exactly one active deployment and version")
+              for records in (deployments, versions):
+                  for record in records:
+                      if not isinstance(record, dict):
+                          fail("Cloudflare provider record is invalid")
+                      serialized_record = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+                      if len(serialized_record.encode()) > 256 * 1024 or any(marker in serialized_record.lower() for marker in ('"password":', '"token":', '"secret_value":')):
+                          fail("Cloudflare provider record contains forbidden secret material")
+              active_deployment = deployments[0]
+              active_version = versions[0]
+              if (set(active_deployment) != {"id", "created_on", "versions"} or
+                      not isinstance(active_deployment.get("id"), str) or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", active_deployment["id"]) is None or
+                      not isinstance(active_deployment.get("created_on"), str) or
+                      set(active_version) != {"id", "resources"}):
+                  fail("Cloudflare active provider record allowlist is invalid")
+              parse_time(active_deployment["created_on"])
+              active_traffic = active_deployment["versions"]
+              if (not isinstance(active_traffic, list) or len(active_traffic) != 1 or not isinstance(active_traffic[0], dict) or
+                      set(active_traffic[0]) != {"version_id", "percentage"} or type(active_traffic[0].get("percentage")) is not int or
+                      active_traffic[0]["percentage"] != 100):
+                  fail("Cloudflare active Worker version is ambiguous")
+              active_version_id = active_traffic[0].get("version_id")
+              if not isinstance(active_version_id, str) or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", active_version_id) is None:
+                  fail("Cloudflare active Worker version ID is invalid")
+              if active_version.get("id") != active_version_id:
+                  fail("Cloudflare active Worker version identity is inconsistent")
+              resources = active_version["resources"]
+              if not isinstance(resources, dict) or set(resources) != {"bindings"}:
+                  fail("Cloudflare active Worker resource allowlist is invalid")
+              bindings = resources["bindings"]
+              pool_names = ("LATCHWAY_DB_MAX_CONNECTIONS", "LATCHWAY_DB_COMPLETION_CONNECTIONS")
+              pool_bindings = bindings if isinstance(bindings, list) else []
+              if (len(pool_bindings) != 2 or any(not isinstance(item, dict) for item in pool_bindings) or
+                      [item.get("name") for item in pool_bindings] != list(pool_names) or
+                      any(set(item) != {"name", "type", "text"} or item.get("type") != "plain_text" or not isinstance(item.get("text"), str) for item in pool_bindings)):
+                  fail("Cloudflare database pool binding allowlist is invalid")
+              pool_values = {item["name"]: item["text"] for item in pool_bindings}
+              if any(re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", value) is None for value in pool_values.values()):
+                  fail("Cloudflare database pool bindings are not canonical integers")
+              aggregate_pool = int(pool_values["LATCHWAY_DB_MAX_CONNECTIONS"])
+              completion_pool = int(pool_values["LATCHWAY_DB_COMPLETION_CONNECTIONS"])
+              regular_pool = aggregate_pool - completion_pool
+              if not (2 <= aggregate_pool <= 500 and regular_pool >= 1 and completion_pool >= 1 and completion_pool < aggregate_pool and
+                      regular_pool + completion_pool == aggregate_pool and (aggregate_pool, regular_pool, completion_pool) == (5, 3, 2)):
+                  fail("Cloudflare database pool partition is not the release profile")
+              database_pool = {
+                  "aggregate_max_connections": aggregate_pool,
+                  "regular_max_connections": regular_pool,
+                  "completion_max_connections": completion_pool,
+              }
+
               def one_instance(path):
                   items = load(path)
                   matches = [item for item in items if isinstance(item, dict) and item.get("name") == "instance-0"] if isinstance(items, list) else []
@@ -2361,10 +3198,11 @@ jobs:
                   "identity.json": {"platform": platform, "resource_id": raw_resource, "observed_at": shutdown_finished,
                       "provider_response": {"account_id": account_id, "whoami_sha256": whoami_sha, "wrangler_version": wrangler_version}},
                   "control_plane.json": {"platform": platform, "worker": {"status": "ready", "resource_id": raw_resource,
-                      "deployments": load(raw / "deployments.json"), "versions": load(raw / "versions.json")},
+                      "active_version_id": active_version_id, "deployments": deployments, "versions": versions},
                       "container": {"application": app_reduced, "instances": [after],
                           "canonical": {"index_digest": candidate_image["index_digest"], "platform": "linux/amd64", "platform_digest": platform_digest, **canonical},
-                          "mirror": {"image": mirror_image, "manifest_digest": mirror_digest, **mirror}}},
+                          "mirror": {"image": mirror_image, "manifest_digest": mirror_digest, **mirror}},
+                      "database_pool": database_pool},
                   "migration.json": {"command": command, "status": status_value, "provider_execution": {"exit_code": 0, "evidence_id": evidence_id,
                       "instance_name": "instance-0", "command": command, "reported_status": status_value}},
                   "secrets.json": {"required_names": required_secrets,
@@ -2397,7 +3235,7 @@ jobs:
           if (health.get("status") != "ok" or not isinstance(build, dict) or build.get("commit") != commit or
                   build.get("contract_version") != manifest["contract_version"] or readiness.get("status") != "ready" or
                   not isinstance(checks, dict) or any(checks.get(name) != "ok" for name in
-                  ("database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"))):
+                  ("database", "schema", "active_configuration", "quota_completion_pool", "master_key", "signing_key", "worker_heartbeat"))):
               fail("HTTP release semantics are invalid")
 
           candidate_entries = [{"path": name, "sha256": digest_bytes(extracted[name]), "size_bytes": len(extracted[name])} for name in expected_entries]

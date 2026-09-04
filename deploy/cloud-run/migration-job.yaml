@@ -9,22 +9,26 @@ spec:
     metadata:
       annotations:
         run.googleapis.com/cloudsql-instances: ${CLOUD_SQL_CONNECTION_NAME}
-        run.googleapis.com/vpc-access-connector: ${VPC_CONNECTOR}
-        run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
+      taskCount: 1
+      parallelism: 1
       template:
         spec:
-          serviceAccountName: ${SERVICE_ACCOUNT}
-          maxRetries: 1
+          serviceAccountName: ${MIGRATOR_SERVICE_ACCOUNT}
+          maxRetries: 0
           timeoutSeconds: "900"
           containers:
             - name: latchway-migrate
               image: ${LATCHWAY_IMAGE}
               command: ["/latchway"]
               args: ["migrate", "up"]
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
               env:
                 - name: LATCHWAY_DATABASE_URL
                   valueFrom:
                     secretKeyRef:
                       name: latchway-database-url
-                      key: latest
+                      key: ${DATABASE_SECRET_VERSION}

@@ -100,6 +100,8 @@ class FakeRunner(d.Runner):
         if argv[:3] == ["docker", "image", "inspect"]:
             if argv[-1] == d.n.PG_IMAGE: return 0, d.n.canonical({"id": "sha256:"+"b"*64, "os": "linux", "arch": "amd64"})
             return 0, self.runtime_projection
+        if argv[:3] == ["docker", "container", "inspect"] and "LATCHWAY_DB_" in argv[-2]:
+            return 0, b"matched\n"
         if argv[:3] in (["docker", "network", "create"], ["docker", "volume", "create"]):
             key = next(key for key, name in self.paths.items() if name == argv[-1])
             self.objects[key] = {"id": hashlib.sha256(key.encode()).hexdigest()}
@@ -160,6 +162,12 @@ class SafetyTests(unittest.TestCase):
         a, b = (item[1]["env"].copy() for item in gateway)
         self.assertEqual(b.pop("GODEBUG"), "madvdontneed=1,otherflag=0,disablethp=1")
         self.assertEqual(a, b)
+        self.assertEqual(a["LATCHWAY_DB_MAX_CONNECTIONS"], str(d.DB_POOL_MAX_CONNECTIONS))
+        self.assertEqual(a["LATCHWAY_DB_COMPLETION_CONNECTIONS"], str(d.DB_COMPLETION_POOL_MAX_CONNECTIONS))
+        self.assertEqual(
+            d.DB_REGULAR_POOL_MAX_CONNECTIONS + d.DB_COMPLETION_POOL_MAX_CONNECTIONS,
+            d.DB_POOL_MAX_CONNECTIONS,
+        )
         self.assertEqual(gateway[0][0][-1], gateway[1][0][-1])
         for argv, kwargs in creates:
             for key, value in kwargs.get("env", {}).items():
@@ -168,11 +176,28 @@ class SafetyTests(unittest.TestCase):
         loads = [argv for argv, _ in creates if "/tools/latchway-load" in argv]
         self.assertEqual(len(loads), 2)
         self.assertTrue(all(argv[-1] == d.MODE for argv in loads))
+        provisioners = [argv for argv, _ in creates if "/tools/latchway-load-provision" in argv]
+        self.assertEqual(len(provisioners), 2)
+        for argv in provisioners:
+            self.assertEqual(argv[argv.index("-gateway-db-pool-max-connections") + 1], "32")
+            self.assertEqual(argv[argv.index("-gateway-db-regular-pool-max-connections") + 1], "24")
+            self.assertEqual(argv[argv.index("-gateway-db-completion-pool-max-connections") + 1], "8")
         for path in runner.artifacts.iterdir():
             content = path.read_text()
             self.assertNotIn("synthetic private raw failure", content)
             self.assertNotIn("must not survive", content)
         self.assertEqual(d.private_json(runner.artifacts/"A-load.json")["gates"][2]["status"], "failed")
+        environment = d.private_json(runner.artifacts/"A-environment.json")
+        self.assertEqual(environment["gateway_pool_max_connections"], 32)
+        self.assertEqual(environment["gateway_regular_pool_max_connections"], 24)
+        self.assertEqual(environment["gateway_completion_pool_max_connections"], 8)
+        pool_inspections = [
+            argv
+            for argv, _ in runner.commands
+            if argv[:3] == ["docker", "container", "inspect"]
+            and "LATCHWAY_DB_" in argv[-2]
+        ]
+        self.assertEqual(len(pool_inspections), 4)
 
     def test_only_one_attempt_after_ambiguous_create_and_owned_target_cleaned(self):
         runner = self.runner(); runner.create_error = "A_gateway"

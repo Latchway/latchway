@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"strings"
 	"testing"
@@ -72,8 +73,59 @@ func TestBuildLoadConfigRetainsContractFloors(t *testing.T) {
 		environment["postgresql_memory_bytes"] != int64(4<<30) ||
 		environment["postgresql_memory_swap_bytes"] != int64(4<<30) ||
 		environment["postgresql_max_connections"] != 100 ||
-		environment["gateway_db_pool_max_connections"] != 32 {
+		environment["gateway_db_pool_max_connections"] != 32 ||
+		environment["gateway_db_regular_pool_max_connections"] != 24 ||
+		environment["gateway_db_completion_pool_max_connections"] != 8 {
 		t.Fatalf("load environment omitted exact PostgreSQL/pool facts: %#v", environment)
+	}
+}
+
+func TestValidGatewayDBPoolPartitionRequiresExactPositiveSplit(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		total, regular, completion int
+		want                       bool
+	}{
+		{total: 32, regular: 24, completion: 8, want: true},
+		{total: 16, regular: 12, completion: 4, want: true},
+		{total: 5, regular: 3, completion: 2, want: true},
+		{total: 32, regular: 25, completion: 8},
+		{total: 32, regular: 0, completion: 32},
+		{total: 32, regular: 32, completion: 0},
+	} {
+		if got := validGatewayDBPoolPartition(test.total, test.regular, test.completion); got != test.want {
+			t.Fatalf(
+				"validGatewayDBPoolPartition(%d, %d, %d) = %t, want %t",
+				test.total, test.regular, test.completion, got, test.want,
+			)
+		}
+	}
+}
+
+func TestGatewayDBPoolPartitionFlagsAreRegistered(t *testing.T) {
+	t.Parallel()
+	values := options{}
+	flags := flag.NewFlagSet("load-provision-test", flag.ContinueOnError)
+	registerOptionsFlags(flags, &values)
+
+	err := flags.Parse([]string{
+		"-gateway-db-pool-max-connections", "32",
+		"-gateway-db-regular-pool-max-connections", "24",
+		"-gateway-db-completion-pool-max-connections", "8",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags.NArg() != 0 {
+		t.Fatalf("unexpected positional arguments: %q", flags.Args())
+	}
+	if values.gatewayDBPool != 32 || values.gatewayDBRegularPool != 24 || values.gatewayDBCompletionPool != 8 {
+		t.Fatalf(
+			"registered DB pool flags = total %d, regular %d, completion %d",
+			values.gatewayDBPool,
+			values.gatewayDBRegularPool,
+			values.gatewayDBCompletionPool,
+		)
 	}
 }
 
@@ -169,15 +221,17 @@ func TestLoadQuotaFixtureMatchesTrustedPreflightAndTerminalArithmetic(t *testing
 
 func validLoadOptions() options {
 	return options{
-		gatewayURL:         "http://127.0.0.1:8080",
-		localDockerImageID: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		postgresIdentity:   "PostgreSQL 18.6 Alpine local image sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		postgresNetwork:    "same isolated bridge 10.239.100.0/24",
-		postgresCPUMilli:   4000,
-		postgresMemory:     4 << 30,
-		postgresMemorySwap: 4 << 30,
-		postgresMaxConns:   100,
-		gatewayDBPool:      32,
+		gatewayURL:              "http://127.0.0.1:8080",
+		localDockerImageID:      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		postgresIdentity:        "PostgreSQL 18.6 Alpine local image sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		postgresNetwork:         "same isolated bridge 10.239.100.0/24",
+		postgresCPUMilli:        4000,
+		postgresMemory:          4 << 30,
+		postgresMemorySwap:      4 << 30,
+		postgresMaxConns:        100,
+		gatewayDBPool:           32,
+		gatewayDBRegularPool:    24,
+		gatewayDBCompletionPool: 8,
 	}
 }
 

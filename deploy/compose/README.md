@@ -17,6 +17,8 @@ export LATCHWAY_DATABASE_URL='postgresql://latchway:<url-encoded password>@postg
 export LATCHWAY_MASTER_KEY="$(openssl rand -base64 32)"
 export LATCHWAY_PUBLIC_ORIGIN='https://ai.example.com'
 export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -base64 36)"
+export LATCHWAY_DB_MAX_CONNECTIONS=20
+export LATCHWAY_DB_COMPLETION_CONNECTIONS=5
 
 docker compose -f deploy/compose/compose.release.yaml config --quiet
 docker compose -f deploy/compose/compose.release.yaml pull
@@ -31,6 +33,14 @@ docker compose -f deploy/compose/compose.release.yaml run --rm --no-deps \
 Use TLS for an external PostgreSQL service. After creating the first
 administrator, remove `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` and recreate only the
 Latchway service. Keep the database volume and master key.
+
+`LATCHWAY_DB_MAX_CONNECTIONS=20` is the aggregate per-process database budget,
+not the regular-pool size. The completion pool reserves five of those
+connections and regular work receives the remaining 15. Never add the two
+settings when sizing PostgreSQL; require the completion value to be at least
+one and strictly less than the aggregate total. The template supplies both
+settings, so override both together; changing only the aggregate retains the
+explicit completion value rather than recomputing the runtime default.
 
 The release template pins PostgreSQL 18 and mounts its named volume at
 `/var/lib/postgresql`, the 18+ major-version-aware layout. Do not attach a
@@ -66,7 +76,8 @@ gh workflow run deployment-evidence.yml --ref main \
 ```
 
 The workflow generates ephemeral database/bootstrap material, pulls rather
-than builds the exact image, waits for the migration service and health check,
+than builds the exact image, waits for the migration service and its bounded
+loopback `latchway readiness` health check,
 captures `migrate status`, sends SIGTERM with a 35-second platform grace around
 the application's 30-second drain, recreates the healthy service, captures its
 bounded health/readiness responses on the same runner, and removes the entire
