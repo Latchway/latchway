@@ -10,6 +10,10 @@ const providerCredential = process.env.LATCHWAY_CONSOLE_LIVE_E2E_PROVIDER_CREDEN
 test.use({ screenshot: "off", trace: "off", video: "off" });
 
 test.describe("real first-run control plane", () => {
+  // This proof mutates an isolated gateway through the one-time owner bootstrap.
+  // A retry would reuse that already-configured gateway and hide the original failure.
+  test.describe.configure({ retries: 0 });
+
   test.skip(
     !liveStackBaseURL || !bootstrapToken || !ownerPassword || !providerCredential,
     "The live-stack harness supplies an isolated PostgreSQL gateway and ephemeral credentials."
@@ -48,9 +52,13 @@ test.describe("real first-run control plane", () => {
     await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
       "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
     );
+    await page.getByLabel("Exact version code").fill("1");
     await page.getByLabel("Input price (nano-USD per million tokens)").fill("250000");
     await page.getByLabel("Output price (nano-USD per million tokens)").fill("2000000");
-    await page.getByRole("button", { name: "Create application and environment" }).click();
+    const createWorkspace = page.getByRole("button", { name: "Create application and environment" });
+    await expect(createWorkspace).toBeEnabled();
+    expect(await createWorkspace.evaluate((button) => button.closest("form")?.checkValidity() ?? false)).toBe(true);
+    await createWorkspace.click();
 
     await expect(page.getByRole("heading", { name: "Write-only upstream credential" })).toBeVisible();
     await page.getByLabel("Secret value").fill(providerCredential ?? "");
