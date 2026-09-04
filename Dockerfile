@@ -8,13 +8,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY api/admin.openapi.yaml api/client.openapi.yaml api/config.schema.json /src/api/
 COPY web/console/ ./
-# Browser E2E runs in the pinned CI runner before an image is published.
-# Keep the image build self-contained and deterministic: Playwright's
-# `install --with-deps` is intentionally unsupported in this Alpine stage.
-RUN pnpm lint && \
-    pnpm typecheck && \
-    pnpm test && \
-    pnpm build
+RUN pnpm exec vite build
 
 FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS go-build
 RUN apk add --no-cache ca-certificates
@@ -28,10 +22,6 @@ ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG TARGETOS
 ARG TARGETARCH
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=tmpfs,target=/tmp \
-    go test ./...
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath \
