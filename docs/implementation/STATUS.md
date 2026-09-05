@@ -2,6 +2,17 @@
 
 Status date: 2026-09-05
 
+## Server 1.0.1 release preparation
+
+Server 1.0.1 promotes the tested unrestricted App Attest build policy described
+below into the public server image. Runtime, Docker, Make, Console, and release
+workflow version defaults are 1.0.1. The frozen client contract remains 1.0.0,
+wire protocol remains 2 (with legacy 1 accepted), and database schema remains 29.
+No SDK update or new migration is required. Publication uses the existing simple
+multi-architecture GHCR/GitHub release workflow; no CI verification gates are
+added. Publication and the VPS switch must be confirmed after the workflow runs.
+See [the patch release notes](../release/v1.0.1.md) for policy and rollback details.
+
 ## Habitify deployment follow-up
 
 The DigitalOcean deployment at `https://latchway.habitify.me` was installed from

@@ -2,13 +2,15 @@
 
 Latchway is an Apache-2.0-licensed, self-hostable access gateway that lets untrusted iOS, Android, web, and React Native applications call configured AI infrastructure without embedding upstream provider credentials.
 
-The current source candidate implements the mobile-first gateway, native and
+The server implements the mobile-first gateway, native and
 web attestation verifiers, structured and restricted opaque protocols, quotas,
 routing, the operator control plane, telemetry/jobs, deployment templates, and
-evidence-gated release automation. It is **not yet a published or supported
-release**: live provider, physical-device, cloud, resilience, public tag, and
-registry receipts must still pass for the exact immutable candidate. The
-evidence-based state is maintained in
+simple release publication. Public versions are listed in
+[GitHub Releases](https://github.com/Latchway/latchway/releases) and the
+[GHCR package](https://github.com/orgs/Latchway/packages/container/package/latchway).
+Server 1.0.1 adds [an explicit any-build App Attest policy](docs/release/v1.0.1.md).
+Publication does not imply completed physical-device, cloud, or resilience
+qualification. The evidence-based state and outstanding checks are maintained in
 [`docs/implementation/STATUS.md`](docs/implementation/STATUS.md); release claims
 are tracked in
 [`docs/implementation/COMPLETION_REPORT.md`](docs/implementation/COMPLETION_REPORT.md).
@@ -28,7 +30,7 @@ for compatible legacy installation/session clients. Normative artifacts live
 in [`api/`](api/):
 
 - client and Admin OpenAPI 3.1 descriptions;
-- the immutable environment configuration JSON Schema;
+- the environment configuration JSON Schema (with additive server policy options);
 - the stable error registry;
 - protocol compatibility metadata;
 - canonical attestation-binding and RFC 9449 DPoP test vectors.

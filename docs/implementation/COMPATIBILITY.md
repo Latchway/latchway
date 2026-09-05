@@ -6,7 +6,7 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
-The post-1.0.0 Habitify configuration update adds `allowedBundleVersions: ["*"]`
+The server 1.0.1 configuration update adds `allowedBundleVersions: ["*"]`
 for App Attest. This is an explicit server-owned policy accepting any well-formed
 build version; it does not relax bundle identity, validation category, signing
 environment, root certificate, signature, or replay checks. Existing exact lists
