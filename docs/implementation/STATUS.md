@@ -2,22 +2,42 @@
 
 Status date: 2026-09-05
 
-## Server 1.0.2 release preparation
+## Server 1.0.2 and iOS SDK 1.1.0 published
 
-The user authorized publishing the server patch and iOS SDK/example 1.1.0.
 Server runtime, Docker, Make, Console, and release defaults are now 1.0.2;
 [release notes](../release/v1.0.2.md) describe the additive Responses update,
 unchanged schema 29 / contract 1.0.0 / wire 2, and known accounting limits.
-Publication uses the existing simple multi-architecture GHCR/GitHub workflow.
-No new CI gates or cloud verification are added. The private deployment proof
-below remains distinct from final public image publication.
+Publication completed through the existing simple workflows, without new CI
+gates or cloud verification:
+
+- Server `v1.0.2`: commit `3ddd10ba076b1a3740c34ba7f00624f1d270c1ec`,
+  [successful run 33967913721](https://github.com/Latchway/latchway/actions/runs/33967913721),
+  [immutable GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.0.2).
+  Public GHCR `1.0.2` contains Linux amd64 and arm64. Image index digest:
+  `sha256:8a5a72265db22472f8c2881242650a2b73398f101ce01b2f39a873531b7aa3a9`.
+  Anonymous manifest access and pull succeeded. Running the image's `version`
+  command reported 1.0.2 and the exact release commit, contract 1.0.0 / wire 2.
+- iOS `v1.1.0`: annotated tag at `d9a84acd0f9ddf22a42acae88f428d9cce6a0143`,
+  [successful run 33967909630](https://github.com/Latchway/latchway-ios-sdk/actions/runs/33967909630),
+  [immutable GitHub release](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.1.0).
+  CocoaPods publicly lists `Latchway 1.1.0`, including FoundationModels.
+  The source archive checksum is
+  `f2a748aa40e597e1c221f2185f52fb8159c9f2bb9a7da8d01334c110675a251e`;
+  its uncompressed tar exactly matches a fresh archive of the release tag.
+  The example is included; Firebase plist, credentials, signing assets, and
+  user build state are excluded.
+
+The VPS remains on its tested private candidate `1.0.2-dev.fm110.3`; publishing
+these artifacts did not restart or roll forward the live deployment. The
+private development-device proof below is not exact public-image device proof.
 
 ## Foundation Models 1.1.0 integration candidate and physical proof
 
 The optional Swift adapter now translates guided schemas, local tool calls and
 results, sampling controls, context options, metadata, and visible reasoning.
 LatchwayChat has Settings-selectable Foundation Models and URLSession engines
-and a real Open-Meteo weather tool. These changes are local and unpublished.
+and a real Open-Meteo weather tool. The following records prepublication proof;
+the public release coordinates are above.
 The companion Responses gateway update is additive: contract 1.0.0, wire 2,
 and database schema 29 remain unchanged. No CI gates have been added.
 
@@ -41,8 +61,8 @@ now requests reasoning effort `none`; tools, schemas, and conversation history
 remain enabled. The SDK preserves reasoning for compatible routes but cannot
 claim encrypted-reasoning support under this quota method. Seeded sampling,
 vision attachments, and recursive schemas under text accounting remain limited
-as described in the SDK guide. This is development-device proof, not a public
-1.1.0 release or production/extension certification.
+as described in the SDK guide. This is development-device proof, not exact
+public-image device proof or production/extension certification.
 
 All Go package tests, 17 Foundation Models tests on an iOS 27 simulator, and
 the optional FoundationModels CocoaPods subspec validation passed. Full Swift
