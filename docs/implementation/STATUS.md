@@ -4,10 +4,12 @@ Status date: 2026-09-05
 
 ## Habitify deployment follow-up
 
-The DigitalOcean deployment at `https://latchway.habitify.me` runs the published
-1.0.0 image with Caddy, managed PostgreSQL over private VPC TLS, and schema 29.
-Habitify now has Development and Production environment resources and scoped
-write-only OpenRouter credentials. Native client configuration is in progress;
+The DigitalOcean deployment at `https://latchway.habitify.me` was installed from
+published 1.0.0 with Caddy, managed PostgreSQL over private VPC TLS, and schema 29.
+It now runs the VPS-local `1.0.1-habitify.1` update from source `e97acda` to support
+the requested unrestricted App Attest build policy. Habitify Development and
+Production configurations are active for iOS with Firebase identities,
+OpenRouter `openai/gpt-5.6-luna`, and 100,000 total tokens per user per UTC day.
 Android verification credentials and signing identity are still required.
 
 The operator explicitly requested unrestricted app build versions. Current
@@ -15,8 +17,13 @@ source accepts the sole App Attest `allowedBundleVersions` entry `"*"` as an
 explicit unrestricted-build policy. Exact lists retain their existing behavior;
 empty or mixed wildcard lists remain invalid. App identity, root trust,
 attestation environment, signature, replay, and validation-category checks
-remain enforced. Targeted attestation/configuration/session tests pass. This
-additive source change is not yet a published release or a physical-device proof.
+remain enforced. Targeted attestation/configuration/session tests and race tests
+pass. Configuration validation, authenticated/unauthenticated policy simulations,
+and deployed readiness pass. OpenRouter buffered/streaming diagnostics returned
+usage, but the unchanged one-token bound checks failed: direct probes reported
+five completion tokens for a requested cap of one. A 16-token probe honored its
+cap with finish reason `length`. The one-token checks remain failed, not waived.
+This additive source change is not a public release or a physical-device proof.
 
 The following release checkpoint is historical and predates the completed
 1.0.0 package publication and DigitalOcean deployment.
