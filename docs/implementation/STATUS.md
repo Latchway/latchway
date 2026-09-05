@@ -2,7 +2,7 @@
 
 Status date: 2026-09-05
 
-## Server 1.0.1 release preparation
+## Server 1.0.1 published and deployed
 
 Server 1.0.1 promotes the tested unrestricted App Attest build policy described
 below into the public server image. Runtime, Docker, Make, Console, and release
@@ -10,14 +10,24 @@ workflow version defaults are 1.0.1. The frozen client contract remains 1.0.0,
 wire protocol remains 2 (with legacy 1 accepted), and database schema remains 29.
 No SDK update or new migration is required. Publication uses the existing simple
 multi-architecture GHCR/GitHub release workflow; no CI verification gates are
-added. Publication and the VPS switch must be confirmed after the workflow runs.
+added. GitHub release `v1.0.1` and the Linux amd64/arm64 GHCR image were published
+from `4b903e7b4c5e4fbe89783c7c6d077f80edb21a06` by
+[run 33960400339](https://github.com/Latchway/latchway/actions/runs/33960400339).
+The public image index digest is
+`sha256:08045ba102fd77ec6fd7a8fe4a4445423a98d85f874d52d64cea53629457f4fd`.
+Anonymous pulling succeeded. The Habitify VPS now pins both migrator and server
+to this digest without a private-image override. Migration exited 0, health
+reports the exact release version/commit, all seven readiness checks pass, and
+both active environment documents are unchanged. Caddy was not restarted;
+previous Compose files and the compatible private patch remain available for
+rollback. Targeted Go and race tests plus workflow lint passed for the release.
 See [the patch release notes](../release/v1.0.1.md) for policy and rollback details.
 
-## Habitify deployment follow-up
+## Habitify deployment follow-up (before public 1.0.1)
 
 The DigitalOcean deployment at `https://latchway.habitify.me` was installed from
 published 1.0.0 with Caddy, managed PostgreSQL over private VPC TLS, and schema 29.
-It now runs the VPS-local `1.0.1-habitify.1` update from source `e97acda` to support
+It initially ran the VPS-local `1.0.1-habitify.1` update from source `e97acda` to support
 the requested unrestricted App Attest build policy. Habitify Development and
 Production configurations are active for iOS with Firebase identities,
 OpenRouter `openai/gpt-5.6-luna`, and 100,000 total tokens per user per UTC day.
@@ -34,7 +44,9 @@ and deployed readiness pass. OpenRouter buffered/streaming diagnostics returned
 usage, but the unchanged one-token bound checks failed: direct probes reported
 five completion tokens for a requested cap of one. A 16-token probe honored its
 cap with finish reason `length`. The one-token checks remain failed, not waived.
-This additive source change is not a public release or a physical-device proof.
+That private deployment was not a public release or a physical-device proof;
+the public publication and upgrade are recorded above. Physical-device proof
+and the provider diagnostic limitation remain outstanding.
 
 The following release checkpoint is historical and predates the completed
 1.0.0 package publication and DigitalOcean deployment.
