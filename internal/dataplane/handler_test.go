@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
+	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
@@ -2689,6 +2690,47 @@ func TestValidateTrustedInputPreflightBindsDeclaredAccountingFields(t *testing.T
 	overflowProfile.MaximumFramingTokensPerMessage = math.MaxInt64
 	if _, ok := trustedInputBoundFromProfile(overflowProfile, preflight); ok {
 		t.Fatal("overflowing declared message framing produced an input bound")
+	}
+}
+
+func TestResponsesSchemaPreflightPassesGatewayValidation(t *testing.T) {
+	t.Parallel()
+	profile := protocol.TrustedInputProfile{
+		ID: "responses_profile", Protocol: protocol.OpenAIResponsesID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "physical-model", MaximumFramingTokensPerRequest: 1024,
+		MaximumFramingTokensPerMessage: 128, MaximumContextTokens: 100000,
+	}
+	decision := policy.Decision{
+		Feature: configuration.Feature{Protocol: profile.Protocol},
+		Model:   configuration.Model{UpstreamModel: profile.PhysicalModel},
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://gateway.example/v1/responses", strings.NewReader(`{"model":"physical-model","input":"Weather in Singapore?","store":false,"stream":true,"max_output_tokens":1024,"tools":[{"type":"function","name":"weather_check","description":"Current weather","strict":true,"parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}}],"text":{"format":{"type":"json_schema","name":"answer","strict":true,"schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}}}}`))
+	request.Header.Set("Content-Type", "application/json")
+	preflight, err := (openairesponses.Adapter{}).PreflightInput(context.Background(), request, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.ExpandedSchemaBytes <= 0 {
+		t.Fatal("schema overhead was not reserved")
+	}
+	if err := validateTrustedInputPreflight(profile, decision, 1024, preflight); err != nil {
+		t.Fatalf("Responses tool/schema proof rejected by gateway: %v", err)
+	}
+	if err := verifyAndRebindPreflightBody(request, preflight); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []int64{-1, 0, preflight.ExpandedSchemaBytes + 1, 4*1024*1024 + 1} {
+		invalid := preflight
+		invalid.ExpandedSchemaBytes = value
+		if err := validateTrustedInputPreflight(profile, decision, 1024, invalid); !errors.Is(err, policy.ErrConfiguration) {
+			t.Fatalf("altered schema proof %d accepted", value)
+		}
+	}
+	other := profile
+	other.Protocol = protocol.OpenAIChatID
+	if _, ok := trustedInputBoundFromProfile(other, preflight); ok {
+		t.Fatal("Responses schema allowance accepted for another protocol")
 	}
 }
 

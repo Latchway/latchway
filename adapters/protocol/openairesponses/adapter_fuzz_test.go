@@ -85,6 +85,7 @@ func FuzzInspectAndRewrite(f *testing.F) {
 }
 
 func FuzzTrustedInputPreflight(f *testing.F) {
+	f.Add(`{"model":"client","input":"hello","tools":[{"type":"function","name":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}]}`)
 	f.Add(`{"model":"client","input":"hello"}`)
 	f.Add(`{"model":"client","input":[{"role":"user","content":"你好 🌉"}],"stream":true}`)
 	f.Add(`{"model":"client","input":"hello","tools":[{"type":"function","name":"lookup"}]}`)
@@ -123,7 +124,8 @@ func FuzzTrustedInputPreflight(f *testing.F) {
 			return
 		}
 		if preflight.RewrittenBodySHA256 != sha256.Sum256(before) ||
-			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3 ||
+			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3+preflight.ExpandedSchemaBytes ||
+			preflight.ExpandedSchemaBytes < 0 || preflight.ExpandedSchemaBytes > 4*1024*1024 ||
 			preflight.OutputTokenBound <= 0 ||
 			preflight.TotalTokenBound != preflight.InputTokenBound+preflight.OutputTokenBound {
 			t.Fatalf("invalid trusted input proof: %+v", preflight)

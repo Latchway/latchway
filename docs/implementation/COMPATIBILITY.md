@@ -6,6 +6,15 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+Server **1.0.2** adds upstream Responses metadata, sampling/reasoning controls,
+and trusted local tool/schema input accounting for iOS SDK **1.1.0**. No frozen
+client contract artifact, header, envelope, or database migration changes.
+The SDK's core transport still supports older 1.0.x servers; the expanded
+Foundation Models requests require 1.0.2. OS 27 runtime, upstream model support,
+and quota-method limits apply; see [the patch notes](../release/v1.0.2.md).
+The frozen framework registry remains a historical contract checkpoint, not
+a claim of new production or extension conformance.
+
 The server 1.0.1 configuration update adds `allowedBundleVersions: ["*"]`
 for App Attest. This is an explicit server-owned policy accepting any well-formed
 build version; it does not relax bundle identity, validation category, signing

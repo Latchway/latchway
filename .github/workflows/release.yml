@@ -6,7 +6,7 @@ on:
       version:
         description: Version without the v prefix
         required: true
-        default: 1.0.1
+        default: 1.0.2
         type: string
 
 permissions:
@@ -51,8 +51,10 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: >-
-          gh release create "v${{ inputs.version }}"
-          --target "${{ github.sha }}"
-          --generate-notes
+          gh release create "v$RELEASE_VERSION"
+          --target "$GITHUB_SHA"
+          --title "Latchway server v$RELEASE_VERSION"
+          --notes-file "docs/release/v$RELEASE_VERSION.md"
           --latest

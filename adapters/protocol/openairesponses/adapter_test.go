@@ -99,7 +99,7 @@ func TestTrustedInputPreflightBindsExactRewrittenTextItems(t *testing.T) {
 	}
 }
 
-func TestTrustedInputPreflightRejectsRichOrMismatchedResponses(t *testing.T) {
+func TestTrustedInputPreflightAccountsLocalToolsAndSchemas(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -127,8 +127,8 @@ func TestTrustedInputPreflightRejectsRichOrMismatchedResponses(t *testing.T) {
 				Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
 				PhysicalModel: "server", MaximumContextTokens: 1_000_000,
 			}
-			if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
-				t.Fatalf("PreflightInput() result=%+v error=%v, want closed failure", result, err)
+			if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err != nil || result.InputTokenBound < result.RequestBytes || result.TotalTokenBound != result.InputTokenBound+8 {
+				t.Fatalf("PreflightInput() result=%+v error=%v, want conservative local-content bound", result, err)
 			}
 		})
 	}
@@ -371,7 +371,7 @@ func TestInspectUsesExactRootAllowlistAndValidatedGenerationControls(t *testing.
 		name     string
 		fragment string
 	}{
-		{name: "metadata", fragment: `"metadata":{"tenant":"other"}`},
+		{name: "non-string metadata", fragment: `"metadata":{"tenant":{"admin":true}}`},
 		{name: "service tier", fragment: `"service_tier":"priority"`},
 		{name: "reasoning extension", fragment: `"reasoning":{"context":"auto"}`},
 		{name: "moderation extension", fragment: `"moderation":{"model":"omni-moderation-latest"}`},
@@ -452,7 +452,7 @@ func TestInspectRejectsRemoteAndUnboundInputItems(t *testing.T) {
 		{name: "message remote extra", body: `{"model":"client","input":[{"type":"message","role":"user","content":"hello","id":"msg_other"}]}`},
 		{name: "message object content", body: `{"model":"client","input":[{"role":"user","content":{"type":"input_text","text":"hello"}}]}`},
 		{name: "assistant input image", body: `{"model":"client","input":[{"role":"assistant","content":[{"type":"input_image","file_id":"file_other"}]}]}`},
-		{name: "undeclared function call", body: `{"model":"client","input":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]}`},
+		{name: "invalid historical function name", body: `{"model":"client","input":[{"type":"function_call","call_id":"call_1","name":"invalid/tool","arguments":"{}"}]}`},
 		{name: "unbound function output", body: `{"model":"client","input":[{"type":"function_call_output","call_id":"call_1","output":"result"}],"tools":[{"type":"function","name":"lookup"}]}`},
 		{name: "function call remote ID", body: `{"model":"client","input":[{"type":"function_call","id":"fc_other","call_id":"call_1","name":"lookup","arguments":"{}"}],"tools":[{"type":"function","name":"lookup"}]}`},
 		{name: "tool kind mismatch", body: `{"model":"client","input":[{"type":"custom_tool_call","call_id":"call_1","name":"lookup","input":"x"}],"tools":[{"type":"function","name":"lookup"}]}`},
@@ -836,6 +836,7 @@ func TestSSEObserverRejectsMalformedAndNonterminalStreams(t *testing.T) {
 		{name: "incomplete event", stream: "data: " + completed + "\n"},
 		{name: "bytes after completed", stream: "data: " + completed + "\n\n", after: "data: {\"type\":\"response.created\"}\n\n", wantObserve: true},
 		{name: "duplicate completed", stream: "data: " + completed + "\n\ndata: " + completed + "\n\n", wantObserve: true},
+		{name: "duplicate sentinel", stream: "data: " + completed + "\n\ndata: [DONE]\n\ndata: [DONE]\n\n", wantObserve: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -857,6 +858,23 @@ func TestSSEObserverRejectsMalformedAndNonterminalStreams(t *testing.T) {
 				t.Fatalf("Finalize() error = %v, want upstream_protocol_error", err)
 			}
 		})
+	}
+}
+
+func TestSSEObserverAcceptsOneOptionalSentinelAfterCanonicalCompletion(t *testing.T) {
+	stream := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":12,\"output_tokens\":9,\"total_tokens\":21}}}\n\ndata: [DONE]\n\n"
+	for split := 0; split <= len(stream); split++ {
+		observer := &sseObserver{}
+		if err := observer.Observe([]byte(stream[:split])); err != nil {
+			t.Fatal(err)
+		}
+		if err := observer.Observe([]byte(stream[split:])); err != nil {
+			t.Fatal(err)
+		}
+		usage, err := observer.Finalize()
+		if err != nil || !usage.Known || usage.InputTokens != 12 || usage.OutputTokens != 9 || usage.TotalTokens != 21 {
+			t.Fatalf("split %d: usage=%+v err=%v", split, usage, err)
+		}
 	}
 }
 

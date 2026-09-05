@@ -2,6 +2,67 @@
 
 Status date: 2026-09-05
 
+## Server 1.0.2 release preparation
+
+The user authorized publishing the server patch and iOS SDK/example 1.1.0.
+Server runtime, Docker, Make, Console, and release defaults are now 1.0.2;
+[release notes](../release/v1.0.2.md) describe the additive Responses update,
+unchanged schema 29 / contract 1.0.0 / wire 2, and known accounting limits.
+Publication uses the existing simple multi-architecture GHCR/GitHub workflow.
+No new CI gates or cloud verification are added. The private deployment proof
+below remains distinct from final public image publication.
+
+## Foundation Models 1.1.0 integration candidate and physical proof
+
+The optional Swift adapter now translates guided schemas, local tool calls and
+results, sampling controls, context options, metadata, and visible reasoning.
+LatchwayChat has Settings-selectable Foundation Models and URLSession engines
+and a real Open-Meteo weather tool. These changes are local and unpublished.
+The companion Responses gateway update is additive: contract 1.0.0, wire 2,
+and database schema 29 remain unchanged. No CI gates have been added.
+
+Physical verification passed renewed real development App Attest and Secure
+Enclave trust. It exposed two gateway integration defects missed by isolated
+adapter tests: schema overhead was absent from the central trusted-proof
+formula, and OpenRouter's optional `[DONE]` trailer after `response.completed`
+was incorrectly classified as failure/unknown usage. Both have regression
+coverage and the tested VPS-local candidate `1.0.2-dev.fm110.3`; the original
+release image and Compose configuration are retained for rollback. The final
+physical run completed Singapore then Ho Chi Minh City with two real weather
+lookups and four successful Responses requests, consuming 11,200 total tokens.
+The server's final request is `req_01M1RRS4RH3Q4AQF46Q5MJWM45`; the phone's
+68,181-token cumulative quota snapshot includes earlier diagnostic runs.
+The original Custom URLSession chat also passed on the same iPhone after the
+upgrade. Firebase, App Attest, Secure Enclave, DPoP, and quotas were not bypassed.
+
+An intermediate multi-turn denial exposed an explicit backend limitation:
+encrypted reasoning cannot obtain a trusted local-text input bound. The demo
+now requests reasoning effort `none`; tools, schemas, and conversation history
+remain enabled. The SDK preserves reasoning for compatible routes but cannot
+claim encrypted-reasoning support under this quota method. Seeded sampling,
+vision attachments, and recursive schemas under text accounting remain limited
+as described in the SDK guide. This is development-device proof, not a public
+1.1.0 release or production/extension certification.
+
+All Go package tests, 17 Foundation Models tests on an iOS 27 simulator, and
+the optional FoundationModels CocoaPods subspec validation passed. Full Swift
+package tests and a fresh trusted-input fuzz run also passed. Habitify
+Development and Production active configuration documents remain unchanged.
+
+## Disposable LatchwayChat physical iPhone proof
+
+The separate `latchway-chat` Development application on the Habitify-hosted
+server 1.0.1 was exercised by the native SwiftUI LatchwayChat example on an iPhone
+16 Pro / iOS 27. Firebase project `latchway` email/password signup and login
+succeeded. The gateway recorded direct iOS App Attest trust (`app_verified`),
+and the SDK reported Secure Enclave DPoP keys. Logical request
+`req_01M1RK8XNRB5NRAWJGDFYMKTYB` completed through OpenRouter with 2,143 input and
+209 output tokens, matching the on-device 2,352-token quota snapshot. The first
+malformed, missing-model request was denied before dispatch and then corrected
+in the example. Existing Habitify configurations were not modified. This is
+development-device integration proof, not production Apple distribution,
+extension, Android, load, or comprehensive security-conformance evidence.
+
 ## Server 1.0.1 published and deployed
 
 Server 1.0.1 promotes the tested unrestricted App Attest build policy described

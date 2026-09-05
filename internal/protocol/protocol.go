@@ -124,10 +124,14 @@ type TrustedInputPreflight struct {
 	// Anthropic messages, Responses input items, or Embeddings text inputs.
 	// The historical field name is retained in the internal proof contract so
 	// existing durable fingerprints remain stable.
-	MessageCount     int64
-	InputTokenBound  int64
-	OutputTokenBound int64
-	TotalTokenBound  int64
+	MessageCount int64
+	// ExpandedSchemaBytes is additional conservative input accounting for
+	// bounded local schema expansion in Responses. It never changes the exact
+	// RequestBytes/body digest binding and is zero for other protocols.
+	ExpandedSchemaBytes int64
+	InputTokenBound     int64
+	OutputTokenBound    int64
+	TotalTokenBound     int64
 }
 
 // RequestMeasurements binds exact request-shape units to the rewritten body

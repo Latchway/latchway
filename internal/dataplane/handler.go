@@ -1727,6 +1727,8 @@ func trustedInputBoundFromProfile(
 	preflight protocol.TrustedInputPreflight,
 ) (int64, bool) {
 	if preflight.RequestBytes <= 0 || preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
+		preflight.ExpandedSchemaBytes < 0 || preflight.ExpandedSchemaBytes > 4*1024*1024 ||
+		preflight.ExpandedSchemaBytes != 0 && profile.Protocol != protocol.OpenAIResponsesID ||
 		profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
 		profile.MaximumFramingTokensPerMessage != 0 &&
 			preflight.MessageCount > math.MaxInt64/profile.MaximumFramingTokensPerMessage {
@@ -1740,7 +1742,11 @@ func trustedInputBoundFromProfile(
 	if bound > math.MaxInt64-messageFraming {
 		return 0, false
 	}
-	return bound + messageFraming, true
+	bound += messageFraming
+	if bound > math.MaxInt64-preflight.ExpandedSchemaBytes {
+		return 0, false
+	}
+	return bound + preflight.ExpandedSchemaBytes, true
 }
 
 func verifyAndRebindPreflightBody(

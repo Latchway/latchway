@@ -9,6 +9,8 @@ simple release publication. Public versions are listed in
 [GitHub Releases](https://github.com/Latchway/latchway/releases) and the
 [GHCR package](https://github.com/orgs/Latchway/packages/container/package/latchway).
 Server 1.0.1 adds [an explicit any-build App Attest policy](docs/release/v1.0.1.md).
+Server 1.0.2 adds [rich Responses support for iOS SDK 1.1.0](docs/release/v1.0.2.md),
+including trusted tool/schema quota accounting and compatible stream completion.
 Publication does not imply completed physical-device, cloud, or resilience
 qualification. The evidence-based state and outstanding checks are maintained in
 [`docs/implementation/STATUS.md`](docs/implementation/STATUS.md); release claims

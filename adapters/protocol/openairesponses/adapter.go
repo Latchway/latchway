@@ -241,10 +241,10 @@ func (a Adapter) MeasureRequest(
 }
 
 // PreflightInput proves a conservative bound over the exact rewritten
-// Responses body. The proof deliberately accepts only local text input and
-// text message items. Files, media, tools, provider-hosted state, schemas, and
-// every other richer shape remain usable when trusted input accounting is not
-// selected, but fail closed here.
+// Responses body, including local function definitions, call history, output
+// schemas and visible reasoning. Remote state/media and encrypted reasoning
+// remain outside this proof. Schema references are expanded with bounded work
+// for accounting; recursive/unbounded expansion fails closed.
 func (a Adapter) PreflightInput(
 	ctx context.Context,
 	request *http.Request,
@@ -267,6 +267,14 @@ func (a Adapter) PreflightInput(
 	if err != nil {
 		return protocol.TrustedInputPreflight{}, err
 	}
+	schemaBytes, schemaItems, err := trustedSchemaAccounting(object)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	itemCount += schemaItems
+	if itemCount > 4096 {
+		return protocol.TrustedInputPreflight{}, requestMalformed("trusted schema framing exceeds its bound")
+	}
 	requestBytes, ok := checkedLength(len(raw))
 	if !ok {
 		return protocol.TrustedInputPreflight{}, errors.New("trusted input request size overflows int64")
@@ -283,6 +291,10 @@ func (a Adapter) PreflightInput(
 	if !ok {
 		return protocol.TrustedInputPreflight{}, errors.New("trusted input bound overflows int64")
 	}
+	inputBound, ok = checkedAdd(inputBound, schemaBytes)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted schema bound overflows int64")
+	}
 	totalBound, ok := checkedAdd(inputBound, outputBound)
 	if !ok {
 		return protocol.TrustedInputPreflight{}, errors.New("trusted total-token bound overflows int64")
@@ -296,7 +308,7 @@ func (a Adapter) PreflightInput(
 		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
 		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
 		RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: requestBytes,
-		MessageCount: itemCount, InputTokenBound: inputBound,
+		MessageCount: itemCount, ExpandedSchemaBytes: schemaBytes, InputTokenBound: inputBound,
 		OutputTokenBound: outputBound, TotalTokenBound: totalBound,
 	}, nil
 }
@@ -325,11 +337,8 @@ func validateTrustedInputRequest(
 	object map[string]any,
 	profile protocol.TrustedInputProfile,
 ) (int64, int64, error) {
-	if !hasOnlyMembers(
-		object,
-		"model", "input", "instructions", "max_output_tokens", "stream", "stream_options", "store",
-	) {
-		return 0, 0, requestMalformed("trusted input preflight supports only bounded text request fields")
+	if _, err := inspectRequestObject(object, nil); err != nil {
+		return 0, 0, err
 	}
 	model, ok := object["model"].(string)
 	if !ok || model != profile.PhysicalModel {
@@ -348,7 +357,7 @@ func validateTrustedInputRequest(
 	if err := validateInstructions(object); err != nil {
 		return 0, 0, err
 	}
-	itemCount, err := trustedTextInputItemCount(object["input"])
+	itemCount, err := trustedLocalInputItemCount(object["input"])
 	if err != nil {
 		return 0, 0, err
 	}
@@ -362,7 +371,7 @@ func validateTrustedInputRequest(
 	return itemCount, outputBound, nil
 }
 
-func trustedTextInputItemCount(value any) (int64, error) {
+func trustedLocalInputItemCount(value any) (int64, error) {
 	switch typed := value.(type) {
 	case string:
 		if typed == "" || !utf8.ValidString(typed) || strings.ContainsRune(typed, '\x00') {
@@ -375,16 +384,23 @@ func trustedTextInputItemCount(value any) (int64, error) {
 		}
 		for _, value := range typed {
 			item, ok := value.(map[string]any)
-			if !ok || !hasOnlyMembers(item, "type", "role", "content") {
-				return 0, requestMalformed("trusted input supports only text message items")
+			if !ok {
+				return 0, requestMalformed("trusted input items must be local objects")
 			}
-			if itemType, present := item["type"]; present && itemType != "message" {
-				return 0, requestMalformed("trusted input supports only text message items")
-			}
-			role, ok := item["role"].(string)
-			if !ok || !stringIn(role, "developer", "system", "user", "assistant") ||
-				!trustedMessageContent(item["content"], role) {
-				return 0, requestMalformed("trusted input supports only text message items")
+			switch item["type"] {
+			case nil, "message":
+				role, _ := item["role"].(string)
+				if !trustedMessageContent(item["content"], role) {
+					return 0, requestMalformed("trusted messages must contain local text")
+				}
+			case "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+				// The full inspector validated IDs, local text and call/output pairing.
+			case "reasoning":
+				if _, present := item["encrypted_content"]; present {
+					return 0, requestMalformed("encrypted reasoning cannot be bounded by text accounting")
+				}
+			default:
+				return 0, requestMalformed("trusted input supports only bounded local content")
 			}
 		}
 		return int64(len(typed)), nil
@@ -553,7 +569,7 @@ func validateRootMembers(root map[string]any) error {
 		root,
 		"model", "input", "instructions", "max_output_tokens",
 		"stream", "stream_options", "background", "tools", "tool_choice", "parallel_tool_calls",
-		"store", "temperature", "top_p", "top_logprobs", "truncation", "text",
+		"store", "temperature", "top_p", "top_k", "top_logprobs", "truncation", "text", "metadata", "reasoning",
 	) {
 		return requestMalformed("Responses request contains an unsupported root member")
 	}
@@ -561,6 +577,9 @@ func validateRootMembers(root map[string]any) error {
 }
 
 func validateGenerationControls(root map[string]any) error {
+	if err := validateFoundationModelsControls(root); err != nil {
+		return err
+	}
 	if err := optionalNumberRange(root, "temperature", 0, 2); err != nil {
 		return err
 	}
@@ -808,9 +827,8 @@ func validateInputItems(values []any, tools map[string]localToolKind) error {
 			if err != nil {
 				return err
 			}
-			if tools[name] != localFunctionTool {
-				return requestMalformed("function call input must name a declared local function tool")
-			}
+			// Historical calls may name a now-disabled tool. Only root.tools
+			// defines what the model may invoke on this generation.
 			if _, duplicate := calls[callID]; duplicate {
 				return requestMalformed("input tool call identifiers must be unique")
 			}
@@ -829,6 +847,10 @@ func validateInputItems(values []any, tools map[string]localToolKind) error {
 			calls[callID] = localCall{kind: localCustomTool, name: name}
 		case "function_call_output", "custom_tool_call_output":
 			outputItems = append(outputItems, item)
+		case "reasoning":
+			if err := validateReasoningItem(item); err != nil {
+				return err
+			}
 		default:
 			return requestMalformed("remote, file, media, reasoning, and provider-hosted input items are not supported")
 		}
@@ -1218,20 +1240,18 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 func (o *jsonObserver) FirstTokenObserved() bool { return o.firstToken }
 
 type sseObserver struct {
-	pending    []byte
-	scanOffset int
-	lineStart  int
-	eventEnd   int
-	events     int
-	usage      protocol.Usage
-	done       bool
-	firstToken bool
+	pending      []byte
+	scanOffset   int
+	lineStart    int
+	eventEnd     int
+	events       int
+	usage        protocol.Usage
+	done         bool
+	sentinelSeen bool
+	firstToken   bool
 }
 
 func (o *sseObserver) Observe(chunk []byte) error {
-	if o.done && len(chunk) > 0 {
-		return upstreamMalformed("upstream SSE stream contains bytes after response.completed")
-	}
 	for len(chunk) > 0 {
 		room := maximumSSEEvent + 4 - len(o.pending)
 		if room <= 0 {
@@ -1244,9 +1264,6 @@ func (o *sseObserver) Observe(chunk []byte) error {
 		chunk = chunk[room:]
 		if err := o.drainEvents(false); err != nil {
 			return err
-		}
-		if o.done && (len(o.pending) > 0 || len(chunk) > 0) {
-			return upstreamMalformed("upstream SSE stream contains bytes after response.completed")
 		}
 	}
 	return nil
@@ -1323,9 +1340,6 @@ func (o *sseObserver) compactSSEPrefix(consumed int) {
 }
 
 func (o *sseObserver) observeEvent(event []byte) error {
-	if o.done {
-		return upstreamMalformed("upstream SSE stream contains bytes after response.completed")
-	}
 	if o.events >= maximumSSEEvents {
 		return upstreamMalformed("upstream SSE stream contains too many events")
 	}
@@ -1339,6 +1353,16 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	}
 	if !hasData {
 		return nil
+	}
+	// Some compatible providers append the SSE sentinel after the canonical
+	// terminal response. It carries no usage and cannot complete a stream by
+	// itself. Reject any subsequent data event, including duplicate sentinels.
+	if o.done {
+		if !o.sentinelSeen && eventName == "" && bytes.Equal(data, []byte("[DONE]")) {
+			o.sentinelSeen = true
+			return nil
+		}
+		return upstreamMalformed("upstream SSE stream contains data after response.completed")
 	}
 	value, err := jsonsafe.Decode(data)
 	if err != nil {
