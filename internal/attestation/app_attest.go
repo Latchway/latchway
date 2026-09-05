@@ -103,9 +103,9 @@ type AppAttestKeyStore interface {
 
 // AppAttestConfig contains only server-owned values. The Apple App ID is the
 // App ID prefix joined to the bundle identifier with a period. Extension
-// allowlists are mandatory because current Apple validation guidance requires
-// checking both values when present rather than accepting client-selected
-// metadata. Valid legacy authenticator data has neither extension.
+// policies are mandatory. The server may explicitly allow all well-formed build
+// versions with the sole entry "*"; validation categories remain allowlisted.
+// Valid legacy authenticator data has neither extension.
 type AppAttestConfig struct {
 	ApplicationID               string
 	EnvironmentID               string
@@ -185,6 +185,10 @@ func newAppAttestVerifier(config AppAttestConfig, roots *x509.CertPool) (*AppAtt
 		return nil, ErrConfiguration
 	}
 	for _, version := range config.AllowedBundleVersions {
+		if version == "*" && len(config.AllowedBundleVersions) == 1 {
+			versions[version] = struct{}{}
+			continue
+		}
 		if !validAppAttestBundleVersion(version) {
 			return nil, ErrConfiguration
 		}
@@ -552,7 +556,8 @@ func (verifier *AppAttestVerifier) extensionsAllowed(extensions appAttestExtensi
 	}
 	_, categoryAllowed := verifier.allowedCategories[extensions.validationCategory]
 	_, versionAllowed := verifier.allowedBundleVersions[extensions.bundleVersion]
-	return categoryAllowed && versionAllowed
+	_, anyVersionAllowed := verifier.allowedBundleVersions["*"]
+	return categoryAllowed && validAppAttestBundleVersion(extensions.bundleVersion) && (versionAllowed || anyVersionAllowed)
 }
 
 func decodeAppAttestEvidence(

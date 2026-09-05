@@ -6,6 +6,16 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+The post-1.0.0 Habitify configuration update adds `allowedBundleVersions: ["*"]`
+for App Attest. This is an explicit server-owned policy accepting any well-formed
+build version; it does not relax bundle identity, validation category, signing
+environment, root certificate, signature, or replay checks. Existing exact lists
+are unchanged, and empty or mixed wildcard lists are rejected. No client wire
+fields, SDK changes, or database migration are required. The published 1.0.0
+server rejects this new value; deployments using it must retain a compatible
+server or replace the wildcard with an exact list before a rollback. Frozen
+1.0.0 contract bundles remain unchanged.
+
 | Field | Legacy compatibility | Current contract |
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `released`, `released_at: 2026-09-01T20:25:00Z` |

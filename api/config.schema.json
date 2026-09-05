@@ -723,7 +723,7 @@
         },
         "allowedBundleVersions": {
           "type": "array",
-          "description": "Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION.",
+          "description": "Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. Use [\"*\"] explicitly to allow any well-formed build version while retaining all identity, signature, environment, and validation-category checks.",
           "minItems": 1,
           "maxItems": 64,
           "uniqueItems": true,
@@ -731,8 +731,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?$"
-          }
+            "pattern": "^(?:\\*|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?)$"
+          },
+          "allOf": [
+            {
+              "if": { "contains": { "const": "*" } },
+              "then": { "maxItems": 1 }
+            }
+          ]
         }
       }
     },

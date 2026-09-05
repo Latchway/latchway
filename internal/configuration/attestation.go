@@ -136,6 +136,9 @@ func validAppAttestConfiguration(configuration *AppAttestConfiguration) bool {
 	}
 	versions := make(map[string]struct{}, len(configuration.AllowedBundleVersions))
 	for _, version := range configuration.AllowedBundleVersions {
+		if version == "*" && len(configuration.AllowedBundleVersions) == 1 {
+			continue
+		}
 		if !validConfiguredBundleVersion(version) {
 			return false
 		}
