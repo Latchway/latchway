@@ -1,6 +1,51 @@
 # Implementation status
 
-Status date: 2026-09-05
+Status date: 2026-09-07
+
+## Server 1.0.3 release preparation
+
+Version defaults and [release notes](../release/v1.0.3.md) now promote the
+shared iOS/Android native/RN root correction below. Contract 1.0.0, wire 2 and
+schema 29 remain unchanged. The companion React Native 1.1.2 patch corrects
+exact URL handling in both its optional bootstrap and app-owned example.
+iOS 1.1.0 and Android 1.0.0 contain the latest native SDK code; no native
+code-only version bump is required for the server correction. Public artifact
+publication is being verified separately; the VPS remains on the recorded
+compatible private image until an explicit deployment upgrade.
+
+## Native / React Native shared-bundle and shared-package support
+
+The configuration validator and runtime snapshot loader now permit one directly
+App Attest-verified `ios` / `react_native_ios` main-app root pair to share a bundle
+identifier. Root selection remains exact-platform, and both roots still require
+their own valid required App Attest selection and matching attested bundle.
+The Android counterpart permits one directly Play Integrity-verified `android` /
+`react_native_android` app-root pair to share a package. Exact-platform/provider
+root selection and matching attested package remain required. Same-platform
+duplicates, third roots, delegated overlaps, watchOS/Wear OS overlaps, wrong kinds
+and wrong providers remain rejected. No identity, attestation, quota, schema or
+wire format changes accompany these additive configuration corrections.
+
+The complete Go test suite passes, including positive platform-resolution and
+negative semantic/runtime regression coverage. The explicitly authorized private
+VPS build `1.0.2-dev.android.1` is deployed and healthy. Its Linux amd64 image index
+is `sha256:8673bfb8370b38687c38d01f82f716ce4f2a96529796f6a46afd149562879805`.
+Habitify Development and Production now enable all four native/RN iOS/Android
+platforms with unchanged Firebase, existing App Attest requirements, model and
+shared daily token quota. Required Play Integrity policies accept any version,
+require device integrity and licensing, and disallow testing responses. The
+provided verifier credential is stored as an encrypted secret per environment.
+No IAM grants were added. Scoped Google OAuth and a deliberately invalid-token
+decoder rejection passed; this is not real device-verdict or project-linkage proof.
+
+Both revisions passed validation, ten positive/negative simulations each and
+independent post-activation reads proving only the Android additions differ from
+the preceding RN iOS-only configurations. No new Habitify physical-device proof,
+package publication or CI gates are part of this work. The private build includes
+uncommitted source changes; it is not the public 1.0.2 image. Roll back both
+configuration revisions before restoring an older server that rejects shared
+identifiers. In particular, disable Android through the previous revisions before
+restoring `1.0.2-dev.rn-ios.1`; the prior image/override are retained on the VPS.
 
 ## Server 1.0.2 and iOS SDK 1.1.0 published
 
@@ -27,8 +72,9 @@ gates or cloud verification:
   The example is included; Firebase plist, credentials, signing assets, and
   user build state are excluded.
 
-The VPS remains on its tested private candidate `1.0.2-dev.fm110.3`; publishing
-these artifacts did not restart or roll forward the live deployment. The
+At publication time the VPS remained on private candidate `1.0.2-dev.fm110.3`;
+publishing these artifacts did not restart or roll forward the live deployment.
+The later RN shared-bundle deployment is recorded above. The
 private development-device proof below is not exact public-image device proof.
 
 ## Foundation Models 1.1.0 integration candidate and physical proof

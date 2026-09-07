@@ -88,7 +88,7 @@ func componentDefinitionSemanticIssues(
 	environmentKind string,
 ) []Issue {
 	issues := make([]Issue, 0)
-	identifierOwners := make(map[string]string)
+	identifierOwners := make(map[string][]string)
 	parents := make(map[string][]string, len(definitions))
 
 	for _, definitionID := range sortedMapKeys(definitions) {
@@ -110,15 +110,18 @@ func componentDefinitionSemanticIssues(
 			"origins":           stringArray(identifiers, "origins"),
 		} {
 			for index, value := range values {
-				if owner, exists := identifierOwners[value]; exists && owner != definitionID {
-					issues = append(issues, errorIssue(
-						"component_identifier_duplicate",
-						fmt.Sprintf("%s/identifiers/%s/%d", base, field, index),
-						"A platform identifier may belong to only one Component Definition.",
-					))
-				} else {
-					identifierOwners[value] = definitionID
+				for _, owner := range identifierOwners[value] {
+					if owner != definitionID && !nativeReactNativeRootPair(
+						semanticIdentifierOwner(definitions[owner]), semanticIdentifierOwner(definition),
+					) {
+						issues = append(issues, errorIssue(
+							"component_identifier_duplicate",
+							fmt.Sprintf("%s/identifiers/%s/%d", base, field, index),
+							"A platform identifier may belong to only one Component Definition, except an App Attest iOS/React Native iOS main-app root pair or Play Integrity Android/React Native Android app-root pair, both directly attested.",
+						))
+					}
 				}
+				identifierOwners[value] = append(identifierOwners[value], definitionID)
 			}
 		}
 		if !componentIdentifierShapeValid(platform, identifiers, environmentKind) {

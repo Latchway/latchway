@@ -168,16 +168,18 @@ func runtimeComponentDefinition(raw compiledComponentDefinition) (ComponentDefin
 }
 
 func runtimeComponentDefinitionGraph(definitions map[string]ComponentDefinition) bool {
-	identifierOwners := make(map[string]string)
+	identifierOwners := make(map[string][]string)
 	for definitionID, definition := range definitions {
 		for _, identifier := range append(
 			append(append([]string(nil), definition.Identifiers.BundleIdentifiers...), definition.Identifiers.PackageNames...),
 			definition.Identifiers.Origins...,
 		) {
-			if owner, exists := identifierOwners[identifier]; exists && owner != definitionID {
-				return false
+			for _, owner := range identifierOwners[identifier] {
+				if owner != definitionID && !nativeReactNativeRootPair(definitions[owner], definition) {
+					return false
+				}
 			}
-			identifierOwners[identifier] = definitionID
+			identifierOwners[identifier] = append(identifierOwners[identifier], definitionID)
 		}
 		if definition.Delegation == nil {
 			continue

@@ -6,6 +6,16 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+Server **1.0.3** accepts a directly attested native/RN iOS main-app root pair
+sharing a bundle, or native/RN Android app-root pair sharing a package. Exact
+platform/provider selection and required attestation remain unchanged. Existing
+SDK releases work without an API update. Roll back affected active configurations
+before restoring an older server that rejects shared identities. Schema 29,
+contract 1.0.0 and wire 2 are unchanged; see [the patch notes](../release/v1.0.3.md).
+React Native **1.1.2** independently fixes its optional/example URL capability
+probe; it keeps the existing 1.0.0 native dependency locks. The expanded standalone
+iOS SDK remains 1.1.0, Android 1.0.0 and LangChain adapter 1.1.0.
+
 Server **1.0.2** adds upstream Responses metadata, sampling/reasoning controls,
 and trusted local tool/schema input accounting for iOS SDK **1.1.0**. No frozen
 client contract artifact, header, envelope, or database migration changes.
