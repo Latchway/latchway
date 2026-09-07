@@ -4,9 +4,9 @@ description: "Wire CocoaPods, App Attest, bundle identity, Keychain groups, and 
 icon: "apple"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "react-native-sdk"
 ---
 
@@ -20,7 +20,7 @@ DPoP, and refresh state behind the native bridge.
 
 ## Configure the target
 
-1. install CocoaPods from the source workspace;
+1. install the npm package and run CocoaPods in the host app;
 2. enable the App Attest entitlement for the exact application identifier;
 3. put the fully resolved private root app-ID Keychain group first in the
    signed entitlement;
@@ -32,6 +32,12 @@ DPoP, and refresh state behind the native bridge.
 
 Never pass `$(AppIdentifierPrefix)` at runtime. Inspect the built `.app`
 entitlements rather than inferring expansion from the Xcode project.
+
+Require App Attest and disallow software-key fallback for the protected root.
+Match the App Attest entitlement and signing category to the selected environment.
+Server 1.0.3 permits native `ios` and `react_native_ios` main-app roots to share
+the signed bundle only when both are directly App Attest verified. Configure
+each platform explicitly; adding one does not automatically authorize the other.
 
 ## Keep the bridge narrow
 

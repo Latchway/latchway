@@ -696,11 +696,11 @@ def main() -> int:
     if not (
         isinstance(versions, list)
         and len(versions) == 1
-        and versions[0].get("version") == "Pre-release"
+        and versions[0].get("version") == "1.x"
         and versions[0].get("default") is True
         and versions[0].get("href") == "/release-status"
     ):
-        errors.append("version navigation must expose one default Pre-release entry")
+        errors.append("version navigation must expose one default 1.x entry")
 
     redirects = resolved_docs.get("redirects", [])
     redirect_sources: set[str] = set()

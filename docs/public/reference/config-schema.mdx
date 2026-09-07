@@ -217,7 +217,7 @@ Shape: object. Definition constraints: unknown properties rejected.
 | `bundleId` | string | Yes | pattern: `"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"`; minimum length: `1`; maximum length: `255` | — |
 | `environment` | enum `"development"`, `"production"` | Yes | — | — |
 | `allowedValidationCategories` | array of enum `1`, `2`, `3`, `4`, `5`, `6`, `10` | Yes | minimum items: `1`; maximum items: `7`; unique items | Exact Apple launch ValidationCategory allowlist: 2 TestFlight, 3 development signing, 4 App Store, 5 ad hoc or enterprise, 6 Developer ID, 10 otherwise classified signing; category 1 is reserved for operating-system executables. |
-| `allowedBundleVersions` | array of string | Yes | minimum items: `1`; maximum items: `64`; unique items; items: pattern: `"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?$"`; minimum length: `1`; maximum length: `128` | Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. |
+| `allowedBundleVersions` | array of string | Yes | minimum items: `1`; maximum items: `64`; unique items; items: pattern: `"^(?:\\*\|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?)$"`; minimum length: `1`; maximum length: `128`; 1 combined rule(s) | Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. Use ["*"] explicitly to allow any well-formed build version while retaining all identity, signature, environment, and validation-category checks. |
 
 ### PlayIntegrityConfiguration
 

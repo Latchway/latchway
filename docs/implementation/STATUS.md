@@ -2,16 +2,43 @@
 
 Status date: 2026-09-07
 
-## Server 1.0.3 release preparation
+## Server 1.0.3 and React Native 1.1.2 published
 
 Version defaults and [release notes](../release/v1.0.3.md) now promote the
 shared iOS/Android native/RN root correction below. Contract 1.0.0, wire 2 and
 schema 29 remain unchanged. The companion React Native 1.1.2 patch corrects
 exact URL handling in both its optional bootstrap and app-owned example.
 iOS 1.1.0 and Android 1.0.0 contain the latest native SDK code; no native
-code-only version bump is required for the server correction. Public artifact
-publication is being verified separately; the VPS remains on the recorded
-compatible private image until an explicit deployment upgrade.
+code-only version bump is required for the server correction.
+
+- Server 1.0.3: `f76014843cb2df1300576cd963e52ecabfc99cdb`,
+  [successful run](https://github.com/Latchway/latchway/actions/runs/34099844605).
+  Public GHCR index `sha256:2a3b822e7169a383251a1a9b65c82800126c07c86a6542b057cd86c72d79f6c2`;
+  anonymous access and exact source/version labels passed for amd64 and arm64.
+- React Native 1.1.2: `2074393673503338321fb39d6724e145f0738fc7`,
+  [successful run](https://github.com/Latchway/latchway-react-native-sdk/actions/runs/34099973778).
+  npm/GitHub tarballs match byte-for-byte and the archive matches the audited
+  source allowlist. SHA-256 `563cee9471e452b13a8cd3f1c57d7cb295ed79788b38511c9246070ae441588e`.
+- iOS 1.1.0, Android 1.0.0, client 1.0.0 and LangChain 1.1.0 remain publicly
+  available. Native SDK repository updates in this phase are documentation-only.
+
+Full Go package tests and Console production build pass. React Native runtime,
+103 unit tests, types, lint, codegen, both platform Metro bundles, native boundary
+and double-pack checks pass. Its full historical check fails on tests expecting
+the previously removed CI workflows; those failures are not suppressed or claimed
+as passed. No fresh native build/device or strict release-certification claim is
+made. The local Docker daemon is unavailable, so public-image verification here
+checks registry manifests/configuration rather than executing that image locally.
+The VPS remains on the recorded compatible private image until an explicit
+deployment upgrade. Public installation/release-status docs and the separate
+Habitify iOS/Android handoff are updated for the published versions.
+
+Canonical public documentation passes its complete check: generated references
+and frozen SDK bundles, 233-page navigation/metadata, visual/policy tests, Vale,
+Mintlify build, links and accessibility. Existing color contrast advisories
+remain non-failing; no prose or media accessibility errors were reported.
+The configuration reference was regenerated from the existing wildcard schema;
+historical SDK coverage records were not rewritten to claim new conformance.
 
 ## Native / React Native shared-bundle and shared-package support
 

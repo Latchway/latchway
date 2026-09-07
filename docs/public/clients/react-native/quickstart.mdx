@@ -1,12 +1,12 @@
 ---
 title: "Send a protected request from React Native"
-description: "Run the version-locked source example and exercise one TypeScript API through native iOS and Android security modules."
+description: "Use published packages and exercise one TypeScript API through native iOS and Android security modules."
 icon: "atom"
 audience: "client-react-native"
 pageType: "tutorial"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-02"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "react-native-sdk"
 ---
 
@@ -15,17 +15,17 @@ import ReactNativeStreamingFetch from "/snippets/generated/react-native/quicksta
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 import { SetupCoordinates } from "/components/SetupPath.jsx";
 
-<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">React Native 0.82</Badge>
+<Badge color="purple">SDK 1.1.2</Badge> <Badge color="blue">React Native 0.82</Badge>
 
-**Expected time:** 15 minutes after the version-locked source checkouts,
+**Expected time:** 15 minutes after the published package installation,
 gateway resources, Firebase identity, and one native host configuration exist;
 repeat the native run on the other platform for completion proof.
 
-**Mode:** Source evaluation; iOS and Android compilation is distinct from
+**Mode:** Application integration; iOS and Android compilation is distinct from
 protected App Attest, Play Integrity, or distribution evidence.
 
-**Coordinates:** server contract `1.0.0`; React Native SDK source `1.0.0` with
-its locked iOS and Android SDK checkpoints.
+**Coordinates:** server `1.0.3`, contract `1.0.0`; React Native SDK `1.1.2`
+with its published iOS/Android `1.0.0` dependency locks.
 
 ## Outcome
 
@@ -36,10 +36,9 @@ rotation, and platform attestation.
 
 ## Before you start
 
-- a reachable Latchway `1.0.0` gateway with an application resource ID,
+- a reachable Latchway `1.0.3` gateway with an application resource ID,
   environment, `habit-assistant` feature, Responses route, and limits
-- authorized, version-locked checkouts of the React Native, iOS, and Android
-  SDK source candidates
+- published `@latchway/react-native@1.1.2` and its locked native dependencies
 - React Native 0.82 with the New Architecture enabled
 - a signed-in Firebase user whose ID token the gateway identity provider accepts
 - either the iOS 15+ toolchain or the Android API 24+ toolchain for the first
@@ -53,14 +52,14 @@ rotation, and platform attestation.
 </Note>
 
 <Warning>
-  The npm package and native artifacts are not published. The source example is
-  the prepublication integration path. Current evidence covers React Native
+  Published packages are available, but compilation does not prove your app's
+  signing or attestation. Historical evidence covers React Native
   commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` on a real iPad running
   iPadOS 26.5 in Debug configuration with automatic Apple Development signing.
   Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` adds a Debug
   native delegated-request path and passed strict Apple Development
   root/extension entitlement/provisioning, registered-device install, and
-  launch checks without new App Attest or App Intent execution. Current source
+  launch checks without new App Attest or App Intent execution. Historical source
   `ba23c750ec662834b4d480940c4067508723defb` carries the release retry-closure
   and transition-order hardening, locks the released contract plus final
   sibling SDK successor commits, and passes the full local plus generic iOS
@@ -95,21 +94,21 @@ refresh token from the native bridge.
 ## Procedure
 
 <Steps>
-  <Step title="Install and verify the source workspace">
-    From the `latchway-react-native-sdk` checkout, install the exact JavaScript
-    lock, then type-check and bundle the checked-in example.
+  <Step title="Install the published package">
+    From your React Native host, install the package and retain the lockfile.
+    Reuse existing Firebase App/Auth modules and login UI. The versioned
+    [npm-only example](https://github.com/Latchway/latchway-react-native-sdk/tree/v1.1.2/Examples/LatchwayChat)
+    demonstrates the full host setup; its original dependency lock predates the
+    1.1.2 publication, so use the current main example for the refreshed npm lock.
 
 ```bash
-corepack pnpm install --frozen-lockfile
-corepack pnpm example:check
-corepack pnpm example:bundle:check
+npm install --save-exact @latchway/react-native@1.1.2
 ```
 
-    Expected result: TypeScript accepts the current public API and Metro creates
-    production iOS and Android bundles. Do not substitute registry packages
-    before promotion. Diagnostic: rerun the first failing command from the SDK
-    root; a package-resolution error means the source workspace or lock is not
-    the reviewed coordinate set.
+    Expected result: npm resolves the public archive, with no local SDK links.
+    Diagnostic: check the lockfile version and registry integrity. For LangChain,
+    complete [runtime setup](/clients/react-native/framework-integrations) before
+    importing the framework; the ordinary SDK import does not install globals.
   </Step>
   <Step title="Complete one native host, then the other">
     <Tabs>
@@ -121,18 +120,14 @@ corepack pnpm example:bundle:check
         TypeScript must match the signed entitlement byte-for-byte.
 
 ```bash
-cd example/ios
-LATCHWAY_IOS_SDK_PATH=/absolute/path/to/latchway-ios-sdk \
-  RCT_NEW_ARCH_ENABLED=1 pod install --repo-update
-xcodebuild -workspace LatchwayExample.xcworkspace \
-  -scheme LatchwayExample -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/latchway-rn-ios \
-  CODE_SIGNING_ALLOWED=NO build
+cd ios
+pod install
+cd ..
+npm run ios
 ```
 
         Expected result: CocoaPods resolves `LatchwayReactNative` and the pinned
-        `Latchway/AppAttest` source, and the host compiles without exposing a
+        `Latchway/AppAttest` 1.0.0 release, and the host compiles without exposing a
         key or token to JavaScript. Diagnostic: inspect only non-secret build
         coordinates with `grep -n "Latchway" Podfile.lock`. A simulator proves
         compilation, not App Attest; use a correctly provisioned physical
@@ -140,19 +135,14 @@ xcodebuild -workspace LatchwayExample.xcworkspace \
       </Tab>
       <Tab title="Android">
         Use API 24 or newer with compile SDK 37, JDK 17, and the New
-        Architecture. First publish the sibling Android SDK into its disposable
-        local Maven repository, then point the React Native host at that exact
-        directory. Configure the decimal Play cloud project number in
+        Architecture. Resolve the bridge's native dependencies from Maven Central,
+        without a local SDK repository override. Configure the decimal-string Play Cloud project number in
         TypeScript; the package and signing-certificate digest must match the
         gateway application before a protected verdict can succeed.
 
 ```bash
-cd /absolute/path/to/latchway-android
-./scripts/verify-local-publication.sh
-cd /absolute/path/to/latchway-react-native-sdk
-LATCHWAY_NATIVE_REPOSITORY=/absolute/path/to/latchway-android/build/publication-test-repository \
-  ./android/gradlew -p example/android \
-  :app:compileDebugKotlin :app:lintDebug --no-daemon
+cd android
+./gradlew :app:compileDebugKotlin :app:lintDebug --no-daemon
 ```
 
         Expected result: Gradle resolves the pinned `dev.latchway` artifacts and

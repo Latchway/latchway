@@ -1,22 +1,22 @@
 ---
 title: "Install the React Native SDK"
-description: "Resolve the source package, TurboModule code generation, CocoaPods, Gradle composite build, and exact native dependency locks."
+description: "Install the published npm package and its locked CocoaPods and Maven dependencies in a React Native application."
 icon: "package"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "react-native-sdk"
 ---
 
-<Badge color="blue">Development</Badge> <Badge color="yellow">Source workspace</Badge>
+<Badge color="blue">npm 1.1.2</Badge> <Badge color="purple">Native dependencies</Badge>
 
 ## Outcome
 
 The application resolves `@latchway/react-native` and the exact reviewed iOS,
 Android, JavaScript, contract, and gateway compatibility coordinates without
-falling back to unpublished registry packages.
+using local source overrides.
 
 ## Meet the baseline
 
@@ -29,7 +29,26 @@ falling back to unpublished registry packages.
 Legacy Architecture behavior and Expo-managed integration are not claimed by
 the source candidate.
 
-## Install the workspace
+## Install in an application
+
+```bash
+npm install --save-exact @latchway/react-native@1.1.2
+cd ios
+bundle exec pod install
+cd ..
+```
+
+Use `pod install` if the host does not use Bundler. The npm podspec resolves
+`Latchway/AppAttest` 1.0.0; Gradle resolves the locked `dev.latchway` 1.0.0
+artifacts from Maven Central. Do not add local SDK paths or a second native
+implementation. Rebuild the native app after installation; a JS reload is not enough.
+
+The base SDK requires only `@latchway/client` 1.0.0 and a private stream fallback.
+It does not install LangChain or initialize global runtime polyfills. For that
+integration, follow [framework setup](/clients/react-native/framework-integrations)
+before importing dependent libraries. Reuse the host's Firebase App/Auth stack.
+
+## Develop the SDK workspace
 
 From the React Native SDK checkout:
 

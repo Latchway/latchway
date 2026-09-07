@@ -1,181 +1,105 @@
 ---
 title: "Release status"
-description: "What the locally converged Latchway version 1 source proves and what remains gated."
+description: "Published server and SDK versions, upgrade boundaries, and verification that remains outstanding."
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-04"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "release-engineering"
 ---
 
-Latchway version 1 now has a local source-level released contract checkpoint
-and a coordinated successor SDK tuple. The contract checkpoint is
-`cd47229eac32f4a93a0779903d927526b77817d6`; its reproducible bundle SHA-256 is
-`0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617`.
-Contract `1.0.0` selects wire protocol `2` as current while retaining wire `1`
-for compatible legacy clients.
+## Published artifacts
 
-The source locks name JavaScript
-`efa0a1074fd5639a02c4b852eac9ecaf4baf00f7`, iOS
-`92a394acbc00d1af6d258372f22b11ddae8e1750`, Android
-`694cb4d2bff9e91582896e3cbbe140e960d9e4e4`, and React Native
-`ba23c750ec662834b4d480940c4067508723defb`. The current core binary and SDK
-source versions identify as `1.0.0`. Core and all four exact SDK heads are
-delivered to remote `main`. Canonical public documentation is this checked-in
-source tree, and the generated mirror must bind that exact source through
-`.latchway-docs-source.json`. They have not been tagged, published as packages
-or a container, deployed as a product runtime, or observed through protected
-post-publication checks. The released contract lock is not itself a public
-stable release.
+Package availability and physical-device verification are different claims.
+The current distributions are:
 
-The four exact SDK remote source coordinates above were audited and delivered
-to `main`. The current local JavaScript checkout has a separately preserved,
-pre-existing unresolved merge and is not used to derive or validate the release
-coordinate. JavaScript at the recorded remote coordinate passes its full `pnpm check`,
-71 offline release tests (70 pass and one skip), and 51 Playwright tests. Swift passes
-65 offline release tests (64 pass and one skip),
-166/166 XCTest cases, SwiftOpenAI 11/11, Foundation Models 12/12, App
-Extensions 4/4, its external consumer build, and all four CocoaPods lints.
-Android passes 106 offline release tests (105 pass and one skip), its full 665-
-actionable-task Gradle gate, publication smoke, and an 8/8 locked semantic
-slice. React Native
-passes 103 Vitest, 62 Node, 19 Python, and 8/8 dependency-scan tests; separate
-native gates pass Swift bridge 5/5, Robolectric 6/6, locked iOS
-semantics 10/10, locked Android semantics 8/8, and a real CocoaPods/TurboModule
-build. The mirror/source manifest and six-repository source-conformance gates
-must match this canonical source. Local results do not substitute for
-protected artifact, device, registry, or deployment evidence.
+| Component | Version | Distribution |
+| --- | --- | --- |
+| Server and Console | 1.0.3 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.0.3), GHCR `ghcr.io/latchway/latchway:1.0.3` |
+| iOS SDK | 1.1.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.1.0), CocoaPods `Latchway` |
+| Android SDK | 1.0.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.0.0), Maven Central `dev.latchway` |
+| React Native SDK | 1.1.2 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.1.2), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.1.2) |
+| JavaScript client | 1.0.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.0.0) |
+| LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
+| OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
 
-The first-publication target is the explicitly lower-assurance
-`single_maintainer_v1` profile, not the original strict A-to-Z Definition of
-Done. It requires GHCR and package publication, multi-architecture
-supply-chain evidence. Independent review, Apple/Android/browser/provider
-evidence, every cloud deployment (including Compose and Google Cloud Run),
-operational-resilience drills, and Mintlify production
-remain `unverified`. A passing profile may authorize those scoped public
-artifacts, but it cannot support production-ready, fully-evidence-gated,
-independently reviewed, or `release-qualified` wording.
+The server image includes Linux amd64 and arm64. Pin the published image digest
+for repeatable deployments. Moving aliases `1.0`, `1` and `latest` are not
+immutable version locks. Use the same image for server and migrator.
 
-| Area | Current claim |
-| --- | --- |
-| Core gateway and control plane | Released-contract source checkpoint exists locally. Protected candidate `86dae658676e7187a8db6a0deda3f8429ca6ab76` passed verification and failed the unchanged isolated load gate before image construction. Its current uncommitted remediation passed the integrated `mise exec -- make check` gate: generated SQL, workflow lint, Go vet and all Go packages on PostgreSQL 18, all 548 Python cases, Console lint/API/type checks, 292/292 unit tests, deterministic production build verification, and 37 browser cases across Chromium, Firefox, WebKit, and mobile WebKit; the real-stack-only case remains intentionally opt-in. The complete race suite and every fuzz-smoke target also pass. Image, local load, and protected candidate gates remain open. |
-| React Native, iOS, Android, and JavaScript SDK sources | Coordinated `1.0.0` successor locks name the exact commits above, their local source gates pass, and their heads are on remote `main`; package publication and post-publication conformance are not claimed |
-| Local Console preview | Loopback port `18082` runs `latchway:local-d4693ee-arm64`; its embedded revision is `d4693ee36bf8a018a027fb75e5e2ac2fb6b58d50`, contract `1.0.0`, wire `2`. This is local operator evidence, not a GHCR or deployment receipt. |
-| Protocol contract | Released source contract `1.0.0` at `cd47229eac32f4a93a0779903d927526b77817d6` has reproducible bundle SHA-256 `0d8eed1d275a2a3783e3d8ba1d8d62ab850faa8dc071a647d777317df8c3e617` and is pinned across the SDK tuple |
-| Admin sessions and configuration transfer | Canonical API/CLI/Console session inventory/revoke, negotiated read-only safe mode, and bounded redaction-safe YAML/JSON transfer with exact numeric preservation, immutable strong-ETag staging, and explicit activation review are implemented. The current wizard additionally enforces exact canonical-template resume, selected-endpoint active-revision/self-test binding, revision-drift rejection, `manage_secrets` capability gates, and application/environment state isolation; its 292/292 unit and 37 cross-browser cases pass, while the real-stack-only case remains intentionally opt-in. |
-| Admin live refresh | Authenticated SSE refresh hints are implemented with no row data, principal revalidation, reconnect behavior, and polling/manual fallback when `admin_event_stream` is absent; complete local gates pass |
-| Public tags and immutable GitHub releases | No local version 1 tags; no remote tag or GitHub release is authenticated or verified |
-| GitHub and npm release controls | A closed six-repository strict manifest covers 51 protected environments and their manifest-bound privileged jobs. Its reversible quarantine, partial-apply journal, exact environment/ruleset model, dual npmjs scope pins, and five npm trusted-publisher tuples pass deterministic local validation. The explicit `single_maintainer_v1` profile permits a lower-assurance launch without an independent reviewer, keeps deferred controls `unverified`, and cannot claim `release-qualified`. Its 13 reviewer-free, self-review-permitted, main-only environments and exact non-secret policy sentinels are configured. npm account 2FA is `auth-and-writes`; all five trusted publishers are configured and verified without npm tokens. Strict-profile rulesets and protected release execution remain open. |
-| npm, Swift/CocoaPods, and Maven publication | No stable package is published. All five inert namespace records are public at `0.0.0-bootstrap.0`; their bootstrap and `latest` aliases name the same sole non-stable placeholder and are verified by an exact-byte schema-2 receipt. The native `Latchway` CocoaPod does need publication because `@latchway/react-native` pins `Latchway/AppAttest` `1.0.0`; the React Native podspec itself ships inside its npm package and does not require a separate Trunk publication. CocoaPods and Maven publishing credentials are installed only in their approved environments. |
-| Production App Attest and Play Integrity | Historical React Native root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug run with production App Attest registration and same-key assertion. Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` passed strict Apple Development root/extension signing, provisioning/entitlement, registered-device install, and launch checks without new App Attest or App Intent execution. Current `ba23c750ec662834b4d480940c4067508723defb` carries the release hardening and locks the released contract plus final sibling SDK successor commits; its physical path was not rerun. App Intent/extension, Apple distribution, and physical Android/Google Play evidence remain explicitly deferred under `single_maintainer_v1`; none is claimed as passed. |
-| Firebase Web App Check | A browser-minted reCAPTCHA Enterprise token exchange and server verifier pass against the current source gateway; protected immutable-candidate rerun remains required |
-| Cloudflare Turnstile | No configured observation exists; protected exact-candidate evidence remains required |
-| Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
-| Cloud deployment and resilience evidence | Credential-free static/dry-run deployment checks plus historical local load and nine-scenario automated failure gates pass. No exact-image Compose/Cloud Run receipt or billable GCP verification stack exists. Compose, Google Cloud Run, AWS, Fly.io, Cloudflare Containers, and resilience drills are all deferred under the selected profile; Terraform remains optional for a later manual GCP deployment. |
-| Image signing, provenance, and post-publication checks | Local image and multi-architecture source checks are distinct from required protected registry signing/provenance/publication receipts |
-| Independent security review | Workflow and schema implemented; protected reviewer receipt still required |
-| Client quota and diagnostics | Authenticated, redaction-safe, and locally validated |
+## What changed
 
-Launch is evidence-driven. The selected `single_maintainer_v1` profile requires
-authenticated public tags and releases; GHCR, npm, SwiftPM, CocoaPods, and Maven
-bytes; and the exact multi-
-architecture image, scans, SBOM, signature, and provenance. Only its protected
-finalizer may set profile-scoped `publication_ready` to true, after it
-authenticates the exact producer runs and immutable certificates and
-independently reconstructs the profile projection. Even then its
-`profile_status` remains `incomplete`, the other domains remain `unverified`,
-and `release_qualified`, `fully_evidence_gated`, and `independently_reviewed`
-remain false. No such final result exists yet. The later strict-full claim
-requires provider, mobile-device, all configured cloud, resilience, backup,
-restore, upgrade, load, independent-review, Mintlify, and post-publication
-evidence as well. Local tests cannot manufacture either profile's receipts.
+Server 1.0.3 permits one directly App Attest-verified native/RN iOS main-app
+root pair to share a bundle identifier, or one directly Play Integrity-verified
+native/RN Android app-root pair to share a package. Each platform still needs
+an explicit component definition and required attestation policy. Exact-platform
+root selection, Firebase/other user authentication and quotas are unchanged.
+Unconfigured platforms are not enabled automatically.
 
-Local source testing covers the Go check, race, fuzz, and real PostgreSQL
-suites; Console unit, build, and browser suites; and each SDK's release and
-consumer gates. Local adversarial engineering review closed root-challenge and App Attest
-post-disable insertion races, configuration and family/component lock-order
-deadlocks, exact JSON/YAML numeric preservation, and explicit `READ COMMITTED`
-lifecycle behavior. Those local results and the clean cross-repository source
-run do not replace protected artifact evidence for the exact publication
-candidate.
+React Native 1.1.2 fixes the optional/example URL bootstrap so exact Responses
+and Chat Completions paths survive React Native's incomplete built-in URL.
+Recopy application-owned runtime files as well as upgrading npm. Its required
+runtime dependencies remain the shared client and a private streams fallback;
+its locked native dependencies remain iOS/Android 1.0.0. See
+[framework setup](/clients/react-native/framework-integrations).
 
-Image publication, release promotion, public-state observation, deployment
-capture, and release-record finalization enforce a source/credential split:
-their candidate source is evaluated in credential-free jobs, while registry,
-GitHub, provider, and OIDC jobs accept bounded hash-verified handoffs without
-checking out that source. Live JavaScript conformance remains fail-closed until
-its identity and App Check or Turnstile proofs are delivered as single-use,
-run-bound capabilities on a gateway-egress-only ephemeral runner. The split
-closes specific workflow trust boundaries, but does not substitute for the
-external receipts.
+The standalone iOS 1.1.0 Foundation Models adapter requires OS 27 and server
+1.0.2+ for expanded tools, schemas and generation options. The server cannot
+bound remote/opaque state, encrypted reasoning or image attachments with its
+local text-byte accounting method. This is not unrestricted multimodal or
+every-model support. See the
+[iOS integration guide](https://github.com/Latchway/latchway-ios-sdk/blob/v1.1.0/Documentation/FoundationModels.md).
 
-## What is usable now
+## Upgrade and rollback
 
-Authorized evaluators can build the source checkouts, run the isolated local
-verification suite, inspect the immutable control plane, integrate the mobile
-SDK examples, and prepare protected release infrastructure. Supplemental local
-container, multi-architecture, scan/SBOM, failure, recovery, and load work
-exists, but it is bound to local checkpoints and does not establish a released
-image.
+Contract 1.0.0 and wire 2 remain current, with compatible legacy wire-1 grants
+supported. Database schema remains 29; 1.0.3 adds no migration. Keep the database
+URL, public origin and encryption master key.
 
-A supplemental real-device run also passed the React Native iOS bridge, Apple
-production App Attest registration and same-key assertion, Secure Enclave DPoP,
-upstream non-streaming and streaming requests, quota, typed component denial,
-and cleanup. It used React Native commit
-`6de46e1c7264e1d45cdd31174e4ea040a8c24acf` in Debug configuration on an
-iPad running iPadOS 26.5 with automatic Apple Development signing. It did not
-use an Apple Distribution, ad hoc, TestFlight, or App Store candidate, so it
-does not authorize release promotion.
+Upgrade the gateway before activating shared native/RN identities. Before
+rolling back to an older server, activate compatible revisions without those
+shared identifiers in every affected environment. An older runtime rejects
+them; changing the image first can prevent configuration loading.
 
-React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
-adds root-owned component descriptor lifecycle and a Debug App Intent that uses
-the native extension client for one exact-run delegated request. Its Apple
-Development root app and embedded App Intents extension passed strict
-entitlement/provisioning, registered-device install, and launch checks. It did
-not invoke the intent or collect new App Attest proof. Current
-`ba23c750ec662834b4d480940c4067508723defb` carries the release retry-closure,
-transition-order, wording, and development-runner hardening, then locks the
-released contract and final JavaScript, iOS, and Android successor commits. Its
-local plus generic iOS and isolated Debug/Release App Intent build gates pass;
-the physical path was not rerun at that head. The Release App Intent target
-contains no Latchway request path and fails closed. None of these results
-extends the historical live proof or authorizes release promotion.
+For application setup, start with [React Native installation](/clients/react-native/installation),
+[iOS signing](/clients/react-native/ios-native-setup) and
+[Android Play setup](/clients/react-native/android-native-setup).
+The React Native podspec comes with npm; it does not need its own CocoaPods
+Trunk publication.
 
-## Current source and authorization boundary
+## Evidence and limits
 
-Source-branch synchronization is a delivery operation and does not promote a
-release. Core and all four SDK heads are on remote `main`; canonical public
-documentation is this checked-in source tree, and its generated mirror must
-bind that exact source through `.latchway-docs-source.json`. No tag, GitHub
-release, package/container publication, product-runtime deployment, or
-protected post-publication check is verified. A Mintlify preview exists, but
-no protected production-deployment receipt is sealed.
+The full server Go package suite and Console production build pass. React Native
+runtime regressions, 103 SDK unit tests, types, lint, code generation, both
+platform Metro bundles, native-boundary checks and deterministic package
+inspection pass. Its full historical `pnpm check` still fails in release-policy
+tests referring to CI workflows removed under the maintainer's earlier decision.
+Those failures are not relabeled as passes, and no replacement CI gate was added.
 
-Offline/local device build, install, and launch may proceed if it does not
-contact ngrok or a live provider and does not collect Apple App Attest evidence.
-Starting or reusing ngrok, contacting a provider for device proof, collecting
-live App Attest evidence, or producing a protected device receipt required the
-exact phrase `I authorize the scoped ngrok device proof.` The phrase was
-supplied for a scoped run, but no tunnel, service, provider, App Attest, or
-protected-device evidence was started or collected under that authorization.
-The operator subsequently deferred App Intent/extension and physical
-Android/Google Play evidence. Historical App Attest and predecessor signed
-launch observations remain separately bound to their stated commits.
+A compatible private DigitalOcean Compose deployment passed health/readiness and
+native/RN iOS/Android configuration validation and allow/deny simulations.
+Credential-level Play Integrity OAuth succeeded; rejecting a deliberately invalid
+decoder token is not a real device verdict. The public release does not
+automatically upgrade an existing private deployment.
 
-## What must remain gated
+Prior disposable iOS examples demonstrated Firebase authentication, App Attest,
+native key possession, streaming and multi-turn tools against compatible private
+gateways. Those observations do not certify the exact current public package/image
+combination, another application's signing, or Android.
 
-Do not advertise release-qualified Apple App Attest, Play Integrity,
-immutable-image live-provider compatibility, cloud support, multi-replica
-resilience, signed packages, or released package/image availability until the
-matching external domain has an authenticated receipt for the exact candidate.
-Missing credentials, devices, provider accounts, or registry access produce an
-open gate, never a synthetic pass.
+<Warning>
+  Real Play-distributed Android verification, production Apple distribution,
+  extension execution, the cloud deployment matrix, multi-replica resilience,
+  load/failure certification and independent security review remain separate
+  evidence. Publication through the maintainer-approved simple workflows does
+  not establish the original strict A-to-Z release qualification.
+</Warning>
 
-<Info>
-  Until promotion completes, evaluate Latchway from repository-local tested
-  source checkouts. The contract is released in source, but this is not an
-  independent security audit and no `1.0.0` package or image should be assumed
-  to exist on a public registry.
-</Info>
+Frozen generated SDK bundles and compatibility tables identify their historical
+source checkpoint. They are not rewritten to claim new device or provider
+evidence. Use the versioned release notes and guides above for current package
+installation; use those generated records only for the coverage they actually
+describe. A synchronized Mintlify source repository is not a production-hosting
+receipt.

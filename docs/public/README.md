@@ -7,10 +7,10 @@ deployment mirror. Do not author mirror-owned content there.
 Latchway is a self-hostable gateway that lets mobile and web applications call
 configured AI infrastructure without embedding upstream-provider credentials.
 
-The documentation currently describes the repository-local tested version 1
-source candidate. It is not an independent security review or an announcement
-that the server image or SDK packages have been published. Release status is
-tracked on the site and in the core repository's evidence ledger.
+The documentation describes published 1.x packages alongside explicitly
+historical source/conformance records. See `release-status.mdx` for current
+versions and verification limits. Package availability is not an independent
+security review or proof of every deployment and physical-device configuration.
 
 ## Local development
 

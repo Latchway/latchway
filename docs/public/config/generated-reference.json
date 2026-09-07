@@ -336,7 +336,7 @@
     },
     {
       "path": "reference/config-schema.mdx",
-      "sha256": "8a2db70a0de8008b83e2aba8e96fd84192f8f5adcd77c471d3e321d547f6f77b"
+      "sha256": "43e145869e396a107939a7d9a6027f4c8a583d5d4788708fb3e8d5fbf33c02fb"
     },
     {
       "path": "reference/errors.mdx",
@@ -354,7 +354,7 @@
     },
     {
       "path": "api/config.schema.json",
-      "sha256": "ae76e0745676a123895adced5b969e51726a92f70b087c69f323aa5ae5e84040"
+      "sha256": "020bef4cb3fa50f422c68d4c627f88c2049f6b870450296a361ac5f566e725b1"
     },
     {
       "path": "api/error-codes.yaml",

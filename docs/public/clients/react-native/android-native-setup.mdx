@@ -1,12 +1,12 @@
 ---
 title: "Configure the React Native Android host"
-description: "Wire the Gradle composite, Play project, package and certificate policy, and native Kotlin security module into React Native Android."
+description: "Configure published native dependencies, the Play project, signing policy and hardware-backed keys for React Native Android."
 icon: "smartphone"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "react-native-sdk"
 ---
 
@@ -20,14 +20,26 @@ refresh, integrity, and protected networking behind the TurboModule.
 
 ## Configure the host
 
-1. keep the repository's local Gradle composite override for source
-   evaluation;
-2. compile against the SDK candidate's pinned Android toolchain;
-3. set `android.playIntegrityCloudProjectNumber` to the numeric cloud project;
+1. install the npm package and let autolinking resolve its Maven dependencies;
+2. compile against the supported host toolchain with New Architecture enabled;
+3. set `android.playIntegrityCloudProjectNumber` to the decimal-string Cloud project number
+   and `android.keyPolicy` to `hardware_backed_required`;
 4. match the server policy's package, installed signing certificate, Play
    track, and verdict requirements; and
 5. retain the locked Latchway interceptor, network origin guard, and
    authenticator supplied by the native bridge.
+
+Configure a `react_native_android` root with direct required Play Integrity and
+the exact package name. Server 1.0.3 allows a native `android` counterpart to
+share that package when it also uses direct Play Integrity. Use the Play
+app-signing SHA-256, not merely the upload-key certificate; the server schema
+stores its digest as Base64URL. Version bounds `0`/`0` allow all valid version
+codes without weakening package, certificate, licensing or device verdict checks.
+
+Keep the verifier service-account JSON in an encrypted server secret. It does
+not belong in the mobile app. Use the environment's matching Firebase config
+and current user's ID token; Firebase Auth is separate from Play Integrity, and
+Firebase App Check is not a replacement for this native policy.
 
 Do not pass an integrity token, request hash, DPoP proof, private key, access
 token, refresh token, or provider credential through JavaScript configuration.

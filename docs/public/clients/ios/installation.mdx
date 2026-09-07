@@ -4,13 +4,13 @@ description: "Add the version-matched Swift products, resolve native entitlement
 icon: "package"
 audience: "client-ios"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.0"
+lastVerified: "2026-09-07"
 owner: "ios-sdk"
 ---
 
-<Badge color="blue">Development</Badge> <Badge color="yellow">Source candidate</Badge>
+<Badge color="blue">SwiftPM / CocoaPods</Badge> <Badge color="purple">SDK 1.1.0</Badge>
 
 ## Outcome
 
@@ -20,11 +20,10 @@ private Keychain group and App Attest capability expected by configuration.
 
 ## Select the package source
 
-Until publication, add an authorized local checkout in Xcode or the
-application package manifest:
+Add the published repository version in Xcode or the application package manifest:
 
 ```swift
-.package(path: "../latchway-ios-sdk")
+.package(url: "https://github.com/Latchway/latchway-ios-sdk.git", exact: "1.1.0")
 ```
 
 Link `Latchway` and `LatchwayAppAttest` to the main application target. Add
@@ -32,11 +31,17 @@ Link `Latchway` and `LatchwayAppAttest` to the main application target. Add
 Add `LatchwayAppExtensions` only to targets that execute the delegated
 component flow.
 
-<Warning>
-  The intended remote `1.0.0` coordinate and CocoaPods specification are
-  release outputs, not current installation instructions. Do not substitute a
-  same-named registry artifact before the release page records it.
-</Warning>
+For a CocoaPods host:
+
+```ruby
+pod 'Latchway/AppAttest', '1.1.0'
+```
+
+The optional Foundation Models product/subspec requires OS 27 and server 1.0.2+
+for expanded generation requests. See the versioned
+[Foundation Models guide](https://github.com/Latchway/latchway-ios-sdk/blob/v1.1.0/Documentation/FoundationModels.md).
+React Native retains its own reviewed 1.0.0 native pins; do not override those
+with the standalone Swift version without compatibility testing.
 
 ## Resolve signed capabilities
 

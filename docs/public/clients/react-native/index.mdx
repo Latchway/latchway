@@ -4,13 +4,13 @@ description: "Choose the TypeScript, iOS host, Android host, streaming, framewor
 icon: "atom"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.0.3"
+sdkVersion: "1.1.2"
+lastVerified: "2026-09-07"
 owner: "react-native-sdk"
 ---
 
-<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">React Native 0.82</Badge>
+<Badge color="purple">SDK 1.1.2</Badge> <Badge color="blue">React Native 0.82</Badge>
 
 The React Native API is TypeScript, but the security boundary is native. The
 iOS or Android module owns the component key, App Attest or Play Integrity,
@@ -22,7 +22,7 @@ DPoP signing, rotating refresh state, and protected network request.
   <Card title="Complete the quickstart" icon="send" href="/clients/react-native/quickstart">
     Use one TypeScript API and verify one request from each native platform.
   </Card>
-  <Card title="Install the source workspace" icon="package" href="/clients/react-native/installation">
+  <Card title="Install from npm" icon="package" href="/clients/react-native/installation">
     Resolve the exact JavaScript, Swift, Android, TurboModule, and contract locks.
   </Card>
   <Card title="Configure native hosts" icon="settings" href="/clients/react-native/ios-native-setup">
@@ -55,10 +55,10 @@ TypeScript API -> TurboModule -> native iOS or Android SDK -> Latchway
 
 ## Support boundary
 
-The source candidate supports React Native 0.82 with the New Architecture,
+The published SDK targets React Native 0.82 with the New Architecture,
 iOS 15+, and Android API 24+. Legacy Architecture and Expo-managed support are
-not inferred. The npm and native dependency artifacts remain unpublished until
-[Release status](/release-status) records promotion. Consult the generated
+not inferred. See [Release status](/release-status) for available packages and
+remaining evidence limits. Consult the historical generated
 [React Native SDK bundle](/reference/sdk-bundles/react-native) for exact source
 and version evidence.
 
