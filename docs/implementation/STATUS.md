@@ -20,8 +20,18 @@ Habitify handoff corrects the former unqualified `bindTools` advice: this Chat
 profile requires server 1.0.4, not a switch to the Responses API. Static analysis,
 the expanded Chat preflight fuzz run, the pinned-npm Habitify handoff checks,
 and the complete canonical documentation check also pass (existing color
-contrast advisories remain). No CI gates were added. Release and VPS
-deployment evidence will be recorded after publication.
+contrast advisories remain). No CI gates were added.
+
+Published from `bb0ad7db9969d6a1d5541aaec870d87d33c9b230` as `v1.0.4`;
+[release run 34147113592](https://github.com/Latchway/latchway/actions/runs/34147113592)
+completed successfully. Public GHCR index
+`sha256:5983e17a9a3bb1e20d6c81a91d4ca4cac8fb24031a9e160d8be107b666654064`
+passed anonymous access and exact source/version checks on amd64 and arm64.
+The validated docs mirror was published at `c6e6fa8`.
+
+Operational deployment receipts are retained in the private developer handoff,
+separately from these public release coordinates. No new physical-device
+certification is claimed by publication.
 
 ## Server 1.0.3 and React Native 1.1.2 published
 
