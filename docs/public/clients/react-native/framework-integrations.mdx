@@ -4,9 +4,9 @@ description: "Connect tested OpenAI, Vercel AI, LangChain, and Anthropic consume
 icon: "plug"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.0.4"
+sdkVersion: "1.1.3"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
@@ -36,13 +36,13 @@ fetch seam remain outside the tested surface.
 ## Install LangChain in the host app
 
 ```bash
-npm install --save-exact @latchway/react-native@1.1.2 @latchway/langchain@1.1.0 \
+npm install --save-exact @latchway/react-native@1.1.3 @latchway/langchain@1.1.0 \
   @latchway/client@1.0.0 @langchain/core@1.2.9 @langchain/openai@1.5.10 openai@7.8.0
 ```
 
 The base SDK does not depend on LangChain, Babel helpers or global URL/decoder
 polyfills. Follow the versioned
-[runtime and Babel guide](https://github.com/Latchway/latchway-react-native-sdk/blob/v1.1.2/docs/langchain.md)
+[runtime and Babel guide](https://github.com/Latchway/latchway-react-native-sdk/blob/v1.1.3/docs/langchain.md)
 and copy its application-owned bootstrap before importing frameworks. Reuse
 complete globals already supplied by the host; do not install duplicate native
 randomness modules or replace global fetch. Recopy old bootstrap files when
@@ -85,6 +85,35 @@ the old client. Use the user's Firebase ID token, not a UID, App Check token,
 custom sign-in token or service-account JSON. Read authoritative quota from the
 server. Tool execution remains app-owned: validate arguments, enforce an
 allowlist, bound the loop and append complete correlated tool results only.
+
+## Chat function tools and quotas
+
+Chat `bindTools` with input/total-token quotas requires **server 1.0.4+**.
+Earlier versions reject these requests before provider dispatch. Updating the
+React Native package or switching a Chat-only feature to the Responses API is
+not the fix. Keep quotas and required native attestation enabled.
+
+Use `bindLatchwayTools(model, tools)` from `@latchway/langchain` 1.1.0 with
+ordinary local functions and strict object schemas. The helper supplies boolean
+`strict: true` and `parallel_tool_calls: false` defaults. Keep
+`useResponsesApi: false` for a Chat feature, `maxRetries: 0`, and an explicit
+output cap. Unknown options such as `temperature` and `response_format` remain
+outside this trusted Chat profile; this patch is not general structured-output
+or hosted-tool support.
+
+After a complete tool-call response, validate the function name and arguments,
+authorize and execute it in app/backend code, and append the complete assistant
+message plus a correlated `ToolMessage`. For streaming, assemble all deltas
+before executing a tool; never execute partial arguments. Bound rounds, tool
+count, execution time and result size. On cancellation or failure, discard the
+incomplete turn, retain previous complete history, and do not retry silently.
+Every model round consumes quota, including tool schemas and replayed history.
+
+The server accepts up to 128 function definitions and 128 calls per assistant
+message, within 4,096 combined framing units and 4 MiB of expanded schema
+accounting. Local acyclic JSON-pointer references are supported; remote,
+recursive, unresolved or scope-changing references fail closed. Media,
+provider-hosted/custom tools and incomplete call/result exchanges are excluded.
 
 ## Bind each protocol separately
 

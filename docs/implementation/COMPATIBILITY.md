@@ -6,6 +6,16 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+Server **1.0.4** adds bounded local function tools and complete tool-result
+history to Chat trusted preflight. Existing SDK APIs and configured Chat
+profiles work unchanged; tools require upgrading the server before use with
+input/total quotas. Tool definitions and expanded schemas now contribute to
+the reservation. Unsupported remote state and schemas still fail closed.
+Contract 1.0.0, wire 2 and schema 29 remain unchanged. See
+[the patch notes](../release/v1.0.4.md). React Native **1.1.3** independently
+widens its declared host peers to React Native >=0.74 <1 and React ^18.2 or ^19;
+it is not the fix for server-side `bindTools` rejection.
+
 Server **1.0.3** accepts a directly attested native/RN iOS main-app root pair
 sharing a bundle, or native/RN Android app-root pair sharing a package. Exact
 platform/provider selection and required attestation remain unchanged. Existing

@@ -1726,9 +1726,10 @@ func trustedInputBoundFromProfile(
 	profile protocol.TrustedInputProfile,
 	preflight protocol.TrustedInputPreflight,
 ) (int64, bool) {
-	if preflight.RequestBytes <= 0 || preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
+	if profile.Protocol != preflight.Protocol ||
+		preflight.RequestBytes <= 0 || preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
 		preflight.ExpandedSchemaBytes < 0 || preflight.ExpandedSchemaBytes > 4*1024*1024 ||
-		preflight.ExpandedSchemaBytes != 0 && profile.Protocol != protocol.OpenAIResponsesID ||
+		preflight.ExpandedSchemaBytes != 0 && profile.Protocol != protocol.OpenAIResponsesID && profile.Protocol != protocol.OpenAIChatID ||
 		profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
 		profile.MaximumFramingTokensPerMessage != 0 &&
 			preflight.MessageCount > math.MaxInt64/profile.MaximumFramingTokensPerMessage {

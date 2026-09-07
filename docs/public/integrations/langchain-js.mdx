@@ -4,15 +4,16 @@ description: "Define a low-maintenance ChatOpenAI transport adapter while keepin
 icon: "plug"
 audience: "mixed"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-01"
+serverVersion: "1.0.4"
+sdkVersion: "1.1.0"
+lastVerified: "2026-09-08"
 owner: "framework-integrations"
 ---
 
 <Warning>
-  `@latchway/langchain` is pre-release and unpublished. `@langchain/openai`
-  `1.5.10` has an experimental local-evidence row, not a supported release.
+  `@latchway/langchain` 1.1.0 is published. Generated pre-release compatibility
+  records retain their historical evidence scope; publication does not establish every
+  framework capability or physical-device combination.
 </Warning>
 
 ## 1. What this integration does
@@ -29,9 +30,9 @@ published.
 
 ## 3. Supported Latchway versions
 
-None published for this adapter. Released source contract `1.0.0` uses current
-wire protocol `2`, but a contract coordinate does not establish framework
-support or artifact publication.
+Use published `@latchway/langchain` 1.1.0 with `@latchway/client` 1.0.0.
+Chat function tools under input/total quotas require server 1.0.4+; the bounded
+Responses profile requires 1.0.2+. Contract 1.0.0 and wire 2 are unchanged.
 
 ## 4. Security level
 
@@ -48,8 +49,10 @@ support or artifact publication.
 
 ## 5. Install packages
 
-Do not install an unverified `@latchway/langchain` package. Peer dependency and
-version ranges are not released.
+Install `@latchway/langchain@1.1.0`, `@latchway/client@1.0.0`,
+`@langchain/core@1.2.9`, `@langchain/openai@1.5.10` and `openai@7.8.0`.
+For a native host, follow the [React Native setup](/clients/react-native/framework-integrations)
+for native modules, application-owned runtime compatibility and exact examples.
 
 ## 6. Create the Latchway client
 
@@ -63,8 +66,10 @@ field to select a physical model.
 
 ## 8. Create the framework client
 
-The source helper configures `ChatOpenAI` through supported client options. Its
-signature remains intentionally undocumented until package release.
+Use `createLatchwayChatOpenAI({latchway, feature, chatOptions: {
+useResponsesApi: false, maxTokens: 1024, maxRetries: 0}})` for a Chat feature.
+The guarded native/client fetch owns authentication and DPoP; do not pass a
+provider key or physical model to the app.
 
 ## 9. Send a non-streaming request
 
@@ -78,8 +83,12 @@ gate.
 
 ## 11. Use tools
 
-LangChain retains tool schemas and execution. Latchway only transports valid
-protocol payloads under feature policy.
+Use `bindLatchwayTools(model, tools)` for local function definitions with
+explicit strict/serial defaults. Server 1.0.4 accounts for Chat tools and
+expanded schemas under input/total quotas; earlier servers reject that shape.
+The app owns authorization, argument validation, execution, timeouts and a
+bounded loop. Replay complete assistant calls plus correlated tool results.
+See [Chat tool limits](/clients/react-native/framework-integrations#chat-function-tools-and-quotas).
 
 ## 12. Use structured output
 

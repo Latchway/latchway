@@ -2,7 +2,7 @@
 package buildinfo
 
 var (
-	Version = "1.0.3"
+	Version = "1.0.4"
 	Commit  = "unknown"
 	Date    = "unknown"
 )

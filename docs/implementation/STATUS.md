@@ -1,6 +1,27 @@
 # Implementation status
 
-Status date: 2026-09-07
+Status date: 2026-09-08
+
+## Server 1.0.4: quota-safe Chat function tools
+
+The Chat adapter now accepts bounded local function definitions and complete
+call/result history under hard input, total-token and input-priced cost quotas.
+It adds expanded schema bytes and tool/schema/content framing to the exact-body
+proof; the gateway validates protocol binding and includes the expansion in
+reservation units. Plain string-only Chat bounds remain unchanged. Responses
+uses the extracted shared counter with unchanged behavior. No identity,
+attestation, active configuration, frozen wire contract or migration changes.
+
+Full Go tests, targeted race tests and the authenticated PostgreSQL integration
+pass. The latter now covers streamed and JSON tool loops with actual durable
+input/output/total/cost settlement and released remainders. Unsafe references,
+oversized schemas, incomplete histories and mutated proofs fail closed. The
+Habitify handoff corrects the former unqualified `bindTools` advice: this Chat
+profile requires server 1.0.4, not a switch to the Responses API. Static analysis,
+the expanded Chat preflight fuzz run, the pinned-npm Habitify handoff checks,
+and the complete canonical documentation check also pass (existing color
+contrast advisories remain). No CI gates were added. Release and VPS
+deployment evidence will be recorded after publication.
 
 ## Server 1.0.3 and React Native 1.1.2 published
 

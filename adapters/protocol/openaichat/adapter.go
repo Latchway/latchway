@@ -229,10 +229,9 @@ func countRequestUnits(object map[string]any) (int64, int64) {
 
 // PreflightInput proves a conservative input-token bound over the exact body
 // installed by ApplyFeature. It intentionally supports only a strict
-// text-only subset of Chat Completions. Rich requests remain available when
-// trusted input accounting is not required, but they fail closed here because
-// tools, files, media, and provider extensions can add input not bounded by
-// the JSON bytes alone.
+// local text/function-tool subset of Chat Completions. Schema expansion and
+// tool framing are reserved in addition to exact body bytes. Remote state,
+// media, hosted/custom tools and unknown provider extensions remain excluded.
 func (a Adapter) PreflightInput(
 	ctx context.Context,
 	request *http.Request,
@@ -258,6 +257,17 @@ func (a Adapter) PreflightInput(
 	if err != nil {
 		return protocol.TrustedInputPreflight{}, err
 	}
+	schemaBytes, schemaUnits, err := trustedToolAccounting(object)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	messageCount += schemaUnits
+	if messageCount > 4096 {
+		return protocol.TrustedInputPreflight{}, requestMalformed("trusted tool/schema framing exceeds its bound")
+	}
 	requestBytes, ok := checkedLength(len(raw))
 	if !ok {
 		return protocol.TrustedInputPreflight{}, errors.New("trusted input request size overflows int64")
@@ -273,6 +283,10 @@ func (a Adapter) PreflightInput(
 	inputBound, ok = checkedAdd(inputBound, messageFraming)
 	if !ok {
 		return protocol.TrustedInputPreflight{}, errors.New("trusted input bound overflows int64")
+	}
+	inputBound, ok = checkedAdd(inputBound, schemaBytes)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted schema bound overflows int64")
 	}
 	totalBound, ok := checkedAdd(inputBound, outputBound)
 	if !ok {
@@ -295,6 +309,7 @@ func (a Adapter) PreflightInput(
 		RewrittenBodySHA256: sha256.Sum256(raw),
 		RequestBytes:        requestBytes,
 		MessageCount:        messageCount,
+		ExpandedSchemaBytes: schemaBytes,
 		InputTokenBound:     inputBound,
 		OutputTokenBound:    outputBound,
 		TotalTokenBound:     totalBound,
@@ -328,10 +343,11 @@ func validateTrustedInputRequest(
 	allowedRoot := map[string]struct{}{
 		"model": {}, "messages": {}, "stream": {}, "stream_options": {}, "n": {},
 		"max_tokens": {}, "max_completion_tokens": {},
+		"tools": {}, "tool_choice": {}, "parallel_tool_calls": {},
 	}
 	for key := range object {
 		if _, ok := allowedRoot[key]; !ok {
-			return 0, 0, requestMalformed("trusted input preflight supports only bounded text request fields")
+			return 0, 0, requestMalformed("trusted input preflight supports only bounded local text and function-tool fields")
 		}
 	}
 	model, ok := object["model"].(string)
@@ -342,19 +358,9 @@ func validateTrustedInputRequest(
 	if !ok || len(messages) == 0 || len(messages) > 4096 {
 		return 0, 0, requestMalformed("messages must be a non-empty bounded array")
 	}
-	for _, value := range messages {
-		message, ok := value.(map[string]any)
-		if !ok || len(message) != 2 {
-			return 0, 0, requestMalformed("trusted input messages must contain exactly role and content")
-		}
-		role, roleOK := message["role"].(string)
-		content, contentOK := message["content"].(string)
-		if !roleOK || !slicesContainsString([]string{"developer", "system", "user", "assistant"}, role) {
-			return 0, 0, requestMalformed("trusted input messages must use a text-only role")
-		}
-		if !contentOK || !utf8.ValidString(content) || strings.ContainsRune(content, '\x00') {
-			return 0, 0, requestMalformed("trusted input message content must be a non-null UTF-8 string")
-		}
+	messageCount, err := validateTrustedToolMessages(messages)
+	if err != nil {
+		return 0, 0, err
 	}
 	streaming := false
 	if value, present := object["stream"]; present {
@@ -392,10 +398,6 @@ func validateTrustedInputRequest(
 	}
 	if _, present := object[otherOutputField]; present {
 		return 0, 0, errors.New("rewritten request contains ambiguous output-token maxima")
-	}
-	messageCount, ok := checkedLength(len(messages))
-	if !ok {
-		return 0, 0, errors.New("trusted input message count overflows int64")
 	}
 	return messageCount, outputBound, nil
 }

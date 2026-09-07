@@ -121,13 +121,14 @@ type TrustedInputPreflight struct {
 	RewrittenBodySHA256 [sha256.Size]byte
 	RequestBytes        int64
 	// MessageCount is the bounded number of protocol framing units: Chat and
-	// Anthropic messages, Responses input items, or Embeddings text inputs.
+	// Anthropic messages, Responses input items, or Embeddings text inputs,
+	// including bounded tool/schema/content-part framing where supported.
 	// The historical field name is retained in the internal proof contract so
 	// existing durable fingerprints remain stable.
 	MessageCount int64
 	// ExpandedSchemaBytes is additional conservative input accounting for
-	// bounded local schema expansion in Responses. It never changes the exact
-	// RequestBytes/body digest binding and is zero for other protocols.
+	// bounded local schema expansion in Responses and Chat Completions. It never
+	// changes the exact RequestBytes/body digest binding and is zero elsewhere.
 	ExpandedSchemaBytes int64
 	InputTokenBound     int64
 	OutputTokenBound    int64

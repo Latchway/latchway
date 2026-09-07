@@ -73,6 +73,8 @@ func FuzzInspectAndRewrite(f *testing.F) {
 }
 
 func FuzzTrustedInputPreflight(f *testing.F) {
+	f.Add(`{"model":"client","messages":[{"role":"user","content":"Weather?"}],"tools":[` + weatherTool + `]}`)
+	f.Add(`{"model":"client","messages":[{"role":"assistant","tool_calls":[{"id":"one","type":"function","function":{"name":"weather_check","arguments":"{}"}}]},{"role":"tool","tool_call_id":"one","content":"Sunny"}],"tools":[` + weatherTool + `]}`)
 	f.Add(`{"model":"client","messages":[{"role":"user","content":"hello"}]}`)
 	f.Add(`{"model":"client","messages":[{"role":"developer","content":"brief"},{"role":"user","content":"你好 🌉"}],"stream":true,"n":1}`)
 	f.Add(`{"model":"client","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}]}`)
@@ -121,7 +123,9 @@ func FuzzTrustedInputPreflight(f *testing.F) {
 		}
 		if preflight.RewrittenBodySHA256 != sha256.Sum256(before) ||
 			preflight.RequestBytes != int64(len(before)) ||
-			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3 ||
+			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3+preflight.ExpandedSchemaBytes ||
+			preflight.ExpandedSchemaBytes < 0 || preflight.ExpandedSchemaBytes > 4*1024*1024 ||
+			preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
 			preflight.OutputTokenBound <= 0 ||
 			preflight.TotalTokenBound != preflight.InputTokenBound+preflight.OutputTokenBound ||
 			preflight.ProfileDigest != profile.Digest() || preflight.PhysicalModel != "server-model" {

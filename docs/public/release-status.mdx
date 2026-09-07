@@ -4,9 +4,9 @@ description: "Published server and SDK versions, upgrade boundaries, and verific
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.0.4"
+sdkVersion: "1.1.3"
+lastVerified: "2026-09-08"
 owner: "release-engineering"
 ---
 
@@ -17,10 +17,10 @@ The current distributions are:
 
 | Component | Version | Distribution |
 | --- | --- | --- |
-| Server and Console | 1.0.3 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.0.3), GHCR `ghcr.io/latchway/latchway:1.0.3` |
+| Server and Console | 1.0.4 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.0.4), GHCR `ghcr.io/latchway/latchway:1.0.4` |
 | iOS SDK | 1.1.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.1.0), CocoaPods `Latchway` |
 | Android SDK | 1.0.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.0.0), Maven Central `dev.latchway` |
-| React Native SDK | 1.1.2 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.1.2), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.1.2) |
+| React Native SDK | 1.1.3 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.1.3), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.1.3) |
 | JavaScript client | 1.0.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.0.0) |
 | LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
 | OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
@@ -30,6 +30,15 @@ for repeatable deployments. Moving aliases `1.0`, `1` and `latest` are not
 immutable version locks. Use the same image for server and migrator.
 
 ## What changed
+
+Server 1.0.4 enables bounded Chat function tools under trusted input, total-token
+and input-priced cost quotas. Local schemas and complete call/result history
+are included in exact-body accounting. Auth, required attestation, model
+selection and quotas remain in place. See [Chat tools](/clients/react-native/framework-integrations#chat-function-tools-and-quotas).
+
+React Native 1.1.3 declares React Native `>=0.74 <1` and React `^18.2` or `^19` host
+peers. This peer-range update is independent of the server's tool fix; peer
+ranges do not claim every host/framework combination has been device-tested.
 
 Server 1.0.3 permits one directly App Attest-verified native/RN iOS main-app
 root pair to share a bundle identifier, or one directly Play Integrity-verified
@@ -55,7 +64,7 @@ every-model support. See the
 ## Upgrade and rollback
 
 Contract 1.0.0 and wire 2 remain current, with compatible legacy wire-1 grants
-supported. Database schema remains 29; 1.0.3 adds no migration. Keep the database
+supported. Database schema remains 29; 1.0.4 adds no migration. Keep the database
 URL, public origin and encryption master key.
 
 Upgrade the gateway before activating shared native/RN identities. Before
@@ -70,6 +79,10 @@ The React Native podspec comes with npm; it does not need its own CocoaPods
 Trunk publication.
 
 ## Evidence and limits
+
+Server 1.0.4 passes the full Go suite, targeted race tests and authenticated
+PostgreSQL tool-loop tests with JSON/streaming responses and durable quota
+settlement. These use synthetic providers, not fresh physical-device evidence.
 
 The full server Go package suite and Console production build pass. React Native
 runtime regressions, 103 SDK unit tests, types, lint, code generation, both

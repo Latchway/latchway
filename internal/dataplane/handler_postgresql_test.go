@@ -160,8 +160,13 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct mock upstream: %v", err)
 	}
+	toolMock, err := mockupstream.New(mockupstream.Config{Scenario: mockupstream.ScenarioToolCall})
+	if err != nil {
+		t.Fatal(err)
+	}
 	capture := &dataPlaneE2EProviderCapture{
-		next: mock, blockPrompt: dataPlaneE2EConcurrencyHold,
+		toolNext: toolMock,
+		next:     mock, blockPrompt: dataPlaneE2EConcurrencyHold,
 		blockStarted: make(chan struct{}), blockRelease: make(chan struct{}),
 	}
 	privateBaseURL := startDataPlaneE2EPrivateServer(t, capture) + "/v1"
@@ -1463,6 +1468,55 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EResponsesPrompt, dataPlaneE2EEmbeddingsPrompt, dataPlaneE2EAnthropicPrompt)
+
+	// Exercise the actual Chat adapter, authenticated gateway, durable quota
+	// reservation and provider usage settlement across a complete tool exchange.
+	for _, streaming := range []bool{false, true} {
+		t.Run("function tools stream="+strconv.FormatBool(streaming), func(t *testing.T) {
+			messages := []any{map[string]any{"role": "user", "content": "e2e-tool-weather-marker"}}
+			for round := 0; round < 2; round++ {
+				requestID := fmt.Sprintf("tool-%t-%d", streaming, round)
+				proof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget, now, requestID, grant.AccessToken)
+				body := map[string]any{
+					"model": "client", "messages": messages, "stream": streaming,
+					"tools": []any{map[string]any{"type": "function", "function": map[string]any{
+						"name": "lookup_weather", "strict": true,
+						"parameters": map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}, "required": []any{"city"}, "additionalProperties": false},
+					}}},
+					"parallel_tool_calls": false,
+				}
+				response := postDataPlaneE2EFeatureChat(t, protectedHandler, grant.AccessToken, proof, dataPlaneE2ETrustedInputFeature, requestID, body)
+				if response.Code != http.StatusOK {
+					t.Fatalf("tool round %d = %d: %s", round, response.Code, response.Body.String())
+				}
+				if round == 0 && (!strings.Contains(response.Body.String(), "tool_calls") || !strings.Contains(response.Body.String(), "call_mock_0001")) {
+					t.Fatal("provider tool call was not delivered")
+				}
+				captured, err := capture.snapshot()
+				if err != nil {
+					t.Fatal(err)
+				}
+				providerBody := captured[len(captured)-1].body
+				request := httptest.NewRequest(http.MethodPost, dataTarget.String(), bytes.NewReader(providerBody))
+				request.Header.Set("Content-Type", "application/json")
+				profile := protocol.TrustedInputProfile{
+					ID: dataPlaneE2ETrustedInputProfile, Protocol: protocol.OpenAIChatID,
+					Method: protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1, PhysicalModel: dataPlaneE2EProviderModel,
+					MaximumContextTokens: 100000, MaximumFramingTokensPerRequest: dataPlaneE2ETrustedRequestFraming,
+					MaximumFramingTokensPerMessage: dataPlaneE2ETrustedMessageFraming,
+				}
+				input, err := (openaichat.Adapter{}).PreflightInput(ctx, request, profile)
+				if err != nil || input.ExpandedSchemaBytes <= 0 {
+					t.Fatalf("tool accounting: %+v %v", input, err)
+				}
+				assertDataPlaneE2ETrustedInputSuccess(t, ctx, pool, requestID, revisionID, input.InputTokenBound)
+				messages = append(messages,
+					map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "call_mock_0001", "type": "function", "function": map[string]any{"name": "lookup_weather", "arguments": `{"city":"Paris"}`}}}},
+					map[string]any{"role": "tool", "tool_call_id": "call_mock_0001", "name": "lookup_weather", "content": "e2e-tool-result-marker"})
+			}
+		})
+	}
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, "e2e-tool-weather-marker", "e2e-tool-result-marker")
 }
 
 type dataPlaneE2ETenant struct {
@@ -2690,6 +2744,7 @@ type dataPlaneE2EProviderRequest struct {
 
 type dataPlaneE2EProviderCapture struct {
 	next         http.Handler
+	toolNext     http.Handler
 	blockPrompt  string
 	blockStarted chan struct{}
 	blockRelease chan struct{}
@@ -2722,6 +2777,10 @@ func (capture *dataPlaneE2EProviderCapture) ServeHTTP(writer http.ResponseWriter
 			close(capture.blockStarted)
 			<-capture.blockRelease
 		})
+	}
+	if capture.toolNext != nil && bytes.Contains(body, []byte("e2e-tool-weather-marker")) && !bytes.Contains(body, []byte("e2e-tool-result-marker")) {
+		capture.toolNext.ServeHTTP(writer, request)
+		return
 	}
 	capture.next.ServeHTTP(writer, request)
 }
