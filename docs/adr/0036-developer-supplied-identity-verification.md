@@ -52,8 +52,10 @@ is SDK-owned; no API resets user quota or infers external-provider logout.
 This is additive to contract 1.1.0 / wire 3. Existing wire 1/2 routes are unchanged.
 ADR 0032's exact one-field refresh body remains normative. Its old recovery advice
 now has this capability-negotiated same-account identity alternative; attestation
-renewal still uses the challenge exchange. There is no additional database
-migration beyond schema 30's previously implemented shared-caller attribution.
+renewal still uses the challenge exchange. Server 1.1.1 and migration 31 correct
+the historical issuance-only timestamp constraint, permitting revalidation after
+issuance without changing grant/attestation lifetime. The initial 1.1.0 tests
+froze the clock and missed that real-device case; use 1.1.1 for supplied identity.
 
 Clients must check both the capability and same-origin canonical endpoint. An
 older server is an explicit unsupported configuration, not permission to trust a

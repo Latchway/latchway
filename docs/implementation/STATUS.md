@@ -2,6 +2,27 @@
 
 Status date: 2026-09-08
 
+## Server 1.1.1: real-device identity renewal regression
+
+The first fresh iOS 1.2.0 device run against public server 1.1.0 completed
+challenge/exchange but failed identity renewal with `internal_error` (request
+`87ef73be-cbaa-4717-8122-9d591cf9a9e7`). Advancing the isolated HTTP test clock
+by two seconds reproduces it: schema 30 requires `identity_verified_at <=
+issued_at`, while revalidation intentionally renews freshness after issuance.
+
+Migration 31 replaces only that issuance-bound check with a bounded identity
+freshness check; credential issuance/expiry and attestation remain unchanged.
+Identity-less legacy grants retain their issuance bound. An interrupted
+migration rolls back transactionally; after success, readiness rejects a
+schema-30 binary. Roll forward or restore the pre-migration database and its
+compatible image rather than rewriting identity history. Contract 1.1.0 is
+unchanged. Release and deployment receipts remain separate.
+
+The final complete Go suite passes against isolated UTF-8 PostgreSQL. Targeted
+session/clientapi/identity/server race tests, static analysis, schema upgrade
+and rollback checks pass. The rebuilt contract archive remains byte-identical
+to released 1.1.0 (`deb25aaae5160a7342bfae0efa4a9ce0403d8c40ed8da74eb2c99be4d4ede293`).
+
 ## Supplied identity verification: server implementation, release candidate
 
 The additive protocol-3 `supplied_identity_v1` capability and
@@ -10,8 +31,9 @@ active DPoP-bound refresh credential. Expired old identity/access does not block
 recovery; invalid, wrong-account, expired, revoked and replayed inputs fail
 closed. Same-account recovery updates verified freshness and configured claims
 without rotating credentials/keys, changing attestation or touching quota.
-Initial sign-in retains the challenge/exchange flow. No schema beyond 30 is
-required. See [ADR 0036](../adr/0036-developer-supplied-identity-verification.md).
+Initial sign-in retains the challenge/exchange flow. The real-device renewal
+correction above requires schema 31 and server 1.1.1. See
+[ADR 0036](../adr/0036-developer-supplied-identity-verification.md).
 
 The complete Go suite passes against isolated UTF-8 PostgreSQL, including the
 new HTTP vertical slice. Transport/session/identity race tests and Go static

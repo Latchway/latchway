@@ -354,6 +354,11 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	assertClientHTTPGrant(t, exchanged, dpopJKT)
 	assertClientHTTPAccessToken(t, ctx, keyManager, exchanged.AccessToken, fixture, revisionID, dpopJKT, now)
 	t.Run("supplied identity recovery verifies same account without credential rotation", func(t *testing.T) {
+		// A real token update happens after the original grant is issued. A
+		// frozen clock used to hide the schema-30 issuance-only CHECK failure.
+		issuedAt := now
+		now = now.Add(2 * time.Second)
+		defer func() { now = issuedAt }()
 		identityTarget := clientHTTPURL(t, "/client/v1/sessions/identity")
 		post := func(token, provider, jti string, key *ecdsa.PrivateKey) *httptest.ResponseRecorder {
 			body, err := json.Marshal(map[string]any{"refresh_token": exchanged.RefreshToken, "identity": map[string]any{"provider": provider, "token": token}})
@@ -429,6 +434,17 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		}
 		if _, err := sessionStore.Authorize(ctx, principal); err != nil {
 			t.Fatalf("verified identity did not resume same access: %v", err)
+		}
+		var originalIssuedAt, originalExpiresAt, attestedAt, renewedAt time.Time
+		if err := pool.QueryRow(ctx, `SELECT issued_at, expires_at, attested_at, identity_verified_at FROM session_grants WHERE session_grant_id=$1`, principal.SessionGrantID).
+			Scan(&originalIssuedAt, &originalExpiresAt, &attestedAt, &renewedAt); err != nil {
+			t.Fatal(err)
+		}
+		if !originalIssuedAt.Equal(issuedAt) || !originalExpiresAt.Equal(issuedAt.Add(time.Duration(exchanged.ExpiresIn)*time.Second)) || !attestedAt.Equal(issuedAt) || !renewedAt.Equal(now) {
+			t.Fatal("identity renewal changed credential or attestation lifetime")
+		}
+		if _, err := pool.Exec(ctx, `UPDATE session_grants SET identity_verified_at=identity_expires_at WHERE session_grant_id=$1`, principal.SessionGrantID); err == nil {
+			t.Fatal("identity expiry bound was removed by renewal migration")
 		}
 		assertClientHTTPProblem(t, post(validToken, "custom", "identity-valid", dpopPrivateKey), http.StatusUnauthorized, "dpop_replayed")
 		if retry := post(validToken, "custom", "identity-valid-retry", dpopPrivateKey); retry.Code != http.StatusOK {

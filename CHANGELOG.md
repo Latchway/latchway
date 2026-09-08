@@ -2,6 +2,18 @@
 
 All notable project changes will be documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versioning follows Semantic Versioning once distributable artifacts exist.
 
+## [1.1.1] - 2026-09-08
+
+### Fixed
+
+- Schema 31 permits same-account identity verification after original session
+  issuance. Schema 30's issuance-only timestamp constraint caused legitimate
+  supplied-token renewal to fail with `internal_error` once the clock advanced.
+  Credential issuance/expiry, required attestation, identity expiry, possession
+  and replay checks remain unchanged. Contract 1.1.0 and wire 3 are unchanged.
+- Add advancing-clock HTTP coverage, preserved-lifetime assertions, migration
+  rollback/upgrade catalog checks and retained identity-expiry validation.
+
 ## [1.1.0] - 2026-09-08
 
 ### Added

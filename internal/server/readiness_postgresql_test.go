@@ -79,6 +79,21 @@ func TestReadinessChecksSchemaConfigurationKeysAndWorkerPostgreSQL(t *testing.T)
 		}
 	}
 
+	// An application-only rollback to an older binary must fail readiness if
+	// the database has already advanced. Forward migrations are not reversible
+	// by replacing only the image, even when the SQL change seems compatible.
+	var futureVersion int64
+	if err := pool.QueryRow(ctx, `INSERT INTO schema_migrations (version,name)
+		SELECT max(version)+1,'future-schema-readiness-fixture' FROM schema_migrations RETURNING version`).Scan(&futureVersion); err != nil {
+		t.Fatal(err)
+	}
+	status, body = serveReadiness(t, pool, checks)
+	if status != http.StatusServiceUnavailable || readinessCheck(body, "schema") != "incompatible" {
+		t.Fatalf("schema-ahead rollback status=%d body=%v", status, body)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version=$1`, futureVersion); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)`); err != nil {
 		t.Fatal(err)
 	}
