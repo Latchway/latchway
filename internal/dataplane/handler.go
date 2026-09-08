@@ -61,17 +61,18 @@ const (
 )
 
 var (
-	errInvalidConfiguration = errors.New("invalid data-plane configuration")
-	errUnsupportedLimitPlan = errors.New("unsupported data-plane limit plan")
-	errDispatchNotOwned     = errors.New("logical request dispatch is already owned")
-	errDispatchNotConsumed  = errors.New("upstream dispatch did not provide a response")
-	errTargetConfiguration  = errors.New("invalid protected upstream target")
-	errPricingUnavailable   = errors.New("configured pricing unavailable")
-	errUpstreamDispatch     = errors.New("upstream dispatch failed")
-	errUpstreamProtocol     = errors.New("upstream protocol observation failed")
-	errUpstreamRelay        = errors.New("upstream response relay failed")
-	decisionWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|w|mo)$`)
-	decisionTimezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$`)
+	errInvalidConfiguration    = errors.New("invalid data-plane configuration")
+	errUnsupportedLimitPlan    = errors.New("unsupported data-plane limit plan")
+	errDispatchNotOwned        = errors.New("logical request dispatch is already owned")
+	errDispatchNotConsumed     = errors.New("upstream dispatch did not provide a response")
+	errTargetConfiguration     = errors.New("invalid protected upstream target")
+	errPricingUnavailable      = errors.New("configured pricing unavailable")
+	errUpstreamDispatch        = errors.New("upstream dispatch failed")
+	errUpstreamProtocol        = errors.New("upstream protocol observation failed")
+	errUpstreamRelay           = errors.New("upstream response relay failed")
+	errProviderRequestRejected = errors.New("provider rejected request before generation")
+	decisionWindowPattern      = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|w|mo)$`)
+	decisionTimezonePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$`)
 )
 
 var decisionWindowMaximum = map[string]int64{
@@ -857,7 +858,27 @@ func calculateAttemptOutcome(
 		)
 	}
 	settlementCost = boundedSettlementCost(settlementCost, prepared.hardCost)
-	return result, quotaOutcome(result.relay, settlementCost, result.err)
+	outcome := quotaOutcome(result.relay, settlementCost, result.err)
+	if result.relay.ProviderError != (upstream.ProviderErrorDiagnostics{}) {
+		outcome.Diagnostics = &quota.AttemptDiagnostics{ProviderError: result.relay.ProviderError}
+	}
+	if result.relay.RejectionConfirmed && !providerUsageOverBound &&
+		!result.relay.ClientStarted && result.relay.BodyBytes == 0 && result.firstByteAt.IsZero() && result.firstTokenAt.IsZero() &&
+		outcome.Status == quota.AttemptFailed && outcome.HTTPStatus == http.StatusBadRequest &&
+		!outcome.Usage.Known && !outcome.Cost.Known &&
+		errors.Is(result.err, upstream.ErrUpstreamNonSuccess) {
+		outcome.Diagnostics = &quota.AttemptDiagnostics{
+			AccountingPolicy: quota.ProviderRejectionAccountingV1, ProviderError: result.relay.ProviderError,
+		}
+		outcome.FailureCode = "upstream_request_rejected"
+		result.err = errors.Join(errProviderRequestRejected, result.err)
+	} else if outcome.Status != quota.AttemptSucceeded && outcome.Usage.Known {
+		if outcome.Diagnostics == nil {
+			outcome.Diagnostics = &quota.AttemptDiagnostics{}
+		}
+		outcome.Diagnostics.AccountingPolicy = quota.ReportedUsageAccountingV1
+	}
+	return result, outcome
 }
 
 func (handler *Handler) prepareExecutionAttempt(
@@ -1436,6 +1457,7 @@ func (handler *Handler) consumeResponse(
 	var firstByteAt time.Time
 	var firstTokenAt time.Time
 	outcome, err := handler.relayer.Relay(streamCtx, writer, response, observer, upstream.ResponseRelayConfig{
+		ProviderErrorMode:  providerErrorMode(decision.Upstream),
 		FirstByteTimeout:   decision.Upstream.Timeouts.FirstByte,
 		IdleTimeout:        decision.Upstream.Timeouts.Idle,
 		ClientWriteTimeout: handler.clientWriteTimeout,
@@ -1467,6 +1489,23 @@ func (handler *Handler) consumeResponse(
 		return outcome, firstByteAt, firstTokenAt, fmt.Errorf("%w: %w", errUpstreamRelay, err)
 	}
 	return outcome, firstByteAt, firstTokenAt, nil
+}
+
+// Error evidence is provider-specific and selected from the protected upstream
+// configuration. Client headers, model names and caller metadata cannot opt in.
+func providerErrorMode(target configuration.Upstream) upstream.ProviderErrorMode {
+	parsed, err := url.Parse(target.BaseURL)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Port() != "" && parsed.Port() != "443") || target.Type != "openai_compatible" {
+		return upstream.ProviderErrorModeNone
+	}
+	switch parsed.Hostname() {
+	case "openrouter.ai", "eu.openrouter.ai", "us.openrouter.ai":
+		if parsed.Path == "/api/v1" || parsed.Path == "/api/v1/" {
+			return upstream.ProviderErrorModeOpenRouter
+		}
+	}
+	return upstream.ProviderErrorModeNone
 }
 
 func (handler *Handler) maximumResponseBytes(decision policy.Decision) int64 {
@@ -1730,6 +1769,9 @@ func trustedInputBoundFromProfile(
 	profile protocol.TrustedInputProfile,
 	preflight protocol.TrustedInputPreflight,
 ) (int64, bool) {
+	if preflight.Breakdown != nil && !preflight.Breakdown.Matches(profile, preflight) {
+		return 0, false
+	}
 	if profile.Protocol != preflight.Protocol ||
 		preflight.RequestBytes <= 0 || preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
 		preflight.ExpandedSchemaBytes < 0 || preflight.ExpandedSchemaBytes > 4*1024*1024 ||
@@ -1822,11 +1864,17 @@ func quotaInputPreflightBinding(
 	if preflight == nil {
 		return nil
 	}
+	var breakdown *protocol.InputAccountingBreakdown
+	if preflight.Breakdown != nil {
+		copy := *preflight.Breakdown
+		breakdown = &copy
+	}
 	return &quota.InputPreflightBinding{
 		Method: preflight.Method, Protocol: preflight.Protocol, ProfileID: preflight.ProfileID,
 		ProfileDigest: preflight.ProfileDigest, RewrittenBodySHA256: preflight.RewrittenBodySHA256,
 		PhysicalModel: preflight.PhysicalModel, InputTokenBound: preflight.InputTokenBound,
 		OutputTokenBound: preflight.OutputTokenBound, TotalTokenBound: preflight.TotalTokenBound,
+		Breakdown: breakdown,
 	}
 }
 
@@ -2557,6 +2605,8 @@ func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr err
 
 func failureCode(err error) string {
 	switch {
+	case errors.Is(err, errProviderRequestRejected):
+		return "upstream_request_rejected"
 	case isUpstreamTimeout(err):
 		return "upstream_timeout"
 	case errors.Is(err, context.Canceled):
@@ -2672,6 +2722,8 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "upstream_protocol_error", 0
 	case errors.Is(err, errUpstreamProtocol), errors.Is(err, errDispatchNotConsumed):
 		return "upstream_protocol_error", 0
+	case errors.Is(err, errProviderRequestRejected):
+		return "request_invalid", 0
 	case errors.Is(err, upstream.ErrUpstreamNonSuccess):
 		return "upstream_unavailable", 0
 	case errors.Is(err, errPricingUnavailable):

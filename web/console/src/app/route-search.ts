@@ -211,6 +211,7 @@ export const RouteSimulatorRouteSearchSchema = z.object({
   app_version: optional(AppVersion),
   authenticated: optional(QueryBoolean),
   environment_id: optional(OpaqueID("env")),
+  expanded_schema_bytes: optional(boundedNonnegativeIntegerText(4_194_304)),
   feature: optional(Identifier),
   framing_unit_count: optional(boundedNonnegativeIntegerText(4096)),
   platform: optional(Platform),

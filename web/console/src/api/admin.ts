@@ -201,13 +201,33 @@ export const InstallationPageSchema = z
   .object({ items: z.array(InstallationSchema).max(200), page: PageInfo })
   .strict();
 
+const UsageMetricDetailsSchema = z.object({
+  recorded_units: NonnegativeSafeInteger.nullable(),
+  reported_units: NonnegativeSafeInteger.nullable(),
+  unknown_units: NonnegativeSafeInteger.nullable(),
+  provenance: z.array(z.enum(["upstream_reported", "calculated", "estimated", "unknown"])).max(4)
+}).strict().superRefine((metric, context) => {
+  if (metric.recorded_units === null ? metric.reported_units !== null || metric.unknown_units !== null || metric.provenance.length !== 0 : metric.provenance.length === 0) {
+    context.addIssue({ code: "custom", message: "Usage evidence must distinguish missing observations from known units." });
+  }
+  for (const value of [metric.reported_units, metric.unknown_units]) {
+    if (value !== null && (metric.recorded_units === null || value > metric.recorded_units)) {
+      context.addIssue({ code: "custom", message: "Usage evidence cannot exceed recorded units." });
+    }
+  }
+});
+
 export const UsageValuesSchema = z
   .object({
     cost_nano_usd: NonnegativeSafeInteger,
     input_tokens: NonnegativeSafeInteger,
     logical_requests: NonnegativeSafeInteger,
     output_tokens: NonnegativeSafeInteger,
-    total_tokens: NonnegativeSafeInteger
+    total_tokens: NonnegativeSafeInteger,
+    details: z.object({
+      input_tokens: UsageMetricDetailsSchema, output_tokens: UsageMetricDetailsSchema,
+      total_tokens: UsageMetricDetailsSchema, cost_nano_usd: UsageMetricDetailsSchema
+    }).strict().optional()
   })
   .strict();
 
@@ -380,6 +400,21 @@ const PublicAttemptFailureCode = z.enum([
 
 const AttemptSchema = z
   .object({
+    accounting_policy: z.enum(["", "provider_rejection_v1", "reported_usage_v1"]).optional(),
+    provider_error: z.object({
+      category: z.enum(["context_length_exceeded", "max_tokens_exceeded", "token_limit_exceeded", "string_too_long", "authentication", "permission_denied", "payment_required", "rate_limit_exceeded", "provider_overloaded", "provider_unavailable", "invalid_request", "invalid_prompt", "not_found", "precondition_failed", "payload_too_large", "unprocessable", "content_policy_violation", "refusal", "invalid_image", "image_too_large", "image_too_small", "unsupported_image_format", "image_not_found", "image_download_failed", "server", "timeout", "unmapped", "unknown"]).optional(),
+      parameter: z.string().regex(/^[a-z_0-9.[\]]+$/).max(128).optional(),
+      provider_code: z.string().regex(/^[a-z_]+$/).max(64).optional(),
+      generation_id: z.string().regex(/^gen-[A-Za-z0-9_-]+$/).max(128).optional(),
+      request_id: z.string().regex(/^req-[A-Za-z0-9_-]+$/).max(128).optional()
+    }).strict().optional(),
+    input_accounting_breakdown: z.object({
+      version: z.literal(1), rewritten_request_bytes: z.number().int().min(1).max(104_857_600),
+      framing_unit_count: z.number().int().min(1).max(4096),
+      maximum_framing_tokens_per_request: NonnegativeSafeInteger,
+      maximum_framing_tokens_per_unit: NonnegativeSafeInteger,
+      expanded_schema_bytes: z.number().int().min(0).max(4 * 1024 * 1024)
+    }).strict().optional(),
     attempt_number: z.number().int().min(1).max(32),
     completed_at: OptionalInstant,
     failure_code: PublicAttemptFailureCode.optional(),
@@ -577,6 +612,7 @@ export const RequestSchema = z
       context.addIssue({ code: "custom", message: "Terminal requests require completion time.", path: ["completed_at"] });
     }
     let terminalStage = false;
+    let quotaDenial: string | undefined;
     request.decision_stages.forEach((stage, index) => {
       if (stage.number !== index + 1) {
         context.addIssue({ code: "custom", message: "Decision stages must be contiguous and ordered.", path: ["decision_stages", index, "number"] });
@@ -587,7 +623,21 @@ export const RequestSchema = z
       if (terminalStage) {
         context.addIssue({ code: "custom", message: "No decision stage may follow a terminal stage.", path: ["decision_stages", index] });
       }
-      terminalStage ||= stage.outcome !== "succeeded";
+      if (quotaDenial) {
+        if (stage.stage === "quota_rule_evaluated" &&
+            (stage.outcome === "succeeded" || stage.outcome === "denied" && stage.failure_code === quotaDenial)) {
+          // A reservation batch may evaluate further rules after a denied rule.
+        } else if (stage.stage === "quota_reserved" && stage.outcome === "denied" && stage.failure_code === quotaDenial) {
+          quotaDenial = undefined;
+          terminalStage = true;
+        } else {
+          context.addIssue({ code: "custom", message: "A denied quota rule must finish with the matching reservation denial.", path: ["decision_stages", index] });
+        }
+      } else if (stage.stage === "quota_rule_evaluated" && stage.outcome === "denied") {
+        quotaDenial = stage.failure_code;
+      } else {
+        terminalStage ||= stage.outcome !== "succeeded";
+      }
       if (stage.limit_plan_key && stage.limit_plan_key !== request.selected_limit_plan) {
         context.addIssue({ code: "custom", message: "Decision-stage plan must match its request.", path: ["decision_stages", index, "limit_plan_key"] });
       }
@@ -595,6 +645,9 @@ export const RequestSchema = z
         context.addIssue({ code: "custom", message: "Route-selection stage must match the durable selected route.", path: ["decision_stages", index, "route"] });
       }
     });
+    if (quotaDenial) {
+      context.addIssue({ code: "custom", message: "The quota denial batch is incomplete.", path: ["decision_stages"] });
+    }
     request.attempts.forEach((attempt, index) => {
       if (attempt.attempt_number !== index + 1) {
         context.addIssue({
@@ -1235,6 +1288,7 @@ export const RouteSimulationSchema = z
         environment_kind: z.enum(["development", "staging", "production"]),
         feature: Identifier,
         framing_unit_count: z.number().int().min(0).max(4096),
+        expanded_schema_bytes: z.number().int().min(0).max(4194304),
         image_units: z.number().int().min(0).max(1_000_000),
         normalized_claims: z.record(z.string(), z.unknown()),
         platform: z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"]),
@@ -1320,6 +1374,7 @@ export const RouteSimulationSchema = z
         input_accounting: z
           .object({
             framing_unit_count: z.number().int().min(0).max(4096),
+            expanded_schema_bytes: z.number().int().min(0).max(4194304),
             input_token_bound: NonnegativeSafeInteger,
             maximum_context_tokens: NonnegativeSafeInteger,
             maximum_framing_tokens_per_request: NonnegativeSafeInteger,

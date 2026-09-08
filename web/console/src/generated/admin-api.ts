@@ -2567,6 +2567,16 @@ export interface components {
             /** @enum {unknown} */
             type: "generic_oidc" | "firebase" | "supabase" | "clerk" | "custom_jwt";
         } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown);
+        /** @description Content-free decomposition of the existing conservative input bound. Historical attempts omit it. The bound equals rewritten_request_bytes plus maximum_framing_tokens_per_request plus framing_unit_count times maximum_framing_tokens_per_unit plus expanded_schema_bytes. It is not a tokenizer count. */
+        InputAccountingBreakdown: {
+            expanded_schema_bytes: number;
+            framing_unit_count: number;
+            maximum_framing_tokens_per_request: number;
+            maximum_framing_tokens_per_unit: number;
+            rewritten_request_bytes: number;
+            /** @constant */
+            version: 1;
+        };
         InputAccountingProfile: {
             id: components["schemas"]["Identifier"];
             maximumContextTokens: number;
@@ -2845,6 +2855,17 @@ export interface components {
             /** Format: uri */
             type: string;
         } & unknown;
+        /** @description Allowlisted bounded provider metadata only; never raw messages, prompts, response bodies or credentials. */
+        ProviderErrorDiagnostics: {
+            /** @enum {string} */
+            category?: "context_length_exceeded" | "max_tokens_exceeded" | "token_limit_exceeded" | "string_too_long" | "authentication" | "permission_denied" | "payment_required" | "rate_limit_exceeded" | "provider_overloaded" | "provider_unavailable" | "invalid_request" | "invalid_prompt" | "not_found" | "precondition_failed" | "payload_too_large" | "unprocessable" | "content_policy_violation" | "refusal" | "invalid_image" | "image_too_large" | "image_too_small" | "unsupported_image_format" | "image_not_found" | "image_download_failed" | "server" | "timeout" | "unmapped" | "unknown";
+            generation_id?: string;
+            /** @description Validated fixed API field path; arbitrary schema property names are excluded. */
+            parameter?: string;
+            /** @description Closed recognized provider code */
+            provider_code?: string;
+            request_id?: string;
+        };
         /** @description Explicit opt-in to exact final provider usage.cost settlement. Configured pricing remains authoritative for pre-dispatch reservations. */
         ProviderReportedCost: {
             /** @constant */
@@ -2951,6 +2972,11 @@ export interface components {
             };
             request?: {
                 app_version?: string;
+                /**
+                 * @description Additional bounded local schema-expansion bytes for Chat or Responses conservative input projection; not schema content.
+                 * @default 0
+                 */
+                expanded_schema_bytes: number;
                 /** @description Hypothetical exact adapter framing-unit count used for conservative trusted-input projection. */
                 framing_unit_count?: number;
                 /** @description Hypothetical exact structured image count used by a hard per-request guard. */
@@ -2990,6 +3016,7 @@ export interface components {
                 environment_id: components["schemas"]["EnvironmentID"];
                 /** @enum {string} */
                 environment_kind: "development" | "staging" | "production";
+                expanded_schema_bytes: number;
                 feature: components["schemas"]["Identifier"];
                 framing_unit_count: number;
                 image_units: number;
@@ -3061,6 +3088,7 @@ export interface components {
                 cost_bound_known: boolean;
                 cost_nano_usd_bound: number;
                 input_accounting: {
+                    expanded_schema_bytes: number;
                     framing_unit_count: number;
                     input_token_bound: number;
                     maximum_context_tokens: number;
@@ -3306,6 +3334,11 @@ export interface components {
         } & (unknown & unknown);
         /** @description One redaction-safe physical attempt. Attempts are returned in contiguous attempt_number order. Terminal attempts have completed_at; succeeded attempts have a 2xx http_status and no failure_code; failed or canceled attempts have a sanitized failure_code. Unknown durable failure values map to unknown and raw provider or internal error text is never returned. */
         UpstreamAttempt: {
+            /**
+             * @description Versioned recorded settlement evidence. Omitted for historical attempts; empty means diagnostics only, with no new settlement policy.
+             * @enum {string}
+             */
+            accounting_policy?: "" | "provider_rejection_v1" | "reported_usage_v1";
             attempt_number: number;
             /** Format: date-time */
             completed_at?: string;
@@ -3334,7 +3367,9 @@ export interface components {
             /** @description Upstream HTTP status when a valid status line was received. */
             http_status?: number;
             id: string;
+            input_accounting_breakdown?: components["schemas"]["InputAccountingBreakdown"];
             model: string;
+            provider_error?: components["schemas"]["ProviderErrorDiagnostics"];
             route: components["schemas"]["Identifier"];
             /** Format: date-time */
             started_at: string;
@@ -3403,6 +3438,12 @@ export interface components {
             limit: number;
             truncated: boolean;
         };
+        UsageDetails: {
+            cost_nano_usd: components["schemas"]["UsageMetricDetails"];
+            input_tokens: components["schemas"]["UsageMetricDetails"];
+            output_tokens: components["schemas"]["UsageMetricDetails"];
+            total_tokens: components["schemas"]["UsageMetricDetails"];
+        };
         UsageDistribution: {
             p50_ms: number;
             p95_ms: number;
@@ -3412,6 +3453,15 @@ export interface components {
         UsageFraction: {
             denominator: number;
             numerator: number;
+        };
+        UsageMetricDetails: {
+            provenance: ("upstream_reported" | "calculated" | "estimated" | "unknown")[];
+            /** @description Ledger units for this metric; null means no record, while zero is a recorded zero. */
+            recorded_units: number | null;
+            /** @description Provider-reported subset; null means no provider report, not zero usage. */
+            reported_units: number | null;
+            /** @description Unknown-confidence subset, which may be conservative quota charges rather than observed generation or billing. */
+            unknown_units: number | null;
         };
         UsageRate: {
             denominator: number;
@@ -3436,8 +3486,10 @@ export interface components {
                 values: components["schemas"]["UsageValues"];
             }[];
         };
+        /** @description Backward-compatible immutable ledger totals, including conservative quota charges. A numeric zero alone does not establish a provider-reported zero or a zero bill. When present, details retain absent observations as null and distinguish reported measurements from unknown charges. These are accounting evidence, not invoices. */
         UsageValues: {
             cost_nano_usd: number;
+            details?: components["schemas"]["UsageDetails"];
             input_tokens: number;
             logical_requests: number;
             output_tokens: number;

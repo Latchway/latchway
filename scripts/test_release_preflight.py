@@ -111,6 +111,35 @@ class ReleasePreflightTests(unittest.TestCase):
         self.assertEqual(report["intended_tag"], "v1.0.0-rc.1")
         self.assertEqual(report["version"], "1.0.0-rc.1")
 
+    def test_new_bundle_edition_preserves_advertised_client_contract(self) -> None:
+        manifest_path = self.root / "api/protocol-version.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["contract_version"] = "1.0.1"
+        manifest["client_contract_version"] = "1.0.0"
+        manifest["bundle"]["file_name"] = "latchway-contract-1.0.1.tar.gz"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.run_git("add", "api/protocol-version.json")
+        self.run_git("commit", "-q", "-m", "new bundle with unchanged client")
+        self.commit = self.run_git("rev-parse", "HEAD").stdout.strip()
+        report = self.validate()
+        self.assertEqual(report["contract_version"], "1.0.1")
+        self.assertEqual(report["client_contract_version"], "1.0.0")
+
+        for client_version, filename, code in (
+            ("1.0.1", "latchway-contract-1.0.1.tar.gz", "contract_version_mismatch"),
+            ("1.0.0", "latchway-contract-1.0.0.tar.gz", "contract_bundle_name_mismatch"),
+            (None, "latchway-contract-1.0.1.tar.gz", "contract_version_mismatch"),
+        ):
+            with self.subTest(code=code, client_version=client_version):
+                manifest["client_contract_version"] = client_version
+                manifest["bundle"]["file_name"] = filename
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                self.run_git("add", "api/protocol-version.json")
+                self.run_git("commit", "-q", "-m", "invalid bundle coordinates")
+                self.commit = self.run_git("rev-parse", "HEAD").stdout.strip()
+                with self.assertRaisesRegex(MODULE.PreflightError, code):
+                    self.validate()
+
     def test_rejects_prerelease_that_cannot_be_a_canonical_prior_rc(self) -> None:
         for tag in (
             "v1.0.0-alpha.1",

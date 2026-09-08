@@ -16,6 +16,7 @@ import (
 	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/protocol"
+	"github.com/latchway/latchway/internal/upstream"
 	"github.com/spf13/cobra"
 )
 
@@ -162,30 +163,34 @@ type installationPageCLI struct {
 }
 
 type usageValuesCLI struct {
-	LogicalRequests json.Number `json:"logical_requests"`
-	InputTokens     json.Number `json:"input_tokens"`
-	OutputTokens    json.Number `json:"output_tokens"`
-	TotalTokens     json.Number `json:"total_tokens"`
-	CostNanoUSD     json.Number `json:"cost_nano_usd"`
+	LogicalRequests json.Number      `json:"logical_requests"`
+	InputTokens     json.Number      `json:"input_tokens"`
+	OutputTokens    json.Number      `json:"output_tokens"`
+	TotalTokens     json.Number      `json:"total_tokens"`
+	CostNanoUSD     json.Number      `json:"cost_nano_usd"`
+	Details         *usageDetailsCLI `json:"details,omitempty"`
 }
 
 type upstreamAttemptCLI struct {
-	ID              string          `json:"id"`
-	AttemptNumber   int32           `json:"attempt_number"`
-	Route           string          `json:"route"`
-	Upstream        string          `json:"upstream"`
-	Model           string          `json:"model"`
-	StartedAt       string          `json:"started_at"`
-	FirstByteAt     string          `json:"first_byte_at,omitempty"`
-	FirstTokenAt    string          `json:"first_token_at,omitempty"`
-	CompletedAt     string          `json:"completed_at,omitempty"`
-	Status          string          `json:"status"`
-	HTTPStatus      int             `json:"http_status,omitempty"`
-	FailureCode     string          `json:"failure_code,omitempty"`
-	Usage           *usageValuesCLI `json:"usage,omitempty"`
-	UsageProvenance string          `json:"usage_provenance"`
-	CostProvenance  string          `json:"cost_provenance"`
-	CostSource      string          `json:"cost_source,omitempty"`
+	ID                       string                             `json:"id"`
+	AttemptNumber            int32                              `json:"attempt_number"`
+	Route                    string                             `json:"route"`
+	Upstream                 string                             `json:"upstream"`
+	Model                    string                             `json:"model"`
+	StartedAt                string                             `json:"started_at"`
+	FirstByteAt              string                             `json:"first_byte_at,omitempty"`
+	FirstTokenAt             string                             `json:"first_token_at,omitempty"`
+	CompletedAt              string                             `json:"completed_at,omitempty"`
+	Status                   string                             `json:"status"`
+	HTTPStatus               int                                `json:"http_status,omitempty"`
+	FailureCode              string                             `json:"failure_code,omitempty"`
+	Usage                    *usageValuesCLI                    `json:"usage,omitempty"`
+	UsageProvenance          string                             `json:"usage_provenance"`
+	CostProvenance           string                             `json:"cost_provenance"`
+	CostSource               string                             `json:"cost_source,omitempty"`
+	AccountingPolicy         string                             `json:"accounting_policy,omitempty"`
+	ProviderError            *upstream.ProviderErrorDiagnostics `json:"provider_error,omitempty"`
+	InputAccountingBreakdown *inputAccountingBreakdownCLI       `json:"input_accounting_breakdown,omitempty"`
 }
 
 type requestDecisionStageCLI struct {
@@ -1531,12 +1536,14 @@ func validEffectiveConfigurationCLI(document effectiveConfigurationCLI) bool {
 			return false
 		}
 	}
-	terminalStage := false
+	sequence := requestDecisionSequenceCLI{}
 	for index, stage := range document.DecisionStages {
-		if terminalStage || !validRequestDecisionStageCLI(stage, int32(index+1), document.RevisionID, document.LimitPlan, selectedRoute) {
+		if !validRequestDecisionStageCLI(stage, int32(index+1), document.RevisionID, document.LimitPlan, selectedRoute) || !sequence.append(stage) {
 			return false
 		}
-		terminalStage = stage.Outcome != "succeeded"
+	}
+	if sequence.quotaDenial != "" {
+		return false
 	}
 	for _, warning := range document.Warnings {
 		if !validEffectiveRequiredTextCLI(warning, 2048) {
@@ -1724,18 +1731,21 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 	default:
 		return false
 	}
-	terminalStage := false
+	sequence := requestDecisionSequenceCLI{}
 	for index, stage := range request.DecisionStages {
-		if terminalStage || !validRequestDecisionStageCLI(
+		if !validRequestDecisionStageCLI(
 			stage, int32(index+1), request.ConfigRevisionID,
 			request.SelectedLimitPlan, request.SelectedRoute,
-		) {
+		) || !sequence.append(stage) {
 			return false
 		}
-		terminalStage = stage.Outcome != "succeeded"
+	}
+	if sequence.quotaDenial != "" || request.Usage != nil && !validUsageValuesCLI(*request.Usage) {
+		return false
 	}
 	for index, attempt := range request.Attempts {
-		if !validUpstreamAttemptCLI(attempt, int32(index+1)) {
+		if !validUpstreamAttemptCLI(attempt, int32(index+1)) ||
+			attempt.InputAccountingBreakdown != nil && !attempt.InputAccountingBreakdown.valid(request.Protocol) {
 			return false
 		}
 	}
@@ -1806,6 +1816,9 @@ func validUpstreamAttemptCLI(attempt upstreamAttemptCLI, expectedNumber int32) b
 		!operationalIdentifierPattern.MatchString(attempt.Route) ||
 		!operationalIdentifierPattern.MatchString(attempt.Upstream) ||
 		(attempt.HTTPStatus != 0 && (attempt.HTTPStatus < 100 || attempt.HTTPStatus > 599)) {
+		return false
+	}
+	if !validAttemptDiagnosticsCLI(attempt) || attempt.Usage != nil && !validUsageValuesCLI(*attempt.Usage) {
 		return false
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
@@ -1901,7 +1914,7 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 		return err
 	}
 	if len(request.Attempts) == 0 {
-		return nil
+		return printRequestDiagnosticsCLI(opts, request)
 	}
 	attempts := make([][]string, 0, len(request.Attempts))
 	for _, attempt := range request.Attempts {
@@ -1922,10 +1935,13 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 			attempt.UsageProvenance, attempt.CostProvenance, attempt.CostSource,
 		})
 	}
-	return printControlTable(opts, []string{
+	if err := printControlTable(opts, []string{
 		"#", "ATTEMPT", "ROUTE", "UPSTREAM", "MODEL", "STATUS", "STARTED", "FIRST BYTE",
 		"FIRST TOKEN", "COMPLETED", "HTTP", "FAILURE", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
-	}, attempts)
+	}, attempts); err != nil {
+		return err
+	}
+	return printRequestDiagnosticsCLI(opts, request)
 }
 
 func printUsageSummary(opts *options, summary usageSummaryCLI) error {

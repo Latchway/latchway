@@ -459,6 +459,13 @@ describe("canonical Admin API browser client", () => {
 	  }]
 	};
 	expect(RequestSchema.parse(recovered).decision_stages.at(-1)?.stage).toBe("lifecycle_recovered");
+	const quotaRule = { ...recovered.decision_stages[1], stage: "quota_rule_evaluated", outcome: "denied", failure_code: "quota_exceeded" };
+	const quotaReserved = { ...quotaRule, number: 3, stage: "quota_reserved" };
+	const quotaDenied = { ...recovered, status: "denied", failure_code: "quota_exceeded", decision_stages: [recovered.decision_stages[0], quotaRule, quotaReserved] };
+	expect(RequestSchema.parse(quotaDenied).decision_stages).toHaveLength(3);
+	expect(() => RequestSchema.parse({ ...quotaDenied, decision_stages: [recovered.decision_stages[0], quotaRule] })).toThrow();
+	expect(() => RequestSchema.parse({ ...quotaDenied, decision_stages: [recovered.decision_stages[0], quotaRule, { ...quotaReserved, outcome: "succeeded", failure_code: undefined }] })).toThrow();
+	expect(() => RequestSchema.parse({ ...quotaDenied, decision_stages: [recovered.decision_stages[0], quotaRule, { ...quotaReserved, stage: "policy_evaluated" }] })).toThrow();
 	expect(() => RequestSchema.parse({ ...recovered, decision_stages: recovered.decision_stages.map((stage, index) => index === 1 ? { ...stage, stage: "unregistered_stage" } : stage) })).toThrow();
 	const values = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 	const analytics = {

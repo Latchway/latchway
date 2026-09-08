@@ -163,6 +163,7 @@ type InputPreflightBinding struct {
 	InputTokenBound     int64
 	OutputTokenBound    int64
 	TotalTokenBound     int64
+	Breakdown           *protocol.InputAccountingBreakdown
 }
 
 // RequestMeasurementBinding is the server-trusted post-rewrite request proof
@@ -261,6 +262,9 @@ type Outcome struct {
 	FailureCode string
 	Usage       Usage
 	Cost        Cost
+	// Diagnostics is trusted, bounded provider evidence and the versioned
+	// settlement policy. Nil preserves historical accounting on replay.
+	Diagnostics *AttemptDiagnostics
 }
 
 // Reservation is an opaque, immutable handle returned only after the reserve
@@ -619,7 +623,7 @@ func prepareInputPreflight(
 		return nil, nil
 	}
 
-	binding := *input
+	binding := *cloneInputPreflightBinding(input)
 	if !validInputPreflightBinding(&binding, protocol, physicalModel) {
 		return nil, ErrInvalidInput
 	}
@@ -661,7 +665,8 @@ func validInputPreflightBinding(
 		validPhysicalModel(binding.PhysicalModel) && binding.PhysicalModel == physicalModel &&
 		binding.InputTokenBound > 0 && validOutput &&
 		binding.InputTokenBound <= math.MaxInt64-binding.OutputTokenBound &&
-		binding.TotalTokenBound == binding.InputTokenBound+binding.OutputTokenBound
+		binding.TotalTokenBound == binding.InputTokenBound+binding.OutputTokenBound &&
+		(binding.Breakdown == nil || binding.Breakdown.Validate(binding.InputTokenBound, binding.Protocol))
 }
 
 func trustedInputProtocolUsesOutput(protocol string) (usesOutput bool, supported bool) {
@@ -1238,6 +1243,9 @@ func (outcome Outcome) validate() error {
 		outcome.Cost.Known && outcome.Cost.Confidence == CalculatedCostConfidence && !outcome.Usage.Known {
 		return ErrInvalidInput
 	}
+	if validateAttemptDiagnostics(outcome) != nil {
+		return ErrInvalidInput
+	}
 	return nil
 }
 
@@ -1294,6 +1302,10 @@ func (cost Cost) validate() error {
 }
 
 func normalizeOutcomeForPricing(outcome Outcome, pricing selectedPricing) (Outcome, error) {
+	if outcome.Diagnostics != nil {
+		owned := *outcome.Diagnostics
+		outcome.Diagnostics = &owned
+	}
 	if outcome.validate() != nil || pricing.validate() != nil {
 		return Outcome{}, ErrInvalidInput
 	}
@@ -1337,10 +1349,7 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 		return RetryAttemptInput{}, ErrInvalidInput
 	}
 	result := input
-	if input.InputPreflight != nil {
-		binding := *input.InputPreflight
-		result.InputPreflight = &binding
-	}
+	result.InputPreflight = cloneInputPreflightBinding(input.InputPreflight)
 	result.RequestMeasurements = cloneRequestMeasurementBinding(input.RequestMeasurements)
 	result.Allocations = append([]AttemptAllocation(nil), input.Allocations...)
 	sort.Slice(result.Allocations, func(left, right int) bool {
@@ -1379,6 +1388,10 @@ func cloneInputPreflightBinding(input *InputPreflightBinding) *InputPreflightBin
 		return nil
 	}
 	result := *input
+	if input.Breakdown != nil {
+		breakdown := *input.Breakdown
+		result.Breakdown = &breakdown
+	}
 	return &result
 }
 

@@ -212,6 +212,7 @@ describe("shareable operational route search", () => {
       confirmation: "REVOKE",
       credential: "provider-key",
       environment_id: "env_0123456789abcdef",
+      expanded_schema_bytes: 268,
       feature: "assistant",
       framing_unit_count: 2,
       platform: "react_native_ios",
@@ -228,6 +229,7 @@ describe("shareable operational route search", () => {
       app_version: "1.2.3-beta",
       authenticated: true,
       environment_id: "env_0123456789abcdef",
+      expanded_schema_bytes: "268",
       feature: "assistant",
       framing_unit_count: "2",
       platform: "react_native_ios",
@@ -240,6 +242,8 @@ describe("shareable operational route search", () => {
     });
     expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", feature: "assistant" }).success).toBe(false);
     expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", framing_unit_count: 4097 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: 4_194_305 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: -1 }).success).toBe(false);
   });
 
   it("keeps feature selection canonical and drops route-foreign sensitive values", () => {

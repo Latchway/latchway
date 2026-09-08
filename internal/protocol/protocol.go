@@ -133,6 +133,9 @@ type TrustedInputPreflight struct {
 	InputTokenBound     int64
 	OutputTokenBound    int64
 	TotalTokenBound     int64
+	// Breakdown is optional aggregate diagnostic metadata for existing proofs.
+	// It never supplies a different input bound or changes quota enforcement.
+	Breakdown *InputAccountingBreakdown
 }
 
 // RequestMeasurements binds exact request-shape units to the rewritten body

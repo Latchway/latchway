@@ -24,6 +24,7 @@ type ReservationProjectionInput struct {
 	RequestedOutputMaximum int64
 	RewrittenRequestBytes  int64
 	FramingUnitCount       int64
+	ExpandedSchemaBytes    int64
 	ImageUnits             int64
 	ToolCalls              int64
 	Streaming              bool
@@ -40,6 +41,7 @@ type ReservationProjectionInputAccounting struct {
 	FramingUnitCount               int64
 	MaximumFramingTokensPerRequest int64
 	MaximumFramingTokensPerUnit    int64
+	ExpandedSchemaBytes            int64
 	InputTokenBound                int64
 	MaximumContextTokens           int64
 }
@@ -79,6 +81,8 @@ func ProjectReservation(
 ) (ReservationProjection, error) {
 	if input.EvaluatedAt.IsZero() || input.RequestedOutputMaximum < 0 ||
 		input.RewrittenRequestBytes < 0 || input.FramingUnitCount < 0 ||
+		input.ExpandedSchemaBytes < 0 || input.ExpandedSchemaBytes > 4*1024*1024 ||
+		input.ExpandedSchemaBytes != 0 && decision.Feature.Protocol != protocol.OpenAIChatID && decision.Feature.Protocol != protocol.OpenAIResponsesID ||
 		input.ImageUnits < 0 || input.ToolCalls < 0 {
 		return ReservationProjection{}, ErrInvalidReservationProjection
 	}
@@ -115,18 +119,10 @@ func ProjectReservation(
 		if profileErr != nil {
 			return ReservationProjection{}, profileErr
 		}
-		candidate := protocol.TrustedInputPreflight{
-			ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
-			Method: profile.Method, PhysicalModel: profile.PhysicalModel,
-			RequestBytes: input.RewrittenRequestBytes, MessageCount: input.FramingUnitCount,
-			OutputTokenBound: appliedOutput,
+		candidate, err := projectTrustedInputPreflight(profile, input, appliedOutput)
+		if err != nil {
+			return ReservationProjection{}, err
 		}
-		inputBound, boundOK := trustedInputBoundFromProfile(profile, candidate)
-		if !boundOK || inputBound > math.MaxInt64-appliedOutput {
-			return ReservationProjection{}, ErrInvalidReservationProjection
-		}
-		candidate.InputTokenBound = inputBound
-		candidate.TotalTokenBound = inputBound + appliedOutput
 		if err := validateTrustedInputPreflight(profile, decision, appliedOutput, candidate); err != nil {
 			return ReservationProjection{}, ErrInvalidReservationProjection
 		}
@@ -138,6 +134,7 @@ func ProjectReservation(
 			FramingUnitCount:               input.FramingUnitCount,
 			MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
 			MaximumFramingTokensPerUnit:    profile.MaximumFramingTokensPerMessage,
+			ExpandedSchemaBytes:            input.ExpandedSchemaBytes,
 			InputTokenBound:                candidate.InputTokenBound,
 			MaximumContextTokens:           profile.MaximumContextTokens,
 		}
@@ -174,6 +171,22 @@ func ProjectReservation(
 		})
 	}
 	return projection, nil
+}
+
+func projectTrustedInputPreflight(profile protocol.TrustedInputProfile, input ReservationProjectionInput, appliedOutput int64) (protocol.TrustedInputPreflight, error) {
+	candidate := protocol.TrustedInputPreflight{
+		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
+		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
+		RequestBytes: input.RewrittenRequestBytes, MessageCount: input.FramingUnitCount,
+		ExpandedSchemaBytes: input.ExpandedSchemaBytes, OutputTokenBound: appliedOutput,
+	}
+	inputBound, ok := trustedInputBoundFromProfile(profile, candidate)
+	if !ok || appliedOutput < 0 || inputBound > math.MaxInt64-appliedOutput {
+		return protocol.TrustedInputPreflight{}, ErrInvalidReservationProjection
+	}
+	candidate.InputTokenBound = inputBound
+	candidate.TotalTokenBound = inputBound + appliedOutput
+	return candidate, nil
 }
 
 func projectedOutputMaximum(

@@ -58,6 +58,9 @@ type ResponseRelayConfig struct {
 	MaxBodyBytes       int64
 	OnFirstByte        func(context.Context) error
 	OnFirstToken       func(context.Context)
+	// ProviderErrorMode is selected from trusted upstream configuration, never
+	// a client header, body field, or a provider's self-reported identity.
+	ProviderErrorMode ProviderErrorMode
 }
 
 // RelayOutcome describes bytes accepted by the client writer and normalized
@@ -67,6 +70,11 @@ type RelayOutcome struct {
 	BodyBytes     int64
 	ClientStarted bool
 	Usage         protocol.Usage
+	ProviderError ProviderErrorDiagnostics
+	// RejectionConfirmed means the trusted provider explicitly rejected an
+	// invalid request before generation. It does not follow from HTTP status
+	// or lack of client-visible bytes alone, and never applies to a 2xx stream.
+	RejectionConfirmed bool
 }
 
 // NormalizeResponseStatus applies the production provider-status boundary
@@ -119,7 +127,7 @@ func RelayResponse(
 	if nilInterface(ctx) || nilInterface(destination) || response == nil || body == nil ||
 		response.StatusCode < http.StatusOK || response.StatusCode > 599 ||
 		nilInterface(observer) || config.FirstByteTimeout < 0 || config.IdleTimeout <= 0 || config.ClientWriteTimeout <= 0 ||
-		config.MaxBodyBytes <= 0 || cancelUpstream == nil {
+		config.MaxBodyBytes <= 0 || cancelUpstream == nil || !validProviderErrorMode(config.ProviderErrorMode) {
 		return outcome, ErrInvalidResponseRelay
 	}
 	abortUpstream := func() {
@@ -128,7 +136,9 @@ func RelayResponse(
 	}
 
 	if err := NormalizeResponseStatus(response.StatusCode); err != nil {
-		return outcome, err
+		var diagnosticErr error
+		outcome.ProviderError, outcome.RejectionConfirmed, diagnosticErr = inspectProviderError(ctx, response, body, abortUpstream, config)
+		return outcome, errors.Join(err, diagnosticErr)
 	}
 	if response.ContentLength > config.MaxBodyBytes {
 		return outcome, ErrResponseBodyTooLarge

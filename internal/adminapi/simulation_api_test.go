@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/dataplane"
 	"github.com/latchway/latchway/internal/protocol"
 )
 
@@ -38,6 +39,34 @@ func TestBaseSimulationResultDescribesProductionCELRequestFacts(t *testing.T) {
 	if _, legacy := uses["requested_input_tokens"]; legacy {
 		t.Fatal("legacy explanatory input estimate remained in fact usage")
 	}
+}
+
+func TestSimulationSchemaFactsRemainBoundedAndReachAccounting(t *testing.T) {
+	for _, count := range []int64{-1, 4*1024*1024 + 1} {
+		if validSimulationRequestFacts(routeSimulationRequestFacts{ExpandedSchemaBytes: count}) {
+			t.Fatal("out-of-range expanded schema bytes accepted")
+		}
+	}
+	authenticated := true
+	request := routeSimulationRequest{Principal: routeSimulationPrincipal{Authenticated: &authenticated}, Request: routeSimulationRequestFacts{ExpandedSchemaBytes: 268}}
+	facts := simulationFacts(configuration.SimulationSnapshot{}, request)
+	if facts.ExpandedSchemaBytes != 268 {
+		t.Fatal("schema bytes omitted from effective simulation facts")
+	}
+	result := simulationReservation(dataplane.ReservationProjection{InputAccounting: dataplane.ReservationProjectionInputAccounting{ExpandedSchemaBytes: 268}})
+	if result.InputAccounting.ExpandedSchemaBytes != 268 {
+		t.Fatal("schema bytes omitted from simulation response")
+	}
+	base := baseSimulationResult(configuration.SimulationSnapshot{}, facts)
+	for _, use := range base.FactUsage {
+		if use.Fact == "expanded_schema_bytes" {
+			if use.AffectsCEL || use.Role != "reservation" {
+				t.Fatal("schema facts must only affect reservation")
+			}
+			return
+		}
+	}
+	t.Fatal("schema fact usage omitted")
 }
 
 func TestSimulationRequestTokenFactsUseProductionBound(t *testing.T) {

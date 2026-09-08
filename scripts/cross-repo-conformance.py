@@ -559,11 +559,19 @@ class Evaluator:
         if manifest.get("manifest_version") != 1:
             raise VerificationError("unsupported_contract_manifest")
         contract_version = manifest.get("contract_version")
+        client_contract_version = manifest.get("client_contract_version", contract_version)
         wire = nested(manifest, "wire_protocol", "current")
         bundle_name = nested(manifest, "bundle", "file_name")
         sdk_kinds = manifest.get("sdk_kinds")
         if not isinstance(contract_version, str) or SEMVER.fullmatch(contract_version) is None:
             raise VerificationError("invalid_contract_version")
+        if not isinstance(client_contract_version, str) or SEMVER.fullmatch(client_contract_version) is None:
+            raise VerificationError("invalid_client_contract_version")
+        if client_contract_version != contract_version:
+            # This gate binds every SDK fixture and lock to one exact bundle.
+            # Split editions need an explicitly pinned retained client baseline;
+            # do not silently compare old SDK hashes with a newly built bundle.
+            raise VerificationError("split_contract_bundle_requires_pinned_client_baseline")
         if not isinstance(wire, int) or isinstance(wire, bool) or wire < 1:
             raise VerificationError("invalid_wire_protocol")
         if bundle_name != f"latchway-contract-{contract_version}.tar.gz":

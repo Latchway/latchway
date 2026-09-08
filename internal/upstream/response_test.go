@@ -465,8 +465,8 @@ func TestRelayResponseRejectsProviderErrorBodyBeforeClientStart(t *testing.T) {
 			if !errors.Is(err, ErrUpstreamNonSuccess) || outcome.StatusCode != statusCode || outcome.ClientStarted || writer.started {
 				t.Fatalf("provider error: outcome=%#v writer_started=%t err=%v", outcome, writer.started, err)
 			}
-			if body.index != 0 || writer.body.Len() != 0 || observer.observed.Len() != 0 || observer.finalizeCalls != 0 {
-				t.Fatalf("provider error body was consumed or exposed: reads=%d client=%q observed=%q finalize=%d", body.index, writer.body.String(), observer.observed.String(), observer.finalizeCalls)
+			if body.index != 1 || writer.body.Len() != 0 || observer.observed.Len() != 0 || observer.finalizeCalls != 0 || outcome.RejectionConfirmed || outcome.ProviderError != (ProviderErrorDiagnostics{}) {
+				t.Fatalf("provider error body was not privately consumed: reads=%d client=%q observed=%q finalize=%d", body.index, writer.body.String(), observer.observed.String(), observer.finalizeCalls)
 			}
 			if body.closeCalls.Load() != 1 || upstreamCancelCalls.Load() != 1 {
 				t.Fatalf("cleanup calls: close=%d cancel=%d", body.closeCalls.Load(), upstreamCancelCalls.Load())

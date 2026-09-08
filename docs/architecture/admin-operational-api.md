@@ -65,6 +65,26 @@ hours, appends a terminal `lifecycle_recovered` / `internal_error` stage, and
 marks the logical request failed. This closes rows abandoned by a transient
 stage-persistence failure without guessing which dependency operation ran.
 
+A quota reservation writes an atomic decision batch: evaluated quota rules,
+then its overall `quota_reserved` result. A denied `quota_rule_evaluated` can
+therefore be followed by further evaluated rules and a matching denied
+`quota_reserved`. This is the only supported continuation after a denial;
+unrelated stages, changed failure codes, missing aggregate denial, and any
+stage after the aggregate terminal result remain corrupt and fail closed.
+
+Request and attempt usage, summary totals, and populated timeseries points
+include additive `usage.details` (or `values.details`) for input, output,
+total tokens, and nano-USD cost. Each metric contains nullable
+`recorded_units`, `reported_units`, and `unknown_units`, plus its provenance.
+Null means no matching ledger observation; zero means a recorded zero.
+The original numeric totals remain unchanged for existing consumers and
+represent ledger charges, not necessarily measured generation or a bill.
+For example, an unknown-confidence total of 92,444 can be a conservative
+quota charge while input, output, and billing observations are all absent.
+The Console labels this explicitly instead of displaying a confirmed zero
+bill. A calculated zero after confirmed pre-generation rejection is not a
+provider-reported zero. Aggregate records never establish invoice completeness.
+
 Physical attempts remain ordered by `attempt_number` (1–32). Each
 attempt includes its canonical route and upstream, physical model,
 start/optional-first-byte/optional-first-token/optional-completion times,
@@ -77,7 +97,9 @@ historical attempts; it is never inferred from `first_byte_at`. The API does
 not partially return a corrupt request.
 
 Logical and decision-stage failures expose registered problem codes, collapsing
-unrecognized durable values to `unknown`. Attempt failures use the closed public
+unrecognized durable values to `unknown`; internal `upstream_non_success` and
+`upstream_request_rejected` map to `upstream_rejected`, matching the request-list
+filter. Attempt failures use the closed public
 vocabulary `canceled`, `gateway_error`,
 `protocol_error`, `timeout`, `unavailable`, `upstream_rejected`, and `unknown`.
 Known internal lifecycle codes map into those categories; every unrecognized or
@@ -86,6 +108,19 @@ error text, internal errors, request/response bodies, and identity subjects are
 never returned. Provider-reported cost exposes the fixed bounded source
 `openrouter_usage_cost`; the attempt's configured catalog binding remains
 distinct for reservation replay.
+
+New attempts can also include `accounting_policy` and `provider_error` from
+their versioned, tenant-scoped diagnostic record. The policy distinguishes
+confirmed provider rejection before generation (`provider_rejection_v1`),
+reported usage on a failed attempt (`reported_usage_v1`), or diagnostics only
+(empty string). Old attempts omit these fields and are not reclassified.
+Provider diagnostics allow only recognized category/code, fixed API parameter
+paths, and bounded provider request/generation identifiers. They never contain
+the provider's free-form message. Optional `input_accounting_breakdown` reports
+rewritten bytes, framing count/allowances, and additional expanded-schema bytes;
+its checked sum must equal the persisted conservative input bound. This is an
+explanation of reservation accounting, not a tokenizer measurement, and no
+prompt, tool definition, or schema content is stored in the breakdown.
 
 The rich summary limits each feature, physical-model, and selected-limit-plan
 breakdown to an operator-selected 1–200 rows and reports truncation. It returns

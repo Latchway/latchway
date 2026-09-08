@@ -20,7 +20,10 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/protocol"
+	"github.com/latchway/latchway/internal/upstream"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
@@ -157,30 +160,91 @@ type installationDocument struct {
 }
 
 type usageValues struct {
-	LogicalRequests int64 `json:"logical_requests"`
-	InputTokens     int64 `json:"input_tokens"`
-	OutputTokens    int64 `json:"output_tokens"`
-	TotalTokens     int64 `json:"total_tokens"`
-	CostNanoUSD     int64 `json:"cost_nano_usd"`
+	LogicalRequests int64         `json:"logical_requests"`
+	InputTokens     int64         `json:"input_tokens"`
+	OutputTokens    int64         `json:"output_tokens"`
+	TotalTokens     int64         `json:"total_tokens"`
+	CostNanoUSD     int64         `json:"cost_nano_usd"`
+	Details         *usageDetails `json:"details,omitempty"`
+}
+
+// The original totals remain ledger charges for compatibility. Details retain
+// missing observations as null and separate reported usage from unknown charges.
+type usageMetricDetails struct {
+	RecordedUnits *int64   `json:"recorded_units"`
+	ReportedUnits *int64   `json:"reported_units"`
+	UnknownUnits  *int64   `json:"unknown_units"`
+	Provenance    []string `json:"provenance"`
+}
+
+type usageDetails struct {
+	InputTokens  usageMetricDetails `json:"input_tokens"`
+	OutputTokens usageMetricDetails `json:"output_tokens"`
+	TotalTokens  usageMetricDetails `json:"total_tokens"`
+	CostNanoUSD  usageMetricDetails `json:"cost_nano_usd"`
+}
+
+// prefix is an internal SQL alias, never an Admin query parameter.
+func usageDetailsSQL(prefix string) string {
+	metrics := []string{"input_tokens", "output_tokens", "total_tokens", "cost_nano_usd"}
+	parts := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		parts = append(parts, fmt.Sprintf(`'%s', jsonb_build_object(
+			'recorded_units', sum(%sunits) FILTER (WHERE %smetric = '%s'),
+			'reported_units', sum(%sunits) FILTER (WHERE %smetric = '%s' AND %sconfidence = 'reported'),
+			'unknown_units', sum(%sunits) FILTER (WHERE %smetric = '%s' AND %sconfidence = 'unknown'),
+			'provenance', COALESCE(array_agg(DISTINCT %sconfidence) FILTER (WHERE %smetric = '%s'), ARRAY[]::text[])
+		)`, metric, prefix, prefix, metric, prefix, prefix, metric, prefix,
+			prefix, prefix, metric, prefix, prefix, prefix, metric))
+	}
+	return "jsonb_build_object(" + strings.Join(parts, ",") + ")"
+}
+
+func decodeUsageDetails(data []byte) (*usageDetails, error) {
+	var details usageDetails
+	if len(data) == 0 || json.Unmarshal(data, &details) != nil {
+		return nil, errOperationalCorrupt
+	}
+	for _, metric := range []*usageMetricDetails{
+		&details.InputTokens, &details.OutputTokens, &details.TotalTokens, &details.CostNanoUSD,
+	} {
+		if metric.RecordedUnits == nil {
+			if metric.ReportedUnits != nil || metric.UnknownUnits != nil || len(metric.Provenance) != 0 {
+				return nil, errOperationalCorrupt
+			}
+		} else if *metric.RecordedUnits < 0 || len(metric.Provenance) == 0 {
+			return nil, errOperationalCorrupt
+		}
+		for _, units := range []*int64{metric.ReportedUnits, metric.UnknownUnits} {
+			if units != nil && (metric.RecordedUnits == nil || *units < 0 || *units > *metric.RecordedUnits) {
+				return nil, errOperationalCorrupt
+			}
+		}
+		metric.Provenance = normalizeProvenance(metric.Provenance)
+	}
+	return &details, nil
 }
 
 type upstreamAttemptDocument struct {
-	ID              string       `json:"id"`
-	AttemptNumber   int32        `json:"attempt_number"`
-	Route           string       `json:"route"`
-	Upstream        string       `json:"upstream"`
-	Model           string       `json:"model"`
-	StartedAt       time.Time    `json:"started_at"`
-	FirstByteAt     *time.Time   `json:"first_byte_at,omitempty"`
-	FirstTokenAt    *time.Time   `json:"first_token_at,omitempty"`
-	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
-	Status          string       `json:"status"`
-	HTTPStatus      *int32       `json:"http_status,omitempty"`
-	FailureCode     *string      `json:"failure_code,omitempty"`
-	Usage           *usageValues `json:"usage,omitempty"`
-	UsageProvenance string       `json:"usage_provenance"`
-	CostProvenance  string       `json:"cost_provenance"`
-	CostSource      *string      `json:"cost_source,omitempty"`
+	ID                       string                             `json:"id"`
+	AttemptNumber            int32                              `json:"attempt_number"`
+	Route                    string                             `json:"route"`
+	Upstream                 string                             `json:"upstream"`
+	Model                    string                             `json:"model"`
+	StartedAt                time.Time                          `json:"started_at"`
+	FirstByteAt              *time.Time                         `json:"first_byte_at,omitempty"`
+	FirstTokenAt             *time.Time                         `json:"first_token_at,omitempty"`
+	CompletedAt              *time.Time                         `json:"completed_at,omitempty"`
+	Status                   string                             `json:"status"`
+	HTTPStatus               *int32                             `json:"http_status,omitempty"`
+	FailureCode              *string                            `json:"failure_code,omitempty"`
+	Usage                    *usageValues                       `json:"usage,omitempty"`
+	UsageProvenance          string                             `json:"usage_provenance"`
+	CostProvenance           string                             `json:"cost_provenance"`
+	CostSource               *string                            `json:"cost_source,omitempty"`
+	InputAccountingBreakdown *protocol.InputAccountingBreakdown `json:"input_accounting_breakdown,omitempty"`
+	AccountingPolicy         *string                            `json:"accounting_policy,omitempty"`
+	ProviderError            *upstream.ProviderErrorDiagnostics `json:"provider_error,omitempty"`
 }
 
 type requestDecisionStageDocument struct {
@@ -1107,6 +1171,7 @@ func (store *operationalStore) listRequests(
 				WHEN request.failure_code IS NULL THEN NULL
 				WHEN request.failure_code IN ('client_cancelled', 'request_cancelled') THEN 'canceled'
 				WHEN request.failure_code = ANY($%d::text[]) THEN request.failure_code
+				WHEN request.failure_code IN ('upstream_non_success', 'upstream_request_rejected') THEN 'upstream_rejected'
 				ELSE 'unknown'
 			END = $%d
 			OR EXISTS (
@@ -1116,6 +1181,7 @@ func (store *operationalStore) listRequests(
 				      WHEN stage.failure_code IS NULL THEN NULL
 				      WHEN stage.failure_code IN ('client_cancelled', 'request_cancelled') THEN 'canceled'
 				      WHEN stage.failure_code = ANY($%d::text[]) THEN stage.failure_code
+				      WHEN stage.failure_code IN ('upstream_non_success', 'upstream_request_rejected') THEN 'upstream_rejected'
 				      ELSE 'unknown'
 				  END = $%d
 			)
@@ -1392,6 +1458,10 @@ func publicLogicalFailureCode(code *string) *string {
 		value := *code
 		return &value
 	}
+	if *code == "upstream_non_success" || *code == "upstream_request_rejected" {
+		value := "upstream_rejected"
+		return &value
+	}
 	value := "unknown"
 	return &value
 }
@@ -1408,7 +1478,7 @@ func publicAttemptFailureSQL(column string) string {
 		WHEN ` + column + ` = 'upstream_protocol_error' THEN 'protocol_error'
 		WHEN ` + column + ` IN ('upstream_timeout', 'upstream_timed_out') THEN 'timeout'
 		WHEN ` + column + ` = 'upstream_unavailable' THEN 'unavailable'
-		WHEN ` + column + ` = 'upstream_non_success' THEN 'upstream_rejected'
+		WHEN ` + column + ` IN ('upstream_non_success', 'upstream_request_rejected') THEN 'upstream_rejected'
 		ELSE 'unknown'
 	END`
 }
@@ -1444,11 +1514,62 @@ func publicAttemptFailureCode(code string) string {
 		return "timeout"
 	case "upstream_unavailable":
 		return "unavailable"
-	case "upstream_non_success":
+	case "upstream_non_success", "upstream_request_rejected":
 		return "upstream_rejected"
 	default:
 		return "unknown"
 	}
+}
+
+func decodeProviderErrorDiagnostics(data []byte) (*upstream.ProviderErrorDiagnostics, error) {
+	if len(data) == 0 || len(data) > 2048 {
+		return nil, errOperationalCorrupt
+	}
+	decoded, err := jsonsafe.Decode(data)
+	object, ok := decoded.(map[string]any)
+	if err != nil || !ok {
+		return nil, errOperationalCorrupt
+	}
+	for key, rawValue := range object {
+		if !slices.Contains([]string{"category", "parameter", "provider_code", "generation_id", "request_id"}, key) {
+			return nil, errOperationalCorrupt
+		}
+		if value, ok := rawValue.(string); !ok || value == "" {
+			return nil, errOperationalCorrupt
+		}
+	}
+	var value upstream.ProviderErrorDiagnostics
+	if json.Unmarshal(data, &value) != nil || value.Validate() != nil {
+		return nil, errOperationalCorrupt
+	}
+	return &value, nil
+}
+
+func validateAttemptDiagnosticsDocument(attempt upstreamAttemptDocument, status string, failure *string) error {
+	if attempt.AccountingPolicy == nil || attempt.ProviderError == nil {
+		return errOperationalCorrupt
+	}
+	switch *attempt.AccountingPolicy {
+	case "":
+		if *attempt.ProviderError == (upstream.ProviderErrorDiagnostics{}) || failure != nil && *failure == "upstream_request_rejected" {
+			return errOperationalCorrupt
+		}
+	case "provider_rejection_v1":
+		if status != "failed" || attempt.HTTPStatus == nil || *attempt.HTTPStatus != 400 ||
+			failure == nil || *failure != "upstream_request_rejected" ||
+			!slices.Contains([]upstream.ProviderErrorCategory{
+				"invalid_request", "invalid_prompt", "context_length_exceeded", "string_too_long", "invalid_image", "unsupported_image_format",
+			}, attempt.ProviderError.Category) {
+			return errOperationalCorrupt
+		}
+	case "reported_usage_v1":
+		if status == "succeeded" || status == "started" || failure == nil || *failure == "upstream_request_rejected" {
+			return errOperationalCorrupt
+		}
+	default:
+		return errOperationalCorrupt
+	}
+	return nil
 }
 
 func validateUpstreamAttempt(
@@ -1571,6 +1692,45 @@ func validateRequestDecisionStage(
 	return nil
 }
 
+// Quota reservation records one atomic batch: every evaluated rule followed by
+// its aggregate reservation outcome. A denied rule is not the batch's terminal
+// stage. Only that narrow continuation is allowed after a non-success outcome.
+type requestDecisionSequence struct {
+	terminal    bool
+	quotaDenial *string
+}
+
+func (sequence *requestDecisionSequence) append(stage requestDecisionStageDocument, failure *string) error {
+	if sequence.terminal {
+		return errOperationalCorrupt
+	}
+	if sequence.quotaDenial != nil {
+		switch stage.Stage {
+		case "quota_rule_evaluated":
+			if stage.Outcome == "succeeded" && failure == nil {
+				return nil
+			}
+			if stage.Outcome == "denied" && failure != nil && *failure == *sequence.quotaDenial {
+				return nil
+			}
+		case "quota_reserved":
+			if stage.Outcome == "denied" && failure != nil && *failure == *sequence.quotaDenial {
+				sequence.quotaDenial = nil
+				sequence.terminal = true
+				return nil
+			}
+		}
+		return errOperationalCorrupt
+	}
+	if stage.Stage == "quota_rule_evaluated" && stage.Outcome == "denied" && failure != nil {
+		code := *failure
+		sequence.quotaDenial = &code
+	} else if stage.Outcome != "succeeded" {
+		sequence.terminal = true
+	}
+	return nil
+}
+
 func (store *operationalStore) populateRequestDetails(
 	ctx context.Context,
 	organizationID string,
@@ -1597,7 +1757,7 @@ func (store *operationalStore) populateRequestDetails(
 	if err != nil {
 		return fmt.Errorf("list request decision stages: %w", err)
 	}
-	terminalStages := make(map[string]bool, len(items))
+	stageSequences := make(map[string]*requestDecisionSequence, len(items))
 	for stageRows.Next() {
 		var requestID string
 		var storedFailureCode *string
@@ -1613,16 +1773,24 @@ func (store *operationalStore) populateRequestDetails(
 			return fmt.Errorf("scan request decision stage: %w", err)
 		}
 		requestIndex, ok := requestIndexes[requestID]
-		if !ok || terminalStages[requestID] || validateRequestDecisionStage(
+		if !ok || validateRequestDecisionStage(
 			stage, storedFailureCode, items[requestIndex], int32(len(items[requestIndex].DecisionStages)+1),
 		) != nil {
 			stageRows.Close()
 			return errOperationalCorrupt
 		}
+		sequence := stageSequences[requestID]
+		if sequence == nil {
+			sequence = &requestDecisionSequence{}
+			stageSequences[requestID] = sequence
+		}
+		if err := sequence.append(stage, storedFailureCode); err != nil {
+			stageRows.Close()
+			return err
+		}
 		stage.FailureCode = publicDecisionFailureCode(storedFailureCode)
 		stage.DurationMS = stage.CompletedAt.Sub(stage.StartedAt).Milliseconds()
 		items[requestIndex].DecisionStages = append(items[requestIndex].DecisionStages, stage)
-		terminalStages[requestID] = stage.Outcome != "succeeded"
 	}
 	if err := stageRows.Err(); err != nil {
 		stageRows.Close()
@@ -1630,6 +1798,9 @@ func (store *operationalStore) populateRequestDetails(
 	}
 	stageRows.Close()
 	for index := range items {
+		if sequence := stageSequences[items[index].ID]; sequence != nil && sequence.quotaDenial != nil {
+			return errOperationalCorrupt
+		}
 		if len(items[index].DecisionStages) == 0 {
 			continue
 		}
@@ -1649,12 +1820,18 @@ func (store *operationalStore) populateRequestDetails(
 	}
 
 	attemptRows, err := store.pool.Query(ctx, `
-		SELECT logical_request_id, upstream_attempt_id, attempt_number, route_key,
+		SELECT logical_request_id, attempt.upstream_attempt_id, attempt_number, route_key,
 		       upstream_key, COALESCE(physical_model, ''), started_at, first_byte_at, first_token_at,
 		       completed_at, status, http_status, failure_code,
-		       cost_confidence, pricing_source
-		FROM upstream_attempts
-		WHERE organization_id = $1 AND logical_request_id = ANY($2::text[])
+		       cost_confidence, pricing_source, input_token_bound, input_accounting_breakdown,
+		       diagnostic.accounting_policy, diagnostic.provider_error
+		FROM upstream_attempts AS attempt
+		LEFT JOIN upstream_attempt_diagnostics AS diagnostic
+		  ON diagnostic.upstream_attempt_id = attempt.upstream_attempt_id
+		 AND diagnostic.organization_id = attempt.organization_id
+		 AND diagnostic.application_id = attempt.application_id
+		 AND diagnostic.environment_id = attempt.environment_id
+		WHERE attempt.organization_id = $1 AND logical_request_id = ANY($2::text[])
 		ORDER BY logical_request_id, attempt_number
 	`, organizationID, requestIDs)
 	if err != nil {
@@ -1664,12 +1841,16 @@ func (store *operationalStore) populateRequestDetails(
 	for attemptRows.Next() {
 		var requestID, status string
 		var failureCode, costConfidence, pricingSource *string
+		var inputTokenBound *int64
+		var inputBreakdownJSON []byte
+		var providerErrorJSON []byte
 		var attempt upstreamAttemptDocument
 		if err := attemptRows.Scan(
 			&requestID, &attempt.ID, &attempt.AttemptNumber, &attempt.Route,
 			&attempt.Upstream, &attempt.Model, &attempt.StartedAt, &attempt.FirstByteAt, &attempt.FirstTokenAt,
 			&attempt.CompletedAt, &status, &attempt.HTTPStatus, &failureCode,
-			&costConfidence, &pricingSource,
+			&costConfidence, &pricingSource, &inputTokenBound, &inputBreakdownJSON,
+			&attempt.AccountingPolicy, &providerErrorJSON,
 		); err != nil {
 			attemptRows.Close()
 			return fmt.Errorf("scan upstream attempt: %w", err)
@@ -1680,6 +1861,29 @@ func (store *operationalStore) populateRequestDetails(
 		) != nil {
 			attemptRows.Close()
 			return errOperationalCorrupt
+		}
+		if attempt.AccountingPolicy != nil {
+			attempt.ProviderError, err = decodeProviderErrorDiagnostics(providerErrorJSON)
+			if err != nil || validateAttemptDiagnosticsDocument(attempt, status, failureCode) != nil {
+				attemptRows.Close()
+				return errOperationalCorrupt
+			}
+		} else if failureCode != nil && *failureCode == "upstream_request_rejected" {
+			attemptRows.Close()
+			return errOperationalCorrupt
+		}
+		if len(inputBreakdownJSON) != 0 {
+			if inputTokenBound == nil {
+				attemptRows.Close()
+				return errOperationalCorrupt
+			}
+			attempt.InputAccountingBreakdown, err = protocol.DecodeInputAccountingBreakdown(
+				inputBreakdownJSON, *inputTokenBound, items[requestIndex].Protocol,
+			)
+			if err != nil {
+				attemptRows.Close()
+				return errOperationalCorrupt
+			}
 		}
 		attempt.Status = publicAttemptStatus(status)
 		if failureCode != nil {
@@ -1716,7 +1920,8 @@ func (store *operationalStore) populateRequestDetails(
 		       COALESCE(sum(units) FILTER (WHERE metric = 'output_tokens'), 0)::bigint,
 		       COALESCE(sum(units) FILTER (WHERE metric = 'total_tokens'), 0)::bigint,
 		       COALESCE(sum(units) FILTER (WHERE metric = 'cost_nano_usd'), 0)::bigint,
-		       COALESCE(array_agg(DISTINCT confidence), ARRAY[]::text[])
+		       COALESCE(array_agg(DISTINCT confidence), ARRAY[]::text[]),
+		       `+usageDetailsSQL("")+`
 		FROM usage_records
 		WHERE organization_id = $1 AND logical_request_id = ANY($2::text[])
 		GROUP BY GROUPING SETS (
@@ -1735,10 +1940,11 @@ func (store *operationalStore) populateRequestDetails(
 		var requestTotal bool
 		var values usageValues
 		var confidences []string
+		var detailsJSON []byte
 		if err := usageRows.Scan(
 			&requestID, &attemptID, &requestTotal,
 			&values.LogicalRequests, &values.InputTokens, &values.OutputTokens,
-			&values.TotalTokens, &values.CostNanoUSD, &confidences,
+			&values.TotalTokens, &values.CostNanoUSD, &confidences, &detailsJSON,
 		); err != nil {
 			return fmt.Errorf("scan request usage: %w", err)
 		}
@@ -1746,6 +1952,10 @@ func (store *operationalStore) populateRequestDetails(
 		if !requestFound || values.LogicalRequests < 0 || values.InputTokens < 0 ||
 			values.OutputTokens < 0 || values.TotalTokens < 0 || values.CostNanoUSD < 0 {
 			return errOperationalCorrupt
+		}
+		values.Details, err = decodeUsageDetails(detailsJSON)
+		if err != nil {
+			return err
 		}
 		if requestTotal {
 			if attemptID != nil {
@@ -1843,6 +2053,7 @@ func (store *operationalStore) aggregateUsage(
 ) (usageValues, []string, error) {
 	var values usageValues
 	var confidences []string
+	var detailsJSON []byte
 	err := store.pool.QueryRow(ctx, `
 		SELECT
 		    COALESCE(sum(units) FILTER (WHERE metric = 'logical_requests'), 0)::bigint,
@@ -1850,16 +2061,21 @@ func (store *operationalStore) aggregateUsage(
 		    COALESCE(sum(units) FILTER (WHERE metric = 'output_tokens'), 0)::bigint,
 		    COALESCE(sum(units) FILTER (WHERE metric = 'total_tokens'), 0)::bigint,
 		    COALESCE(sum(units) FILTER (WHERE metric = 'cost_nano_usd'), 0)::bigint,
-		    COALESCE(array_agg(DISTINCT confidence) FILTER (WHERE confidence IS NOT NULL), ARRAY[]::text[])
+		    COALESCE(array_agg(DISTINCT confidence) FILTER (WHERE confidence IS NOT NULL), ARRAY[]::text[]),
+		    `+usageDetailsSQL("")+`
 		FROM usage_records
 		WHERE organization_id = $1 AND environment_id = $2
 		  AND recorded_at >= $3 AND recorded_at < $4
 	`, organizationID, environmentID, start.UTC(), end.UTC()).Scan(
 		&values.LogicalRequests, &values.InputTokens, &values.OutputTokens,
-		&values.TotalTokens, &values.CostNanoUSD, &confidences,
+		&values.TotalTokens, &values.CostNanoUSD, &confidences, &detailsJSON,
 	)
 	if err != nil {
 		return usageValues{}, nil, fmt.Errorf("aggregate usage summary: %w", err)
+	}
+	values.Details, err = decodeUsageDetails(detailsJSON)
+	if err != nil {
+		return usageValues{}, nil, err
 	}
 	provenance := normalizeProvenance(confidences)
 	return values, provenance, nil
@@ -1916,13 +2132,14 @@ func (store *operationalStore) usageTimeseries(
 		       COALESCE(sum(units) FILTER (WHERE metric = 'input_tokens'), 0)::bigint,
 		       COALESCE(sum(units) FILTER (WHERE metric = 'output_tokens'), 0)::bigint,
 		       COALESCE(sum(units) FILTER (WHERE metric = 'total_tokens'), 0)::bigint,
-		       COALESCE(sum(units) FILTER (WHERE metric = 'cost_nano_usd'), 0)::bigint
+		       COALESCE(sum(units) FILTER (WHERE metric = 'cost_nano_usd'), 0)::bigint,
+		       %s
 		FROM usage_records
 		WHERE organization_id = $1 AND environment_id = $2
 		  AND recorded_at >= $3 AND recorded_at < $4
 		GROUP BY bucket
 		ORDER BY bucket
-	`, truncation)
+	`, truncation, usageDetailsSQL(""))
 	rows, err := store.pool.Query(ctx, query, principal.OrganizationID, environmentID, start.UTC(), end.UTC())
 	if err != nil {
 		return usageTimeseriesDocument{}, fmt.Errorf("read usage timeseries: %w", err)
@@ -1931,11 +2148,16 @@ func (store *operationalStore) usageTimeseries(
 	for rows.Next() {
 		var timestamp time.Time
 		var values usageValues
+		var detailsJSON []byte
 		if err := rows.Scan(
 			&timestamp, &values.LogicalRequests, &values.InputTokens, &values.OutputTokens,
-			&values.TotalTokens, &values.CostNanoUSD,
+			&values.TotalTokens, &values.CostNanoUSD, &detailsJSON,
 		); err != nil {
 			return usageTimeseriesDocument{}, fmt.Errorf("scan usage timeseries: %w", err)
+		}
+		values.Details, err = decodeUsageDetails(detailsJSON)
+		if err != nil {
+			return usageTimeseriesDocument{}, err
 		}
 		index, ok := pointIndex[timestamp.UTC()]
 		if !ok {

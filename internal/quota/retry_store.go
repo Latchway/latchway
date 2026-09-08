@@ -586,6 +586,10 @@ func (store *Store) BeginRetryAttempt(
 	pricing := retrySelectedPricing(preparedInput.Pricing, logical.configRevisionID)
 	var accountingMethod, accountingProfileID, accountingProfileDigest any
 	var rewrittenBodyDigest, inputBound, outputBound, totalBound any
+	accountingBreakdown, err := inputAccountingBreakdownJSON(preparedInput.InputPreflight)
+	if err != nil {
+		return Attempt{}, false, err
+	}
 	if preparedInput.InputPreflight != nil {
 		binding := preparedInput.InputPreflight
 		accountingMethod = binding.Method
@@ -621,11 +625,11 @@ func (store *Store) BeginRetryAttempt(
 			rewritten_body_sha256, input_token_bound, output_token_bound,
 			total_token_bound, request_measurement_binding_version,
 			request_measurement_sha256, measured_request_bytes,
-			measured_image_units, measured_tool_calls
+			measured_image_units, measured_tool_calls, input_accounting_breakdown
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 2, $11, $12, 1,
 			'started', $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-			1, $25, $26, $27, $28
+			1, $25, $26, $27, $28, $29
 		)
 	`, attemptID, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID, nextNumber,
@@ -637,7 +641,7 @@ func (store *Store) BeginRetryAttempt(
 		rewrittenBodyDigest, inputBound, outputBound, totalBound,
 		decisionAttempt.requestMeasurementSHA256,
 		decisionAttempt.measuredRequestBytes, decisionAttempt.measuredImageUnits,
-		decisionAttempt.measuredToolCalls); err != nil {
+		decisionAttempt.measuredToolCalls, accountingBreakdown); err != nil {
 		return Attempt{}, false, mapWriteError("insert retry upstream attempt", err)
 	}
 	if err := insertAttemptQuotaEntries(
@@ -1672,6 +1676,13 @@ func (store *Store) settleRetryLifecycle(
 	if err != nil {
 		return err
 	}
+	unobserved, observationErr := rejectionObservationStateMatches(ctx, tx, reservation, stored.id, outcome)
+	if observationErr != nil {
+		return observationErr
+	}
+	if !unobserved {
+		return ErrInvalidInput
+	}
 	entries, err := lockEntries(ctx, tx, reservation)
 	if err != nil {
 		return err
@@ -2220,6 +2231,9 @@ func settleRetryAttemptLocked(
 	); err != nil {
 		return err
 	}
+	if err := insertAttemptDiagnostics(ctx, tx, reservation, attempt, outcome); err != nil {
+		return err
+	}
 	billedCost, confidence := settlementCostValues(pricing, outcome.Cost)
 	command, err := tx.Exec(ctx, `
 		UPDATE upstream_attempts
@@ -2255,6 +2269,11 @@ func retryAttemptChargedUnits(entry lockedAttemptQuotaEntry, outcome Outcome) (i
 		}
 		return 1, nil
 	}
+	if providerRejectedBeforeGeneration(outcome) &&
+		(entry.metric == InputTokensMetric || entry.metric == OutputTokensMetric ||
+			entry.metric == TotalTokensMetric || entry.metric == CostNanoUSDMetric) {
+		return 0, nil
+	}
 	if entry.metric == CostNanoUSDMetric {
 		if !outcome.Cost.Known {
 			return entry.allocated, nil
@@ -2268,10 +2287,10 @@ func retryAttemptChargedUnits(entry lockedAttemptQuotaEntry, outcome Outcome) (i
 	if !ok {
 		return 0, ErrInvalidState
 	}
-	if outcome.Status == AttemptSucceeded && outcome.Usage.Known && actual > entry.allocated {
+	if usesReportedTokenSettlement(outcome) && actual > entry.allocated {
 		return 0, ErrInvalidInput
 	}
-	if outcome.Status == AttemptSucceeded && outcome.Usage.Known {
+	if usesReportedTokenSettlement(outcome) {
 		return actual, nil
 	}
 	return entry.allocated, nil
@@ -2346,13 +2365,14 @@ func insertRetryAttemptUsage(
 			if !ok || usageID == "" {
 				return ErrInvalidState
 			}
-			if err := insert(
-				usageID, reservationEntry.metric, reservationEntry.units,
-				nil, nil, nil, nil, UnknownCostConfidence,
-				retryUnknownTokenUsageProvenanceKey(
-					reservation.reservationID, attempt, reservationEntry.metric,
-				),
-			); err != nil {
+			units, confidence := reservationEntry.units, UnknownCostConfidence
+			provenance := retryUnknownTokenUsageProvenanceKey(reservation.reservationID, attempt, reservationEntry.metric)
+			if providerRejectedBeforeGeneration(outcome) {
+				units, confidence = 0, CalculatedCostConfidence
+				provenance = rejectedUsageProvenanceKey(attempt.id, reservationEntry.metric)
+			}
+			if err := insert(usageID, reservationEntry.metric, units,
+				nil, nil, nil, nil, confidence, provenance); err != nil {
 				return err
 			}
 		}
@@ -2380,6 +2400,13 @@ func retryAttemptUsageMatches(
 	quotaEntries []lockedAttemptQuotaEntry,
 	outcome Outcome,
 ) (bool, error) {
+	diagnostics, diagnosticErr := loadAttemptDiagnostics(ctx, tx, reservation, attempt.id)
+	if diagnosticErr != nil {
+		return false, diagnosticErr
+	}
+	if !sameAttemptDiagnostics(diagnostics, outcome.Diagnostics) {
+		return false, nil
+	}
 	type expectedUsage struct {
 		metric     string
 		units      int64
@@ -2409,12 +2436,13 @@ func retryAttemptUsageMatches(
 			return false, err
 		}
 		for _, tokenReservation := range reservations {
-			expected[retryUnknownTokenUsageProvenanceKey(
-				reservation.reservationID, attempt, tokenReservation.metric,
-			)] = expectedUsage{
-				metric: tokenReservation.metric, units: tokenReservation.units,
-				confidence: UnknownCostConfidence,
+			units, confidence := tokenReservation.units, UnknownCostConfidence
+			provenance := retryUnknownTokenUsageProvenanceKey(reservation.reservationID, attempt, tokenReservation.metric)
+			if providerRejectedBeforeGeneration(outcome) {
+				units, confidence = 0, CalculatedCostConfidence
+				provenance = rejectedUsageProvenanceKey(attempt.id, tokenReservation.metric)
 			}
+			expected[provenance] = expectedUsage{metric: tokenReservation.metric, units: units, confidence: confidence}
 		}
 	}
 	pricing, err := attempt.selectedPricing()
@@ -2482,6 +2510,11 @@ func storedRetryAttemptAccountingMatches(
 	attempt storedAttempt,
 	quotaEntries []lockedAttemptQuotaEntry,
 ) (bool, error) {
+	diagnostics, diagnosticErr := loadAttemptDiagnostics(ctx, tx, reservation, attempt.id)
+	if diagnosticErr != nil {
+		return false, diagnosticErr
+	}
+	rejected := diagnostics != nil && diagnostics.AccountingPolicy == ProviderRejectionAccountingV1
 	tokenAllocations := make(map[string]int64, len(reservedTokenMetricOrder))
 	for _, entry := range quotaEntries {
 		if entry.metric != CostNanoUSDMetric && entry.metric != UpstreamAttemptsMetric {
@@ -2513,8 +2546,19 @@ func storedRetryAttemptAccountingMatches(
 			return false, nil
 		}
 		switch confidence {
+		case CalculatedCostConfidence:
+			_, expected := tokenAllocations[metric]
+			if !rejected || !expected || units != 0 || (mode != "" && mode != "rejected") ||
+				provenance != rejectedUsageProvenanceKey(attempt.id, metric) {
+				return false, nil
+			}
+			if _, duplicate := unknown[metric]; duplicate {
+				return false, nil
+			}
+			mode = "rejected"
+			unknown[metric] = units
 		case "reported":
-			if mode == "unknown" ||
+			if rejected || mode == "unknown" || mode == "rejected" ||
 				provenance != providerUsageProvenanceKey(attempt.id, metric) {
 				return false, nil
 			}
@@ -2525,7 +2569,7 @@ func storedRetryAttemptAccountingMatches(
 			reported[metric] = units
 		case UnknownCostConfidence:
 			allocated, expected := tokenAllocations[metric]
-			if mode == "reported" || !expected || units != allocated ||
+			if rejected || mode == "reported" || mode == "rejected" || !expected || units != allocated ||
 				provenance != retryUnknownTokenUsageProvenanceKey(
 					reservation.reservationID, attempt, metric,
 				) {
@@ -2543,7 +2587,7 @@ func storedRetryAttemptAccountingMatches(
 	if err := rows.Err(); err != nil {
 		return false, persistenceFailure("iterate stored retry token usage", err)
 	}
-	outcome := Outcome{Status: attempt.status}
+	outcome := Outcome{Status: attempt.status, Diagnostics: diagnostics}
 	if attempt.httpStatus != nil {
 		outcome.HTTPStatus = int(*attempt.httpStatus)
 	}
@@ -2567,7 +2611,7 @@ func storedRetryAttemptAccountingMatches(
 		}
 		outcome.Usage.Known = true
 		outcome.Usage.Provenance = ProviderReportedProvenance
-	case "unknown":
+	case "unknown", "rejected":
 		if len(unknown) != len(tokenAllocations) {
 			return false, nil
 		}
@@ -2595,6 +2639,13 @@ func storedRetryAttemptAccountingMatches(
 		}
 	} else if pricing.present() {
 		outcome.Cost = Cost{Confidence: UnknownCostConfidence}
+	}
+	unobserved, observationErr := rejectionObservationStateMatches(ctx, tx, reservation, attempt.id, outcome)
+	if observationErr != nil {
+		return false, observationErr
+	}
+	if !unobserved {
+		return false, nil
 	}
 	if outcome.validate() != nil || !terminalAttemptMatches(attempt, outcome, pricing) {
 		return false, nil

@@ -699,11 +699,30 @@ def validate_contract_release_state(manifest: dict[str, Any]) -> None:
         raise ValueError("released v1 contract must use canonical UTC time")
 
 
+def contract_document_versions(manifest: dict[str, Any]) -> tuple[str, str]:
+    """Return immutable bundle edition and independently advertised client contract.
+
+    Historical manifests omitted the client coordinate when both versions matched.
+    """
+    bundle_version = manifest.get("contract_version")
+    client_version = manifest.get("client_contract_version", bundle_version)
+    for value in (bundle_version, client_version):
+        if not isinstance(value, str) or re.fullmatch(
+            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", value
+        ) is None:
+            raise ValueError("invalid bundle or client contract version")
+    if manifest.get("bundle", {}).get("file_name") != (
+        f"latchway-contract-{bundle_version}.tar.gz"
+    ):
+        raise ValueError("contract bundle filename does not match its edition")
+    return bundle_version, client_version
+
+
 def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
-    contract_version = manifest["contract_version"]
-    if contract_version != "1.1.0" or manifest["wire_protocol"] != {
+    contract_version, client_contract_version = contract_document_versions(manifest)
+    if (contract_version, client_contract_version) != ("1.1.1", "1.1.0") or manifest["wire_protocol"] != {
         "current": 3,
         "supported": [1, 2, 3],
         "minimum": 1,
@@ -715,7 +734,7 @@ def main() -> None:
     admin_path = API / "admin.openapi.yaml"
     client = load_document(client_path)
     admin = load_document(admin_path)
-    validate_openapi(client_path, client, contract_version)
+    validate_openapi(client_path, client, client_contract_version)
     validate_openapi(admin_path, admin, contract_version)
     validate_problem_operation_id_contract(client_path, client)
     validate_problem_operation_id_contract(admin_path, admin)
@@ -738,8 +757,11 @@ def main() -> None:
     validate_admin_secret_contract(admin_path, admin)
 
     registry = load_document(API / "error-codes.yaml")
-    if registry["contract_version"] != contract_version:
+    if registry["contract_version"] != client_contract_version:
         raise ValueError("error registry contract version mismatch")
+    sdk_registry = load_document(API / "sdk-error-codes.yaml")
+    if sdk_registry["contract_version"] != client_contract_version:
+        raise ValueError("SDK error registry client contract version mismatch")
     operation_rule = registry.get("fields", {}).get("conditional", {}).get("operation_id", {})
     if operation_rule != {"required_for": ["operation_indeterminate"], "forbidden_otherwise": True}:
         raise ValueError("error registry operation_id conditional drift")

@@ -4,7 +4,7 @@ description: "How features select routes and how Latchway reserves trusted usage
 icon: "book-open"
 audience: "mixed"
 pageType: "concept"
-serverVersion: "1.0.4"
+serverVersion: "1.1.2"
 sdkVersion: "1.0.0"
 lastVerified: "2026-09-08"
 owner: "security"
@@ -147,6 +147,35 @@ authoritative tokenizer, price calculator, or policy simulator; server-owned
 preflight and the active immutable revision determine the real reservation.
 
 ## Operator verification
+
+### Rejected requests and unknown usage
+
+From server 1.1.2, a confirmed OpenRouter request-validation rejection before
+generation releases its token and cost reservations. It still counts as a
+logical request and an upstream attempt. An HTTP error alone is not sufficient
+evidence: untyped errors, timeouts and ambiguous interrupted responses retain
+conservative accounting.
+
+The Console and CLI distinguish reported measurements from unknown quota
+charges. The Admin API provides `usage.details` with recorded, reported and
+unknown units for each token/cost metric. An unavailable measurement is `null`,
+not a reported zero. A calculated zero-token settlement after rejection is not
+proof that OpenRouter billed zero dollars.
+
+Attempt diagnostics may include a sanitized provider category, structural
+parameter path and generation ID. Raw provider messages and prompt bodies are
+not retained. Use a confirmed rejection's `request_invalid` response to correct
+the request before retrying; an operator can inspect the safe diagnostics.
+
+### Explaining a large input reservation
+
+`input_accounting_breakdown` exposes aggregate rewritten request bytes, framing
+unit count, per-request/per-unit framing allowances and expanded schema bytes.
+Tool schemas can increase both framing and schema-expansion allowances. These
+are conservative bounds, not exact tokenizer measurements or prompt text.
+When simulating Chat or Responses input, include `expanded_schema_bytes`; the
+CLI accepts `--expanded-schema-bytes`. Historical attempts may lack this
+breakdown and cannot be reconstructed from their body hash alone.
 
 Use route simulation against an exact configuration revision before activation.
 After traffic begins, inspect the logical request and its ordered attempts,

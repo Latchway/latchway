@@ -1172,9 +1172,12 @@ def render_all() -> Mapping[Path, str]:
     for code, definition in sdk_error_registry["codes"].items():
         documents[ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx"] = render_sdk_error_page(code, definition)
     protocol = json.loads(PROTOCOL_SOURCE.read_text(encoding="utf-8"))
-    if protocol["contract_version"] != error_registry["contract_version"]:
+    client_contract_version = protocol.get("client_contract_version", protocol["contract_version"])
+    if client_contract_version != error_registry["contract_version"]:
         raise ReferenceError("protocol and error registry versions disagree")
-    if protocol["contract_version"] == "1.1.0":
+    if client_contract_version != sdk_error_registry["contract_version"]:
+        raise ReferenceError("protocol and SDK error registry versions disagree")
+    if client_contract_version == "1.1.0":
         current_pages = {ADMIN_OUTPUT, CLIENT_OUTPUT, ERROR_OUTPUT, CONFIG_OUTPUT}
         current_pages.update(ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx" for code in SHARED_NATIVE_ERRORS)
         for path in current_pages:
@@ -1182,13 +1185,25 @@ def render_all() -> Mapping[Path, str]:
             content = re.sub(r'^serverVersion: .*$', 'serverVersion: "1.1.0"', content, count=1, flags=re.MULTILINE)
             content = re.sub(r'^sdkVersion: .*$', 'sdkVersion: "not-applicable"', content, count=1, flags=re.MULTILINE)
             content = re.sub(r'^lastVerified: .*$', 'lastVerified: "2026-09-08"', content, count=1, flags=re.MULTILINE)
-            if protocol["contract_status"] == "draft":
+            if protocol["contract_status"] == "draft" and protocol["contract_version"] == client_contract_version:
                 frontmatter, body = content.split("\n---\n", 1)
                 content = frontmatter + "\n---\n\n<Warning>" + (
                     "This reference includes draft contract 1.1.0. Shared native app APIs are unreleased; "
                     "published SDKs and server 1.0.x do not provide them. Do not treat this reference as release evidence."
                 ) + "</Warning>\n" + body
             documents[path] = content
+    if protocol["contract_version"] == "1.1.1" and client_contract_version == "1.1.0":
+        documents[ADMIN_OUTPUT] = re.sub(
+            r'^serverVersion: .*$', 'serverVersion: "1.1.2"',
+            documents[ADMIN_OUTPUT], count=1, flags=re.MULTILINE,
+        )
+    if protocol["contract_status"] == "draft" and protocol["contract_version"] != client_contract_version:
+        frontmatter, body = documents[ADMIN_OUTPUT].split("\n---\n", 1)
+        documents[ADMIN_OUTPUT] = frontmatter + "\n---\n\n<Warning>" + (
+            f"This reference includes draft Admin contract bundle {protocol['contract_version']}. "
+            f"Client contract {client_contract_version} remains unchanged. "
+            "These Admin additions are unreleased; do not treat this reference as release evidence."
+        ) + "</Warning>\n" + body
     sources = (
         ADMIN_SOURCE,
         CLIENT_SOURCE,

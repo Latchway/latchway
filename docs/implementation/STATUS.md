@@ -2,6 +2,33 @@
 
 Status date: 2026-09-08
 
+## Server 1.1.2: evidence-based failure settlement and diagnostics
+
+The implementation separates confirmed OpenRouter pre-generation rejection from
+unknown post-dispatch consumption. Versioned settlement evidence releases unused
+token/cost reservations without fabricating provider billing, preserves request
+and attempt counters, and keeps historical failed-attempt accounting on replay.
+Schemas 32/33 add aggregate input-bound components and bounded safe provider
+diagnostics. No prompt bodies or historical refunds are introduced.
+
+Admin request/effective-configuration, CLI and Console now handle the normal
+quota-denial stage sequence. Usage details distinguish absent, reported and
+unknown measurements. Schema expansion is represented in simulation; conservative
+hard-bound arithmetic and the published client contract remain unchanged.
+
+The complete PostgreSQL-backed Go suite, affected-package race tests, static
+analysis, generated database/API bindings, contract validation, and canonical
+public-documentation checks pass. Console verification passes 294 unit tests
+and 40 browser tests across Chromium, Firefox, WebKit and mobile WebKit. One
+separate live-stack browser bootstrap test remains skipped because its isolated
+gateway harness was not configured. The Python script suite has the identical
+18 failures and 133 errors as the pre-change baseline (569 current tests versus
+562 baseline tests); seven added tests pass. Removed verification CI is not
+reinstated or represented as passing. Publication and VPS deployment remain
+separate receipts, not inferred from local checks.
+See [release notes](../release/v1.1.2.md) and
+[settlement decision](../adr/0038-evidence-based-failed-attempt-settlement.md).
+
 ## Server 1.1.1: real-device identity renewal regression
 
 The first fresh iOS 1.2.0 device run against public server 1.1.0 completed

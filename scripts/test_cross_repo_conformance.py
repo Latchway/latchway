@@ -1410,5 +1410,40 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertIn("evidence_output_inside_source_repository", result.stderr)
 
 
+class SplitContractBaselineTests(unittest.TestCase):
+    def test_split_bundle_requires_explicit_retained_client_baseline(self) -> None:
+        module_name = "latchway_split_contract_baseline_under_test"
+        specification = importlib.util.spec_from_file_location(module_name, SCRIPT)
+        assert specification is not None and specification.loader is not None
+        module = importlib.util.module_from_spec(specification)
+        sys.modules[module_name] = module
+        try:
+            specification.loader.exec_module(module)
+            with tempfile.TemporaryDirectory(prefix="latchway-split-contract-") as temporary:
+                core = Path(temporary)
+                manifest_path = core / "api/protocol-version.json"
+                manifest_path.parent.mkdir()
+                manifest_path.write_text(json.dumps({
+                    "manifest_version": 1,
+                    "contract_version": "1.1.1",
+                    "client_contract_version": "1.1.0",
+                    "wire_protocol": {"current": 3},
+                    "bundle": {"file_name": "latchway-contract-1.1.1.tar.gz"},
+                }), encoding="utf-8")
+                evaluator = module.Evaluator(module.Configuration(
+                    scope="source", repositories={"core": core}, release_tag=None,
+                    oci_image_digest=None, external_evidence_dir=None,
+                ))
+                evaluator.state["repositories"] = {"core": core}
+                with self.assertRaisesRegex(
+                    module.VerificationError,
+                    "split_contract_bundle_requires_pinned_client_baseline",
+                ):
+                    evaluator._core_contract()
+                self.assertNotIn("contract_version", evaluator.state)
+        finally:
+            del sys.modules[module_name]
+
+
 if __name__ == "__main__":
     unittest.main()

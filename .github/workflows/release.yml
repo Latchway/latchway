@@ -6,7 +6,7 @@ on:
       version:
         description: Version without the v prefix
         required: true
-        default: 1.1.1
+        default: 1.1.2
         type: string
 
 permissions:
@@ -62,7 +62,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: >-
           gh release create "v$RELEASE_VERSION"
-          "dist/release/latchway-contract-1.1.0.tar.gz"
+          "dist/release/latchway-contract-1.1.1.tar.gz"
           --target "$GITHUB_SHA"
           --title "Latchway server v$RELEASE_VERSION"
           --notes-file "docs/release/v$RELEASE_VERSION.md"

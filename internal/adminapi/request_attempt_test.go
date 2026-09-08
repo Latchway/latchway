@@ -11,18 +11,19 @@ import (
 func TestPublicAttemptFailureCodeUsesClosedVocabulary(t *testing.T) {
 	t.Parallel()
 	tests := map[string]string{
-		"client_cancelled":        "canceled",
-		"request_cancelled":       "canceled",
-		"pricing_unavailable":     "gateway_error",
-		"quota_state_unavailable": "gateway_error",
-		"configuration_invalid":   "gateway_error",
-		"upstream_protocol_error": "protocol_error",
-		"upstream_timeout":        "timeout",
-		"upstream_timed_out":      "timeout",
-		"upstream_unavailable":    "unavailable",
-		"upstream_non_success":    "upstream_rejected",
-		"provider body: secret":   "unknown",
-		"":                        "unknown",
+		"client_cancelled":          "canceled",
+		"request_cancelled":         "canceled",
+		"pricing_unavailable":       "gateway_error",
+		"quota_state_unavailable":   "gateway_error",
+		"configuration_invalid":     "gateway_error",
+		"upstream_protocol_error":   "protocol_error",
+		"upstream_timeout":          "timeout",
+		"upstream_timed_out":        "timeout",
+		"upstream_unavailable":      "unavailable",
+		"upstream_non_success":      "upstream_rejected",
+		"upstream_request_rejected": "upstream_rejected",
+		"provider body: secret":     "unknown",
+		"":                          "unknown",
 	}
 	allowed := map[string]bool{
 		"canceled": true, "gateway_error": true, "protocol_error": true,
@@ -43,9 +44,11 @@ func TestPublicAttemptFailureCodeUsesClosedVocabulary(t *testing.T) {
 func TestPublicLogicalDecisionFailureCodeUsesRegisteredOrClosedValues(t *testing.T) {
 	t.Parallel()
 	for stored, want := range map[string]string{
-		"quota_exceeded":       "quota_exceeded",
-		"request_cancelled":    "canceled",
-		"provider_secret_hint": "unknown",
+		"quota_exceeded":            "quota_exceeded",
+		"request_cancelled":         "canceled",
+		"upstream_non_success":      "upstream_rejected",
+		"upstream_request_rejected": "upstream_rejected",
+		"provider_secret_hint":      "unknown",
 	} {
 		stored, want := stored, want
 		t.Run(stored, func(t *testing.T) {
@@ -58,6 +61,111 @@ func TestPublicLogicalDecisionFailureCodeUsesRegisteredOrClosedValues(t *testing
 	}
 	if publicDecisionFailureCode(nil) != nil {
 		t.Fatal("nil decision failure became present")
+	}
+}
+
+func TestRequestDecisionSequenceAllowsOnlyQuotaDenialBatchContinuation(t *testing.T) {
+	t.Parallel()
+	denied := "quota_exceeded"
+	other := "internal_error"
+	rule := requestDecisionStageDocument{Stage: "quota_rule_evaluated", Outcome: "denied"}
+	reserved := requestDecisionStageDocument{Stage: "quota_reserved", Outcome: "denied"}
+	for name, continuation := range map[string][]struct {
+		stage requestDecisionStageDocument
+		code  *string
+	}{
+		"one denied rule": {{reserved, &denied}},
+		"multiple rules including later success": {
+			{requestDecisionStageDocument{Stage: "quota_rule_evaluated", Outcome: "succeeded"}, nil},
+			{rule, &denied}, {reserved, &denied},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sequence := requestDecisionSequence{}
+			if err := sequence.append(rule, &denied); err != nil {
+				t.Fatal(err)
+			}
+			for _, next := range continuation {
+				if err := sequence.append(next.stage, next.code); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !sequence.terminal || sequence.quotaDenial != nil {
+				t.Fatal("batch did not close")
+			}
+			if !errors.Is(sequence.append(reserved, &denied), errOperationalCorrupt) {
+				t.Fatal("accepted stage after reservation denial")
+			}
+		})
+	}
+	for name, next := range map[string]struct {
+		stage requestDecisionStageDocument
+		code  *string
+	}{
+		"unrelated success":                {requestDecisionStageDocument{Stage: "route_selected", Outcome: "succeeded"}, nil},
+		"success reservation after denial": {requestDecisionStageDocument{Stage: "quota_reserved", Outcome: "succeeded"}, nil},
+		"changed failure":                  {reserved, &other},
+		"missing failure":                  {reserved, nil},
+		"failed rule after denial":         {requestDecisionStageDocument{Stage: "quota_rule_evaluated", Outcome: "failed"}, &other},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sequence := requestDecisionSequence{}
+			if err := sequence.append(rule, &denied); err != nil {
+				t.Fatal(err)
+			}
+			if !errors.Is(sequence.append(next.stage, next.code), errOperationalCorrupt) {
+				t.Fatal("accepted invalid denial continuation")
+			}
+		})
+	}
+	sequence := requestDecisionSequence{}
+	if err := sequence.append(requestDecisionStageDocument{Stage: "policy_evaluated", Outcome: "denied"}, &denied); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(sequence.append(rule, &denied), errOperationalCorrupt) {
+		t.Fatal("accepted stage after terminal policy denial")
+	}
+}
+
+func TestUsageDetailsPreserveAbsentZeroAndUnknownCharges(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"input_tokens":{"recorded_units":null,"reported_units":null,"unknown_units":null,"provenance":[]},
+		"output_tokens":{"recorded_units":0,"reported_units":0,"unknown_units":null,"provenance":["reported"]},
+		"total_tokens":{"recorded_units":92444,"reported_units":null,"unknown_units":92444,"provenance":["unknown"]},
+		"cost_nano_usd":{"recorded_units":null,"reported_units":null,"unknown_units":null,"provenance":[]}
+	}`)
+	details, err := decodeUsageDetails(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if details.InputTokens.RecordedUnits != nil || details.CostNanoUSD.RecordedUnits != nil ||
+		details.OutputTokens.ReportedUnits == nil || *details.OutputTokens.ReportedUnits != 0 ||
+		details.TotalTokens.ReportedUnits != nil || details.TotalTokens.UnknownUnits == nil || *details.TotalTokens.UnknownUnits != 92444 ||
+		len(details.OutputTokens.Provenance) != 1 || details.OutputTokens.Provenance[0] != "upstream_reported" {
+		t.Fatalf("details lost accounting evidence: %#v", details)
+	}
+}
+
+func TestProviderDiagnosticsReadBoundaryRejectsRawOrUnrecognizedValues(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		`{"category":"invalid_request","parameter":"messages[0].content","provider_code":"invalid_value","generation_id":"gen-safe123","request_id":"req-safe123"}`,
+		`{}`,
+	} {
+		if _, err := decodeProviderErrorDiagnostics([]byte(raw)); err != nil {
+			t.Fatalf("safe diagnostics rejected: %v", err)
+		}
+	}
+	for _, raw := range []string{
+		`{"message":"private provider message"}`, `{"category":"private_provider_category"}`,
+		`{"parameter":"private_secret"}`, `{"provider_code":"private_provider_code"}`,
+		`{"request_id":"https://private.example"}`, `{"category":"invalid_request","category":"server"}`,
+		`null`, `[]`,
+	} {
+		if _, err := decodeProviderErrorDiagnostics([]byte(raw)); !errors.Is(err, errOperationalCorrupt) {
+			t.Fatalf("unsafe diagnostics accepted: %s", raw)
+		}
 	}
 }
 

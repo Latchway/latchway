@@ -134,14 +134,18 @@ def validate_candidate(tag: str, commit: str, now: datetime) -> dict[str, Any]:
         raise PreflightError("binary_version_mismatch")
 
     manifest = read_json(ROOT / "api/protocol-version.json")
-    if manifest.get("contract_version") != contract_constant:
+    bundle_version = manifest.get("contract_version")
+    client_version = manifest.get("client_contract_version", bundle_version)
+    if not isinstance(bundle_version, str) or re.fullmatch(CORE_VERSION, bundle_version) is None:
+        raise PreflightError("contract_version_invalid")
+    if client_version != contract_constant:
         raise PreflightError("contract_version_mismatch")
     if manifest.get("contract_status") != "released":
         raise PreflightError("contract_not_released")
     released_at = parse_released_at(manifest.get("released_at"), now)
     bundle = manifest.get("bundle")
     if not isinstance(bundle, dict) or bundle.get("file_name") != (
-        f"latchway-contract-{contract_constant}.tar.gz"
+        f"latchway-contract-{bundle_version}.tar.gz"
     ):
         raise PreflightError("contract_bundle_name_mismatch")
 
@@ -162,7 +166,8 @@ def validate_candidate(tag: str, commit: str, now: datetime) -> dict[str, Any]:
         "candidate_commit": commit,
         "intended_tag": tag,
         "version": version,
-        "contract_version": contract_constant,
+        "contract_version": bundle_version,
+        "client_contract_version": client_version,
         "contract_released_at": released_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

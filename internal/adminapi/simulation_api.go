@@ -47,6 +47,7 @@ type routeSimulationRequestFacts struct {
 	RequestedOutputMax    int64  `json:"requested_output_max,omitempty"`
 	RewrittenRequestBytes int64  `json:"rewritten_request_bytes,omitempty"`
 	FramingUnitCount      int64  `json:"framing_unit_count,omitempty"`
+	ExpandedSchemaBytes   int64  `json:"expanded_schema_bytes,omitempty"`
 	ImageUnits            int64  `json:"image_units,omitempty"`
 	ToolCalls             int64  `json:"tool_calls,omitempty"`
 }
@@ -89,6 +90,7 @@ type routeSimulationFacts struct {
 	RequestedOutputMax    int64          `json:"requested_output_max"`
 	RewrittenRequestBytes int64          `json:"rewritten_request_bytes"`
 	FramingUnitCount      int64          `json:"framing_unit_count"`
+	ExpandedSchemaBytes   int64          `json:"expanded_schema_bytes"`
 	ImageUnits            int64          `json:"image_units"`
 	ToolCalls             int64          `json:"tool_calls"`
 }
@@ -108,6 +110,7 @@ type routeSimulationInputAccounting struct {
 	FramingUnitCount               int64  `json:"framing_unit_count"`
 	MaximumFramingTokensPerRequest int64  `json:"maximum_framing_tokens_per_request"`
 	MaximumFramingTokensPerUnit    int64  `json:"maximum_framing_tokens_per_unit"`
+	ExpandedSchemaBytes            int64  `json:"expanded_schema_bytes"`
 	InputTokenBound                int64  `json:"input_token_bound"`
 	MaximumContextTokens           int64  `json:"maximum_context_tokens"`
 }
@@ -243,6 +246,7 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		RequestedOutputMaximum: request.Request.RequestedOutputMax,
 		RewrittenRequestBytes:  request.Request.RewrittenRequestBytes,
 		FramingUnitCount:       request.Request.FramingUnitCount,
+		ExpandedSchemaBytes:    request.Request.ExpandedSchemaBytes,
 		ImageUnits:             request.Request.ImageUnits,
 		ToolCalls:              request.Request.ToolCalls,
 		Streaming:              request.Request.Streaming, EvaluatedAt: now,
@@ -311,6 +315,7 @@ func validSimulationRequestFacts(facts routeSimulationRequestFacts) bool {
 		facts.RequestedOutputMax >= 0 && facts.RequestedOutputMax <= maximumSimulatedTokens &&
 		facts.RewrittenRequestBytes >= 0 && facts.RewrittenRequestBytes <= maximumSimulatedBytes &&
 		facts.FramingUnitCount >= 0 && facts.FramingUnitCount <= 4096 &&
+		facts.ExpandedSchemaBytes >= 0 && facts.ExpandedSchemaBytes <= 4*1024*1024 &&
 		facts.ImageUnits >= 0 && facts.ImageUnits <= maximumSimulatedUnits &&
 		facts.ToolCalls >= 0 && facts.ToolCalls <= maximumSimulatedUnits
 }
@@ -329,6 +334,7 @@ func simulationFacts(
 		RequestedOutputMax:    request.Request.RequestedOutputMax,
 		RewrittenRequestBytes: request.Request.RewrittenRequestBytes,
 		FramingUnitCount:      request.Request.FramingUnitCount,
+		ExpandedSchemaBytes:   request.Request.ExpandedSchemaBytes,
 		ImageUnits:            request.Request.ImageUnits,
 		ToolCalls:             request.Request.ToolCalls,
 	}
@@ -356,7 +362,8 @@ func baseSimulationResult(
 			{Fact: "request.estimated_input_tokens", Role: "policy", AffectsCEL: true, Explanation: "Bounded untrusted estimate for conservative policy and scheduling only; never quota, accounting, pricing, or context authority."},
 			{Fact: "request.maximum_output_tokens", Role: "policy", AffectsCEL: true, Explanation: "Exact normalized requested maximum (zero when omitted); the independent server-owned clamp controls reservation and dispatch."},
 			{Fact: "rewritten_request_bytes", Role: "reservation", Explanation: "Models the adapter-proved rewritten body size used by trusted input accounting."},
-			{Fact: "framing_unit_count", Role: "reservation", Explanation: "Models the adapter-proved message, item, or input count used by trusted input accounting."},
+			{Fact: "framing_unit_count", Role: "reservation", Explanation: "Models the adapter-proved message, item, tool, schema-object, and content-part count used by trusted input accounting."},
+			{Fact: "expanded_schema_bytes", Role: "reservation", Explanation: "Models the additional bounded local schema expansion bytes used by Chat and Responses trusted input accounting; it does not alter CEL."},
 			{Fact: "image_units", Role: "reservation", Explanation: "Models the adapter-proved structured image count used by a hard per-request guard; it does not alter CEL."},
 			{Fact: "tool_calls", Role: "reservation", Explanation: "Models the adapter-proved structured tool-call count used by a hard per-request guard; it does not alter CEL."},
 			{Fact: "app_version", Role: "explanatory", Explanation: "Returned for context only; it is not currently exposed to production CEL."},
@@ -384,6 +391,7 @@ func simulationReservation(projection dataplane.ReservationProjection) *routeSim
 			FramingUnitCount:               accounting.FramingUnitCount,
 			MaximumFramingTokensPerRequest: accounting.MaximumFramingTokensPerRequest,
 			MaximumFramingTokensPerUnit:    accounting.MaximumFramingTokensPerUnit,
+			ExpandedSchemaBytes:            accounting.ExpandedSchemaBytes,
 			InputTokenBound:                accounting.InputTokenBound,
 			MaximumContextTokens:           accounting.MaximumContextTokens,
 		},

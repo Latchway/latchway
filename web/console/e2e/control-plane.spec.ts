@@ -62,7 +62,7 @@ function problem(route: Route, code: string, status: number, detail: string) {
 
 async function installAdminFixture(
   page: Page,
-  options: { includePrimarySecret?: boolean } = {}
+  options: { includePrimarySecret?: boolean; incidentUsage?: boolean } = {}
 ) {
   let authenticated = false;
   const mutations: ObservedMutation[] = [];
@@ -334,8 +334,22 @@ async function installAdminFixture(
       usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 1, output_tokens: 20, total_tokens: 30 },
       user_id: ids.user
     };
-    if (url.pathname === "/admin/v1/requests") return json(route, 200, { items: [requestDetail], page: { has_more: false } });
-    if (url.pathname === `/admin/v1/requests/${ids.request}`) return json(route, 200, requestDetail);
+    const missingUsage = { recorded_units: null, reported_units: null, unknown_units: null, provenance: [] };
+    const incidentUsage = {
+      logical_requests: 1, input_tokens: 0, output_tokens: 0, total_tokens: 92444, cost_nano_usd: 0,
+      details: {
+        input_tokens: missingUsage, cost_nano_usd: missingUsage,
+        output_tokens: { recorded_units: 0, reported_units: 0, unknown_units: null, provenance: ["upstream_reported"] },
+        total_tokens: { recorded_units: 92444, reported_units: null, unknown_units: 92444, provenance: ["unknown"] }
+      }
+    };
+    const visibleRequest = options.incidentUsage ? {
+      ...requestDetail, status: "failed", failure_code: "upstream_rejected", usage: incidentUsage,
+      attempts: [{ ...requestDetail.attempts[0], status: "failed", http_status: 400,
+        failure_code: "upstream_rejected", usage: incidentUsage, usage_provenance: "unknown", cost_provenance: "unknown", cost_source: undefined }]
+    } : requestDetail;
+    if (url.pathname === "/admin/v1/requests") return json(route, 200, { items: [visibleRequest], page: { has_more: false } });
+    if (url.pathname === `/admin/v1/requests/${ids.request}`) return json(route, 200, visibleRequest);
     const auditChange = { classification: "public", field: "status", operation: "set", redacted: false };
     const auditEvent = {
       action: "admin.user_block",
@@ -359,7 +373,7 @@ async function installAdminFixture(
     if (url.pathname === `/admin/v1/audit-events/${ids.audit}`) return json(route, 200, auditEvent);
     if (url.pathname === `/admin/v1/config-revisions/${activeConfigurationRevisionID}/simulate`) return json(route, 200, {
       allowed: true, application_id: ids.application, environment_id: ids.environment, environment_kind: "production", explanation: ["production policy allowed"],
-      facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
+      facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, expanded_schema_bytes: 0, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
       fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: activeConfigurationRevisionID, route: "primary", upstream: "openai", warnings: []
     });
     if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "GET") return json(route, 200, { items: selfTestSchedules, page: { has_more: false } });
@@ -833,7 +847,7 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByLabel("Sort")).toHaveValue("started_at_asc");
   await page.getByRole("button", { name: ids.request }).click();
   await expect(page.getByRole("heading", { name: "Durable execution timeline" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Aggregate usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "2.5 s" })).toBeVisible();
   await expect(page.getByRole("cell", { exact: true, name: "primary" })).toBeVisible();
@@ -842,6 +856,27 @@ test("owner activates a targeted configuration merge and uses focused observabil
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
+});
+
+test("request usage distinguishes unknown quota charges, missing billing and reported zero", async ({ page }) => {
+  const fixture = await installAdminFixture(page, { incidentUsage: true });
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await page.getByRole("link", { name: /^Requests/ }).click();
+  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
+  await page.getByRole("button", { name: ids.request }).click();
+  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "92,444 recorded · 92,444 unknown quota charge", exact: true })).toHaveCount(3);
+  await expect(page.getByRole("cell", { name: "Not recorded", exact: true })).toHaveCount(5);
+  await expect(page.getByRole("cell", { name: "0 reported", exact: true })).toHaveCount(2);
+  await expect(page.getByText("0 nUSD", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/missing cost is not a zero bill/)).toBeVisible();
+  await page.getByRole("heading", { name: "Usage and quota accounting" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("usage-accounting.png"), fullPage: true });
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("audit filters and inspected detail survive a fresh browser reload", async ({ page }) => {

@@ -116,12 +116,12 @@ function routeSimulationFixture() {
   return {
     allowed: true, application_id: "app_0123456789abcdef", environment_id: "env_0123456789abcdef",
     environment_kind: "production", explanation: ["production policy allowed"],
-    facts: { application_id: "app_0123456789abcdef", authenticated: true, environment_id: "env_0123456789abcdef", environment_kind: "production", feature: "assistant", framing_unit_count: 1, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 99, requested_output_max: 100, revision_id: "rev_0123456789abcdef", rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
+    facts: { application_id: "app_0123456789abcdef", authenticated: true, environment_id: "env_0123456789abcdef", environment_kind: "production", expanded_schema_bytes: 268, feature: "assistant", framing_unit_count: 1, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 99, requested_output_max: 100, revision_id: "rev_0123456789abcdef", rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
     fact_usage: [{ affects_cel: true, explanation: "Bounded untrusted CEL estimate; never accounting authority.", fact: "request.estimated_input_tokens", role: "policy" }],
     feature: "assistant", limit_plan: "subscriber",
     limits: [{ algorithm: "calendar", hard: true, maximum: 1000, metric: "total_tokens", scope: ["user", "feature"], timezone: "UTC", window: "1d" }],
     model: "gpt_mobile", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses",
-    reservation: { allocations: [{ algorithm: "calendar", applicable: true, durable: true, metric: "total_tokens", units: 1132 }], applied_output_maximum: 100, cost_bound_known: true, cost_nano_usd_bound: 50, input_accounting: { framing_unit_count: 1, input_token_bound: 1032, maximum_context_tokens: 128000, maximum_framing_tokens_per_request: 4, maximum_framing_tokens_per_unit: 4, method: "utf8_byte_bpe_declared_framing_v1", profile_id: "gpt_mobile_input", required: true, rewritten_request_bytes: 1024 }, pricing_catalog: "mobile_price", total_token_bound: 1132 },
+    reservation: { allocations: [{ algorithm: "calendar", applicable: true, durable: true, metric: "total_tokens", units: 1400 }], applied_output_maximum: 100, cost_bound_known: true, cost_nano_usd_bound: 50, input_accounting: { expanded_schema_bytes: 268, framing_unit_count: 1, input_token_bound: 1300, maximum_context_tokens: 128000, maximum_framing_tokens_per_request: 4, maximum_framing_tokens_per_unit: 4, method: "utf8_byte_bpe_declared_framing_v1", profile_id: "gpt_mobile_input", required: true, rewritten_request_bytes: 1024 }, pricing_catalog: "mobile_price", total_token_bound: 1400 },
     revision_id: "rev_0123456789abcdef", route: "primary", upstream: "openai", warnings: []
   };
 }
@@ -498,6 +498,7 @@ describe("rich usage and route-simulator views", () => {
       app_version: "1.2.3",
       authenticated: true,
       environment_id: "env_0123456789abcdef",
+      expanded_schema_bytes: "268",
       feature: "assistant",
       framing_unit_count: "1",
       platform: "react_native_ios",
@@ -519,12 +520,15 @@ describe("rich usage and route-simulator views", () => {
     await waitFor(() => expect(screen.getByText(/Selected active revision/)).toBeInTheDocument());
     expect(screen.getByLabelText("Requested input tokens (explanatory)")).toHaveValue(99);
     expect(screen.getByLabelText("Requested output maximum")).toHaveValue(100);
+    expect(screen.getByLabelText(/Expanded schema bytes/)).toHaveValue(268);
     fireEvent.change(screen.getByLabelText("Normalized claims JSON"), { target: { value: '{"plan":"private-value"}' } });
     await user.click(screen.getByRole("button", { name: "Simulate route" }));
 
     expect(await screen.findByRole("heading", { name: "Allowed" })).toBeInTheDocument();
     const patch = updateSearch.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(patch).toMatchObject({ environment_id: search.environment_id, feature: "assistant", requested_input_tokens: "99", revision_id: search.revision_id });
+    expect(patch).toMatchObject({ environment_id: search.environment_id, expanded_schema_bytes: "268", feature: "assistant", requested_input_tokens: "99", revision_id: search.revision_id });
+    const simulationCall = adminRequestMock.mock.calls.find(([path]) => path.endsWith("/simulate"));
+    expect(simulationCall?.[2]).toMatchObject({ body: { request: { expanded_schema_bytes: 268 } } });
     expect(patch).not.toHaveProperty("claims");
     expect(JSON.stringify(patch)).not.toMatch(/private-value|credential|reason|secret|bearer|authorization/i);
   });
@@ -763,10 +767,10 @@ describe("rich usage and route-simulator views", () => {
 	await user.click(await screen.findByRole("button", { name: "req_0123456789abcdef" }));
 	expect(await screen.findByRole("heading", { name: "Request detail" })).toBeInTheDocument();
 	expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
-	expect(screen.getByRole("heading", { name: "Aggregate usage" })).toBeInTheDocument();
+	expect(screen.getByRole("heading", { name: "Usage and quota accounting" })).toBeInTheDocument();
 	expect(screen.getByRole("heading", { name: "Ordered upstream attempts" })).toBeInTheDocument();
 	expect(screen.getByText("1 s")).toBeInTheDocument();
-	expect(screen.getAllByText("321")).toHaveLength(2);
+	expect(screen.getAllByText("321 (ledger; provenance unavailable)")).toHaveLength(3);
 	expect(screen.getByText("fallback")).toBeInTheDocument();
 	expect(screen.getByText("504")).toBeInTheDocument();
 	const timeoutLinks = screen.getAllByRole("link", { name: "timeout" });

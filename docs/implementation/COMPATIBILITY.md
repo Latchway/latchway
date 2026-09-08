@@ -6,6 +6,15 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.2 diagnostic patch
+
+Client discovery and session diagnostics retain client contract 1.1.0, wire 3
+and unchanged SDK APIs. The additive Admin/bundle edition is 1.1.1; it does not
+replace an existing SDK's frozen 1.1.0 bundle. Schema 33 is required after the
+additive diagnostic migrations. Failed-attempt settlement is explicitly
+versioned so old records keep their original replay interpretation. See
+[the patch notes](../release/v1.1.2.md).
+
 ### Server 1.1.0 shared native app and supplied identity contract
 
 The release source adds server `1.1.0`, contract `1.1.0` and wire `3`.

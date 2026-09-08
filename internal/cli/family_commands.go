@@ -478,7 +478,7 @@ func validUsageValuesCLI(values usageValuesCLI) bool {
 			return false
 		}
 	}
-	return true
+	return values.Details == nil || values.Details.valid(values)
 }
 
 func printInstallationFamilies(opts *options, page installationFamilyPageCLI) error {

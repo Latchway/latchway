@@ -2,6 +2,30 @@
 
 All notable project changes will be documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versioning follows Semantic Versioning once distributable artifacts exist.
 
+## [1.1.2] - 2026-09-08
+
+### Fixed
+
+- Release token/cost quota reservations for explicitly confirmed OpenRouter
+  pre-generation request rejections. Requests and attempts still count. Unknown
+  errors, timeouts and interrupted generations retain conservative settlement.
+- Version failed-attempt accounting so validated reported usage can settle a new
+  failed attempt without reinterpreting historical quota charges during replay.
+- Read bounded, allowlisted provider error diagnostics without retaining or
+  relaying raw provider messages, prompts, response bodies or credentials.
+- Return valid Admin request/effective-configuration views for quota-denied
+  requests; align Console and CLI validation and meaningful rejection codes.
+
+### Added
+
+- Add optional usage evidence separating recorded, reported and unknown units,
+  including explicit missing-versus-zero input/output/cost values.
+- Schema 32 records content-free input-bound components; route simulation
+  includes expanded schema bytes. The conservative token calculation is unchanged.
+- Schema 33 records versioned settlement evidence and safe provider diagnostics.
+  Existing SDKs retain client contract 1.1.0 and wire 3; the additive Admin/bundle
+  edition is 1.1.1. No historical quota corrections or prompt logging are enabled.
+
 ## [1.1.1] - 2026-09-08
 
 ### Fixed

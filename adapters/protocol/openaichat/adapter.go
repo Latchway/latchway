@@ -300,7 +300,7 @@ func (a Adapter) PreflightInput(
 	// validated. The owned slice is not exposed and later integrity checks can
 	// compare against RewrittenBodySHA256 before dispatch.
 	installRequestBody(request, raw)
-	return protocol.TrustedInputPreflight{
+	return (protocol.TrustedInputPreflight{
 		ProfileID:           profile.ID,
 		ProfileDigest:       profile.Digest(),
 		Protocol:            profile.Protocol,
@@ -313,7 +313,7 @@ func (a Adapter) PreflightInput(
 		InputTokenBound:     inputBound,
 		OutputTokenBound:    outputBound,
 		TotalTokenBound:     totalBound,
-	}, nil
+	}).WithAccountingBreakdown(profile)
 }
 
 func validateTrustedInputProfile(profile protocol.TrustedInputProfile) error {

@@ -1556,6 +1556,122 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!strings.Contains(lifecycleAuditText, `session_credentials`) {
 		t.Fatalf("lifecycle audit is unsafe or incomplete: %s", lifecycleAuditText)
 	}
+	testOperationalIncidentDiagnostics(t, ctx, pool, api, handler, cookie, fixture)
+}
+
+func testOperationalIncidentDiagnostics(t *testing.T, ctx context.Context, pool pgxExecutor, api *API, handler http.Handler, cookie *http.Cookie, fixture operationalFixture) {
+	t.Helper()
+	deniedID := id.Must(id.LogicalRequest)
+	unknownID := id.Must(id.LogicalRequest)
+	for requestID, status := range map[string]string{deniedID: "denied", unknownID: "failed"} {
+		failure := "quota_exceeded"
+		if status == "failed" {
+			failure = "upstream_non_success"
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO logical_requests (
+			logical_request_id, organization_id, application_id, environment_id, application_user_id,
+			installation_id, session_grant_id, config_revision_id, selected_limit_plan_key,
+			feature_key, protocol, status, failure_code, requested_at, completed_at
+		) SELECT $2, organization_id, application_id, environment_id, application_user_id,
+			installation_id, session_grant_id, config_revision_id, selected_limit_plan_key,
+			feature_key, protocol, $3, $4, requested_at, completed_at
+			FROM logical_requests WHERE logical_request_id=$1`, fixture.requestID, requestID, status, failure); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO logical_request_decision_stages (
+		organization_id, application_id, environment_id, logical_request_id, config_revision_id,
+		stage_number, stage, outcome, failure_code, started_at, completed_at
+	) SELECT organization_id, application_id, environment_id, logical_request_id, config_revision_id,
+		n, CASE n WHEN 1 THEN 'quota_rule_evaluated' ELSE 'quota_reserved' END,
+		'denied', 'quota_exceeded', requested_at, completed_at
+		FROM logical_requests CROSS JOIN generate_series(1,2) n WHERE logical_request_id=$1`, deniedID); err != nil {
+		t.Fatal(err)
+	}
+	deniedResponse := performGET(handler, "/admin/v1/requests/"+deniedID, cookie)
+	if deniedResponse.Code != http.StatusOK {
+		t.Fatalf("normal quota denial unreadable: %d %s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+	principal, err := api.auth.AuthenticateSession(ctx, cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.operations.effectiveRequestBasis(ctx, principal, deniedID); err != nil {
+		t.Fatalf("normal quota denial effective configuration basis: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO usage_records (
+		usage_record_id, organization_id, application_id, environment_id, logical_request_id,
+		metric, units, confidence, provenance_key, recorded_at
+	) SELECT $2, organization_id, application_id, environment_id, logical_request_id,
+		'total_tokens', 92444, 'unknown', 'incident-unknown-conservative-charge', completed_at
+		FROM logical_requests WHERE logical_request_id=$1`, unknownID, id.Must(id.UsageRecord)); err != nil {
+		t.Fatal(err)
+	}
+	response := performGET(handler, "/admin/v1/requests/"+unknownID, cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unknown-usage request unreadable: %d %s", response.Code, response.Body.String())
+	}
+	var document logicalRequestDocument
+	decodeResponse(t, response, &document)
+	if document.FailureCode == nil || *document.FailureCode != "upstream_rejected" || document.Usage == nil || document.Usage.Details == nil {
+		t.Fatalf("incident diagnostics missing: %#v", document)
+	}
+	details := document.Usage.Details
+	if details.InputTokens.RecordedUnits != nil || details.OutputTokens.RecordedUnits != nil || details.CostNanoUSD.RecordedUnits != nil ||
+		details.TotalTokens.UnknownUnits == nil || *details.TotalTokens.UnknownUnits != 92444 || details.TotalTokens.ReportedUnits != nil {
+		t.Fatalf("unknown usage was presented as reported counts or billing: %#v", details)
+	}
+	listed := performGET(handler, "/admin/v1/requests?environment_id="+document.EnvironmentID+"&error_code=upstream_rejected", cookie)
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(unknownID)) {
+		t.Fatalf("public rejection filter missed logical-only failure: %d %s", listed.Code, listed.Body.String())
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO usage_records (
+		usage_record_id, organization_id, application_id, environment_id, logical_request_id,
+		metric, units, confidence, provenance_key, recorded_at
+	) SELECT $2, organization_id, application_id, environment_id, logical_request_id,
+		'cost_nano_usd', 0, 'reported', 'incident-reported-zero-billing', completed_at
+		FROM logical_requests WHERE logical_request_id=$1`, unknownID, id.Must(id.UsageRecord)); err != nil {
+		t.Fatal(err)
+	}
+	response = performGET(handler, "/admin/v1/requests/"+unknownID, cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("reported zero unreadable: %d %s", response.Code, response.Body.String())
+	}
+	decodeResponse(t, response, &document)
+	if document.Usage.Details.CostNanoUSD.ReportedUnits == nil || *document.Usage.Details.CostNanoUSD.ReportedUnits != 0 {
+		t.Fatal("known zero billing became absent")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO upstream_attempt_diagnostics (
+		upstream_attempt_id, organization_id, application_id, environment_id, accounting_policy, provider_error
+	) SELECT upstream_attempt_id, organization_id, application_id, environment_id, '',
+		'{"category":"unknown","request_id":"req-safe123"}'::jsonb
+		FROM upstream_attempts WHERE upstream_attempt_id=$1`, fixture.attemptID); err != nil {
+		t.Fatal(err)
+	}
+	diagnosticResponse := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
+	if diagnosticResponse.Code != http.StatusOK {
+		t.Fatalf("safe provider diagnostics unreadable: %d %s", diagnosticResponse.Code, diagnosticResponse.Body.String())
+	}
+	var diagnosticDocument logicalRequestDocument
+	decodeResponse(t, diagnosticResponse, &diagnosticDocument)
+	if len(diagnosticDocument.Attempts) != 2 || diagnosticDocument.Attempts[0].ProviderError == nil ||
+		diagnosticDocument.Attempts[0].ProviderError.RequestID != "req-safe123" ||
+		diagnosticDocument.Attempts[0].AccountingPolicy == nil || *diagnosticDocument.Attempts[0].AccountingPolicy != "" ||
+		diagnosticDocument.Attempts[1].ProviderError != nil || diagnosticDocument.Attempts[1].AccountingPolicy != nil {
+		t.Fatal("diagnostic sidecar was lost or invented for historical attempt")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO logical_request_decision_stages (
+		organization_id, application_id, environment_id, logical_request_id, config_revision_id,
+		stage_number, stage, outcome, started_at, completed_at
+	) SELECT organization_id, application_id, environment_id, logical_request_id, config_revision_id,
+		3, 'quota_rule_evaluated', 'succeeded', requested_at, completed_at
+		FROM logical_requests WHERE logical_request_id=$1`, deniedID); err != nil {
+		t.Fatal(err)
+	}
+	invalid := performGET(handler, "/admin/v1/requests/"+deniedID, cookie)
+	if invalid.Code != http.StatusInternalServerError {
+		t.Fatalf("invalid post-terminal continuation was exposed: %d", invalid.Code)
+	}
 }
 
 func lifecycleFixtureBytes(label string) []byte {

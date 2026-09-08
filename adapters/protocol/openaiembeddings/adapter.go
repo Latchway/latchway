@@ -229,13 +229,13 @@ func (a Adapter) PreflightInput(
 	}
 
 	installRequestBody(request, raw)
-	return protocol.TrustedInputPreflight{
+	return (protocol.TrustedInputPreflight{
 		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
 		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
 		RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: requestBytes,
 		MessageCount: itemCount, InputTokenBound: inputBound,
 		OutputTokenBound: 0, TotalTokenBound: inputBound,
-	}, nil
+	}).WithAccountingBreakdown(profile)
 }
 
 func validateTrustedInputProfile(profile protocol.TrustedInputProfile) error {

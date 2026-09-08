@@ -1935,6 +1935,10 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	}
 	var accountingMethod, accountingProfileID, accountingProfileDigest any
 	var rewrittenBodyDigest, inputBound, outputBound, totalBound any
+	accountingBreakdown, err := inputAccountingBreakdownJSON(reservation.inputPreflight)
+	if err != nil {
+		return Attempt{}, false, err
+	}
 	if binding := reservation.inputPreflight; binding != nil {
 		accountingMethod = binding.Method
 		accountingProfileID = binding.ProfileID
@@ -1977,11 +1981,11 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 			rewritten_body_sha256, input_token_bound, output_token_bound,
 			total_token_bound, request_measurement_binding_version,
 			request_measurement_sha256, measured_request_bytes,
-			measured_image_units, measured_tool_calls
+				measured_image_units, measured_tool_calls, input_accounting_breakdown
 		) VALUES (
 			$1, $2, $3, $4, $5, 1, $6, $7, $8, $9, 2, $10, $11, 1,
 			'started', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-			1, $24, $25, $26, $27
+				1, $24, $25, $26, $27, $28
 		)
 	`, attemptID, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID,
@@ -1994,7 +1998,7 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		inputBound, outputBound, totalBound,
 		decisionAttempt.requestMeasurementSHA256,
 		decisionAttempt.measuredRequestBytes, decisionAttempt.measuredImageUnits,
-		decisionAttempt.measuredToolCalls)
+			decisionAttempt.measuredToolCalls, accountingBreakdown)
 	entryCount := queueAttemptQuotaEntries(batch, lockedReservation, attemptID, entries, initialAllocations)
 	results := tx.SendBatch(ctx, batch)
 	if _, err := results.Exec(); err != nil {

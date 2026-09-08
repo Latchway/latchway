@@ -364,7 +364,7 @@
     },
     {
       "path": "reference/admin-api.mdx",
-      "sha256": "b2770a0c9c78b73622e9fb8a5e9c95731aca18d639c1762686eb568d22bc86cd"
+      "sha256": "b3d483b41f4035c658bf417293050c94f6d13319852db98f85b11eea68912edd"
     },
     {
       "path": "reference/client-api.mdx",
@@ -386,7 +386,7 @@
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "55f5a79442fdc3564abc651ed7fb7a9b887ddb226e1f1c1de19c79624dafbaf8"
+      "sha256": "8fdeb09be35d97ac824708fccb324d097be63eafd7e8f5a228a451e582d38f94"
     },
     {
       "path": "api/client.openapi.yaml",
@@ -402,7 +402,7 @@
     },
     {
       "path": "api/protocol-version.json",
-      "sha256": "c8f32d02af792dcec2e92ea1dc5816b85ccf8214f31c9c334cfafc38aa078932"
+      "sha256": "dee179ea1a8122e0e640235a026dcd80bc29448bcff18f4fb1583d8422869c55"
     },
     {
       "path": "api/sdk-error-codes.yaml",

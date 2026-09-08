@@ -808,16 +808,17 @@ type SessionChallengeConsumption struct {
 }
 
 type SessionGrant struct {
-	SessionGrantID     string             `db:"session_grant_id" json:"session_grant_id"`
-	OrganizationID     string             `db:"organization_id" json:"organization_id"`
-	ApplicationID      string             `db:"application_id" json:"application_id"`
-	EnvironmentID      string             `db:"environment_id" json:"environment_id"`
-	ApplicationUserID  string             `db:"application_user_id" json:"application_user_id"`
-	InstallationID     string             `db:"installation_id" json:"installation_id"`
-	AccessTokenJtiHash []byte             `db:"access_token_jti_hash" json:"access_token_jti_hash"`
-	DpopJkt            string             `db:"dpop_jkt" json:"dpop_jkt"`
-	PolicyRevisionID   string             `db:"policy_revision_id" json:"policy_revision_id"`
-	TrustLevel         string             `db:"trust_level" json:"trust_level"`
+	SessionGrantID     string `db:"session_grant_id" json:"session_grant_id"`
+	OrganizationID     string `db:"organization_id" json:"organization_id"`
+	ApplicationID      string `db:"application_id" json:"application_id"`
+	EnvironmentID      string `db:"environment_id" json:"environment_id"`
+	ApplicationUserID  string `db:"application_user_id" json:"application_user_id"`
+	InstallationID     string `db:"installation_id" json:"installation_id"`
+	AccessTokenJtiHash []byte `db:"access_token_jti_hash" json:"access_token_jti_hash"`
+	DpopJkt            string `db:"dpop_jkt" json:"dpop_jkt"`
+	PolicyRevisionID   string `db:"policy_revision_id" json:"policy_revision_id"`
+	TrustLevel         string `db:"trust_level" json:"trust_level"`
+	// Most recent same-account identity verification; may follow original credential issuance. Does not extend access, refresh, attestation, or quota lifetime.
 	IdentityVerifiedAt pgtype.Timestamptz `db:"identity_verified_at" json:"identity_verified_at"`
 	AttestedAt         pgtype.Timestamptz `db:"attested_at" json:"attested_at"`
 	IssuedAt           pgtype.Timestamptz `db:"issued_at" json:"issued_at"`
@@ -884,6 +885,18 @@ type UpstreamAttempt struct {
 	MeasuredToolCalls *int64 `db:"measured_tool_calls" json:"measured_tool_calls"`
 	// First protocol-validated generated content observed in the relayed response; NULL for lifecycle-only, opaque, and historical attempts.
 	FirstTokenAt pgtype.Timestamptz `db:"first_token_at" json:"first_token_at"`
+	// Versioned aggregate explanation of the trusted input bound; contains no prompt/schema contents, is not quota authority, and is NULL for historical attempts.
+	InputAccountingBreakdown []byte `db:"input_accounting_breakdown" json:"input_accounting_breakdown"`
+}
+
+// Allowlisted provider diagnostics and versioned settlement evidence; absent row preserves historical settlement. Never stores prompts, raw errors or credentials.
+type UpstreamAttemptDiagnostic struct {
+	UpstreamAttemptID string `db:"upstream_attempt_id" json:"upstream_attempt_id"`
+	OrganizationID    string `db:"organization_id" json:"organization_id"`
+	ApplicationID     string `db:"application_id" json:"application_id"`
+	EnvironmentID     string `db:"environment_id" json:"environment_id"`
+	AccountingPolicy  string `db:"accounting_policy" json:"accounting_policy"`
+	ProviderError     []byte `db:"provider_error" json:"provider_error"`
 }
 
 // Per-dispatch attempt, token, and selected cost allocations and their conservative settlement under one logical quota reservation.

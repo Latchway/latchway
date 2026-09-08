@@ -77,12 +77,27 @@ func TestMigratorPostgreSQLIdentityRenewalUpgradeAndRollback(t *testing.T) {
 	if err != nil || current != 30 || available != latestTestSchemaVersion {
 		t.Fatalf("rolled-back status current=%d available=%d err=%v", current, available, err)
 	}
-	if err := migrator.Up(ctx); err != nil {
+	// Verify migration 31's catalog boundary independently of later additive
+	// migrations; the full upgrade is exercised after this comparison.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
+	for _, entry := range entries {
+		if entry.version == 31 {
+			if err := migrator.apply(ctx, conn.Conn(), entry); err != nil {
+				conn.Release()
+				t.Fatal(err)
+			}
+		}
+	}
+	conn.Release()
 	assertChecks(0, 1)
 	if err := pool.QueryRow(ctx, catalog).Scan(&after); err != nil || after != before {
 		t.Fatalf("renewal migration changed unrelated constraints, indexes or triggers: %v", err)
+	}
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatal(err)
 	}
 	current, available, err = migrator.Status(ctx)
 	if err != nil || current != latestTestSchemaVersion || available != latestTestSchemaVersion {

@@ -386,6 +386,7 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 		facts, _ := body["request"].(map[string]any)
 		if body["platform"] != "react_native_ios" || claims["plan"] != "premium" ||
 			facts["rewritten_request_bytes"] != float64(1024) || facts["framing_unit_count"] != float64(1) ||
+			facts["expanded_schema_bytes"] != float64(268) ||
 			facts["image_units"] != float64(2) || facts["tool_calls"] != float64(3) ||
 			facts["requested_output_max"] != float64(64) {
 			t.Fatalf("simulation body = %#v", body)
@@ -398,6 +399,7 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 		"--server", "http://127.0.0.1:8080", "--output", "json", "routes", "simulate", controlTestRevision,
 		"--feature", "assistant", "--platform", "react_native_ios", "--trust-level", "app_verified",
 		"--requested-output-max", "64", "--rewritten-request-bytes", "1024", "--framing-unit-count", "1",
+		"--expanded-schema-bytes", "268",
 		"--image-units", "2", "--tool-calls", "3",
 		"--claims-file", claimsPath, "--api-token-env", "TEST_LATCHWAY_ROUTE_TOKEN",
 	}, opts); err != nil {

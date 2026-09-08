@@ -97,13 +97,31 @@ class PublicReferenceTests(unittest.TestCase):
 
     def test_shared_native_references_match_contract_release_state(self) -> None:
         rendered = reference.render_all()
+        protocol = reference.json.loads(reference.PROTOCOL_SOURCE.read_text())
+        client_version = protocol.get("client_contract_version", protocol["contract_version"])
         for code in reference.SHARED_NATIVE_ERRORS:
             page = rendered[reference.ERROR_PAGE_ROOT / f"{reference.error_slug(code)}.mdx"]
             self.assertIn('serverVersion: "1.1.0"', page)
-            if reference.json.loads(reference.PROTOCOL_SOURCE.read_text())["contract_status"] == "draft":
+            if protocol["contract_status"] == "draft" and protocol["contract_version"] == client_version:
                 self.assertIn("Shared native app APIs are unreleased", page)
             else:
                 self.assertNotIn("Shared native app APIs are unreleased", page)
+
+    def test_new_draft_admin_bundle_does_not_unrelease_client_baseline(self) -> None:
+        rendered = reference.render_all()
+        protocol = reference.json.loads(reference.PROTOCOL_SOURCE.read_text())
+        self.assertEqual(protocol["contract_version"], "1.1.1")
+        self.assertEqual(protocol["client_contract_version"], "1.1.0")
+        self.assertIn('serverVersion: "1.1.2"', rendered[reference.ADMIN_OUTPUT])
+        self.assertIn('serverVersion: "1.1.0"', rendered[reference.CLIENT_OUTPUT])
+        if protocol["contract_status"] == "draft":
+            self.assertIn("draft Admin contract bundle 1.1.1", rendered[reference.ADMIN_OUTPUT])
+            self.assertIn("Client contract 1.1.0 remains unchanged", rendered[reference.ADMIN_OUTPUT])
+        else:
+            self.assertNotIn("draft Admin contract bundle", rendered[reference.ADMIN_OUTPUT])
+        for page in (reference.CLIENT_OUTPUT, reference.ERROR_OUTPUT, reference.CONFIG_OUTPUT):
+            self.assertNotIn("Shared native app APIs are unreleased", rendered[page])
+            self.assertNotIn("draft Admin contract bundle", rendered[page])
 
     def test_admin_reference_contains_every_operation_once(self) -> None:
         rendered = reference.render_admin_reference(self.admin)
