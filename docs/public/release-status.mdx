@@ -118,6 +118,14 @@ App Attest, supplied-token update and streaming chat against server 1.1.1. This
 does not establish Apple distribution, another application's signing, Android
 Play Integrity or extension execution.
 
+A registry-only React Native example completed one ordinary LangChain model
+call on a physical iPhone against server 1.1.1, using the existing Firebase
+login and App Attest. It used the published React Native SDK 1.2.0, JavaScript
+client 1.1.0, LangChain adapter 1.1.0 and native iOS SDK 1.2.0 from CocoaPods,
+without Metro. This single-turn run invoked no tools; it does not establish
+multi-turn tool use, the full framework matrix, Android, extensions or Apple
+distribution.
+
 Server 1.0.4 passes the full Go suite, targeted race tests and authenticated
 PostgreSQL tool-loop tests with JSON/streaming responses and durable quota
 settlement. These use synthetic providers, not fresh physical-device evidence.
