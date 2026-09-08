@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json",
+  "$id": "https://latchway.dev/schemas/config/1.1.0/environment-config.schema.json",
   "title": "Latchway EnvironmentConfig",
   "description": "Immutable, revisioned configuration for one Latchway application environment.",
   "type": "object",
@@ -533,6 +533,11 @@
           }
         },
         "secretRef": { "$ref": "#/$defs/SecretRef" },
+        "sharedNativeCallers": {
+          "description": "Explicit protocol-3 native host opt-in for shared roots and independently authorized same-host delegated components; valid only on required iOS/Android selections. Existing runtime-specific or remote component policies are not merged.",
+          "type": "array", "maxItems": 2, "uniqueItems": true,
+          "items": { "enum": ["ios", "android", "react-native"] }
+        },
         "dangerousAllowInProduction": { "type": "boolean", "default": false },
         "appAttest": { "$ref": "#/$defs/AppAttestConfiguration" },
         "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" },

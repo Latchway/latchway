@@ -2,11 +2,19 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Client API
-  version: 1.0.0
+  version: 1.1.0
   summary: DPoP-bound client sessions and AI-compatible proxy routes.
   description: |
-    Normative draft for current wire protocol version 2. Legacy wire protocol
-    version 1 remains accepted for compatible installation/session clients.
+    Unreleased normative draft for wire protocol version 3. Protocol versions
+    1 and 2 retain their existing declarations. The shared native backend uses
+    SDK native, host platform ios/android and an explicit X-Latchway-Caller.
+    It requires server-owned sharedNativeCallers opt-in on the required host
+    attestation policy; caller labels never replace identity or attestation.
+    Same-host delegated components may use this declaration with their own
+    component keys and grants, never root credentials. Their configured platform
+    must equal the parent installation platform; watch and legacy runtime-specific
+    component definitions are not automatically converted. Runtime policy denial
+    precedes provisioning-grant consumption, refresh rotation and proof acceptance.
     Identity, attestation and DPoP
     establish a short-lived installation session. Protected AI requests name an
     application feature; clients cannot select trusted users, routes, prices or
@@ -73,6 +81,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -112,6 +121,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -152,6 +162,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -178,6 +189,55 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /client/v1/sessions/identity:
+    post:
+      tags: [Sessions]
+      operationId: verifySessionIdentity
+      summary: Verify a fresh identity token for the current account without rotating credentials.
+      description: |
+        Requires discovery capability supplied_identity_v1 and protocol 3. The
+        active refresh token and a fresh DPoP proof authorize the exact stored
+        installation/key. As with refresh, the proof does not require ath and
+        no Authorization header is needed. The old identity/access token may
+        be expired, but refresh possession, scope, attestation and revocation
+        must still be valid. The gateway verifies the supplied identity token
+        using current provider configuration and requires the same durable
+        issuer/subject/application user. Only that grant's identity freshness
+        and the configured user claims are updated. No credentials, keys,
+        installation IDs, quota counters or attestation timestamps are rotated.
+        Retrying after a lost response uses the same refresh token and a new
+        DPoP proof. An expired/revoked/rotated refresh token cannot recover an
+        account: use the initial identity and attestation establishment flow
+        only if the SDK's local generation has not been retired.
+      security:
+        - DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/SuppliedIdentityProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifySessionIdentityRequest' }
+      responses:
+        '200':
+          description: Verified same-account identity; the existing refresh token remains active.
+          headers:
+            X-Latchway-Request-ID: { $ref: '#/components/headers/RequestID' }
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifySessionIdentityResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /client/v1/installation-families/current/components:
     post:
       tags: [Components]
@@ -194,6 +254,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -223,6 +284,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -260,6 +322,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -298,6 +361,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -335,6 +399,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -354,6 +419,7 @@ paths:
         - $ref: '#/components/parameters/CurrentProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -373,6 +439,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -397,6 +464,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -426,6 +494,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -452,6 +521,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -476,6 +546,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -500,6 +571,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -524,6 +596,7 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Caller'
         - $ref: '#/components/parameters/Framework'
         - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
@@ -543,6 +616,7 @@ paths:
       - $ref: '#/components/parameters/ProtocolVersion'
       - $ref: '#/components/parameters/SDK'
       - $ref: '#/components/parameters/SDKVersion'
+      - $ref: '#/components/parameters/Caller'
       - $ref: '#/components/parameters/Framework'
       - $ref: '#/components/parameters/FrameworkVersion'
       - $ref: '#/components/parameters/RequestID'
@@ -619,25 +693,36 @@ components:
       name: DPoP
       description: RFC 9449 compact proof JWT signed by the installation P-256 key.
   parameters:
+    SuppliedIdentityProtocolVersion:
+      name: X-Latchway-Protocol-Version
+      in: header
+      required: true
+      schema: { type: string, const: '3' }
     ProtocolVersion:
       name: X-Latchway-Protocol-Version
       in: header
       required: true
-      description: Wire protocol 2 is current; canonical version 1 remains accepted for legacy clients.
-      schema: { type: integer, enum: [1, 2], default: 2 }
+      description: Wire protocol 3 enables opt-in shared native apps; versions 1 and 2 remain accepted for legacy clients.
+      schema: { type: integer, enum: [1, 2, 3], default: 3 }
     CurrentProtocolVersion:
       name: X-Latchway-Protocol-Version
       in: header
       required: true
-      description: Installation Family and Client Component operations require current wire protocol 2.
-      schema: { type: integer, const: 2 }
+      description: Installation Family and Client Component operations require wire protocol 2 or 3.
+      schema: { type: integer, enum: [2, 3] }
     SDK:
       name: X-Latchway-SDK
       in: header
       required: true
       schema:
         type: string
-        enum: [ios, android, javascript, react-native]
+        enum: [ios, android, javascript, react-native, native]
+    Caller:
+      name: X-Latchway-Caller
+      in: header
+      required: false
+      description: Required exactly once for protocol-3 SDK native, forbidden for legacy SDK kinds. Must match the host and its sharedNativeCallers policy. Attribution is not attestation.
+      schema: { type: string, enum: [ios, android, react-native] }
     SDKVersion:
       name: X-Latchway-SDK-Version
       in: header
@@ -1092,8 +1177,8 @@ components:
       properties:
         request_id: { type: string }
         server_version: { type: string }
-        contract_version: { type: string, const: 1.0.0 }
-        protocol_version: { type: integer, const: 2 }
+        contract_version: { type: string, enum: [1.0.0, 1.1.0] }
+        protocol_version: { type: integer, enum: [2, 3] }
         installation: { $ref: '#/components/schemas/InstallationSummary' }
         session:
           type: object
@@ -1109,18 +1194,27 @@ components:
       required: [server_version, contract_version, current_protocol_version, supported_protocol_versions, session_endpoint, dpop_algorithms, maximum_clock_skew_seconds]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 1.0.0 }
-        current_protocol_version: { type: integer, const: 2 }
+        contract_version: { type: string, const: 1.1.0 }
+        current_protocol_version: { type: integer, const: 3 }
         supported_protocol_versions:
           type: array
-          minItems: 2
-          maxItems: 2
+          minItems: 3
+          maxItems: 3
           uniqueItems: true
           prefixItems:
             - { const: 1 }
             - { const: 2 }
+            - { const: 3 }
           items: false
         session_endpoint: { type: string, format: uri-reference, const: /client/v1/sessions }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [supplied_identity_v1] }
+        identity_verification_endpoint:
+          type: string
+          format: uri-reference
+          const: /client/v1/sessions/identity
         dpop_algorithms:
           type: array
           minItems: 1
@@ -1135,6 +1229,40 @@ components:
             android: { type: string }
             javascript: { type: string }
             react-native: { type: string }
+    VerifySessionIdentityRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token, identity]
+      properties:
+        refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        identity:
+          type: object
+          additionalProperties: false
+          required: [provider, token]
+          properties:
+            provider: { type: string, pattern: '^[a-z][a-z0-9_-]{0,62}$' }
+            token: { type: string, minLength: 1, maxLength: 65536, writeOnly: true }
+    VerifySessionIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [identity, installation_id]
+      properties:
+        installation_id: { type: string, pattern: '^ins_[A-Za-z0-9_-]{16,128}$' }
+        identity:
+          type: object
+          additionalProperties: false
+          required: [provider, issuer, subject, audience, verified_at, expires_at]
+          properties:
+            provider: { type: string, pattern: '^[a-z][a-z0-9_-]{0,62}$' }
+            issuer: { type: string, minLength: 1, maxLength: 2048 }
+            subject: { type: string, minLength: 1, maxLength: 2048 }
+            audience:
+              type: array
+              minItems: 1
+              maxItems: 64
+              items: { type: string, minLength: 1, maxLength: 2048 }
+            verified_at: { type: string, format: date-time }
+            expires_at: { type: string, format: date-time }
     JsonWebKeySet:
       type: object
       additionalProperties: false

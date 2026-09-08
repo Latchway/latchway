@@ -45,6 +45,11 @@ Do not change the environment master key during an ordinary upgrade. Do not
 combine a schema migration, public-origin change, signing-key emergency
 rotation, and upstream configuration rewrite in one rollout.
 
+The rolling-overlap steps require both binaries to support the current schema.
+When the bundled schema changes, use the release-specific drained maintenance
+transition instead; an unhealthy container does not necessarily stop a reverse
+proxy from forwarding requests to it.
+
 ## Schema 21: Installation Families
 
 Schema 21 upgrades each legacy installation transactionally into one
@@ -108,6 +113,49 @@ pre-29 backup/PITR point into a fresh database and start the matching previous
 image and master key. That is schema recovery, not application rollback.
 Never remove migration-ledger rows, edit migration `28`, or weaken readiness
 to make an incompatible image appear usable.
+
+## Schema 30: Caller attribution
+
+Migration `30` adds nullable `logical_requests.caller_sdk` and a check constraint
+allowing `ios`, `android`, `react-native`, and `javascript`. Existing rows remain
+null. This is observational request attribution, not a trust input or a new
+quota scope; existing principals, buckets, and usage are unchanged. The migration
+is transactional, but its `ALTER TABLE` operations require a table lock and
+constraint validation may scan existing requests. Rehearse against a populated
+isolated database and allow a maintenance window for large request histories.
+
+A schema-29 binary becomes unready immediately after migration `30` commits.
+For a 29-to-30 deployment:
+
+1. Retain the exact old image, matching master key, active configuration revision
+   IDs, and a verified pre-upgrade backup/PITR recovery path. Prepare and test a
+   schema-30-compatible rollback artifact separately from that backup.
+2. Remove application traffic and drain old API/worker processes for their
+   configured shutdown timeout before the migration. Keep the origin, TLS state,
+   database connection, and master key unchanged.
+3. Run exactly one new-image `migrate up` job with the existing valid environment
+   configuration. Set `LATCHWAY_MIGRATE_ON_START=false` on application processes
+   so starting a canary does not unexpectedly apply migrations.
+4. Run `latchway --output json migrate status` using the new image and explicitly
+   require `current: 30`, `available: 30`, and `up_to_date: true`. A mismatched
+   status response does not itself produce a nonzero command exit code.
+5. Start the compatible application/worker, check doctor output and readiness,
+   then restore traffic after request, refresh, streaming, and settlement checks.
+   Only then activate the explicitly selected shared-native policy changes;
+   unchanged applications retain their existing configuration.
+
+An older application rebuilt with migration `30` must be labeled as a distinct
+artifact and verified against schema `30`; it is not the original release and
+does not acquire wire-3 support. Before rolling back to it, restore the affected
+environments' prior compatible configuration revisions through the Admin API.
+Leave other applications' revisions alone. New shared-native clients fail closed
+on an older wire-1/2 server and cannot be silently converted to legacy sessions.
+
+To recover schema `29`, restore the pre-30 backup/PITR point into a fresh database
+with the original matching image and master key. Schema recovery affects every
+application in that database, and writes after the recovery point may be lost;
+record that RPO before accepting traffic. Never delete migration-ledger rows,
+drop the attribution column manually, or weaken readiness to fake compatibility.
 
 ## Schema recovery
 

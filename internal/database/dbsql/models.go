@@ -558,6 +558,7 @@ type LogicalRequest struct {
 	SelectedUpstreamKey   *string `db:"selected_upstream_key" json:"selected_upstream_key"`
 	SelectedModelKey      *string `db:"selected_model_key" json:"selected_model_key"`
 	SelectedPhysicalModel *string `db:"selected_physical_model" json:"selected_physical_model"`
+	CallerSdk             *string `db:"caller_sdk" json:"caller_sdk"`
 }
 
 // Append-only, redaction-safe identity/trust/policy/quota/routing decisions for one authenticated logical request.

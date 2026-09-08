@@ -4,6 +4,10 @@
 > when the Installation Family addendum reserved ADRs 0017 through 0028. ADR
 > 0024 supersedes its terminal-reuse behavior for component session families;
 > this file remains the record of contract 0.5.1 and the current legacy runtime.
+>
+> Contract 1.1.0 adds a separate capability-negotiated same-account identity
+> verification operation in [ADR 0036](0036-developer-supplied-identity-verification.md).
+> This does not change the exact one-field refresh request or attestation renewal.
 
 ## Context
 

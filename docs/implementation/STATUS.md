@@ -2,6 +2,50 @@
 
 Status date: 2026-09-08
 
+## Supplied identity verification: server implementation, release candidate
+
+The additive protocol-3 `supplied_identity_v1` capability and
+`POST /client/v1/sessions/identity` verify developer-supplied identity against an
+active DPoP-bound refresh credential. Expired old identity/access does not block
+recovery; invalid, wrong-account, expired, revoked and replayed inputs fail
+closed. Same-account recovery updates verified freshness and configured claims
+without rotating credentials/keys, changing attestation or touching quota.
+Initial sign-in retains the challenge/exchange flow. No schema beyond 30 is
+required. See [ADR 0036](../adr/0036-developer-supplied-identity-verification.md).
+
+The complete Go suite passes against isolated UTF-8 PostgreSQL, including the
+new HTTP vertical slice. Transport/session/identity race tests and Go static
+analysis pass. Contract validation, public reference tests and reproducible bundle creation
+pass. The contract is frozen as released 1.1.0 for coordinated publication.
+Package/container publication, SDK/device conformance and VPS deployment are
+not yet claimed by this source checkpoint. The historical script regression
+expecting removed verification CI still fails because the user previously
+removed those gates; the gate is not reinstated or represented as passing.
+
+## Shared native apps and logout: local implementation verified, unreleased
+
+ADR 0035 defines an explicit protocol-3 `native` backend declaration, per-request
+caller attribution and `sharedNativeCallers` host-policy opt-in. Work is local;
+no release, configuration activation or deployment has been performed. Legacy
+platform policies are not implicitly merged. Server policy enforcement and schema
+30 caller attribution pass the full PostgreSQL-backed Go suite. Swift and Android
+tests demonstrate one native/RN session and refresh with distinct request proofs,
+offline retirement, terminal handles, identity-loss fencing and explicit auth-owner
+transfer. RN exposes the native app registry and JS-owned identity broker. SDKs
+consume a checksummed draft overlay while keeping released legacy pins intact.
+
+Root inactive/current key retention is now bounded to eight account scopes with
+recoverable eviction records. Buffered stream retirement and migration drainage
+have regression coverage. The continuation adds account-scoped delegated
+component storage, persistent retirement and explicit legacy migration inventory,
+and migrates the actual chat examples to shared lifecycle APIs. Same-host
+component policy, independent grants, and denial before grant/proof consumption
+pass PostgreSQL-backed tests. Signed storage/device acceptance, published native
+dependency alignment and production enablement remain separate. The working
+tree is not a released production SDK combination. See
+[development APIs and limits](SHARED_NATIVE_APPS.md) and the workspace's
+`SDK_SHARED_APP_IMPLEMENTATION_STATUS.md` for the final local verification ledger.
+
 ## Server 1.0.4: quota-safe Chat function tools
 
 The Chat adapter now accepts bounded local function definitions and complete

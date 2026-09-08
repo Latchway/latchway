@@ -6,6 +6,36 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.0 shared native app and supplied identity contract
+
+The release source adds server `1.1.0`, contract `1.1.0` and wire `3`.
+Wire `1`/`2` retain their existing declarations. A shared native root uses
+`X-Latchway-SDK: native`, a truthful `X-Latchway-Caller: ios|android|react-native`,
+and installation platform `ios` or `android`. Framework compatibility uses the
+caller namespace. Required host policy must explicitly list `sharedNativeCallers`;
+omission does not combine native and RN policies. Quota ownership is unchanged.
+
+Same-host delegated components use the same declaration with independent keys,
+grants and sessions. The component platform must equal the parent installation's
+native host platform. Legacy runtime-specific and remote watch definitions are
+not silently converted; caller policy is enforced before grant/proof consumption.
+
+`supplied_identity_v1` discovery capability advertises a separate current-account
+identity verification endpoint. An active refresh token plus DPoP and a verified
+same-principal ID token may renew identity freshness even after the old token
+expires, without rotating keys/credentials or changing quota. Initial sign-in
+still uses identity and attestation establishment. `identity_refresh_required`
+is a temporary SDK guard, not logout. See [ADR 0036](../adr/0036-developer-supplied-identity-verification.md).
+
+The 1.1.0 contract is frozen for publication. Exact source, bundle, native package
+pins and public publication receipts must be recorded by coordinated release;
+the source checkpoint alone is not registry or physical-device evidence. SDK
+`contract.shared-native.lock.json` records the actual committed source and
+released bundle; retained legacy fixtures and locks remain historical. See
+[the implementation notes](SHARED_NATIVE_APPS.md) and [ADR 0035](../adr/0035-shared-native-app-sessions.md).
+
+### Released compatibility history
+
 Server **1.0.4** adds bounded local function tools and complete tool-result
 history to Chat trusted preflight. Existing SDK APIs and configured Chat
 profiles work unchanged; tools require upgrading the server before use with
@@ -90,7 +120,7 @@ bundle and all four SDK successor locks already bind that schema-28 contract.
 
 ## Current runtime schema
 
-Current source adds schema `29`, a function-body-only replacement of the
+The last released runtime uses schema `29`, a function-body-only replacement of the
 deferred terminal-attempt validator. It consolidates validation reads while
 preserving check outcomes and precedence, legacy settlement repair, trigger
 timing, locking, tables, indexes, and constraints. Historical migration `28`
@@ -98,12 +128,20 @@ is unchanged. Wire `2`, the frozen schema-28 contract checkpoint and bundle,
 and all four SDK locks remain unchanged; a runtime migration does not rewrite
 those contract coordinates.
 
+The shared-native working tree adds schema `30`: nullable `caller_sdk` request
+attribution with a bounded-value check constraint. Historical rows stay null;
+the migration does not rewrite quota principals, buckets, or usage. Its table
+lock and constraint validation still require a rehearsed maintenance window.
+
 Readiness requires the database's current migration version to equal the
-binary's bundled available version. After schema `29`, a schema-28 binary is
-not an application-rollback target. Retain a verified compatible schema-29
-release candidate for stable-image rollback, or restore a pre-29 backup/PITR
-point into a fresh database for schema recovery. See the
-[upgrade runbook](../operations/upgrades.md#schema-29-terminal-attempt-validation).
+binary's bundled available version. After schema `30`, an unmodified schema-29
+binary is not an application-rollback target. Retain a verified schema-30
+compatible rollback artifact, or restore a pre-30 backup/PITR point into a fresh
+database with the matching previous image and master key for schema recovery.
+An explicitly labeled schema-30 rebuild of older application code is not the
+unchanged published image and does not gain wire-3 support. Revert affected
+shared-native configuration revisions before using that older application code.
+See the [upgrade runbook](../operations/upgrades.md#schema-30-caller-attribution).
 Local correctness and advisory measurements do not establish full-candidate
 load, release, or production readiness.
 

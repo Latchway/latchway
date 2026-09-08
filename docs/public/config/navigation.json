@@ -337,6 +337,16 @@
         {
           "group": "SDK errors",
           "pages": [
+            "errors/app-not-configured",
+            "errors/configuration-conflict",
+            "errors/identity-authority-required",
+            "errors/identity-unavailable",
+            "errors/identity-refresh-required",
+            "errors/account-changed",
+            "errors/client-logged-out",
+            "errors/cleanup-required",
+            "errors/client-disposed",
+            "errors/native-version-incompatible",
             "errors/client-configuration-invalid",
             "errors/storage-unavailable",
             "errors/crypto-unavailable",

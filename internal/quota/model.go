@@ -209,6 +209,7 @@ type ReserveInput struct {
 	ClientRequestID     string
 	Framework           string
 	FrameworkVersion    string
+	CallerSDK           string
 	LimitPlanKey        string
 	RouteKey            string
 	UpstreamKey         string
@@ -443,7 +444,7 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	if !validComponentAttribution(
 		input.InstallationFamilyID, input.ClientComponentID,
 		input.ComponentDefinitionID, input.ComponentKind, input.TrustSource,
-	) || !validFrameworkAttribution(input.Framework, input.FrameworkVersion) {
+	) || !validFrameworkAttribution(input.Framework, input.FrameworkVersion) || !validCallerSDK(input.CallerSDK) {
 		return preparedRequest{}, ErrInvalidInput
 	}
 	for _, value := range []string{
@@ -1046,6 +1047,15 @@ func validFrameworkAttribution(framework, version string) bool {
 	return frameworkcompat.ValidVersion(version)
 }
 
+func validCallerSDK(value string) bool {
+	switch value {
+	case "", "ios", "android", "react-native", "javascript":
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneStringMap(input map[string]string) map[string]string {
 	if input == nil {
 		return nil
@@ -1112,6 +1122,9 @@ func requestFingerprint(prepared preparedRequest) string {
 	}
 	if prepared.Framework != "" {
 		parts = append(parts, frameworkAttributionDomain, prepared.Framework, prepared.FrameworkVersion)
+	}
+	if prepared.CallerSDK != "" {
+		parts = append(parts, "latchway/caller-sdk/v1", prepared.CallerSDK)
 	}
 	for _, rule := range prepared.rules {
 		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))

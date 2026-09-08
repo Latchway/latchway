@@ -36,7 +36,7 @@ func (selection *PlatformAttestation) UnmarshalJSON(encoded []byte) error {
 		"provider": {}, "mode": {}, "minimumTrustLevel": {},
 		"applicationIdentifiers": {}, "allowedOrigins": {}, "secretRef": {},
 		"dangerousAllowInProduction": {}, "appAttest": {}, "playIntegrity": {},
-		"firebaseAppCheck": {}, "turnstile": {},
+		"firebaseAppCheck": {}, "turnstile": {}, "sharedNativeCallers": {},
 	})
 	if err != nil {
 		return err

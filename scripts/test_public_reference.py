@@ -49,6 +49,7 @@ class PublicReferenceTests(unittest.TestCase):
                 "api/client.openapi.yaml",
                 "api/config.schema.json",
                 "api/error-codes.yaml",
+                "api/protocol-version.json",
                 "api/sdk-error-codes.yaml",
                 "compatibility/frameworks.schema.json",
                 "compatibility/frameworks.yaml",
@@ -70,6 +71,7 @@ class PublicReferenceTests(unittest.TestCase):
             reference.render_admin_reference(self.admin),
             reference.render_admin_reference(self.admin),
         )
+
         self.assertEqual(
             reference.render_client_reference(self.client),
             reference.render_client_reference(self.client),
@@ -92,6 +94,16 @@ class PublicReferenceTests(unittest.TestCase):
             reference.render_config_reference(self.config),
             reference.render_config_reference(self.config),
         )
+
+    def test_shared_native_references_match_contract_release_state(self) -> None:
+        rendered = reference.render_all()
+        for code in reference.SHARED_NATIVE_ERRORS:
+            page = rendered[reference.ERROR_PAGE_ROOT / f"{reference.error_slug(code)}.mdx"]
+            self.assertIn('serverVersion: "1.1.0"', page)
+            if reference.json.loads(reference.PROTOCOL_SOURCE.read_text())["contract_status"] == "draft":
+                self.assertIn("Shared native app APIs are unreleased", page)
+            else:
+                self.assertNotIn("Shared native app APIs are unreleased", page)
 
     def test_admin_reference_contains_every_operation_once(self) -> None:
         rendered = reference.render_admin_reference(self.admin)
@@ -129,12 +141,13 @@ class PublicReferenceTests(unittest.TestCase):
                 operation = path_item.get(method)
                 if isinstance(operation, dict):
                     operations.append(operation["operationId"])
-        self.assertEqual(len(operations), 23)
+        self.assertEqual(len(operations), 24)
         for operation_id in operations:
             self.assertEqual(rendered.count(f"`{operation_id}`"), 1, operation_id)
         for exact_path in (
             "/.well-known/latchway",
             "/client/v1/session-challenges",
+            "/client/v1/sessions/identity",
             "/client/v1/installation-families/current/components",
             "/client/v1/diagnostics",
             "/v1/responses",
@@ -164,6 +177,9 @@ class PublicReferenceTests(unittest.TestCase):
         self.assertEqual(
             set(self.sdk_errors["codes"]),
             {
+                "app_not_configured", "configuration_conflict", "identity_authority_required",
+                "identity_unavailable", "identity_refresh_required", "account_changed", "client_logged_out", "cleanup_required",
+                "client_disposed", "native_version_incompatible",
                 "attestation_provider_missing",
                 "cancelled",
                 "client_configuration_invalid",

@@ -81,6 +81,7 @@ type AuthenticatedRequestInput struct {
 	ClientRequestID  string
 	Framework        string
 	FrameworkVersion string
+	CallerSDK        string
 }
 
 // AuthenticatedRequest is an opaque handle for one already-bound logical
@@ -131,7 +132,7 @@ func prepareAuthenticatedRequest(input AuthenticatedRequestInput) (Authenticated
 		!validComponentAttribution(
 			input.InstallationFamilyID, input.ClientComponentID,
 			input.ComponentDefinitionID, input.ComponentKind, input.TrustSource,
-		) || !validFrameworkAttribution(input.Framework, input.FrameworkVersion) ||
+		) || !validFrameworkAttribution(input.Framework, input.FrameworkVersion) || !validCallerSDK(input.CallerSDK) ||
 		!identifierPattern.MatchString(input.FeatureKey) ||
 		!slices.Contains(allowedProtocolValues, input.Protocol) ||
 		(input.ClientRequestID != "" &&
@@ -178,11 +179,11 @@ func (store *Store) BeginAuthenticatedRequest(
 			installation_family_id, client_component_id, component_definition_id,
 			component_kind, trust_source, session_grant_id,
 			config_revision_id, feature_key, selected_limit_plan_key,
-			protocol, client_request_id, framework, framework_version,
+			protocol, client_request_id, framework, framework_version, caller_sdk,
 			status, requested_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			$12, $13, $14, 'legacy_unknown', $15, $16, $17, $18,
+			$12, $13, $14, 'legacy_unknown', $15, $16, $17, $18, $19,
 			'authenticated', transaction_timestamp()
 		)
 		ON CONFLICT DO NOTHING
@@ -192,7 +193,7 @@ func (store *Store) BeginAuthenticatedRequest(
 		nullableString(prepared.ComponentDefinitionID), nullableString(prepared.ComponentKind),
 		nullableString(prepared.TrustSource), prepared.SessionGrantID, prepared.ConfigRevisionID,
 		prepared.FeatureKey, prepared.Protocol, nullableString(prepared.ClientRequestID),
-		nullableString(prepared.Framework), nullableString(prepared.FrameworkVersion))
+		nullableString(prepared.Framework), nullableString(prepared.FrameworkVersion), nullableString(prepared.CallerSDK))
 	if err != nil {
 		return AuthenticatedRequest{}, mapWriteError("insert authenticated logical request", err)
 	}
@@ -217,21 +218,21 @@ func validateExistingAuthenticatedRequest(
 	var organizationID, applicationID, environmentID, userID, installationID string
 	var sessionGrantID, revisionID, feature, requestProtocol string
 	var familyID, componentID, definitionID, componentKind, trustSource *string
-	var clientRequestID, framework, frameworkVersion *string
+	var clientRequestID, framework, frameworkVersion, callerSDK *string
 	err := tx.QueryRow(ctx, `
 		SELECT organization_id, application_id, environment_id,
 		       application_user_id, installation_id,
 		       installation_family_id, client_component_id,
 		       component_definition_id, component_kind, trust_source,
 		       session_grant_id, config_revision_id, feature_key, protocol,
-		       client_request_id, framework, framework_version
+		       client_request_id, framework, framework_version, caller_sdk
 		FROM logical_requests
 		WHERE logical_request_id = $1
 	`, input.LogicalRequestID.String()).Scan(
 		&organizationID, &applicationID, &environmentID, &userID, &installationID,
 		&familyID, &componentID, &definitionID, &componentKind, &trustSource,
 		&sessionGrantID, &revisionID, &feature, &requestProtocol,
-		&clientRequestID, &framework, &frameworkVersion,
+		&clientRequestID, &framework, &frameworkVersion, &callerSDK,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrInvalidState
@@ -251,7 +252,7 @@ func validateExistingAuthenticatedRequest(
 		!nullableStringMatches(trustSource, input.TrustSource) ||
 		!nullableStringMatches(clientRequestID, input.ClientRequestID) ||
 		!nullableStringMatches(framework, input.Framework) ||
-		!nullableStringMatches(frameworkVersion, input.FrameworkVersion) {
+		!nullableStringMatches(frameworkVersion, input.FrameworkVersion) || !nullableStringMatches(callerSDK, input.CallerSDK) {
 		return ErrInvalidInput
 	}
 	return nil
@@ -269,7 +270,7 @@ func claimAuthenticatedRequest(
 	var status, organizationID, applicationID, environmentID, userID, installationID string
 	var sessionGrantID, revisionID, feature, requestProtocol, selectedPlan string
 	var familyID, componentID, definitionID, componentKind, trustSource *string
-	var clientRequestID, framework, frameworkVersion, storedFingerprint *string
+	var clientRequestID, framework, frameworkVersion, callerSDK, storedFingerprint *string
 	var routeKey, upstreamKey, modelKey, physicalModel *string
 	var planProvenanceExists bool
 	err := tx.QueryRow(ctx, `
@@ -278,7 +279,7 @@ func claimAuthenticatedRequest(
 		       installation_family_id, client_component_id,
 		       component_definition_id, component_kind, trust_source,
 		       session_grant_id, config_revision_id, feature_key, protocol,
-		       client_request_id, framework, framework_version,
+		       client_request_id, framework, framework_version, caller_sdk,
 		       selected_limit_plan_key, selected_route_key,
 		       selected_upstream_key, selected_model_key,
 		       selected_physical_model, trusted_decision_fingerprint,
@@ -294,7 +295,7 @@ func claimAuthenticatedRequest(
 		&status, &organizationID, &applicationID, &environmentID, &userID, &installationID,
 		&familyID, &componentID, &definitionID, &componentKind, &trustSource,
 		&sessionGrantID, &revisionID, &feature, &requestProtocol,
-		&clientRequestID, &framework, &frameworkVersion, &selectedPlan,
+		&clientRequestID, &framework, &frameworkVersion, &callerSDK, &selectedPlan,
 		&routeKey, &upstreamKey, &modelKey, &physicalModel, &storedFingerprint,
 		&planProvenanceExists,
 	)
@@ -320,6 +321,7 @@ func claimAuthenticatedRequest(
 		!nullableStringMatches(clientRequestID, input.ClientRequestID) ||
 		!nullableStringMatches(framework, input.Framework) ||
 		!nullableStringMatches(frameworkVersion, input.FrameworkVersion) ||
+		!nullableStringMatches(callerSDK, input.CallerSDK) ||
 		(selectedPlan != input.LimitPlanKey &&
 			(selectedPlan != "legacy_unknown" || planProvenanceExists)) ||
 		!nullableSelectionMatches(routeKey, input.RouteKey) ||

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/latchway/latchway/internal/buildinfo"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/protocol"
@@ -28,6 +29,7 @@ var (
 )
 
 type declaration struct {
+	runtime          clientruntime.Declaration
 	sdk              string
 	sdkVersion       string
 	framework        string
@@ -59,7 +61,7 @@ func parseDeclaration(request *http.Request) (declaration, *violation) {
 	if !ok || !buildinfo.SupportsProtocolVersion(version) {
 		return declaration{}, &violation{
 			code:      "protocol_version_unsupported",
-			detail:    "This gateway supports Latchway protocol versions 1 and 2.",
+			detail:    "This gateway supports Latchway protocol versions 1, 2 and 3.",
 			supported: buildinfo.SupportedProtocolVersions(),
 		}
 	}
@@ -67,11 +69,15 @@ func parseDeclaration(request *http.Request) (declaration, *violation) {
 	if !ok || !validSDK(sdk) {
 		return declaration{}, requestViolation("header.X-Latchway-SDK", "A supported SDK identifier is required.")
 	}
+	caller, callerCount := oneRawHeader(request.Header, clientruntime.CallerHeader)
+	if callerCount > 1 || callerCount == 1 && caller == "" || clientruntime.Validate(version, sdk, caller) != nil {
+		return declaration{}, requestViolation("header.X-Latchway-Caller", "Shared native SDK requests require protocol 3 and exactly one native caller; legacy SDKs omit this header.")
+	}
 	sdkVersion, ok := exactlyOneHeader(request.Header, "X-Latchway-SDK-Version")
 	if !ok || !validSemVer(sdkVersion) {
 		return declaration{}, requestViolation("header.X-Latchway-SDK-Version", "A semantic SDK version is required.")
 	}
-	framework, frameworkVersion, frameworkViolation := parseFrameworkDeclaration(request.Header, sdk)
+	framework, frameworkVersion, frameworkViolation := parseFrameworkDeclaration(request.Header, clientruntime.FrameworkSDK(sdk, caller))
 	if frameworkViolation != nil {
 		return declaration{}, frameworkViolation
 	}
@@ -106,7 +112,8 @@ func parseDeclaration(request *http.Request) (declaration, *violation) {
 	}
 
 	return declaration{
-		sdk: sdk, sdkVersion: sdkVersion, framework: framework,
+		runtime: clientruntime.Declaration{Protocol: version, SDK: sdk, Caller: caller},
+		sdk:     sdk, sdkVersion: sdkVersion, framework: framework,
 		frameworkVersion: frameworkVersion, feature: feature,
 		clientRequestID: validClientRequestHint(request.Header),
 		accessToken:     accessToken,
@@ -251,7 +258,7 @@ func validCompactProof(value string) bool {
 
 func validSDK(value string) bool {
 	switch value {
-	case "ios", "android", "javascript", "react-native":
+	case "ios", "android", "javascript", "react-native", "native":
 		return true
 	default:
 		return false
@@ -260,6 +267,8 @@ func validSDK(value string) bool {
 
 func sdkMatchesPlatform(sdk, platform string) bool {
 	switch sdk {
+	case "native":
+		return platform == "ios" || platform == "android"
 	case "ios":
 		return platform == "ios"
 	case "android":

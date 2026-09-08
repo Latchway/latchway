@@ -216,6 +216,7 @@ type logicalRequestDocument struct {
 	TrustSource           *string                        `json:"trust_source,omitempty"`
 	Framework             *string                        `json:"framework,omitempty"`
 	FrameworkVersion      *string                        `json:"framework_version,omitempty"`
+	CallerSDK             *string                        `json:"caller_sdk,omitempty"`
 	ConfigRevisionID      string                         `json:"config_revision_id"`
 	SelectedLimitPlan     string                         `json:"selected_limit_plan"`
 	SelectedRoute         *string                        `json:"selected_route,omitempty"`
@@ -1189,7 +1190,7 @@ func (store *operationalStore) listRequests(
 	query := fmt.Sprintf(`
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
 		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version,
+		       component_kind, trust_source, framework, framework_version, caller_sdk,
 		       config_revision_id, selected_limit_plan_key,
 		       selected_route_key, selected_upstream_key, selected_model_key,
 		       selected_physical_model, feature_key, protocol, requested_at,
@@ -1236,7 +1237,7 @@ func (store *operationalStore) getRequest(
 	row := store.pool.QueryRow(ctx, `
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
 		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version,
+		       component_kind, trust_source, framework, framework_version, caller_sdk,
 		       config_revision_id, selected_limit_plan_key,
 		       selected_route_key, selected_upstream_key, selected_model_key,
 		       selected_physical_model, feature_key, protocol, requested_at,
@@ -1267,7 +1268,7 @@ func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 		&item.ID, &item.EnvironmentID, &item.UserID, &item.InstallationID,
 		&item.InstallationFamilyID, &item.ClientComponentID,
 		&item.ComponentDefinitionID, &item.ComponentKind, &item.TrustSource,
-		&item.Framework, &item.FrameworkVersion,
+		&item.Framework, &item.FrameworkVersion, &item.CallerSDK,
 		&item.ConfigRevisionID, &item.SelectedLimitPlan,
 		&item.SelectedRoute, &item.SelectedUpstream, &item.SelectedModel,
 		&item.SelectedPhysicalModel,
@@ -1286,6 +1287,9 @@ func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 }
 
 func validRequestAttribution(item logicalRequestDocument) bool {
+	if item.CallerSDK != nil && !slices.Contains([]string{"ios", "android", "react-native", "javascript"}, *item.CallerSDK) {
+		return false
+	}
 	if id.Validate(item.ConfigRevisionID, id.ConfigRevision) != nil ||
 		!operationalIdentifierPattern.MatchString(item.SelectedLimitPlan) {
 		return false

@@ -27,7 +27,7 @@ func TestParseClientDeclarationAcceptsExactCompatibleFrameworkPair(t *testing.T)
 func TestParseClientDeclarationAcceptsCurrentAndLegacyWireVersions(t *testing.T) {
 	t.Parallel()
 
-	for _, version := range []string{"1", "2"} {
+	for _, version := range []string{"1", "2", "3"} {
 		request := validClientRequest(http.MethodPost, challengePath, validChallengeBody("ios"), "ios", "1.2.3")
 		request.Header.Set("X-Latchway-Protocol-Version", version)
 		if _, violation := parseClientDeclaration(request); violation != nil {
@@ -54,7 +54,7 @@ func TestSessionTransportRejectsAmbiguousHeadersBodiesPathsAndQueries(t *testing
 		{name: "query", method: http.MethodPost, path: challengePath + "?unexpected=1", body: validChallengeBody("ios"), wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "empty query marker", method: http.MethodPost, path: challengePath + "?", body: validChallengeBody("ios"), wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "missing protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Del("X-Latchway-Protocol-Version") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
-		{name: "unsupported protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "3") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
+		{name: "unsupported protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "4") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "noncanonical protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "01") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "duplicate protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Add("X-Latchway-Protocol-Version", "1") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "combined protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "1, 1") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
@@ -364,7 +364,7 @@ func TestProtocolUpgradeProblemAdvertisesSupportedRange(t *testing.T) {
 	var document map[string]any
 	decodeJSONResponse(t, response, &document)
 	versions, ok := document["supported_protocol_versions"].([]any)
-	if !ok || len(versions) != 2 || versions[0] != float64(1) || versions[1] != float64(2) {
+	if !ok || len(versions) != 3 || versions[0] != float64(1) || versions[1] != float64(2) || versions[2] != float64(3) {
 		t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
 	}
 }
@@ -397,7 +397,7 @@ func TestFamilyAndComponentOperationsRequireCurrentWireProtocol(t *testing.T) {
 			var document map[string]any
 			decodeJSONResponse(t, response, &document)
 			versions, ok := document["supported_protocol_versions"].([]any)
-			if !ok || len(versions) != 1 || versions[0] != float64(2) {
+			if !ok || len(versions) != 2 || versions[0] != float64(2) || versions[1] != float64(3) {
 				t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
 			}
 		})

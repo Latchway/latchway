@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "capability": "supplied_identity_v1",
+  "minimum_protocol": 3,
+  "method": "POST",
+  "path": "/client/v1/sessions/identity",
+  "authorization": {"credential": "active_refresh_token", "proof": "RFC9449_DPoP", "ath_required": false},
+  "request_fields": ["refresh_token", "identity"],
+  "identity_request_fields": ["provider", "token"],
+  "response_example": {
+    "installation_id": "ins_01K3NQ7M8P9RSTVWXYZABCDE12",
+    "identity": {
+      "provider": "firebase",
+      "issuer": "https://securetoken.google.com/example-project",
+      "subject": "example-user",
+      "audience": ["example-project"],
+      "verified_at": "2026-09-08T10:00:00Z",
+      "expires_at": "2026-09-08T11:00:00Z"
+    }
+  },
+  "invariants": [
+    "initial-sign-in-needs-no-existing-session",
+    "expired-identity-may-recover-with-active-refresh-possession",
+    "same-provider-issuer-subject-application-user-only",
+    "forged-or-expired-token-never-extends-freshness",
+    "proof-replay-rejected",
+    "revoked-or-rotated-refresh-possession-rejected",
+    "fresh-proof-retry-does-not-rotate-credentials",
+    "current-grant-installation-key-quota-and-attestation-preserved",
+    "late-response-after-local-retirement-cannot-commit"
+  ]
+}

@@ -1,6 +1,46 @@
 registry_version: 1
-contract_version: 1.0.0
+contract_version: 1.1.0
 codes:
+  app_not_configured:
+    title: Native app not configured
+    surfaces: [ios, android, react_native]
+    guidance: Register the intended named native app before retrieving it. Do not fall back to another environment or identity owner.
+  configuration_conflict:
+    title: Shared app configuration conflict
+    surfaces: [ios, android, react_native]
+    guidance: Reuse the registered app and its identity authority. Explicitly conflicting security or storage settings cannot replace an existing registration.
+  identity_authority_required:
+    title: Native identity authority required
+    surfaces: [ios, android, react_native]
+    guidance: Register one account-aware native or JavaScript identity owner before first configuration. A repeated configuration may omit that owner.
+  identity_unavailable:
+    title: Current identity unavailable
+    surfaces: [ios, android, react_native]
+    guidance: Restore the configured auth owner and obtain a consistent current-account snapshot. A missing JavaScript runtime must not authorize from cached credentials.
+  identity_refresh_required:
+    title: Fresh identity token required
+    surfaces: [ios, android, javascript, react_native]
+    guidance: Supply a fresh same-account ID token through the captured account handle. Protected work is temporarily suspended until gateway verification succeeds; expiry alone does not log out or retire the account. Do not reuse cached Latchway credentials to bypass this guard.
+  account_changed:
+    title: Client account changed
+    surfaces: [ios, android, react_native]
+    guidance: Complete logout for the old generation, explicitly activate the new account, and obtain fresh client handles.
+  client_logged_out:
+    title: Client generation logged out
+    surfaces: [ios, android, react_native]
+    guidance: This handle is terminal. After explicit account activation, create a new client even when signing back into the same account.
+  cleanup_required:
+    title: Local account cleanup required
+    surfaces: [ios, android, react_native]
+    guidance: Restore secure storage and retry logout for the captured generation. Do not activate another account or report cleanup success until durable retirement completes.
+  client_disposed:
+    title: Client lease disposed
+    surfaces: [ios, android, react_native]
+    guidance: Dispose releases one lease and is not logout. Use a live client or generation-scoped app logout for account cleanup.
+  native_version_incompatible:
+    title: Shared native SDK incompatible
+    surfaces: [react_native]
+    guidance: Rebuild with one compatible native SDK implementation and the matching React Native bridge. Do not silently fall back to a legacy session.
   client_configuration_invalid:
     title: Client configuration invalid
     surfaces: [javascript, react_native]

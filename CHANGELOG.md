@@ -2,7 +2,24 @@
 
 All notable project changes will be documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versioning follows Semantic Versioning once distributable artifacts exist.
 
-## [Unreleased]
+## [1.1.0] - 2026-09-08
+
+### Added
+
+- Contract 1.1.0 and wire protocol 3 for a native-owned app session shared
+  by Swift/Kotlin and React Native, with explicit `sharedNativeCallers` host
+  policy and truthful per-request caller attribution. Legacy declarations remain.
+- Independent same-host delegated component sessions may use the new declaration;
+  runtime denial precedes grant consumption, refresh rotation and proof acceptance.
+  Root credentials, remote watch definitions and legacy runtime-specific policies
+  are not adopted or merged.
+- Schema 30 records nullable logical-request caller attribution for the Admin API,
+  CLI and console without changing user/feature quota ownership.
+- Capability-negotiated identity verification authenticates a developer-supplied
+  token using existing refresh possession. Same-account recovery preserves
+  installation/session keys, credentials, attestation and quota; invalid or
+  different-account tokens cannot extend identity freshness. Core, native and
+  React Native integration requires no authentication-provider SDK dependency.
 
 ### Changed
 

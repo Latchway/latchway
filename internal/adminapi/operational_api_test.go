@@ -590,10 +590,39 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"client_component_id":"`+fixture.componentID+`"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework":"swift-openai"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework_version":"4.6.0"`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"caller_sdk":"ios"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"selected_route":"primary"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"decision_stages":[`)) ||
 		requestList.Body.Len() > 16<<10 {
 		t.Fatalf("request list status/body=%d %s", requestList.Code, requestList.Body.String())
+	}
+	// Direct native URLSession clients omit framework attribution. Historical
+	// requests also lack caller_sdk; both forms must remain readable after schema 30.
+	for _, caller := range []string{"", "ios", "android", "react-native", "javascript"} {
+		t.Run("request-caller-without-framework-"+caller, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE logical_requests
+				SET caller_sdk=$2, framework=NULL, framework_version=NULL
+				WHERE logical_request_id=$1`, fixture.requestID, nullableString(caller)); err != nil {
+				t.Fatal(err)
+			}
+			listed := performGET(handler, "/admin/v1/requests"+baseQuery, cookie)
+			detail := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
+			if listed.Code != http.StatusOK || detail.Code != http.StatusOK {
+				t.Fatalf("caller=%q list=%d %s detail=%d %s", caller,
+					listed.Code, listed.Body.String(), detail.Code, detail.Body.String())
+			}
+			var document logicalRequestDocument
+			decodeResponse(t, detail, &document)
+			if document.Framework != nil || document.FrameworkVersion != nil ||
+				(caller == "" && document.CallerSDK != nil) ||
+				(caller != "" && (document.CallerSDK == nil || *document.CallerSDK != caller)) {
+				t.Fatalf("caller=%q was not preserved without framework attribution", caller)
+			}
+		})
+	}
+	if _, err := pool.Exec(ctx, `UPDATE logical_requests SET caller_sdk='ios',
+		framework='swift-openai', framework_version='4.6.0' WHERE logical_request_id=$1`, fixture.requestID); err != nil {
+		t.Fatal(err)
 	}
 	requestStart := fixture.recordedAt.Add(-2 * time.Minute).Format(time.RFC3339)
 	requestEnd := fixture.recordedAt.Add(time.Minute).Format(time.RFC3339)
@@ -1815,12 +1844,12 @@ func seedOperationalFixture(
 		    application_user_id, installation_id, session_grant_id, config_revision_id,
 		    feature_key, protocol, status, requested_at, dispatched_at, completed_at,
 		    installation_family_id, client_component_id, component_definition_id,
-		    component_kind, trust_source, framework, framework_version,
+		    component_kind, trust_source, framework, framework_version, caller_sdk,
 		    selected_route_key, selected_upstream_key, selected_model_key,
 		    selected_physical_model
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
 		          'assistant', 'openai_chat', 'succeeded', $9, $10, $11,
-		          $12, $13, 'ios-main', 'main_app', 'debug', 'swift-openai', '4.6.0',
+		          $12, $13, 'ios-main', 'main_app', 'debug', 'swift-openai', '4.6.0', 'ios',
 		          'primary', 'openai', 'assistant_primary', 'gpt-test')
 	`, fixture.requestID, organizationID, applicationID, environmentID, fixture.userID,
 		fixture.installationID, fixture.grantID, revisionID, fixture.recordedAt.Add(-time.Minute),

@@ -514,6 +514,7 @@ export const RequestSchema = z
     failure_code: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/).optional(),
     feature: Identifier,
     framework: Identifier.optional(),
+    caller_sdk: z.enum(["ios", "android", "react-native", "javascript"]).optional(),
     framework_version: z
       .string()
       .min(1)

@@ -118,6 +118,9 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 	if !ok || policy.ID == "" || selection.Mode != "required" {
 		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
 	}
+	if !requestRuntimeAllowed(snapshot, input.Metadata.Runtime(), input.Platform, false) {
+		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
+	}
 	if !platformOriginAllowed(selection, input.Platform, input.Metadata.Origin) {
 		return clientapi.ChallengeResult{}, clientFailure("attestation_invalid")
 	}
@@ -214,6 +217,9 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	})
 	if err != nil || snapshot.RevisionID != challenge.ConfigurationRevisionID {
 		return clientapi.GrantResult{}, clientFailure("conflict")
+	}
+	if !requestRuntimeAllowed(snapshot, input.Metadata.Runtime(), challenge.Binding.Platform, false) {
+		return clientapi.GrantResult{}, clientFailure("attestation_unsupported")
 	}
 	proof, err := prevalidateExchangeDPoP(input, challenge.Binding.DPoPJKT, coordinator.now().UTC(), snapshot.SessionPolicy().MaximumClockSkew)
 	if err != nil {
@@ -320,6 +326,7 @@ func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input 
 		return clientapi.GrantResult{}, clientFailure("dpop_invalid")
 	}
 	issued, err := coordinator.sessions.Rotate(ctx, RotateInput{
+		Runtime:      input.Metadata.Runtime(),
 		RefreshToken: refresh, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -337,6 +344,7 @@ func (coordinator *clientCoordinator) ProvisionComponent(ctx context.Context, in
 	}
 	provisioned, err := coordinator.sessions.ProvisionComponent(ctx, ComponentProvisionInput{
 		Access: AccessRequestInput{
+			Runtime:     input.Metadata.Runtime(),
 			AccessToken: access, Principal: principal, DPoPProof: proof,
 			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 			Origin: input.Metadata.Origin,
@@ -374,6 +382,7 @@ func (coordinator *clientCoordinator) CreateComponentSession(ctx context.Context
 		return clientapi.GrantResult{}, clientFailure("dpop_invalid")
 	}
 	issued, err := coordinator.sessions.CreateComponentSession(ctx, ComponentSessionInput{
+		Runtime:     input.Metadata.Runtime(),
 		ComponentID: input.ComponentID, RefreshGrant: refresh, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -420,6 +429,7 @@ func (coordinator *clientCoordinator) CreateComponentAttestationChallenge(
 	challenge, err := coordinator.sessions.CreateComponentAttestationChallenge(ctx, ComponentAttestationChallengeInput{
 		Access: AccessRequestInput{
 			AccessToken: access, Principal: principal, DPoPProof: proof,
+			Runtime:    input.Metadata.Runtime(),
 			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 			Origin: input.Metadata.Origin,
 		},
@@ -522,6 +532,7 @@ func (coordinator *clientCoordinator) ExchangeComponentAttestation(
 	issued, err := coordinator.sessions.ExchangeComponentAttestation(ctx, ComponentAttestationExchangeInput{
 		Access: AccessRequestInput{
 			AccessToken: access, Principal: principal, DPoPProof: proof,
+			Runtime:    input.Metadata.Runtime(),
 			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 			Origin: input.Metadata.Origin,
 		},
@@ -563,6 +574,7 @@ func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input cli
 		return clientapi.DiagnosticsResult{}, clientFailure("dpop_invalid")
 	}
 	authorization, refreshAvailable, err := coordinator.sessions.authorizeClientDiagnostics(ctx, AccessRequestInput{
+		Runtime:     input.Metadata.Runtime(),
 		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -593,6 +605,8 @@ func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input cli
 
 func clientSDKMatchesInstallation(sdk, platform string) bool {
 	switch sdk {
+	case "native":
+		return platform == "ios" || platform == "android"
 	case "ios":
 		return platform == "ios" || platform == "watchos"
 	case "android":
@@ -620,6 +634,7 @@ func (coordinator *clientCoordinator) RevokeCurrentInstallation(ctx context.Cont
 		return clientFailure("dpop_invalid")
 	}
 	err = coordinator.sessions.RevokeCurrentInstallation(ctx, AccessRequestInput{
+		Runtime:     input.Metadata.Runtime(),
 		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -636,6 +651,7 @@ func (coordinator *clientCoordinator) RevokeComponent(ctx context.Context, input
 		return err
 	}
 	err = coordinator.sessions.RevokeComponent(ctx, AccessRequestInput{
+		Runtime:     input.Metadata.Runtime(),
 		AccessToken: access, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -652,6 +668,7 @@ func (coordinator *clientCoordinator) RevokeCurrentFamily(ctx context.Context, i
 		return err
 	}
 	err = coordinator.sessions.RevokeCurrentFamily(ctx, AccessRequestInput{
+		Runtime:     input.Metadata.Runtime(),
 		AccessToken: access, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
@@ -1320,6 +1337,8 @@ func mapSessionError(err error) string {
 		return "session_revoked"
 	case errors.Is(err, ErrSessionScope):
 		return "session_revoked"
+	case errors.Is(err, ErrClientRuntime):
+		return "request_invalid"
 	case errors.Is(err, ErrSessionInvalid):
 		return "attestation_invalid"
 	case errors.Is(err, ErrSigningKeyUnavailable):
@@ -1330,6 +1349,9 @@ func mapSessionError(err error) string {
 }
 
 func mapAccessRequestError(err error) string {
+	if errors.Is(err, ErrClientRuntime) {
+		return "request_invalid"
+	}
 	if dpop.IsCode(err, "dpop_nonce_required") {
 		return "dpop_nonce_required"
 	}

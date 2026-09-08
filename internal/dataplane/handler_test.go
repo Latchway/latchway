@@ -1264,7 +1264,7 @@ func TestHandlerRejectsCanonicalPathAndDeclarationFailuresBeforeAuthentication(t
 		{name: "opaque feature mismatch", edit: func(request *http.Request) { request.URL.Path = "/proxy/weather/v2/current" }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "unknown path", edit: func(request *http.Request) { request.URL.Path = "/v1/unknown" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "duplicate protocol", edit: func(request *http.Request) { request.Header.Add("X-Latchway-Protocol-Version", "1") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
-		{name: "unsupported protocol", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Protocol-Version", "3") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
+		{name: "unsupported protocol", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Protocol-Version", "4") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
 		{name: "case duplicate SDK", edit: func(request *http.Request) { request.Header["x-latchway-sdk"] = []string{"ios"} }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "missing SDK version", edit: func(request *http.Request) { request.Header.Del("X-Latchway-SDK-Version") }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "framework without version", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Framework", "swift-openai") }, code: "request_invalid", status: http.StatusBadRequest},

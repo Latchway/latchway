@@ -353,6 +353,95 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}, http.StatusCreated, &exchanged)
 	assertClientHTTPGrant(t, exchanged, dpopJKT)
 	assertClientHTTPAccessToken(t, ctx, keyManager, exchanged.AccessToken, fixture, revisionID, dpopJKT, now)
+	t.Run("supplied identity recovery verifies same account without credential rotation", func(t *testing.T) {
+		identityTarget := clientHTTPURL(t, "/client/v1/sessions/identity")
+		post := func(token, provider, jti string, key *ecdsa.PrivateKey) *httptest.ResponseRecorder {
+			body, err := json.Marshal(map[string]any{"refresh_token": exchanged.RefreshToken, "identity": map[string]any{"provider": provider, "token": token}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest(http.MethodPost, identityTarget.String(), bytes.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-Latchway-Protocol-Version", "3")
+			r.Header.Set("X-Latchway-SDK", "ios")
+			r.Header.Set("X-Latchway-SDK-Version", "1.2.0")
+			r.Header.Set("DPoP", signedSessionDPoP(t, key, http.MethodPost, identityTarget, now, jti).value)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			return w
+		}
+		var userCount, grantCount, quotaCount int
+		if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM application_users), (SELECT count(*) FROM session_grants), (SELECT count(*) FROM quota_buckets)`).Scan(&userCount, &grantCount, &quotaCount); err != nil {
+			t.Fatal(err)
+		}
+		access, err := NewAccessToken(exchanged.AccessToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal, err := accessVerifier.Verify(ctx, access)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The provider-token freshness guard is expired, but refresh possession
+		// is still valid. No access token is needed for its own recovery.
+		if _, err := pool.Exec(ctx, `UPDATE session_grants SET identity_verified_at=$2, identity_expires_at=$3 WHERE session_grant_id=$1`, principal.SessionGrantID, now.Add(-2*time.Hour), now.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sessionStore.Authorize(ctx, principal); !errors.Is(err, ErrTokenExpired) {
+			t.Fatalf("expired identity did not suspend: %v", err)
+		}
+		claims := jwt.MapClaims{"iss": clientHTTPIdentityIssuer, "aud": clientHTTPIdentityAudience, "sub": "external-user-001", "iat": now.Unix(), "exp": now.Add(2 * time.Hour).Unix()}
+		sign := func(claims jwt.MapClaims, key *rsa.PrivateKey) string {
+			token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return token
+		}
+		otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertClientHTTPProblem(t, post(sign(claims, otherKey), "custom", "identity-forged", dpopPrivateKey), http.StatusUnauthorized, "identity_token_invalid")
+		claims["sub"] = "another-account"
+		assertClientHTTPProblem(t, post(sign(claims, identityPrivateKey), "custom", "identity-other-account", dpopPrivateKey), http.StatusUnauthorized, "identity_token_invalid")
+		claims["sub"] = "external-user-001"
+		claims["exp"] = now.Add(-time.Hour).Unix()
+		assertClientHTTPProblem(t, post(sign(claims, identityPrivateKey), "custom", "identity-expired", dpopPrivateKey), http.StatusUnauthorized, "identity_token_expired")
+		claims["exp"] = now.Add(2 * time.Hour).Unix()
+		validToken := sign(claims, identityPrivateKey)
+		assertClientHTTPProblem(t, post(validToken, "firebase", "identity-provider-conflict", dpopPrivateKey), http.StatusUnauthorized, "identity_token_invalid")
+		wrongDPoPKey, _, _ := newChallengeKey(t)
+		assertClientHTTPProblem(t, post(validToken, "custom", "identity-wrong-key", wrongDPoPKey), http.StatusUnauthorized, "dpop_invalid")
+		if _, err := sessionStore.Authorize(ctx, principal); !errors.Is(err, ErrTokenExpired) {
+			t.Fatalf("invalid identity reopened access: %v", err)
+		}
+		response := post(validToken, "custom", "identity-valid", dpopPrivateKey)
+		if response.Code != http.StatusOK {
+			t.Fatalf("identity verification status=%d body=%s", response.Code, response.Body.String())
+		}
+		var verified clientapi.VerifyIdentityResult
+		if err := json.Unmarshal(response.Body.Bytes(), &verified); err != nil {
+			t.Fatal(err)
+		}
+		if verified.InstallationID != exchanged.Installation.ID || verified.Identity.Subject != "external-user-001" || !verified.Identity.ExpiresAt.Equal(now.Add(2*time.Hour)) || !verified.Identity.VerifiedAt.Equal(now) {
+			t.Fatal("verified identity binding changed")
+		}
+		if _, err := sessionStore.Authorize(ctx, principal); err != nil {
+			t.Fatalf("verified identity did not resume same access: %v", err)
+		}
+		assertClientHTTPProblem(t, post(validToken, "custom", "identity-valid", dpopPrivateKey), http.StatusUnauthorized, "dpop_replayed")
+		if retry := post(validToken, "custom", "identity-valid-retry", dpopPrivateKey); retry.Code != http.StatusOK {
+			t.Fatalf("lost-response safe retry failed: %d", retry.Code)
+		}
+		var usersAfter, grantsAfter, quotaAfter int
+		if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM application_users), (SELECT count(*) FROM session_grants), (SELECT count(*) FROM quota_buckets)`).Scan(&usersAfter, &grantsAfter, &quotaAfter); err != nil {
+			t.Fatal(err)
+		}
+		if usersAfter != userCount || grantsAfter != grantCount || quotaAfter != quotaCount {
+			t.Fatal("identity verification created users, grants or quota state")
+		}
+	})
 
 	refreshTarget := clientHTTPURL(t, "/client/v1/sessions/refresh")
 	refreshProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, refreshTarget, now, "client-http-refresh")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/clientapi"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/id"
@@ -96,6 +97,7 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)
 	}
 	authorization, err := provider.sessions.AuthorizeAccess(ctx, session.AccessRequestInput{
+		Runtime:     input.Metadata.Runtime(),
 		AccessToken: accessToken,
 		Principal:   principal,
 		DPoPProof:   dpopProof,
@@ -121,7 +123,7 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)
 	}
-	if snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
+	if !snapshot.AllowsClientRuntime(input.Metadata.SDK, input.Metadata.Caller, authorization.InstallationPlatform, authorization.ComponentID != "" && !authorization.ComponentIsRoot) || snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
 		snapshot.PolicyEnvironment() != authorization.EnvironmentID {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(policy.ErrConfiguration)
 	}
@@ -188,7 +190,8 @@ func (provider *FeatureQuotaProvider) validateInput(input clientapi.FeatureQuota
 		id.Validate(logicalID, id.LogicalRequest) != nil ||
 		input.Metadata.RequestID != logicalID || input.Metadata.HTTPMethod != http.MethodGet ||
 		!validSDK(input.Metadata.SDK) || !validSemVer(input.Metadata.SDKVersion) ||
-		!validFrameworkMetadata(input.Metadata.SDK, input.Metadata.Framework, input.Metadata.FrameworkVersion) {
+		!validFrameworkMetadata(clientruntime.FrameworkSDK(input.Metadata.SDK, input.Metadata.Caller), input.Metadata.Framework, input.Metadata.FrameworkVersion) ||
+		(input.Metadata.SDK == clientruntime.SharedSDK && input.Metadata.Runtime().Validate() != nil) {
 		return url.URL{}, errInvalidConfiguration
 	}
 	target := url.URL{

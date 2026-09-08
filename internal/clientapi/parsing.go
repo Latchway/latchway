@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/buildinfo"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
@@ -54,6 +55,7 @@ func invalidAt(path, message string) *requestViolation {
 }
 
 type clientDeclaration struct {
+	caller           string
 	protocolVersion  string
 	sdk              string
 	sdkVersion       string
@@ -66,13 +68,17 @@ func parseClientDeclaration(r *http.Request) (clientDeclaration, *requestViolati
 	if !ok || !buildinfo.SupportsProtocolVersion(protocolVersion) {
 		return clientDeclaration{}, &requestViolation{
 			code:                      "protocol_version_unsupported",
-			detail:                    "This gateway supports Latchway protocol versions 1 and 2.",
+			detail:                    "This gateway supports Latchway protocol versions 1, 2 and 3.",
 			supportedProtocolVersions: buildinfo.SupportedProtocolVersions(),
 		}
 	}
 	sdk, ok := exactlyOneHeader(r.Header, "X-Latchway-SDK")
 	if !ok || !validSDK(sdk) {
 		return clientDeclaration{}, invalidAt("header.X-Latchway-SDK", "A supported SDK identifier is required.")
+	}
+	caller, callerCount := oneRawClientHeader(r.Header, clientruntime.CallerHeader)
+	if callerCount > 1 || callerCount == 1 && caller == "" || clientruntime.Validate(protocolVersion, sdk, caller) != nil {
+		return clientDeclaration{}, invalidAt("header.X-Latchway-Caller", "Shared native SDK requests require protocol 3 and exactly one native caller; legacy SDKs omit this header.")
 	}
 	sdkVersion, ok := exactlyOneHeader(r.Header, "X-Latchway-SDK-Version")
 	if !ok || len(sdkVersion) > 128 || !sdkVersionPattern.MatchString(sdkVersion) {
@@ -81,33 +87,33 @@ func parseClientDeclaration(r *http.Request) (clientDeclaration, *requestViolati
 	framework, frameworkCount := oneRawClientHeader(r.Header, "X-Latchway-Framework")
 	frameworkVersion, frameworkVersionCount := oneRawClientHeader(r.Header, "X-Latchway-Framework-Version")
 	if frameworkCount == 0 && frameworkVersionCount == 0 {
-		return clientDeclaration{protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion}, nil
+		return clientDeclaration{protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion, caller: caller}, nil
 	}
 	if frameworkCount != 1 || frameworkVersionCount != 1 || framework == "" || frameworkVersion == "" ||
 		strings.TrimSpace(framework) != framework || strings.TrimSpace(frameworkVersion) != frameworkVersion ||
 		strings.ContainsAny(framework, "\r\n\x00,") || strings.ContainsAny(frameworkVersion, "\r\n\x00,") {
 		return clientDeclaration{}, invalidAt("header.X-Latchway-Framework", "Framework and framework version must be declared together exactly once.")
 	}
-	if !frameworkcompat.Compatible(sdk, framework) {
+	if !frameworkcompat.Compatible(clientruntime.FrameworkSDK(sdk, caller), framework) {
 		return clientDeclaration{}, &requestViolation{code: "framework_integration_unsupported", detail: "The declared framework integration is not supported by this SDK."}
 	}
 	if !frameworkcompat.ValidVersion(frameworkVersion) {
 		return clientDeclaration{}, &requestViolation{code: "framework_version_unsupported", detail: "The declared framework version is not supported."}
 	}
 	return clientDeclaration{
-		protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion, framework: framework,
+		protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion, framework: framework, caller: caller,
 		frameworkVersion: frameworkVersion,
 	}, nil
 }
 
 func requireCurrentProtocol(declaration clientDeclaration) *requestViolation {
-	if declaration.protocolVersion == buildinfo.ProtocolVersion {
+	if declaration.protocolVersion == "2" || declaration.protocolVersion == "3" {
 		return nil
 	}
 	return &requestViolation{
 		code:                      "protocol_version_unsupported",
 		detail:                    "This operation requires Latchway protocol version 2.",
-		supportedProtocolVersions: []int{buildinfo.CurrentProtocolVersion},
+		supportedProtocolVersions: []int{2, 3},
 	}
 }
 
@@ -244,7 +250,7 @@ func parseChallengeRequest(r *http.Request, declaration clientDeclaration) (Chal
 	if sdkVersion != declaration.sdkVersion {
 		return ChallengeInput{}, invalidAt("body.sdk_version", "sdk_version must match X-Latchway-SDK-Version.")
 	}
-	if !platformCompatible(declaration.sdk, platform) {
+	if !clientruntime.MatchesHost(declaration.sdk, declaration.caller, platform) {
 		return ChallengeInput{}, invalidAt("body.platform", "platform is incompatible with X-Latchway-SDK.")
 	}
 	origin, originErr := weborigin.Read(r.Header)
@@ -486,7 +492,7 @@ func stringMatching(value any, pattern *regexp.Regexp, maximum int) (string, boo
 
 func validSDK(value string) bool {
 	switch value {
-	case "ios", "android", "javascript", "react-native":
+	case "ios", "android", "javascript", "react-native", "native":
 		return true
 	default:
 		return false
@@ -511,6 +517,8 @@ func validInitialSessionPlatform(value string) bool {
 
 func platformCompatible(sdk, platform string) bool {
 	switch sdk {
+	case "native":
+		return platform == "ios" || platform == "android"
 	case "ios":
 		return platform == "ios" || platform == "watchos"
 	case "android":

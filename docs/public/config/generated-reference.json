@@ -3,6 +3,14 @@
   "generator": "scripts/public_reference.py",
   "outputs": [
     {
+      "path": "errors/account-changed.mdx",
+      "sha256": "6855ab02f25b11b0c3d7ed24c0558b694bdf4e5917af905d2b89866685419e7c"
+    },
+    {
+      "path": "errors/app-not-configured.mdx",
+      "sha256": "831d53cf3c08a8392754248815e3dcb5fb57890ffae10d5fc293886d8d32a514"
+    },
+    {
       "path": "errors/attestation-invalid.mdx",
       "sha256": "6dbd23c5cfa26df37e032ce05054cf92a0d65e0fa650a1b7e1d179abc19f903a"
     },
@@ -39,8 +47,20 @@
       "sha256": "474f63637039159e110e798befdf0f7b137ecbd4f5efce5efd69b21f77ed19c2"
     },
     {
+      "path": "errors/cleanup-required.mdx",
+      "sha256": "5f53d3ee4d5e3b84583f2d23f31a509435e784fdb01c31970cf77948b04e0053"
+    },
+    {
       "path": "errors/client-configuration-invalid.mdx",
       "sha256": "472b2d2d500eecdde0befb95567e24ff0bfe117209f1ebf963b00bf66ae94ba4"
+    },
+    {
+      "path": "errors/client-disposed.mdx",
+      "sha256": "1a7d733cb4866d703b44f6a53439acb206ee82afc1971cc5de7078a51ab14900"
+    },
+    {
+      "path": "errors/client-logged-out.mdx",
+      "sha256": "dababe4dc030623f9381c6fcbf297171289fc5809827447bc60821a8976a4017"
     },
     {
       "path": "errors/component-definition-not-found.mdx",
@@ -85,6 +105,10 @@
     {
       "path": "errors/concurrency-exceeded.mdx",
       "sha256": "fb83d1cb27efd082beed9a898ced13801623334e9ceff65f65f1c14addaafbdb"
+    },
+    {
+      "path": "errors/configuration-conflict.mdx",
+      "sha256": "166f6f7aa5eff708df550c181342f9c70a329d0f642b665d66bd987dbbcd028b"
     },
     {
       "path": "errors/configuration-invalid.mdx",
@@ -159,8 +183,16 @@
       "sha256": "88c546b636a50115f50dfbf35f9ca43f849222da189f7e2e4cfe91667140485c"
     },
     {
+      "path": "errors/identity-authority-required.mdx",
+      "sha256": "60e854e8ba9237c4a3e203ed0f9e5e4e7486f6fa8a256e39eb0b59d3988c54ee"
+    },
+    {
       "path": "errors/identity-reauthentication-required.mdx",
       "sha256": "66bb613730e9b2ee6e56ad978a27e77b94785854d3575d62d93e1b3443de0707"
+    },
+    {
+      "path": "errors/identity-refresh-required.mdx",
+      "sha256": "12aa6f293a7cf4b60808ac540dbe538a017bac703cfab51bc77b97b46718e3aa"
     },
     {
       "path": "errors/identity-token-expired.mdx",
@@ -173,6 +205,10 @@
     {
       "path": "errors/identity-token-missing.mdx",
       "sha256": "040ab236022031a691130341e9a9e94d7bb1c5b5a543e83271dbe627eaeadfd2"
+    },
+    {
+      "path": "errors/identity-unavailable.mdx",
+      "sha256": "b7516a0e2d9b415da1ac64be56013958a43a152f41e94afc5dee2ce6a50ce22a"
     },
     {
       "path": "errors/installation-family-not-found.mdx",
@@ -201,6 +237,10 @@
     {
       "path": "errors/model-not-allowed.mdx",
       "sha256": "b74f1eace0bbf1dc97de445022e42db8006b6a4aa9577b9cb61fc68997665769"
+    },
+    {
+      "path": "errors/native-version-incompatible.mdx",
+      "sha256": "73466dc284489068b40d7f5fbd2f3cbe081f8bf75b702a43cfda2ef42f7f1c08"
     },
     {
       "path": "errors/network-error.mdx",
@@ -324,11 +364,11 @@
     },
     {
       "path": "reference/admin-api.mdx",
-      "sha256": "496f69f638b0ad4e8aa68641acb4666bd88e91110b6adecabd8dde9b5f3db153"
+      "sha256": "b2770a0c9c78b73622e9fb8a5e9c95731aca18d639c1762686eb568d22bc86cd"
     },
     {
       "path": "reference/client-api.mdx",
-      "sha256": "34cd2c4f7101f87d382ce1ea21400a73c964516cf1a2004b16060fd7ef9751a6"
+      "sha256": "22ed817699a20482e89a57390f9b6fc0aeb9353f6cf17ef16636f50ce238e03a"
     },
     {
       "path": "reference/compatibility.mdx",
@@ -336,33 +376,37 @@
     },
     {
       "path": "reference/config-schema.mdx",
-      "sha256": "43e145869e396a107939a7d9a6027f4c8a583d5d4788708fb3e8d5fbf33c02fb"
+      "sha256": "0efd9fe851267fa98abd849a19b94516ce9fc83115da1d5584cce65e4e34ea0c"
     },
     {
       "path": "reference/errors.mdx",
-      "sha256": "0b63a77b73984a2f37bcbdf93263b18deee4c42959cbe04f6651c75693634f13"
+      "sha256": "4219d1b31f754636b8a8f4d5ca731c68619035b7c9dc9a9976d0effd109af8b9"
     }
   ],
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "0f9b13c37f15c936db3b556139c378e77f6e42afed2f46800c930422f3bc8e25"
+      "sha256": "55f5a79442fdc3564abc651ed7fb7a9b887ddb226e1f1c1de19c79624dafbaf8"
     },
     {
       "path": "api/client.openapi.yaml",
-      "sha256": "9590f8113cdc358ac17c781b0bb7ff57c56ae470ca75dded7ab9093f3685987f"
+      "sha256": "763206fb4f4c903b599792baf46d6bc99394cffe66f3cb072aa1f7ef3d968f2c"
     },
     {
       "path": "api/config.schema.json",
-      "sha256": "020bef4cb3fa50f422c68d4c627f88c2049f6b870450296a361ac5f566e725b1"
+      "sha256": "d397515fec5481199f906af7101befe5e86af3f79ffb204b33dff1d9b91c1c6b"
     },
     {
       "path": "api/error-codes.yaml",
-      "sha256": "270a6f60383e02cd312074a4b604768510bfa3588259f439e0d8bd663a3e7202"
+      "sha256": "9c244d0c974bbaade52d8e4942f05bc1a63f5362a4e4345434e0baa6574ed04a"
+    },
+    {
+      "path": "api/protocol-version.json",
+      "sha256": "c8f32d02af792dcec2e92ea1dc5816b85ccf8214f31c9c334cfafc38aa078932"
     },
     {
       "path": "api/sdk-error-codes.yaml",
-      "sha256": "d9a068be22be19eb04accce926759e21a8e4e2725d4a4b26e92afde327b033b1"
+      "sha256": "37c235450badeac051a943be7bd1a926ff83f51bae8e51f5f7370011e0d3711a"
     },
     {
       "path": "compatibility/frameworks.schema.json",

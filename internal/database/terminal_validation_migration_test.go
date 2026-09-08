@@ -71,9 +71,21 @@ func TestMigratorPostgreSQLTerminalValidationBodyOnly(t *testing.T) {
 	if err := pool.QueryRow(ctx, function).Scan(&originalOID, &originalBody); err != nil {
 		t.Fatal("read original terminal function")
 	}
-	if err := NewMigrator(pool).Up(ctx); err != nil {
-		t.Fatalf("apply terminal validation migration: %v", err)
+	applyTerminal := func() {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Release()
+		for _, entry := range entries {
+			if entry.version == 29 {
+				if err := NewMigrator(pool).apply(ctx, conn.Conn(), entry); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 	}
+	applyTerminal()
 	assertLedger(29)
 	if err := pool.QueryRow(ctx, catalog).Scan(&after); err != nil || before != after {
 		t.Fatal("terminal validation migration changed constraints, indexes, or triggers")
@@ -81,7 +93,5 @@ func TestMigratorPostgreSQLTerminalValidationBodyOnly(t *testing.T) {
 	if err := pool.QueryRow(ctx, function).Scan(&candidateOID, &candidateBody); err != nil || originalOID != candidateOID || originalBody == candidateBody {
 		t.Fatal("terminal validation must change only the body of the same function")
 	}
-	if err := NewMigrator(pool).Up(ctx); err != nil {
-		t.Fatal("terminal validation migration is not idempotent")
-	}
+	applyTerminal()
 }

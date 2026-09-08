@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
@@ -55,6 +56,7 @@ type RefreshBinding struct {
 	InstallationStatus        string
 	InstallationTrust         string
 	Platform                  string
+	HostPlatform              string
 	AppVersion                string
 	TrustLevel                string
 	AttestationProvider       string
@@ -83,6 +85,7 @@ func (store *Store) InspectRefresh(ctx context.Context, token RefreshToken) (Ref
 }
 
 type RotateInput struct {
+	Runtime      clientruntime.Declaration
 	RefreshToken RefreshToken
 	DPoPProof    DPoPProof
 	HTTPMethod   string
@@ -120,6 +123,13 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 	}
 	if !snapshotOriginAllowed(snapshot, preflightBinding.Platform, input.Origin) {
 		return IssuedSession{}, ErrSessionInvalid
+	}
+	if !requestRuntimeAllowed(snapshot, input.Runtime, preflightBinding.Platform, preflightBinding.ComponentAware && !preflightBinding.ComponentIsRoot) {
+		return IssuedSession{}, ErrClientRuntime
+	}
+	if preflightBinding.ComponentAware && !preflightBinding.ComponentIsRoot &&
+		!requestDelegatedRuntimeAllowed(snapshot, input.Runtime, preflightBinding.HostPlatform, preflightBinding.ComponentDefinitionID) {
+		return IssuedSession{}, ErrClientRuntime
 	}
 	policy := snapshot.SessionPolicy()
 	validatedProof, err := dpop.Validate(input.DPoPProof.value, dpop.Options{
@@ -963,6 +973,7 @@ func sameRefreshScope(left, right RefreshBinding) bool {
 		left.ComponentKind != right.ComponentKind ||
 		left.ComponentIsRoot != right.ComponentIsRoot ||
 		left.ComponentKeyID != right.ComponentKeyID ||
+		left.HostPlatform != right.HostPlatform ||
 		left.DPoPJKT != right.DPoPJKT ||
 		left.TrustSource != right.TrustSource) {
 		return false
@@ -1102,7 +1113,7 @@ func loadComponentRefreshBinding(
 		       c.trust_verified_at, c.trust_expires_at,
 		       c.trust_parent_component_id, p.trust_attestation_provider,
 		       c.trust_delegation_id,
-		       c.granted_features, c.platform, c.app_version,
+		       c.granted_features, c.platform, c.app_version, i.platform,
 		       k.component_key_id, k.status, sf.status,
 		       u.status, a.status, e.status, o.status
 		FROM component_refresh_tokens r
@@ -1116,6 +1127,7 @@ func loadComponentRefreshBinding(
 		  ON c.client_component_id = r.client_component_id
 		JOIN installation_families f
 		  ON f.installation_family_id = c.installation_family_id
+		JOIN installations i ON i.installation_id = f.root_installation_id
 		LEFT JOIN client_components p
 		  ON p.client_component_id = c.trust_parent_component_id
 		JOIN application_users u
@@ -1152,7 +1164,7 @@ func loadComponentRefreshBinding(
 		&result.ComponentIsRoot, &result.ComponentStatus, &result.TrustSource,
 		&componentAttestationProvider, &trustVerifiedAt, &trustExpiresAt,
 		&parentComponentID, &parentAttestationProvider, &delegationID,
-		&result.GrantedFeatures, &result.Platform, &result.AppVersion,
+		&result.GrantedFeatures, &result.Platform, &result.AppVersion, &result.HostPlatform,
 		&result.ComponentKeyID, &result.ComponentKeyStatus, &result.ComponentSessionStatus,
 		&result.userStatus, &result.applicationStatus, &result.environmentStatus,
 		&result.organizationStatus,

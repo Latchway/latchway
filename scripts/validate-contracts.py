@@ -703,9 +703,9 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "1.0.0" or manifest["wire_protocol"] != {
-        "current": 2,
-        "supported": [1, 2],
+    if contract_version != "1.1.0" or manifest["wire_protocol"] != {
+        "current": 3,
+        "supported": [1, 2, 3],
         "minimum": 1,
     }:
         raise ValueError("unexpected contract or wire protocol version")
@@ -762,7 +762,7 @@ def main() -> None:
     config_schema = load_document(config_path)
     if config_schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
         raise ValueError("configuration schema is not JSON Schema 2020-12")
-    if config_schema.get("$id") != "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json":
+    if config_schema.get("$id") != "https://latchway.dev/schemas/config/1.1.0/environment-config.schema.json":
         raise ValueError("configuration schema identity differs from the contract coordinate")
     walk_refs(config_path, config_schema)
     for index, example in enumerate(config_schema.get("examples", [])):
@@ -908,6 +908,7 @@ def main() -> None:
         "component-attestation-binding.schema.json",
         "release-evidence.schema.json",
         "error-codes.yaml",
+        "sdk-error-codes.yaml",
         "protocol-version.json",
         "compatibility",
         "test-vectors",

@@ -1357,8 +1357,8 @@ export interface components {
             scopes: string[];
         };
         AppAttestConfiguration: {
-            /** @description Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. */
-            allowedBundleVersions: string[];
+            /** @description Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. Use ["*"] explicitly to allow any well-formed build version while retaining all identity, signature, environment, and validation-category checks. */
+            allowedBundleVersions: string[] & unknown;
             /** @description Exact Apple launch ValidationCategory allowlist: 2 TestFlight, 3 development signing, 4 App Store, 5 ad hoc or enterprise, 6 Developer ID, 10 otherwise classified signing; category 1 is reserved for operating-system executables. */
             allowedValidationCategories: (1 | 2 | 3 | 4 | 5 | 6 | 10)[];
             appIdPrefix: string;
@@ -1864,11 +1864,13 @@ export interface components {
                     /** @enum {unknown} */
                     provider: "app_attest" | "play_integrity" | "firebase_app_check" | "turnstile" | "debug";
                     secretRef?: components["schemas"]["SecretRef"];
+                    /** @description Explicit protocol-3 native host opt-in for shared roots and independently authorized same-host delegated components; valid only on required iOS/Android selections. Existing runtime-specific or remote component policies are not merged. */
+                    sharedNativeCallers?: ("ios" | "android" | "react-native")[];
                     turnstile?: components["schemas"]["TurnstileConfiguration"];
                 } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
                 AppAttestConfiguration: {
-                    /** @description Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. */
-                    allowedBundleVersions: string[];
+                    /** @description Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION. Use ["*"] explicitly to allow any well-formed build version while retaining all identity, signature, environment, and validation-category checks. */
+                    allowedBundleVersions: string[] & unknown;
                     /** @description Exact Apple launch ValidationCategory allowlist: 2 TestFlight, 3 development signing, 4 App Store, 5 ad hoc or enterprise, 6 Developer ID, 10 otherwise classified signing; category 1 is reserved for operating-system executables. */
                     allowedValidationCategories: (1 | 2 | 3 | 4 | 5 | 6 | 10)[];
                     appIdPrefix: string;
@@ -2667,6 +2669,11 @@ export interface components {
         LogicalRequest: {
             /** @description Ordered by contiguous attempt_number beginning at one. */
             attempts: components["schemas"]["UpstreamAttempt"][];
+            /**
+             * @description Validated caller SDK attribution; independent of attested host identity. Omitted for historical requests. Never an authorization or quota scope.
+             * @enum {string}
+             */
+            caller_sdk?: "ios" | "android" | "react-native" | "javascript";
             client_component_id?: components["schemas"]["ClientComponentID"];
             /** Format: date-time */
             completed_at?: string;
@@ -2774,6 +2781,8 @@ export interface components {
             /** @enum {unknown} */
             provider: "app_attest" | "play_integrity" | "firebase_app_check" | "turnstile" | "debug";
             secretRef?: components["schemas"]["SecretRef"];
+            /** @description Explicit protocol-3 native host opt-in for shared roots and independently authorized same-host delegated components; valid only on required iOS/Android selections. Existing runtime-specific or remote component policies are not merged. */
+            sharedNativeCallers?: ("ios" | "android" | "react-native")[];
             turnstile?: components["schemas"]["TurnstileConfiguration"];
         } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
         PlayIntegrityConfiguration: {
@@ -3228,7 +3237,7 @@ export interface components {
         };
         SystemStatus: {
             /** @constant */
-            contract_version: "1.0.0";
+            contract_version: "1.1.0";
             database_schema_version: string;
             /** @description True only when the regular administrative database pool is reachable and the schema is current. */
             mutation_ready: boolean;

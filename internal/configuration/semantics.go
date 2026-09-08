@@ -618,6 +618,9 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			mode := stringValue(selection, "mode")
 			selectionPath := base + "/platforms/" + pointerToken(platform)
 			typedSelection, typedSelectionOK := decodePlatformAttestation(selection)
+			if typedSelectionOK && !SharedNativeCallersValid(platform, typedSelection) {
+				issues = append(issues, errorIssue("shared_native_callers_invalid", selectionPath+"/sharedNativeCallers", "Shared native callers require an explicit required iOS or Android root policy and unique matching callers."))
+			}
 			if mode == "required" {
 				if _, exists := requiredPolicyByPlatform[platform]; exists {
 					issues = append(issues, errorIssue("attestation_required_policy_ambiguous", selectionPath+"/mode", "A client platform may have only one required attestation policy."))

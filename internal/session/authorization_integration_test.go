@@ -517,15 +517,28 @@ func TestInstallationRevocationAndRefreshRotationRacePostgreSQL(t *testing.T) {
 	assertRevokedInstallationTerminalState(t, fixture, -1, -1, -1)
 }
 
-func newAccessRevocationFixture(t *testing.T) accessRevocationFixture {
+func newAccessRevocationFixture(t *testing.T, sharedCallers ...string) accessRevocationFixture {
+	return newAccessRevocationFixtureWithComponents(t, false, sharedCallers...)
+}
+
+func newAccessRevocationFixtureWithComponents(t *testing.T, components bool, sharedCallers ...string) accessRevocationFixture {
 	t.Helper()
 	pool, ctx := isolatedSessionPool(t)
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	if components {
+		now = time.Now().UTC().Truncate(time.Second)
+	}
 	domain := createChallengeFixture(t, ctx, pool)
-	revisionID := activateChallengeTestRevision(t, ctx, pool, domain, now)
+	revisionID := activateChallengeTestRevisionForPlatformWithComponents(t, ctx, pool, domain, now, components,
+		"ios", nil, "debug", "required", "debug", "10m", sharedCallers...)
 	configurationStore, err := configuration.NewStore(pool)
 	if err != nil {
 		t.Fatalf("construct revocation configuration store: %v", err)
+	}
+	if _, err := configurationStore.ActiveSnapshot(ctx, configuration.TenantScope{
+		OrganizationID: domain.organizationID, ApplicationID: domain.applicationID, EnvironmentID: domain.environmentID,
+	}); err != nil {
+		t.Fatalf("load revocation fixture policy: %v", err)
 	}
 	challengeStore, err := newChallengeStore(ChallengeStoreConfig{
 		Pool: pool, Configuration: configurationStore, Now: func() time.Time { return now },
@@ -573,7 +586,8 @@ func newAccessRevocationFixture(t *testing.T) accessRevocationFixture {
 	}
 	store, err := NewStore(StoreConfig{
 		Pool: pool, AccessTokens: issuer, Configuration: configurationStore,
-		Now: func() time.Time { return now },
+		RotationProtector: envelope,
+		Now:               func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("construct revocation session store: %v", err)
@@ -591,8 +605,9 @@ func newAccessRevocationFixture(t *testing.T) accessRevocationFixture {
 	if err != nil {
 		t.Fatalf("verify revocation access token: %v", err)
 	}
-	attestationKeyID := mustSessionID(t, id.AttestationKey)
-	if _, err := pool.Exec(ctx, `
+	if !components {
+		attestationKeyID := mustSessionID(t, id.AttestationKey)
+		if _, err := pool.Exec(ctx, `
 		INSERT INTO attestation_keys (
 			attestation_key_id, organization_id, application_id, environment_id,
 			application_user_id, installation_id, provider, environment,
@@ -603,9 +618,10 @@ func newAccessRevocationFixture(t *testing.T) accessRevocationFixture {
 			$7, $8, $9, 'active', $10, $10, $10
 		)
 	`, attestationKeyID, principal.OrganizationID, principal.ApplicationID,
-		principal.EnvironmentID, principal.ApplicationUserID, principal.InstallationID,
-		challenge.Binding.Environment, challenge.Binding.Platform, principal.DPoPJKT, now); err != nil {
-		t.Fatalf("create active revocation attestation key: %v", err)
+			principal.EnvironmentID, principal.ApplicationUserID, principal.InstallationID,
+			challenge.Binding.Environment, challenge.Binding.Platform, principal.DPoPJKT, now); err != nil {
+			t.Fatalf("create active revocation attestation key: %v", err)
+		}
 	}
 	return accessRevocationFixture{
 		pool: pool, ctx: ctx, now: now, store: store, issuer: issuer, verifier: verifier,

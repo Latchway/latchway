@@ -495,7 +495,7 @@ func TestStatusConsumesAndValidatesCompleteSystemDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid := `{"server_version":"1.0.0","contract_version":"1.0.0","protocol_versions":[1,2],"role":"all","database_schema_version":"000042","mutation_ready":true,"ready":true,"server_capabilities":` + string(capabilities) + `}`
+	valid := `{"server_version":"1.1.0-dev","contract_version":"1.1.0","protocol_versions":[1,2,3],"role":"all","database_schema_version":"000042","mutation_ready":true,"ready":true,"server_capabilities":` + string(capabilities) + `}`
 
 	for _, test := range []struct {
 		name    string

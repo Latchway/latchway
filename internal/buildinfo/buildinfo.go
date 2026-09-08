@@ -2,30 +2,31 @@
 package buildinfo
 
 var (
-	Version = "1.0.4"
+	Version = "1.1.0"
 	Commit  = "unknown"
 	Date    = "unknown"
 )
 
 const (
-	ContractVersion        = "1.0.0"
-	ProtocolVersion        = "2"
+	ContractVersion        = "1.1.0"
+	ProtocolVersion        = "3"
 	MinimumProtocolVersion = 1
-	CurrentProtocolVersion = 2
+	CurrentProtocolVersion = 3
 )
 
 // SupportedProtocolVersions returns the complete ordered wire range accepted
 // by this server. Protocol 1 remains available for the legacy installation
-// flow while protocol 2 is the current family/component contract.
+// flow, protocol 2 retains its family/component contract, and protocol 3 adds
+// the opt-in shared native app declaration.
 func SupportedProtocolVersions() []int {
-	return []int{MinimumProtocolVersion, CurrentProtocolVersion}
+	return []int{1, 2, 3}
 }
 
 // SupportsProtocolVersion reports whether the canonical decimal header value
 // names a wire version accepted by this server. Leading zeroes and combined
 // header values deliberately fail closed.
 func SupportsProtocolVersion(value string) bool {
-	return value == "1" || value == ProtocolVersion
+	return value == "1" || value == "2" || value == ProtocolVersion
 }
 
 // Info is the stable machine-readable build description.

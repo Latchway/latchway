@@ -541,11 +541,11 @@ func TestPublicDiscoveryUsesLockedWireShape(t *testing.T) {
 		"server_version", "contract_version", "current_protocol_version", "supported_protocol_versions",
 		"session_endpoint", "dpop_algorithms", "maximum_clock_skew_seconds",
 	)
-	if document["contract_version"] != "1.0.0" || document["current_protocol_version"] != float64(2) || document["session_endpoint"] != exchangePath || document["maximum_clock_skew_seconds"] != float64(300) {
+	if document["contract_version"] != "1.1.0" || document["current_protocol_version"] != float64(3) || document["session_endpoint"] != exchangePath || document["maximum_clock_skew_seconds"] != float64(300) {
 		t.Fatalf("discovery document = %#v", document)
 	}
 	versions, ok := document["supported_protocol_versions"].([]any)
-	if !ok || len(versions) != 2 || versions[0] != float64(1) || versions[1] != float64(2) {
+	if !ok || len(versions) != 3 || versions[0] != float64(1) || versions[1] != float64(2) || versions[2] != float64(3) {
 		t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
 	}
 	algorithms, ok := document["dpop_algorithms"].([]any)

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
@@ -409,6 +410,7 @@ func (store *Store) ProvisionComponent(ctx context.Context, input ComponentProvi
 }
 
 type ComponentSessionInput struct {
+	Runtime      clientruntime.Declaration
 	ComponentID  string
 	RefreshGrant RefreshToken
 	DPoPProof    DPoPProof
@@ -433,6 +435,7 @@ type componentProvisioningBinding struct {
 	CurrentComponentKeyID, SessionStatus, DPoPJKT, TrustSource, ParentComponentID             string
 	ParentAttestationProvider, DelegationID, DelegationRevisionID, Platform, AppVersion       string
 	IdentityProvider, TrustLevel, AttestationProvider, TokenStatus                            string
+	HostPlatform                                                                              string
 	GrantedFeatures                                                                           []string
 	PublicJWK                                                                                 dpop.PublicJWK
 	IdentityVerifiedAt, IdentityExpiresAt, AttestedAt, AttestationExpiresAt                   time.Time
@@ -462,11 +465,12 @@ func loadComponentProvisioningBinding(ctx context.Context, query componentProvis
 		       d.consumed_at IS NOT NULL, d.revoked_at IS NOT NULL,
 		       p.status = 'active' AND p.revoked_at IS NULL
 		          AND (p.trust_expires_at IS NULL OR p.trust_expires_at > statement_timestamp()),
-		       r.status, r.expires_at
+		       r.status, r.expires_at, i.platform
 		FROM component_refresh_tokens r
 		JOIN component_session_families sf
 		  ON sf.component_session_family_id = r.component_session_family_id
 		JOIN installation_families f ON f.installation_family_id = sf.installation_family_id
+		JOIN installations i ON i.installation_id = f.root_installation_id
 		JOIN client_components c ON c.client_component_id = r.client_component_id
 		JOIN component_keys k
 		  ON k.component_key_id = r.component_key_id AND k.client_component_id = r.client_component_id
@@ -497,7 +501,7 @@ func loadComponentProvisioningBinding(ctx context.Context, query componentProvis
 		&result.IdentityVerifiedAt, &result.IdentityExpiresAt, &result.AttestedAt,
 		&result.AttestationProvider, &result.AttestationExpiresAt, &trustExpiresAt,
 		&result.DelegationExpiresAt, &result.DelegationConsumed, &result.DelegationRevoked,
-		&result.ParentActive, &result.TokenStatus, &result.TokenExpiresAt,
+		&result.ParentActive, &result.TokenStatus, &result.TokenExpiresAt, &result.HostPlatform,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return componentProvisioningBinding{}, ErrComponentNotProvisioned
@@ -588,6 +592,10 @@ func (store *Store) CreateComponentSession(ctx context.Context, input ComponentS
 	if !snapshotOriginAllowed(snapshot, preflight.Platform, input.Origin) {
 		return IssuedSession{}, ErrSessionInvalid
 	}
+	if !requestRuntimeAllowed(snapshot, input.Runtime, preflight.Platform, true) ||
+		!requestDelegatedRuntimeAllowed(snapshot, input.Runtime, preflight.HostPlatform, preflight.ComponentDefinitionID) {
+		return IssuedSession{}, ErrClientRuntime
+	}
 	if err := componentProvisioningStateError(preflight, snapshot, now); err != nil {
 		return IssuedSession{}, err
 	}
@@ -667,7 +675,9 @@ func (store *Store) CreateComponentSession(ctx context.Context, input ComponentS
 		return IssuedSession{}, err
 	}
 	if binding.RefreshTokenID != preflight.RefreshTokenID || binding.ComponentKeyID != preflight.ComponentKeyID ||
-		binding.SessionFamilyID != preflight.SessionFamilyID || binding.DPoPJKT != preflight.DPoPJKT {
+		binding.SessionFamilyID != preflight.SessionFamilyID || binding.DPoPJKT != preflight.DPoPJKT ||
+		binding.HostPlatform != preflight.HostPlatform || binding.Platform != preflight.Platform ||
+		binding.ComponentDefinitionID != preflight.ComponentDefinitionID {
 		return IssuedSession{}, ErrComponentNotProvisioned
 	}
 	if err := componentProvisioningStateError(binding, snapshot, now); err != nil {

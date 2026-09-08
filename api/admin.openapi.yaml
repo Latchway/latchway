@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 1.0.0
+  version: 1.1.0
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -2895,6 +2895,10 @@ components:
         component_kind: { $ref: '#/components/schemas/ClientComponentKind' }
         trust_source: { $ref: '#/components/schemas/ComponentTrustSource' }
         framework: { $ref: '#/components/schemas/Identifier' }
+        caller_sdk:
+          type: string
+          enum: [ios, android, react-native, javascript]
+          description: Validated caller SDK attribution; independent of attested host identity. Omitted for historical requests. Never an authorization or quota scope.
         framework_version:
           type: string
           minLength: 1
@@ -3223,7 +3227,7 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, mutation_ready, ready, server_capabilities]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 1.0.0 }
+        contract_version: { type: string, const: 1.1.0 }
         protocol_versions:
           type: array
           minItems: 2

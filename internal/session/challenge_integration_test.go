@@ -1035,6 +1035,16 @@ func activateChallengeTestRevisionForPlatform(
 	mode string,
 	minimumTrust string,
 	maximumAge string,
+	sharedCallers ...string,
+) string {
+	return activateChallengeTestRevisionForPlatformWithComponents(t, ctx, pool, fixture, now, false,
+		platform, allowedOrigins, provider, mode, minimumTrust, maximumAge, sharedCallers...)
+}
+
+func activateChallengeTestRevisionForPlatformWithComponents(
+	t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, now time.Time,
+	components bool, platform string, allowedOrigins []any, provider, mode, minimumTrust, maximumAge string,
+	sharedCallers ...string,
 ) string {
 	t.Helper()
 	adminUserID := mustSessionID(t, id.AdminUser)
@@ -1042,6 +1052,9 @@ func activateChallengeTestRevisionForPlatform(
 	revisionID := mustSessionID(t, id.ConfigRevision)
 	selection := map[string]any{
 		"provider": provider, "mode": mode, "minimumTrustLevel": minimumTrust,
+	}
+	if len(sharedCallers) > 0 {
+		selection["sharedNativeCallers"] = sharedCallers
 	}
 	switch provider {
 	case "debug":
@@ -1056,13 +1069,21 @@ func activateChallengeTestRevisionForPlatform(
 	if platform == "web" {
 		selection["allowedOrigins"] = append([]any(nil), allowedOrigins...)
 	}
-	compiledDocument, err := json.Marshal(map[string]any{"spec": sessionTestCompiledSpec(
+	compiledSpec := sessionTestCompiledSpec(
 		[]any{map[string]any{"id": "firebase", "type": "firebase"}},
 		[]any{map[string]any{
 			"id": "native", "maxAge": maximumAge,
 			"platforms": map[string]any{platform: selection},
 		}},
-	)})
+	)
+	if components {
+		compiledSpec["componentDefinitions"] = json.RawMessage(`[
+		 {"id":"ios-main","platform":"ios","kind":"main_app","familyRole":"root","identifiers":{"bundleIdentifiers":["com.example.challenge"]},"attestation":{"strategy":"direct","provider":"debug"},"allowedFeatures":["assistant"]},
+		 {"id":"ios-widget","platform":"ios","kind":"widget","familyRole":"delegated","identifiers":{"bundleIdentifiers":["com.example.challenge.widget"]},"attestation":{"strategy":"delegated"},"delegation":{"allowedParents":["ios-main"],"maximumLifetime":"7d"},"allowedFeatures":["assistant"]},
+		 {"id":"watch","platform":"watchos","kind":"watch_extension","familyRole":"delegated","identifiers":{"bundleIdentifiers":["com.example.challenge.watch"]},"attestation":{"strategy":"delegated"},"delegation":{"allowedParents":["ios-main"],"maximumLifetime":"7d"},"allowedFeatures":["assistant"]}
+		]`)
+	}
+	compiledDocument, err := json.Marshal(map[string]any{"spec": compiledSpec})
 	if err != nil {
 		t.Fatalf("encode active session test revision: %v", err)
 	}

@@ -1,0 +1,48 @@
+{
+  "contract_version": "1.1.0",
+  "wire_protocol": 3,
+  "status": "released",
+  "caller_header": "X-Latchway-Caller",
+  "shared_sdk": "native",
+  "declarations": [
+    {"protocol":"3","sdk":"native","caller":"ios","host":"ios","valid":true,"host_matches":true,"framework_sdk":"ios"},
+    {"protocol":"3","sdk":"native","caller":"react-native","host":"ios","valid":true,"host_matches":true,"framework_sdk":"react-native"},
+    {"protocol":"3","sdk":"native","caller":"android","host":"android","valid":true,"host_matches":true,"framework_sdk":"android"},
+    {"protocol":"3","sdk":"native","caller":"react-native","host":"android","valid":true,"host_matches":true,"framework_sdk":"react-native"},
+    {"protocol":"3","sdk":"native","caller":"ios","host":"android","valid":true,"host_matches":false,"framework_sdk":"ios"},
+    {"protocol":"3","sdk":"native","caller":"android","host":"ios","valid":true,"host_matches":false,"framework_sdk":"android"},
+    {"protocol":"3","sdk":"native","caller":"react-native","host":"react_native_ios","valid":true,"host_matches":false,"framework_sdk":"react-native"},
+    {"protocol":"3","sdk":"native","caller":"javascript","host":"web","valid":false,"host_matches":false,"framework_sdk":"javascript"},
+    {"protocol":"2","sdk":"native","caller":"ios","host":"ios","valid":false,"host_matches":true,"framework_sdk":"ios"},
+    {"protocol":"1","sdk":"native","caller":"android","host":"android","valid":false,"host_matches":true,"framework_sdk":"android"},
+    {"protocol":"3","sdk":"native","caller":"","host":"ios","valid":false,"host_matches":false,"framework_sdk":""},
+    {"protocol":"2","sdk":"react-native","caller":"","host":"react_native_ios","valid":true,"host_matches":true,"framework_sdk":"react-native"},
+    {"protocol":"2","sdk":"react-native","caller":"","host":"ios","valid":true,"host_matches":false,"framework_sdk":"react-native"},
+    {"protocol":"2","sdk":"javascript","caller":"","host":"web","valid":true,"host_matches":true,"framework_sdk":"javascript"},
+    {"protocol":"2","sdk":"ios","caller":"react-native","host":"ios","valid":false,"host_matches":false,"framework_sdk":"ios"}
+  ],
+  "delegated_components": [
+    {"host":"ios","platform":"ios","caller":"ios","role":"delegated","policy":["ios","react-native"],"allowed":true},
+    {"host":"ios","platform":"ios","caller":"react-native","role":"delegated","policy":["ios","react-native"],"allowed":true},
+    {"host":"android","platform":"android","caller":"react-native","role":"delegated","policy":["android","react-native"],"allowed":true},
+    {"host":"android","platform":"android","caller":"android","role":"delegated","policy":["android"],"allowed":true},
+    {"host":"ios","platform":"ios","caller":"react-native","role":"delegated","policy":[],"allowed":false},
+    {"host":"ios","platform":"ios","caller":"react-native","role":"delegated","policy":["ios"],"allowed":false},
+    {"host":"ios","platform":"ios","caller":"android","role":"delegated","policy":["ios","react-native"],"allowed":false},
+    {"host":"ios","platform":"watchos","caller":"ios","role":"delegated","policy":["ios"],"allowed":false},
+    {"host":"ios","platform":"react_native_ios","caller":"react-native","role":"delegated","policy":["ios","react-native"],"allowed":false},
+    {"host":"ios","platform":"android","caller":"react-native","role":"delegated","policy":["ios","react-native"],"allowed":false},
+    {"host":"ios","platform":"ios","caller":"ios","role":"root","policy":["ios"],"allowed":false}
+  ],
+  "invariants": {
+    "server_policy_opt_in_required": true,
+    "caller_changes_quota_scope": false,
+    "caller_is_attestation_evidence": false,
+    "reuse_dpop_proofs": false,
+    "legacy_session_adoption": false,
+    "root_credentials_exported_to_components": false,
+    "component_keys_independent": true,
+    "runtime_denial_consumes_component_grant_or_proof": false,
+    "remote_device_erased_by_local_logout": false
+  }
+}

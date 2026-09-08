@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-03"
+lastVerified: "2026-09-08"
 owner: "core-operations"
 ---
 
@@ -26,9 +26,8 @@ Complete a fresh backup and recent isolated restore drill. Ensure PostgreSQL
 connections and capacity can carry the overlap of old and new replicas.
 
 <Warning>
-  No stable version 1 image, signature, or provenance has been published yet.
-  Verification commands become usable only after the release workflow publishes
-  those exact assets.
+  A tag alone does not establish image identity or provenance. Verify the exact
+  digest and its corresponding release assets before promotion.
 </Warning>
 
 ## Roll forward
@@ -47,6 +46,10 @@ connections and capacity can carry the overlap of old and new replicas.
 Do not combine schema migration, public-origin change, master-key change,
 emergency signing rotation, and a large upstream configuration rewrite in one
 rollout.
+
+Rolling overlap requires both binaries to accept the current schema. When the
+schema changes, use a drained maintenance transition. An unhealthy container
+does not necessarily stop a reverse proxy from forwarding requests to it.
 
 ## Application rollback
 
@@ -83,6 +86,46 @@ and start the matching previous image with its matching master key. This is
 schema recovery, not application-rollback evidence. Never delete migration
 ledger rows, edit migration `28`, or relax readiness to permit an incompatible
 image.
+
+## Schema 30: Caller attribution
+
+When deploying a server that bundles migration `30`, expect a nullable
+`logical_requests.caller_sdk` column with a bounded-value check. Existing rows
+remain null; quota ownership, buckets, and usage are unchanged. The migration
+requires a table lock and may scan existing requests while validating the
+constraint, so rehearse it against a populated isolated database.
+
+<Warning>
+  A schema-29 binary becomes unready as soon as migration `30` commits. Keeping
+  its old image is not sufficient for application rollback on schema `30`.
+</Warning>
+
+For this transition:
+
+1. Preserve the old image, matching master key, configuration revision IDs, and
+   a verified pre-upgrade backup/PITR path. Test a separate schema-30-compatible
+   rollback artifact before deployment.
+2. Remove application traffic and drain old processes for their shutdown timeout.
+   Keep the origin, database connection, TLS state, and master key unchanged.
+3. Apply migration `30` in one new-image migration job using the existing valid
+   environment configuration. Keep `LATCHWAY_MIGRATE_ON_START=false` on the app.
+4. Inspect `latchway --output json migrate status`: require current and available
+   schema `30` with `up_to_date: true`. Mismatch alone does not make this command
+   exit unsuccessfully.
+5. Start the compatible application and worker, inspect doctor and readiness,
+   and check requests, refresh, streaming, and settlement before restoring traffic.
+   Activate shared-native caller policy only in the intended environments.
+
+An older application rebuilt to bundle migration `30` is a distinct artifact,
+not the unchanged published image, and still lacks wire-3 support. Restore only
+the affected environments' previous compatible configuration revisions through
+the Admin API before using it. Shared-native clients fail closed on older
+wire-1/2 servers; they are not automatically converted to legacy sessions.
+
+Recovering schema `29` requires a pre-30 backup/PITR restore into a fresh database,
+with the matching old image and master key. This affects every application in
+the database and may lose writes after the recovery point. Never delete migration
+ledger rows, manually drop the new column, or relax readiness to fake compatibility.
 
 ## Schema recovery
 

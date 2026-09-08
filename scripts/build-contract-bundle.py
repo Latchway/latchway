@@ -67,6 +67,7 @@ def build(output_directory: Path) -> Path:
         "component-attestation-binding.schema.json",
         "release-evidence.schema.json",
         "error-codes.yaml",
+        "sdk-error-codes.yaml",
         "protocol-version.json",
     ]
     for relative in files:

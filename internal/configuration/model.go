@@ -177,6 +177,7 @@ func (provider IdentityProvider) clone() IdentityProvider {
 // PlatformAttestation is a compiled provider selection for one client
 // platform. Its SecretRef names server-side material but never contains it.
 type PlatformAttestation struct {
+	SharedNativeCallers        []string                       `json:"sharedNativeCallers,omitempty"`
 	Provider                   string                         `json:"provider"`
 	Mode                       string                         `json:"mode"`
 	MinimumTrustLevel          string                         `json:"minimumTrustLevel,omitempty"`
@@ -191,6 +192,7 @@ type PlatformAttestation struct {
 }
 
 func (selection PlatformAttestation) clone() PlatformAttestation {
+	selection.SharedNativeCallers = append([]string(nil), selection.SharedNativeCallers...)
 	selection.ApplicationIdentifiers = append([]string(nil), selection.ApplicationIdentifiers...)
 	selection.AllowedOrigins = append([]string(nil), selection.AllowedOrigins...)
 	if selection.AppAttest != nil {

@@ -27,6 +27,7 @@ import (
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
 	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
 	"github.com/latchway/latchway/adapters/protocol/openairesponses"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/limitscope"
@@ -298,6 +299,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	trustStartedAt := handler.now().UTC()
 	dpopCtx, finishDPoP := handler.startStage(request.Context(), "DPoP verification", telemetry.Labels{})
 	authorization, err := handler.sessions.AuthorizeAccess(dpopCtx, session.AccessRequestInput{
+		Runtime:     declaration.runtime,
 		AccessToken: declaration.accessToken,
 		Principal:   principal,
 		DPoPProof:   declaration.dpopProof,
@@ -328,6 +330,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		FeatureKey:            declaration.feature, Protocol: endpoint.protocolID,
 		ClientRequestID: declaration.clientRequestID,
 		Framework:       declaration.framework, FrameworkVersion: declaration.frameworkVersion,
+		CallerSDK: clientruntime.FrameworkSDK(declaration.runtime.SDK, declaration.runtime.Caller),
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -394,7 +397,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
+	if !snapshot.AllowsClientRuntime(declaration.sdk, declaration.runtime.Caller, authorization.InstallationPlatform, authorization.ComponentID != "" && !authorization.ComponentIsRoot) || snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
 		snapshot.PolicyEnvironment() != authorization.EnvironmentID {
 		if lifecycleErr := handler.recordDecisionFailure(
 			request.Context(), lifecycle, pendingDecisionStages, quota.DecisionConfigurationLoaded,
@@ -534,6 +537,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		NormalizedClaimDigests: cloneClaimDigests(prepared.decision.Scopes.NormalizedClaims),
 		Protocol:               prepared.decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
 		Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
+		CallerSDK:    clientruntime.FrameworkSDK(declaration.runtime.SDK, declaration.runtime.Caller),
 		LimitPlanKey: prepared.decision.LimitPlan.ID, RouteKey: prepared.decision.Route.ID,
 		UpstreamKey: prepared.decision.Upstream.ID, ModelKey: prepared.decision.Model.ID,
 		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
@@ -2630,6 +2634,8 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "attestation_stale", 0
 	case errors.Is(err, session.ErrAttestationStepUpRequired):
 		return "attestation_step_up_required", 0
+	case errors.Is(err, session.ErrClientRuntime):
+		return "request_invalid", 0
 	case errors.Is(err, session.ErrSessionRevoked), errors.Is(err, session.ErrSessionScope),
 		errors.Is(err, session.ErrSessionInvalid):
 		return "session_revoked", 0

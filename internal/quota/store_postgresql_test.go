@@ -1902,6 +1902,40 @@ func authenticatedInputFromReserve(input ReserveInput) AuthenticatedRequestInput
 		FeatureKey: input.FeatureKey, Protocol: input.Protocol,
 		ClientRequestID: input.ClientRequestID, Framework: input.Framework,
 		FrameworkVersion: input.FrameworkVersion,
+		CallerSDK:        input.CallerSDK,
+	}
+}
+
+func TestCallerAttributionDoesNotSplitUserQuotaPostgreSQL(t *testing.T) {
+	f := newQuotaPostgreSQLFixture(t)
+	for _, caller := range []string{"ios", "react-native"} {
+		input := f.input(t, "shared-caller", 10)
+		input.CallerSDK = caller
+		authenticated := authenticatedInputFromReserve(input)
+		if _, err := f.store.BeginAuthenticatedRequest(f.ctx, authenticated); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.Reserve(f.ctx, input); err != nil {
+			t.Fatal(err)
+		}
+		var stored string
+		if err := f.pool.QueryRow(f.ctx, `SELECT caller_sdk FROM logical_requests WHERE logical_request_id=$1`,
+			input.LogicalRequestID.String()).Scan(&stored); err != nil || stored != caller {
+			t.Fatalf("caller attribution=%q: %v", stored, err)
+		}
+		input.CallerSDK = "android"
+		if _, err := f.store.Reserve(f.ctx, input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("replay changed caller attribution: %v", err)
+		}
+		if _, err := f.pool.Exec(f.ctx, `UPDATE logical_requests SET caller_sdk='forged-sdk' WHERE logical_request_id=$1`,
+			input.LogicalRequestID.String()); err == nil {
+			t.Fatal("invalid persisted caller accepted")
+		}
+	}
+	var buckets int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM quota_buckets WHERE environment_id=$1 AND metric='logical_requests'`,
+		quotaTestEnvironmentID).Scan(&buckets); err != nil || buckets != 1 {
+		t.Fatalf("native and RN did not use one user quota bucket: count=%d err=%v", buckets, err)
 	}
 }
 

@@ -26,6 +26,7 @@ const (
 	challengePath             = "/client/v1/session-challenges"
 	exchangePath              = "/client/v1/sessions"
 	refreshPath               = "/client/v1/sessions/refresh"
+	verifyIdentityPath        = "/client/v1/sessions/identity"
 	revokePath                = "/client/v1/installations/current"
 	provisionComponentPath    = "/client/v1/installation-families/current/components"
 	componentSessionPath      = "/client/v1/component-sessions"
@@ -67,7 +68,7 @@ func New(config Config) (*API, error) {
 	}
 	targets := make(map[string]url.URL, 9)
 	for _, path := range []string{
-		challengePath, exchangePath, refreshPath, revokePath, diagnosticsPath,
+		challengePath, exchangePath, refreshPath, verifyIdentityPath, revokePath, diagnosticsPath,
 		provisionComponentPath, componentSessionPath, revokeFamilyPath,
 	} {
 		targets[path] = url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: path}
@@ -180,6 +181,12 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch path {
+	case verifyIdentityPath:
+		if r.Method != http.MethodPost {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.verifySessionIdentity(w, r, correlationID, logicalID.String())
 	case challengePath:
 		if r.Method != http.MethodPost {
 			api.methodNotAllowed(w, correlationID)
@@ -335,7 +342,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 		api.writeDependencyFailure(w, requestID, err)
 		return
 	}
-	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion == buildinfo.ProtocolVersion)
+	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion != "1")
 	if err != nil {
 		api.internal(w, requestID)
 		return
@@ -365,7 +372,7 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 		api.writeDependencyFailure(w, requestID, err)
 		return
 	}
-	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion == buildinfo.ProtocolVersion)
+	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion != "1")
 	if err != nil {
 		api.internal(w, requestID)
 		return
@@ -663,6 +670,10 @@ func (api *API) getDiagnostics(w http.ResponseWriter, r *http.Request, requestID
 		api.internal(w, requestID)
 		return
 	}
+	if declaration.protocolVersion != "3" {
+		document.ProtocolVersion = 2
+		document.ContractVersion = "1.0.0"
+	}
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
 }
 
@@ -690,6 +701,7 @@ func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestI
 	target := url.URL{Scheme: api.origin.Scheme, Host: api.origin.Host, Path: path}
 	input := FeatureQuotaInput{
 		Metadata: RequestMetadata{
+			ProtocolVersion: declaration.protocolVersion, Caller: declaration.caller,
 			RequestID: logicalRequestID.String(), SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
 			Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
 			HTTPMethod: http.MethodGet, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
@@ -733,7 +745,7 @@ func (api *API) publicDiscovery(w http.ResponseWriter, r *http.Request, requestI
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	api.writeSuccess(w, requestID, http.StatusOK, "public, max-age=300", discoveryDocument{
+	document := discoveryDocument{
 		ServerVersion:             buildinfo.Version,
 		ContractVersion:           buildinfo.ContractVersion,
 		CurrentProtocolVersion:    buildinfo.CurrentProtocolVersion,
@@ -741,7 +753,12 @@ func (api *API) publicDiscovery(w http.ResponseWriter, r *http.Request, requestI
 		SessionEndpoint:           exchangePath,
 		DPoPAlgorithms:            []string{"ES256"},
 		MaximumClockSkewSeconds:   300,
-	})
+	}
+	if _, ok := api.coordinator.(IdentityVerificationCoordinator); ok {
+		document.Capabilities = []string{"supplied_identity_v1"}
+		document.IdentityVerificationEndpoint = verifyIdentityPath
+	}
+	api.writeSuccess(w, requestID, http.StatusOK, "public, max-age=300", document)
 }
 
 func (api *API) metadata(r *http.Request, requestID string, declaration clientDeclaration, method, path string, proof SensitiveString) RequestMetadata {
@@ -756,6 +773,7 @@ func (api *API) metadataForPath(r *http.Request, requestID string, declaration c
 
 func (api *API) metadataForTarget(r *http.Request, requestID string, declaration clientDeclaration, method string, target url.URL, proof SensitiveString) RequestMetadata {
 	return RequestMetadata{
+		ProtocolVersion: declaration.protocolVersion, Caller: declaration.caller,
 		RequestID: requestID, SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
 		Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
 		HTTPMethod: method, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
@@ -782,7 +800,7 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 	expectedMethod := ""
 	path := r.URL.Path
 	switch path {
-	case challengePath, exchangePath, refreshPath, provisionComponentPath, componentSessionPath:
+	case challengePath, exchangePath, refreshPath, verifyIdentityPath, provisionComponentPath, componentSessionPath:
 		expectedMethod = http.MethodPost
 	case revokePath, revokeFamilyPath:
 		expectedMethod = http.MethodDelete
@@ -1163,13 +1181,15 @@ type challengeDocument struct {
 }
 
 type discoveryDocument struct {
-	ServerVersion             string   `json:"server_version"`
-	ContractVersion           string   `json:"contract_version"`
-	CurrentProtocolVersion    int      `json:"current_protocol_version"`
-	SupportedProtocolVersions []int    `json:"supported_protocol_versions"`
-	SessionEndpoint           string   `json:"session_endpoint"`
-	DPoPAlgorithms            []string `json:"dpop_algorithms"`
-	MaximumClockSkewSeconds   int      `json:"maximum_clock_skew_seconds"`
+	Capabilities                 []string `json:"capabilities,omitempty"`
+	IdentityVerificationEndpoint string   `json:"identity_verification_endpoint,omitempty"`
+	ServerVersion                string   `json:"server_version"`
+	ContractVersion              string   `json:"contract_version"`
+	CurrentProtocolVersion       int      `json:"current_protocol_version"`
+	SupportedProtocolVersions    []int    `json:"supported_protocol_versions"`
+	SessionEndpoint              string   `json:"session_endpoint"`
+	DPoPAlgorithms               []string `json:"dpop_algorithms"`
+	MaximumClockSkewSeconds      int      `json:"maximum_clock_skew_seconds"`
 }
 
 type diagnosticsDocument struct {

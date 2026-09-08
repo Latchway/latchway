@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
@@ -410,6 +411,7 @@ func validateAccessPrincipal(principal AccessPrincipal, now time.Time) error {
 // prevents callers from manufacturing or changing signed claims after token
 // verification, while the raw token is used only to validate the proof's ath.
 type AccessRequestInput struct {
+	Runtime     clientruntime.Declaration
 	AccessToken AccessToken
 	Principal   AccessPrincipal
 	DPoPProof   DPoPProof
@@ -569,6 +571,13 @@ func (store *Store) authorizeAccess(ctx context.Context, input AccessRequestInpu
 	}
 	if err := authorizationStateError(state, now, allowRevokedInstallation); err != nil {
 		return authorizationState{}, err
+	}
+	if !requestRuntimeAllowed(snapshot, input.Runtime, state.InstallationPlatform, state.ComponentID != "" && !state.ComponentIsRoot) {
+		return authorizationState{}, ErrClientRuntime
+	}
+	if state.ComponentID != "" && !state.ComponentIsRoot &&
+		!requestDelegatedRuntimeAllowed(snapshot, input.Runtime, state.InstallationPlatform, state.ComponentDefinitionID) {
+		return authorizationState{}, ErrClientRuntime
 	}
 	if !snapshotOriginAllowed(snapshot, state.InstallationPlatform, input.Origin) {
 		return authorizationState{}, ErrSessionInvalid

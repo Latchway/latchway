@@ -481,12 +481,12 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			config_revision_id, feature_key, selected_limit_plan_key,
 			selected_route_key, selected_upstream_key, selected_model_key,
 			selected_physical_model,
-			protocol, client_request_id, framework, framework_version,
+			protocol, client_request_id, framework, framework_version, caller_sdk,
 			trusted_decision_fingerprint, status, requested_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24,
+			$20, $21, $22, $23, $26, $24,
 			'reserved', $25
 		)
 		ON CONFLICT DO NOTHING
@@ -498,7 +498,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		prepared.FeatureKey, prepared.LimitPlanKey, prepared.RouteKey, prepared.UpstreamKey,
 		prepared.ModelKey, prepared.PhysicalModel, prepared.Protocol,
 		nullableString(prepared.ClientRequestID), nullableString(prepared.Framework),
-		nullableString(prepared.FrameworkVersion), fingerprint, requestedAt)
+		nullableString(prepared.FrameworkVersion), fingerprint, requestedAt, nullableString(prepared.CallerSDK))
 	if err != nil {
 		return Reservation{}, mapWriteError("insert logical request", err)
 	}
@@ -757,6 +757,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		installationFamilyID, clientComponentID      *string
 		componentDefinitionID, componentKind         *string
 		trustSource, framework, frameworkVersion     *string
+		callerSDK                                    *string
 		clientRequestID, fingerprint, failureCode    *string
 		requestedAt                                  time.Time
 	}
@@ -768,7 +769,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		       component_definition_id, component_kind, trust_source,
 		       session_grant_id,
 		       config_revision_id, feature_key, protocol, client_request_id,
-		       framework, framework_version,
+		       framework, framework_version, caller_sdk,
 		       trusted_decision_fingerprint, status, failure_code, requested_at
 		FROM logical_requests
 		WHERE logical_request_id = $1
@@ -780,7 +781,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		&logical.componentDefinitionID, &logical.componentKind, &logical.trustSource,
 		&logical.sessionGrantID,
 		&logical.configRevisionID, &logical.featureKey, &logical.protocol,
-		&logical.clientRequestID, &logical.framework, &logical.frameworkVersion,
+		&logical.clientRequestID, &logical.framework, &logical.frameworkVersion, &logical.callerSDK,
 		&logical.fingerprint, &logical.status,
 		&logical.failureCode, &logical.requestedAt,
 	)
@@ -807,6 +808,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		!nullableStringMatches(logical.clientRequestID, prepared.ClientRequestID) ||
 		!nullableStringMatches(logical.framework, prepared.Framework) ||
 		!nullableStringMatches(logical.frameworkVersion, prepared.FrameworkVersion) ||
+		!nullableStringMatches(logical.callerSDK, prepared.CallerSDK) ||
 		logical.fingerprint == nil || *logical.fingerprint != fingerprint {
 		return Reservation{}, ErrInvalidInput
 	}

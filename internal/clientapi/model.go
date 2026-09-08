@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/latchway/latchway/internal/clientruntime"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/requestidentity"
 )
@@ -109,6 +110,8 @@ func (EvidencePayload) Format(state fmt.State, _ rune) {
 // RequestID never derives from an inbound correlation header. TargetURL never
 // derives from inbound Host or forwarding headers.
 type RequestMetadata struct {
+	ProtocolVersion  string
+	Caller           string
 	RequestID        string
 	SDK              string
 	SDKVersion       string
@@ -122,6 +125,10 @@ type RequestMetadata struct {
 	// or forwarding headers.
 	Origin    string
 	DPoPProof SensitiveString
+}
+
+func (metadata RequestMetadata) Runtime() clientruntime.Declaration {
+	return clientruntime.Declaration{Protocol: metadata.ProtocolVersion, SDK: metadata.SDK, Caller: metadata.Caller}
 }
 
 type ChallengeInput struct {
@@ -154,6 +161,36 @@ type ExchangeInput struct {
 type RefreshInput struct {
 	Metadata     RequestMetadata
 	RefreshToken SensitiveString
+}
+
+// VerifyIdentityInput renews only identity freshness using current refresh
+// possession. Credentials stay redacted and neither principal nor expiry is
+// accepted from the client.
+type VerifyIdentityInput struct {
+	Metadata         RequestMetadata
+	RefreshToken     SensitiveString
+	IdentityProvider string
+	IdentityToken    SensitiveString
+}
+
+type VerifiedIdentity struct {
+	Provider   string    `json:"provider"`
+	Issuer     string    `json:"issuer"`
+	Subject    string    `json:"subject"`
+	Audience   []string  `json:"audience"`
+	VerifiedAt time.Time `json:"verified_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+type VerifyIdentityResult struct {
+	Identity       VerifiedIdentity `json:"identity"`
+	InstallationID string           `json:"installation_id"`
+}
+
+// IdentityVerificationCoordinator is an additive capability, independently
+// negotiated so old coordinators cannot advertise an unsupported operation.
+type IdentityVerificationCoordinator interface {
+	VerifySessionIdentity(context.Context, VerifyIdentityInput) (VerifyIdentityResult, error)
 }
 
 type ComponentPublicJWK struct {

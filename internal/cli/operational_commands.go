@@ -221,6 +221,7 @@ type logicalRequestCLI struct {
 	TrustSource           string                    `json:"trust_source,omitempty"`
 	Framework             string                    `json:"framework,omitempty"`
 	FrameworkVersion      string                    `json:"framework_version,omitempty"`
+	CallerSDK             string                    `json:"caller_sdk,omitempty"`
 	ConfigRevisionID      string                    `json:"config_revision_id"`
 	SelectedLimitPlan     string                    `json:"selected_limit_plan"`
 	SelectedRoute         string                    `json:"selected_route,omitempty"`
@@ -1695,6 +1696,10 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 			len(request.FrameworkVersion) > 128 || strings.ContainsAny(request.FrameworkVersion, "\r\n\x00")) {
 		return false
 	}
+	if request.CallerSDK != "" && request.CallerSDK != "ios" && request.CallerSDK != "android" &&
+		request.CallerSDK != "react-native" && request.CallerSDK != "javascript" {
+		return false
+	}
 	startedAt, err := time.Parse(time.RFC3339Nano, request.StartedAt)
 	if err != nil || len(request.Attempts) > 32 || len(request.DecisionStages) > 256 {
 		return false
@@ -1872,12 +1877,12 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 	}
 	rows := [][]string{{
 		request.ID, request.InstallationFamilyID, request.ClientComponentID,
-		request.TrustSource, request.Framework, request.FrameworkVersion,
+		request.TrustSource, request.Framework, request.FrameworkVersion, request.CallerSDK,
 		request.ConfigRevisionID, request.Feature, request.SelectedLimitPlan, request.SelectedRoute,
 		request.Status, strconv.Itoa(len(request.DecisionStages)), strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
 	}}
 	if err := printControlTable(opts, []string{
-		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "REVISION", "FEATURE", "PLAN", "ROUTE", "STATUS", "STAGES", "ATTEMPTS", "STARTED",
+		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "CALLER", "REVISION", "FEATURE", "PLAN", "ROUTE", "STATUS", "STAGES", "ATTEMPTS", "STARTED",
 	}, rows); err != nil {
 		return err
 	}

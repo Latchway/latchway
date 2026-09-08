@@ -23,6 +23,7 @@ ADMIN_SOURCE = ROOT / "api/admin.openapi.yaml"
 CLIENT_SOURCE = ROOT / "api/client.openapi.yaml"
 ERROR_SOURCE = ROOT / "api/error-codes.yaml"
 SDK_ERROR_SOURCE = ROOT / "api/sdk-error-codes.yaml"
+PROTOCOL_SOURCE = ROOT / "api/protocol-version.json"
 CONFIG_SOURCE = ROOT / "api/config.schema.json"
 ADMIN_OUTPUT = ROOT / "docs/public/reference/admin-api.mdx"
 CLIENT_OUTPUT = ROOT / "docs/public/reference/client-api.mdx"
@@ -36,6 +37,11 @@ HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 EXPECTED_ERROR_FIELDS = {"status", "title", "retryable", "guidance"}
 EXPECTED_SDK_ERROR_FIELDS = {"title", "surfaces", "guidance"}
 SDK_ERROR_SURFACES = {"javascript", "ios", "android", "react_native"}
+SHARED_NATIVE_ERRORS = {
+    "app_not_configured", "configuration_conflict", "identity_authority_required",
+    "identity_unavailable", "identity_refresh_required", "account_changed", "client_logged_out", "cleanup_required",
+    "client_disposed", "native_version_incompatible",
+}
 WHITESPACE = re.compile(r"\s+")
 
 
@@ -674,7 +680,7 @@ def render_admin_reference(document: Mapping[str, Any]) -> str:
 
 def load_error_registry(path: Path = ERROR_SOURCE) -> Mapping[str, Any]:
     registry = _load_yaml(path)
-    if registry.get("registry_version") != 1 or registry.get("contract_version") != "1.0.0":
+    if registry.get("registry_version") != 1 or registry.get("contract_version") != "1.1.0":
         raise ReferenceError("unexpected error registry coordinate")
     if registry.get("problem_media_type") != "application/problem+json":
         raise ReferenceError("unexpected problem media type")
@@ -700,7 +706,7 @@ def load_error_registry(path: Path = ERROR_SOURCE) -> Mapping[str, Any]:
 
 def load_sdk_error_registry(path: Path = SDK_ERROR_SOURCE) -> Mapping[str, Any]:
     registry = _load_yaml(path)
-    if registry.get("registry_version") != 1 or registry.get("contract_version") != "1.0.0":
+    if registry.get("registry_version") != 1 or registry.get("contract_version") != "1.1.0":
         raise ReferenceError("unexpected SDK error registry coordinate")
     codes = registry.get("codes")
     if not isinstance(codes, dict) or not codes:
@@ -995,7 +1001,7 @@ def load_config_schema(path: Path = CONFIG_SOURCE) -> Mapping[str, Any]:
     schema = _load_json(path)
     if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
         raise ReferenceError("configuration must use JSON Schema 2020-12")
-    if schema.get("$id") != "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json":
+    if schema.get("$id") != "https://latchway.dev/schemas/config/1.1.0/environment-config.schema.json":
         raise ReferenceError("unexpected configuration schema coordinate")
     if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
         raise ReferenceError("configuration schema root must be a closed object")
@@ -1165,11 +1171,30 @@ def render_all() -> Mapping[Path, str]:
         documents[ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx"] = render_error_page(code, definition)
     for code, definition in sdk_error_registry["codes"].items():
         documents[ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx"] = render_sdk_error_page(code, definition)
+    protocol = json.loads(PROTOCOL_SOURCE.read_text(encoding="utf-8"))
+    if protocol["contract_version"] != error_registry["contract_version"]:
+        raise ReferenceError("protocol and error registry versions disagree")
+    if protocol["contract_version"] == "1.1.0":
+        current_pages = {ADMIN_OUTPUT, CLIENT_OUTPUT, ERROR_OUTPUT, CONFIG_OUTPUT}
+        current_pages.update(ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx" for code in SHARED_NATIVE_ERRORS)
+        for path in current_pages:
+            content = documents[path]
+            content = re.sub(r'^serverVersion: .*$', 'serverVersion: "1.1.0"', content, count=1, flags=re.MULTILINE)
+            content = re.sub(r'^sdkVersion: .*$', 'sdkVersion: "not-applicable"', content, count=1, flags=re.MULTILINE)
+            content = re.sub(r'^lastVerified: .*$', 'lastVerified: "2026-09-08"', content, count=1, flags=re.MULTILINE)
+            if protocol["contract_status"] == "draft":
+                frontmatter, body = content.split("\n---\n", 1)
+                content = frontmatter + "\n---\n\n<Warning>" + (
+                    "This reference includes draft contract 1.1.0. Shared native app APIs are unreleased; "
+                    "published SDKs and server 1.0.x do not provide them. Do not treat this reference as release evidence."
+                ) + "</Warning>\n" + body
+            documents[path] = content
     sources = (
         ADMIN_SOURCE,
         CLIENT_SOURCE,
         ERROR_SOURCE,
         SDK_ERROR_SOURCE,
+        PROTOCOL_SOURCE,
         CONFIG_SOURCE,
         framework_compatibility.DEFAULT_REGISTRY,
         framework_compatibility.DEFAULT_SCHEMA,

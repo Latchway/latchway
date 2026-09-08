@@ -430,7 +430,7 @@ func runtimeAttestationPolicy(raw compiledAttestationPolicy) (AttestationPolicy,
 }
 
 func runtimeAttestationSelection(platform string, selection PlatformAttestation) bool {
-	if !runtimeAttestationPlatform(platform) ||
+	if !SharedNativeCallersValid(platform, selection) || !runtimeAttestationPlatform(platform) ||
 		!providerAllowedOnPlatform(selection.Provider, platform) ||
 		!runtimeAttestationMode(selection.Mode) ||
 		!runtimeAttestationTrust(selection.MinimumTrustLevel) ||
