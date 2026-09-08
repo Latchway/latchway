@@ -29,6 +29,25 @@ separate receipts, not inferred from local checks.
 See [release notes](../release/v1.1.2.md) and
 [settlement decision](../adr/0038-evidence-based-failed-attempt-settlement.md).
 
+Publication receipt: [server v1.1.2](https://github.com/Latchway/latchway/releases/tag/v1.1.2)
+was published on 2026-09-08 from commit
+`21d8c9055dcfb32da4a09df249c9109a93d72507`. The public GHCR index digest is
+`sha256:fb0073fd4c956afbdc80f5defc3a8edb07e2e00e254a199d17c6b66caeb43ef3`,
+with both `linux/amd64` and `linux/arm64` manifests verified and anonymous pull
+access confirmed. The downloaded contract 1.1.1 archive matches the reproducible
+local SHA-256 `8dc20b2d840450cf013882d7b76f7f8cb65c910de66638996a3039a5bfff4a6b`.
+The generated public-docs mirror was pushed at `ab957d0`.
+
+VPS receipt: the pinned release was deployed after draining the gateway and
+creating a private database/configuration backup. Schema 33 and all public
+readiness checks pass. Read-only production verification at 15:26:48 UTC on
+2026-09-08 confirms the formerly failing quota-denied request detail and recorded
+effective-configuration endpoints both return HTTP 200. The historical HTTP 400
+attempt is correctly classified; its 92,444-token unknown charge remains
+unchanged, with absent input/output observations and absent billing. No prompt
+logging, identity policy, application configuration or quota correction was
+enabled by the deployment. Client contract 1.1.0 remains advertised.
+
 ## Server 1.1.1: real-device identity renewal regression
 
 The first fresh iOS 1.2.0 device run against public server 1.1.0 completed
