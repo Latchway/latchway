@@ -4,13 +4,12 @@ description: "Use the bounded native-backed fetch surface, bind one feature, pre
 icon: "send"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
-import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
 import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
 
 ## Outcome
@@ -21,13 +20,27 @@ stream.
 
 ## Create one stable client
 
-<ReactNativeCreateClient />
+After [configuration and sign-in](/clients/react-native/authentication), create
+a client from the captured account:
+
+```ts
+const client = await account.makeClient();
+const assistantFetch = client.fetchFor('habit-assistant');
+```
+
+If another caller already signed in, attach with `app.makeClient()`; do not
+start a new login because a screen mounted. At identity expiry, supply a fresh
+token through `account.updateIdToken` before resuming protected work.
 
 The generated application resource ID is not a bundle ID, Android package,
-display name, or slug. Equivalent clients share one native security scope, so
-retain one stable instance per configuration.
+display name, or slug. Equivalent native and RN callers share one app/account;
+retain a client for its owning screen or operation and dispose it on teardown.
+Disposing the client does not log out the shared account.
 
 ## Bind and send
+
+The SDK-owned snippet below shows the transport surface, independently of the
+new supplied-identity setup above:
 
 <ReactNativeStreamingFetch />
 

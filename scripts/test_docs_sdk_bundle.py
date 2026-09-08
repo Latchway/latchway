@@ -23,6 +23,7 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError("SDK documentation bundle module cannot be loaded")
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+TEST_VERSION = next(entry["version"] for entry in MODULE.read_lock(True)["bundles"] if entry["id"] == "js")
 MIRROR_SCRIPT = MODULE.ROOT / "docs" / "public" / "scripts" / "check-sdk-bundles.py"
 MIRROR_SPEC = importlib.util.spec_from_file_location(
     "latchway_public_sdk_bundle_check",
@@ -41,7 +42,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             / "docs"
             / "sdk-bundles"
             / sdk
-            / f"docs-bundle-{MODULE.VERSION}.tar.gz"
+            / f"docs-bundle-{next(entry['version'] for entry in MODULE.read_lock(True)['bundles'] if entry['id'] == sdk)}.tar.gz"
         ).read_bytes()
 
     @staticmethod
@@ -59,7 +60,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive:
                 rows = sorted((rename.get(name, name), name, data) for name, data in members.items())
                 for output_name, original_name, data in rows:
-                    info = tarfile.TarInfo(f"docs-bundle-{MODULE.VERSION}/{output_name}")
+                    info = tarfile.TarInfo(f"docs-bundle-{TEST_VERSION}/{output_name}")
                     info.mode = 0o644
                     info.mtime = epoch
                     info.uid = info.gid = 0
@@ -126,40 +127,83 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             with self.subTest(unsafe=unsafe):
                 with self.assertRaises(MODULE.BundleError):
                     MODULE.render_supported_name(unsafe)
-        for unsafe in (" leading", "trailing ", "bad|cell", "bad`code", "bad\nrow"):
+        self.assertEqual(MODULE.render_inline_code("^18.2.0 || ^19.0.0", "peer"), "`^18.2.0 \\|\\| ^19.0.0`")
+        for unsafe in (" leading", "trailing ", "bad`code", "bad\nrow", "bad\\|cell"):
             with self.subTest(inline=unsafe):
                 with self.assertRaises(MODULE.BundleError):
                     MODULE.render_inline_code(unsafe, "fixture")
 
+    def test_independent_sdk_versions_remain_exact_and_fully_bound(self) -> None:
+        for version in ("1.0.0", "1.1.0", "1.2.0", "2.12.345"):
+            self.assertTrue(MODULE.valid_version(version))
+        for version in (None, 1, True, "latest", "^1.2.0", "1.2.x", "01.2.0", "1.2", "1.2.0/../x", "1.2.0\n", "1.2.0-rc.1", "1.2.0+build"):
+            with self.subTest(version=version):
+                self.assertFalse(MODULE.valid_version(version))
+
+        locked = json.loads(MODULE.LOCK_PATH.read_text(encoding="utf-8"))
+        versions = {"android": "1.1.0", "ios": "1.2.0", "js": "1.1.0", "react-native": "1.2.0"}
+        for entry in locked["bundles"]:
+            version = versions[entry["id"]]
+            entry["version"] = version
+            entry["release"] = f"v{version}"
+            entry["archive"] = f"docs/sdk-bundles/{entry['id']}/docs-bundle-{version}.tar.gz"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sdk-bundles.lock"
+            path.write_bytes(MODULE.json_bytes(locked))
+            with mock.patch.object(MODULE, "LOCK_PATH", path):
+                self.assertEqual(MODULE.read_lock(True), locked)
+                for field, bad in (("version", "latest"), ("release", "v9.9.9"), ("archive", "docs/sdk-bundles/android/docs-bundle-9.9.9.tar.gz")):
+                    changed = json.loads(MODULE.json_bytes(locked))
+                    changed["bundles"][0][field] = bad
+                    path.write_bytes(MODULE.json_bytes(changed))
+                    with self.subTest(field=field), self.assertRaisesRegex(MODULE.BundleError, "is invalid"):
+                        MODULE.read_lock(True)
+
+    def test_bundle_archive_path_and_generated_description_use_its_own_version(self) -> None:
+        for entry, result in MODULE.load_locked_bundles(True):
+            expected = f"docs/sdk-bundles/{entry['id']}/docs-bundle-{entry['version']}.tar.gz"
+            self.assertEqual(MODULE.lock_entry(entry["id"], result)["archive"], expected)
+            page = MODULE.render_sdk_page(entry["id"], entry, result).decode("utf-8")
+            self.assertIn(f"{entry['version']}.\"", page.split("\n")[2])
+            with self.assertRaises(MODULE.BundleError):
+                MODULE.validate_bundle(entry["id"], "9.9.9", self.archive(entry["id"]))
+
+    def test_versioned_payload_closures_match_core_and_mirror(self) -> None:
+        for (sdk, version), additions in MODULE.ADDITIONAL_DOCUMENTS.items():
+            with self.subTest(sdk=sdk, version=version):
+                self.assertEqual(set(additions), MIRROR.ADDITIONAL_DOCUMENTS[(sdk, version)])
+                self.assertEqual(set(MODULE.required_documents(sdk, version)), MIRROR.SDK_SPECS[sdk]["documents"] | set(additions))
+                self.assertEqual(MODULE.required_documents(sdk, "1.0.0"), MODULE.SDK_SPECS[sdk]["required_documents"])
+
     def test_traversal_links_checksum_tampering_duplicate_json_and_trailing_gzip_are_rejected(self) -> None:
         raw = self.archive()
-        members, epoch = MODULE.archive_members(raw, MODULE.VERSION)
+        members, epoch = MODULE.archive_members(raw, TEST_VERSION)
         source_name = "quickstart/firebase-app-check.ts"
 
         traversal = self.repack(
             members, epoch, rename={source_name: "quickstart/../../escape.ts"}
         )
         with self.assertRaisesRegex(MODULE.BundleError, "unsafe archive member"):
-            MODULE.validate_bundle("js", MODULE.VERSION, traversal)
+            MODULE.validate_bundle("js", TEST_VERSION, traversal)
 
         linked = self.repack(members, epoch, symlink=source_name)
         with self.assertRaisesRegex(MODULE.BundleError, "canonical USTAR|metadata is non-canonical"):
-            MODULE.validate_bundle("js", MODULE.VERSION, linked)
+            MODULE.validate_bundle("js", TEST_VERSION, linked)
 
         changed = dict(members)
         changed[source_name] += b"\n// unowned drift\n"
         with self.assertRaisesRegex(MODULE.BundleError, "manifest payload record is invalid"):
-            MODULE.validate_bundle("js", MODULE.VERSION, self.repack(changed, epoch))
+            MODULE.validate_bundle("js", TEST_VERSION, self.repack(changed, epoch))
 
         duplicate = dict(members)
         duplicate["bundle-manifest.json"] = duplicate["bundle-manifest.json"].replace(
             b'{\n  "archive":', b'{\n  "archive": "docs-bundle-1.0.0.tar.gz",\n  "archive":', 1
         )
         with self.assertRaisesRegex(MODULE.BundleError, "duplicate JSON key"):
-            MODULE.validate_bundle("js", MODULE.VERSION, self.repack(duplicate, epoch))
+            MODULE.validate_bundle("js", TEST_VERSION, self.repack(duplicate, epoch))
 
         with self.assertRaisesRegex(MODULE.BundleError, "trailing, concatenated"):
-            MODULE.validate_bundle("js", MODULE.VERSION, raw + b"trailing")
+            MODULE.validate_bundle("js", TEST_VERSION, raw + b"trailing")
 
     def test_noncanonical_ustar_header_and_padding_are_rejected(self) -> None:
         raw = self.archive()
@@ -167,7 +211,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
 
         padded = self.compress_tar(tar_bytes + b"\0" * 10240, epoch)
         with self.assertRaisesRegex(MODULE.BundleError, "USTAR terminator"):
-            MODULE.validate_bundle("js", MODULE.VERSION, padded)
+            MODULE.validate_bundle("js", TEST_VERSION, padded)
 
         changed = bytearray(tar_bytes)
         changed[100:108] = b"0000644 "
@@ -176,7 +220,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
         changed[148:156] = f"{checksum:06o}\0 ".encode("ascii")
         alternate_header = self.compress_tar(bytes(changed), epoch)
         with self.assertRaisesRegex(MODULE.BundleError, "canonical USTAR"):
-            MODULE.validate_bundle("js", MODULE.VERSION, alternate_header)
+            MODULE.validate_bundle("js", TEST_VERSION, alternate_header)
 
         with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as archive:
             member = next(item for item in archive.getmembers() if item.size % 512)
@@ -184,11 +228,11 @@ class SDKDocumentationBundleTests(unittest.TestCase):
         changed[member.offset_data + member.size] = 1
         alternate_padding = self.compress_tar(bytes(changed), epoch)
         with self.assertRaisesRegex(MODULE.BundleError, "payload padding"):
-            MODULE.validate_bundle("js", MODULE.VERSION, alternate_padding)
+            MODULE.validate_bundle("js", TEST_VERSION, alternate_padding)
 
     def test_manifest_and_catalog_provenance_must_close_exactly(self) -> None:
         raw = self.archive()
-        members, epoch = MODULE.archive_members(raw, MODULE.VERSION)
+        members, epoch = MODULE.archive_members(raw, TEST_VERSION)
         manifest = json.loads(members["bundle-manifest.json"])
         manifest["repository"] = "https://github.com/example/substitution"
         changed = dict(members)
@@ -199,7 +243,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             if name != "SHA256SUMS"
         )
         with self.assertRaisesRegex(MODULE.BundleError, "identity or release binding"):
-            MODULE.validate_bundle("js", MODULE.VERSION, self.repack(changed, epoch))
+            MODULE.validate_bundle("js", TEST_VERSION, self.repack(changed, epoch))
 
         catalog = json.loads(members["supported-versions.json"])
         catalog["versions"][0]["source"]["region"]["start_line"] += 1
@@ -215,7 +259,7 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             if name != "SHA256SUMS"
         )
         with self.assertRaisesRegex(MODULE.BundleError, "provenance does not close"):
-            MODULE.validate_bundle("js", MODULE.VERSION, self.repack(changed, epoch))
+            MODULE.validate_bundle("js", TEST_VERSION, self.repack(changed, epoch))
 
     def test_local_source_hash_and_checked_out_commit_are_verified(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

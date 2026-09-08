@@ -1,0 +1,226 @@
+<Info>
+  Generated from [Sources/LatchwayFoundationModels/FoundationModelsRequest.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwayFoundationModels/FoundationModelsRequest.swift#L1-L220) at documentation source commit `37f46733d95e659230f460f44f3ecbd7c7d03a14` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274`.
+</Info>
+
+```swift
+#if canImport(FoundationModels) && compiler(>=6.4)
+import Foundation
+import FoundationModels
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+enum FoundationModelsRequest {
+    static func encode(_ request: LanguageModelExecutorGenerationRequest) throws -> Data {
+        var instructions: [String] = []
+        var input: [[String: Any]] = []
+        for entry in request.transcript {
+            switch entry {
+            case let .instructions(value):
+                instructions.append(try text(value.segments, entry: entry))
+            case let .prompt(value):
+                input.append(["role": "user", "content": try text(value.segments, entry: entry)])
+            case let .response(value):
+                input.append(["role": "assistant", "content": try text(value.segments, entry: entry)])
+            case let .toolCalls(value):
+                for call in value {
+                    guard call.arguments.isComplete else { throw LatchwayFoundationModelsError.invalidTranscript }
+                    input.append([
+                        "type": "function_call", "call_id": call.id,
+                        "name": call.toolName, "arguments": call.arguments.jsonString,
+                    ])
+                }
+            case let .toolOutput(value):
+                input.append([
+                    "type": "function_call_output", "call_id": value.id,
+                    "output": try text(value.segments, entry: entry),
+                ])
+            case let .reasoning(value):
+                var item: [String: Any] = [
+                    "type": "reasoning", "id": value.id,
+                    "summary": [["type": "summary_text", "text": try text(value.segments, entry: entry)]],
+                ]
+                // Responses encrypted reasoning is an opaque UTF-8 string. Do
+                // not reinterpret it, expose it to prompts, or log it.
+                if let signature = value.signature {
+                    guard let encrypted = String(data: signature, encoding: .utf8) else {
+                        throw LatchwayFoundationModelsError.invalidTranscript
+                    }
+                    item["encrypted_content"] = encrypted
+                }
+                input.append(item)
+            @unknown default:
+                throw unsupported(entry)
+            }
+        }
+        guard !input.isEmpty else { throw LatchwayFoundationModelsError.invalidTranscript }
+
+        var body: [String: Any] = [
+            "model": "latchway-feature", "input": input, "stream": true, "store": false,
+        ]
+        let options = request.generationOptions
+        if let temperature = options.temperature {
+            guard temperature.isFinite, (0 ... 2).contains(temperature) else {
+                throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            body["temperature"] = temperature
+        }
+        if let maximum = options.maximumResponseTokens {
+            guard maximum > 0 else { throw LatchwayFoundationModelsError.invalidTranscript }
+            body["max_output_tokens"] = maximum
+        }
+        if let sampling = options.samplingMode {
+            switch sampling.kind {
+            case .greedy:
+                body["temperature"] = 0
+            case let .randomProbabilityThreshold(probability, seed):
+                guard seed == nil else { throw LatchwayFoundationModelsError.unsupportedSamplingMode }
+                guard probability.isFinite, probability > 0, probability <= 1 else {
+                    throw LatchwayFoundationModelsError.invalidTranscript
+                }
+                body["top_p"] = probability
+            case let .randomTopK(count, seed):
+                guard seed == nil else { throw LatchwayFoundationModelsError.unsupportedSamplingMode }
+                guard count > 0 else { throw LatchwayFoundationModelsError.invalidTranscript }
+                body["top_k"] = count
+            @unknown default:
+                throw LatchwayFoundationModelsError.unsupportedSamplingMode
+            }
+        }
+
+        // Only the enabled subset is exposed for NEW calls. Historical calls
+        // remain in input even when a tool is disabled on a subsequent turn.
+        let tools = request.enabledToolDefinitions
+        guard tools.count <= 128, Set(tools.map(\.name)).count == tools.count else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        if !tools.isEmpty {
+            body["tools"] = try tools.map { tool -> [String: Any] in
+                ["type": "function", "name": tool.name, "description": tool.description,
+                 "parameters": try schemaObject(tool.parameters), "strict": true]
+            }
+        }
+        if let mode = options.toolCallingMode {
+            switch mode.kind {
+            case .allowed: body["tool_choice"] = tools.isEmpty ? "none" : "auto"
+            case .required:
+                guard !tools.isEmpty else { throw LatchwayFoundationModelsError.invalidTranscript }
+                body["tool_choice"] = "required"
+            case .disallowed: body["tool_choice"] = "none"
+            @unknown default: throw LatchwayFoundationModelsError.invalidTranscript
+            }
+        }
+
+        if let schema = request.schema {
+            let object = try schemaObject(schema)
+            // Swift type names may contain punctuation that the wire schema
+            // name disallows. The name is a label, not a change to the guide.
+            let name = String(schema.name.unicodeScalars.map {
+                CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "_" || $0 == "-"
+                    ? Character($0) : "_"
+            }.prefix(64))
+            body["text"] = ["format": ["type": "json_schema", "name": name.isEmpty ? "response" : name,
+                                       "schema": object, "strict": true]]
+            if request.contextOptions.includeSchemaInPrompt == true {
+                let encoded = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+                instructions.append("Respond with JSON matching this schema:\n" + String(decoding: encoded, as: UTF8.self))
+            }
+        }
+        if let reasoning = request.contextOptions.reasoningLevel {
+            let effort: String
+            switch reasoning {
+            case .light: effort = "low"
+            case .moderate: effort = "medium"
+            case .deep: effort = "high"
+            case let .custom(value): effort = value
+            @unknown default: throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            body["reasoning"] = ["effort": effort, "summary": "auto"]
+        }
+        if !instructions.isEmpty { body["instructions"] = instructions.joined(separator: "\n\n") }
+
+        // Metadata is upstream-visible, never an authorization or policy input.
+        // Structured GeneratedContent is losslessly represented as JSON text
+        // because Responses accepts string-valued metadata only.
+        guard request.metadata.count <= 15, request.metadata["latchway_generation_id"] == nil else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        var metadata = ["latchway_generation_id": request.id.uuidString]
+        for (key, content) in request.metadata {
+            let value: String
+            if case let .string(string) = content.kind { value = string }
+            else { value = content.jsonString }
+            guard !key.isEmpty, key.utf8.count <= 64, !key.contains("["), !key.contains("]"),
+                  !key.contains("\0"), value.utf8.count <= 512, !value.contains("\0"), content.isComplete else {
+                throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            metadata[key] = value
+        }
+        body["metadata"] = metadata
+        let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .fragmentsAllowed])
+        guard data.count <= 4 * 1024 * 1024 else { throw LatchwayFoundationModelsError.invalidTranscript }
+        return data
+    }
+
+    static func schemaObject(_ schema: GenerationSchema) throws -> [String: Any] {
+        guard let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(schema)) as? [String: Any] else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        return try strictSchema(object, depth: 0)
+    }
+
+    private static func strictSchema(_ schema: [String: Any], depth: Int) throws -> [String: Any] {
+        guard depth < 64 else { throw LatchwayFoundationModelsError.invalidTranscript }
+        var result = schema
+        // Strict providers require all properties to be present; optional
+        // @Generable properties use explicit null instead of omission.
+        if let properties = schema["properties"] as? [String: [String: Any]] {
+            let required = Set(schema["required"] as? [String] ?? [])
+            var normalized: [String: Any] = [:]
+            for (name, property) in properties {
+                let value = try strictSchema(property, depth: depth + 1)
+                normalized[name] = required.contains(name) ? value : ["anyOf": [value, ["type": "null"]]]
+            }
+            result["properties"] = normalized
+            result["required"] = properties.keys.sorted()
+            result["additionalProperties"] = false
+        }
+        for key in ["$defs", "definitions"] {
+            if let definitions = schema[key] as? [String: [String: Any]] {
+                result[key] = try definitions.mapValues { try strictSchema($0, depth: depth + 1) }
+            }
+        }
+        for key in ["items", "additionalProperties"] {
+            if let child = schema[key] as? [String: Any] {
+                result[key] = try strictSchema(child, depth: depth + 1)
+            }
+        }
+        for key in ["anyOf", "oneOf", "allOf"] {
+            if let children = schema[key] as? [[String: Any]] {
+                result[key] = try children.map { try strictSchema($0, depth: depth + 1) }
+            }
+        }
+        return result
+    }
+
+    private static func text(_ segments: [Transcript.Segment], entry: Transcript.Entry) throws -> String {
+        try segments.map { segment in
+            switch segment {
+            case let .text(value): return value.content
+            case let .structure(value):
+                guard value.content.isComplete else { throw LatchwayFoundationModelsError.invalidTranscript }
+                return value.content.jsonString
+            case .attachment: throw unsupported(entry)
+            @unknown default: throw unsupported(entry)
+            }
+        }.joined()
+    }
+
+    private static func unsupported(_ entry: Transcript.Entry) -> LanguageModelError {
+        .unsupportedTranscriptContent(.init(
+            unsupportedContent: [entry],
+            debugDescription: "This Responses route supports text, structured content, local tools, and reasoning, but not image attachments."
+        ))
+    }
+}
+#endif
+```

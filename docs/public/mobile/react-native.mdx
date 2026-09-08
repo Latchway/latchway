@@ -1,137 +1,105 @@
 ---
 title: "React Native SDK behavior"
-description: "Inspect the source candidate's TurboModule, native trust, DPoP, streaming, diagnostics, and lifecycle behavior."
+description: "Understand shared native accounts, application-supplied identity, native trust, transport and account lifecycle."
 icon: "atom"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-02"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
-import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
-import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+React Native 1.2.0 uses the same native account backend as Swift and Kotlin.
+Either native or React Native can configure first. Matching public settings
+reuse one app, installation, account and session; conflicting explicit settings
+fail closed.
 
-`@latchway/react-native` exposes one fetch-shaped API while native iOS and
-Android modules own installation keys, DPoP signing, rotating session state,
-and platform attestation.
+Start with the [React Native quickstart](/clients/react-native/quickstart) for
+installation and a complete request. Check [Release status](/release-status)
+for registry publication and separate physical-device limits.
 
 ## Requirements
 
-- React Native 0.82.x with the New Architecture enabled
-- iOS 15 or newer with an App Attest-capable application entitlement
-- Android API 24 or newer with Play Integrity configured
-- a version-compatible Latchway gateway and SDK source set
+- React Native `>=0.74.0 <1.0.0`, React `^18.2.0 || ^19.0.0` and the New
+  Architecture, using a compatible host pair.
+- iOS 15+, iOS SDK 1.2.0, the signed private root Keychain group and App Attest.
+- Android API 24+, Android SDK 1.1.0 and required Play Integrity. Libraries
+  compile against API 34; the host may need a newer compile or target SDK.
+- Server 1.1.1 and an explicit shared-native caller policy for the host.
+- Application-owned login and current user ID tokens accepted by the gateway.
 
-The intended `1.0.0` package has not been published. For evaluation, use an
-authorized checkout of the React Native source candidate and its example
-application. Do not substitute an unverified registry package.
+## Shared app and identity
 
-The source example is the supported prepublication integration path because it
-pins the exact JavaScript, Swift, and Android source revisions together with the
-normative contract checkpoint and compatible gateway version range. It does
-not pin the current gateway implementation commit. Its local native overrides
-are development-only and must not appear in a published package.
+`Latchway.configure` accepts public gateway, application, environment, identity
+metadata and native security coordinates. It does not sign in. No Firebase
+dependency, native Latchway auth bootstrap or embedded-mode switch is required.
 
-<Warning>
-  The JavaScript extension client remains diagnostics-only. The example's
-  Debug App Intent instead links the native AppExtensions SDK and implements
-  one independently keyed delegated request with an exact-run Keychain
-  challenge and receipt. The Release target has no Latchway request path and
-  fails closed. Local source and build checks are not physical App Intent
-  execution evidence.
-</Warning>
+Supply a current token through `app.signIn({getIdToken})` after accepted login.
+Already-active native/RN callers attach with `app.makeClient()`. Initial auth
+restoration uses `app.restore({getIdToken})`, which cannot undo recorded logout.
+The optional `firebaseProject` helper only formats issuer/audience metadata;
+it does not fetch tokens or install listeners.
 
-<Info>
-  A real iPad running iPadOS 26.5 exercised React Native commit
-  `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` in Debug configuration with
-  automatic Apple Development signing. Production App Attest registration and
-  same-key assertion, Secure Enclave DPoP, upstream non-streaming and streaming
-  requests, quota, typed component denial, bridge behavior, and cleanup passed
-  against the current source gateway. This is development-signed iOS evidence,
-  not an Apple distribution-derived protected release receipt. React Native
-  predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` adds root-owned
-  component lifecycle and the Debug native App Intent path. Its Apple
-  Development app and embedded extension passed strict
-  entitlement/provisioning, registered-device install, and launch checks
-  without new App Attest or App Intent execution. Current
-  `ba23c750ec662834b4d480940c4067508723defb` carries the release retry-closure
-  and transition-order hardening, locks the released contract plus final
-  sibling SDK successor commits, and passes the full local plus generic iOS
-  and isolated Debug/Release build gates; its physical path was not rerun.
-  Android, App Intent, and the protected extension runtime matrix remain
-  operator-deferred release gates.
-</Info>
+ID tokens stay in native process memory, not persistent SDK storage. Supply
+fresh tokens with `account.updateIdToken`. At expiry,
+`identity_refresh_required` suspends protected work until a verified update.
+Native may continue after JS teardown while supplied identity remains fresh
+and the app has not reported a change. Restart requires application auth to
+supply a token again.
 
-## Create a client
+See [authentication](/clients/react-native/authentication) for one-shot token
+callbacks, operation cancellation and the optional provider-neutral binding.
 
-<ReactNativeCreateClient />
+## Logout and screen cleanup
 
-Send a streaming request through the same native-backed client:
+`account.logout()` retires that captured account across native and React Native,
+including offline. Old account handles cannot refresh or log out a newer user.
+Logout does not revoke the whole installation, reset server-side user quota,
+log out other devices or sign out your external authentication provider.
 
-<ReactNativeStreamingFetch />
+Serialize external-provider login/logout calls in application code. Every auth
+surface must notify Latchway; the SDK cannot observe changes in a provider it
+does not depend on. Abort old streams/tools and clear local chat history.
+Screen teardown calls `client.dispose()`, not shared logout.
 
-`applicationID` is generated by the Admin API. A package name, bundle ID,
-display name, or slug is not interchangeable with it.
+## Transport and replay
 
-## Lifecycle and replay behavior
+Native modules own key storage, attestation, DPoP signing, session refresh and
+credential-bearing requests. JavaScript receives safe responses and bounded
+diagnostics, never private keys, session credentials or raw attestation.
 
-Call `dispose()` when the owning application scope is destroyed. Secure
-installation state remains available to later instances. `refresh()` rotates
-session credentials explicitly; `revokeCurrentInstallation()` destroys the
-server installation and local secure state.
+`fetchFor(feature)` binds one server-owned protocol route. Request bodies are
+buffered within the 8 MiB bridge limit; server policy may impose a lower limit.
+Responses stream incrementally. Redirects and cross-origin authorization are
+rejected. JavaScript must not clone authenticated requests or replay uncertain
+provider dispatches. Only native code decides bounded pre-dispatch recovery.
 
-JavaScript never clones or replays a request. Native may retry at most once for
-an exact canonical pre-dispatch `session_expired` or `dpop_nonce_required`
-response when the body was already buffered within the 8 MiB bridge limit.
-Streaming or otherwise non-replayable request bodies are never retried.
-Redirects and cross-origin authorization are rejected.
+Frameworks and polyfills belong to the host app. See
+[framework integrations](/clients/react-native/framework-integrations) for
+LangChain setup, cancellation, tool loops and token accounting.
 
-The client also exposes `quota(feature)`, `refresh()`,
-`revokeCurrentInstallation()`, and `dispose()`. `diagnostics()` combines the
-native SDK/platform compatibility state with a protected server snapshot. It
-can report secure key-storage category, attestation support and accepted
-provider/trust, session state and expiry, refresh availability where the native
-surface exposes it, installation status, server version, and safe request/error
-IDs.
+## Native host and extension boundaries
 
-Diagnostics never returns access or refresh tokens, DPoP proofs or private
-keys, raw attestation evidence, identity subjects or claims, or provider
-credentials. The server validates the active DPoP-bound session, consumes a
-fresh proof replay key, and rejects an SDK kind that does not match the stored
-`react_native_ios` or `react_native_android` installation.
+Follow [iOS host setup](/clients/react-native/ios-native-setup) and
+[Android host setup](/clients/react-native/android-native-setup). Inspect actual
+signed entitlements and Play app-signing configuration rather than guessing
+identifiers. Include real legacy storage coordinates when migrating; a made-up
+empty list is not a migration strategy.
 
-## Native host setup
+The React Native extension surface remains distinct from a main-app account.
+A delegated extension is not directly attested merely because its parent is.
+Do not infer production App Intent or extension execution from root-app
+success. Follow [app extensions](/clients/react-native/app-extensions).
 
-On iOS, install JavaScript dependencies, run CocoaPods from the host app, and
-enable App Attest for the exact application identifier. Configure
-`apple.rootKeychainAccessGroup` with the fully resolved private app-ID group
-that appears first in the root application's signed entitlement. List every
-explicit extension-shared group in
-`apple.legacySharedKeychainAccessGroups`; never pass an unresolved
-`$(AppIdentifierPrefix)` expression. The bridge passes the same groups to the
-native App Attest provider and root client, keeping Keychain, Secure Enclave,
-session, and attested-key state inside the iOS SDK. A stale root record in an
-explicit shared group fails closed and requires an explicit migration.
+## Verify the application
 
-On Android, compile against API 37 for the source candidate, configure the
-numeric Play cloud project in `android.playIntegrityCloudProjectNumber`, and
-include the locked `dev.latchway` native modules. The integrity token stays
-inside the native bridge.
+Exercise both configuration orders, token refresh, expiry/recovery, switching
+accounts, offline logout, JS teardown, streaming and cancellation. Correlate
+safe request IDs with the expected native host, caller, user, feature, trust
+and quota in the Console.
 
-React Native 0.82 uses the New Architecture. Equivalent JavaScript clients in
-one runtime share the native security scope; conflicting security configuration
-for that active scope fails closed.
-
-## Production attestation
-
-React Native delegates to the native SDKs:
-
-- iOS uses an App Attest entitlement and a supported physical device.
-- Android uses the configured cloud project and an exact signed application
-  installed through the configured Google Play track.
-
-Simulator, emulator, fixture, and locally sideloaded Apple Development success
-are development signals only. See [Physical-device proof](/mobile/device-proof)
-and [Security boundary](/concepts/security-boundary).
+A simulator, emulator, fixture or package publication is not physical
+attestation evidence. Verify the exact iOS signing path and Play-distributed
+Android build separately. See [device proof](/mobile/device-proof) and the
+[security boundary](/concepts/security-boundary).

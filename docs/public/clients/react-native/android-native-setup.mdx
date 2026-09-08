@@ -4,9 +4,9 @@ description: "Configure published native dependencies, the Play project, signing
 icon: "smartphone"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
@@ -29,17 +29,26 @@ refresh, integrity, and protected networking behind the TurboModule.
 5. retain the locked Latchway interceptor, network origin guard, and
    authenticator supplied by the native bridge.
 
-Configure a `react_native_android` root with direct required Play Integrity and
-the exact package name. Server 1.0.3 allows a native `android` counterpart to
-share that package when it also uses direct Play Integrity. Use the Play
+For shared native/RN mode, configure the gateway's native `android` host with
+an explicit `sharedNativeCallers` policy admitting the intended callers,
+required direct Play Integrity and the exact package name. Existing standalone
+`android` / `react_native_android` root-pair policies remain compatible; an
+upgrade does not merge them or widen permissions automatically. Use the Play
 app-signing SHA-256, not merely the upload-key certificate; the server schema
 stores its digest as Base64URL. Version bounds `0`/`0` allow all valid version
 codes without weakening package, certificate, licensing or device verdict checks.
 
 Keep the verifier service-account JSON in an encrypted server secret. It does
-not belong in the mobile app. Use the environment's matching Firebase config
-and current user's ID token; Firebase Auth is separate from Play Integrity, and
+not belong in the mobile app. Supply public identity metadata and a current
+user ID token from application-owned auth. Authentication is separate from
+Play Integrity, and
 Firebase App Check is not a replacement for this native policy.
+
+No Firebase dependency or native Latchway authentication bootstrap is needed.
+React Native calls `Latchway.configure`; equivalent Kotlin configuration before
+or after it reuses the same app/account. The bridge resolves Android SDK 1.1.0.
+Its libraries compile against API 34; your host's React Native version and
+other dependencies can require a newer compile or target SDK.
 
 Do not pass an integrity token, request hash, DPoP proof, private key, access
 token, refresh token, or provider credential through JavaScript configuration.

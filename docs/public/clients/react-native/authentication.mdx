@@ -1,59 +1,126 @@
 ---
 title: "Configure React Native authentication"
-description: "Provide the current application identity token through the TypeScript callback without exposing native session or attestation state."
+description: "Share native and React Native accounts with application-supplied ID tokens, explicit refresh and offline logout."
 icon: "user-round-check"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
-<Badge color="blue">Existing application identity</Badge>
-
 ## Outcome
 
-The root React Native client can request a current Firebase, Supabase, Clerk,
-or custom JWT token when the native session lifecycle requires identity. The
-callback does not replace the application's sign-in flow.
+React Native and native code share one app/account/session. Either side may
+configure first; matching settings reuse the existing native app. No native
+Latchway bootstrap or Firebase dependency is required. The application owns login
+and supplies tokens from its existing gateway-supported identity provider.
 
-## Implement `getIdentityToken`
+## Configure public identity metadata
 
-The callback should:
+```ts
+import {Latchway, firebaseProject} from '@latchway/react-native';
 
-1. require the current application user;
-2. obtain a current provider token;
-3. preserve Promise rejection and cancellation semantics;
-4. return the token only to the active native operation; and
-5. never store or log the raw token in React state, persistence, analytics, or
-   diagnostics.
+const app = await Latchway.configure({
+  baseURL: 'https://gateway.example.com',
+  applicationID: 'app_01J00000000000000000000000',
+  environment: 'production',
+  identity: firebaseProject({projectID: 'your-project-id'}),
+  apple: {rootKeychainAccessGroup: 'YOUR_SIGNED_ROOT_KEYCHAIN_GROUP'},
+  android: {playIntegrityCloudProjectNumber: '123456789012'},
+});
+```
 
-Configure the matching server verifier through
-[Authentication providers](/clients/authentication-providers). App Attest or
-Play Integrity remains a separate native input. DPoP remains a native key
-operation.
+Use the actual signed private root Keychain group and your Play Integrity project.
+App Attest and Play Integrity remain separate from authentication. DPoP remains
+native key possession. Public project/app identifiers do not grant trust.
 
-## Understand the bridge boundary
+`firebaseProject` only formats issuer/audience metadata. It imports no Firebase,
+finds no Auth instance and fetches no token. Generic JWT identity can supply
+`{providerID, issuer, audience, tenantID?}`. Configure the matching gateway
+verifier through [Authentication providers](/clients/authentication-providers).
+Configuration itself does not sign in, attest or reactivate a logged-out account.
 
-The external identity JWT is the root client's only application credential
-that crosses into the TurboModule. It is retained only for the native operation.
-Access and refresh tokens, DPoP proofs, private keys, raw attestation evidence,
-and provider credentials never return to JavaScript.
+## Supply a token after accepted login
 
-A delegated component client has no identity callback and cannot acquire the
-containing application's root lease.
+```ts
+const account = await app.signIn({
+  getIdToken: () => yourAuth.getIdToken(),
+});
+const client = await account.makeClient();
+```
 
-## Sign out safely
+`yourAuth` is application code, not a Latchway dependency. The one-shot callback
+runs after native captures the account operation. Already available tokens may
+use `{idToken}`. The gateway validates signatures/issuer/audience/expiry; decoded
+JWT claims are not trusted authentication.
 
-Call the required Latchway revocation operation, await or safely record its
-terminal result, sign out of the application identity provider, dispose the
-JavaScript client scope, and clear application-owned identity state. Secure
-installation behavior after `dispose()` remains governed by the native SDK and
-explicit revocation method.
+An already-active native/RN caller can join with `app.makeClient()` or capture its
+account with `app.currentAccount()`. Initial application-auth restoration uses
+`app.restore({getIdToken})`; it cannot undo recorded logout. Do not sign in
+because a screen mounted.
+
+## Refresh supplied identity
+
+```ts
+await account.updateIdToken({getIdToken: () => yourAuth.getIdToken()});
+```
+
+Updates apply only to that captured account. The gateway verifies the replacement
+using installation possession without resetting generation or quota. The server
+must advertise `supplied_identity_v1`; older servers fail explicitly. Use server
+1.1.1 or newer: it corrects an issuance-time database constraint that made
+legitimate later token updates fail on server 1.1.0.
+
+Provider ID tokens remain only in native process memory. Fresh identity survives
+JS teardown, but at expiry protected work stops with `identity_refresh_required`.
+A valid same-account update resumes it. After process restart, application auth
+supplies a token again. Latchway cannot refresh external-provider tokens or detect
+logout that the application never reported.
+
+Token operations accept `signal`. Abort pending sign-in when the auth flow signs
+out, including before an account handle is returned. Cancellation invalidates
+native intent, not only the JavaScript Promise.
+
+## Sign out without revoking the installation
+
+```ts
+// In the application's serialized auth flow:
+await account.logout();
+await yourAuth.signOut();
+
+// A screen unmount is different:
+abortController.abort();
+await client.dispose();
+```
+
+Logout is offline-capable account retirement shared by native and RN. It does not
+require online installation revocation, sign out the external provider, reset
+server-side user quota, or log out other devices. A's old handle cannot retire B.
+On cleanup failure keep AI disabled and retry the captured account.
+
+Serialize external auth changes so delayed A cleanup cannot sign out B. Optional
+`bindLatchwayAuth` accepts a developer-supplied typed event subscription; use one
+application-lifetime binding, not one per screen. Disposing a binding unsubscribes
+without logging out. Account state observers should cancel tools/streams and
+discard old-generation UI; Latchway does not own chat history.
+
+## Keep credentials inside the boundary
+
+Do not persist/log ID tokens in application state, analytics or crash reports.
+Native refresh credentials, private keys and raw attestation evidence stay native.
+The new supplied-identity API does not return ID tokens in account handles,
+diagnostics or events. Upstream provider credentials never belong in the client.
+
+The legacy `createLatchwayClient({getIdentityToken})` callback remains a separate
+compatibility path; do not combine it with migrated shared-account state or
+silently replace a legacy authority during configure.
 
 ## Verify
 
-Run one request and confirm the Console shows a normalized application user and
-a separate `react_native_ios` or `react_native_android` trust result. Do not
-diagnose identity by printing the token or weakening native attestation.
+Test both configuration orders, same-user token refresh, expiry/recovery, account
+switching, offline logout, JS teardown and late-result fencing. Inspect the
+Console's shared native host identity and separate caller attribution without
+printing tokens. Package publication/local fixtures are not physical App Attest
+or Play-distributed acceptance evidence.

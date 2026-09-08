@@ -1,6 +1,6 @@
 ---
 title: "iOS SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for iOS SDK 1.0.0."
+description: "Generated, version-bound examples and compatibility metadata for iOS SDK 1.2.0."
 ---
 
 <Warning>
@@ -13,27 +13,27 @@ description: "Generated, version-bound examples and compatibility metadata for i
 | Field | Value |
 | --- | --- |
 | Package | `Latchway` |
-| Release | `v1.0.0` |
-| Commit | `92a394acbc00d1af6d258372f22b11ddae8e1750` |
+| Documented SDK release | `v1.2.0` |
+| Documentation source commit | `37f46733d95e659230f460f44f3ecbd7c7d03a14` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `c0cdad255cde507faaad173f9a2dba05a29e6be53130f07a25c2e4e831498f00` |
+| Bundle SHA-256 | `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| Latchway | `1.0.0` | `Latchway.podspec:L1-L20` |
-| SwiftPM product Latchway | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwayAppAttest | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwayAppExtensions | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwayFirebaseAuth | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwaySwiftOpenAI | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwayFoundationModels | `1.0.0` | `README.md:L26-L58` |
-| SwiftPM product LatchwayTesting | `1.0.0` | `README.md:L26-L58` |
-| CocoaPods `Latchway/Core` | `1.0.0` | `README.md:L26-L58` |
-| CocoaPods `Latchway/AppAttest` | `1.0.0` | `README.md:L26-L58` |
-| CocoaPods `Latchway/AppExtensions` | `1.0.0` | `README.md:L26-L58` |
-| CocoaPods `Latchway/FirebaseAuth` | `1.0.0` | `README.md:L26-L58` |
+| Latchway | `1.2.0` | `Latchway.podspec:L1-L20` |
+| SwiftPM product Latchway | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwayAppAttest | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwayAppExtensions | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwayFirebaseAuth | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwaySwiftOpenAI | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwayFoundationModels | `1.2.0` | `README.md:L1-L76` |
+| SwiftPM product LatchwayTesting | `1.2.0` | `README.md:L1-L76` |
+| CocoaPods `Latchway/Core` | `1.2.0` | `README.md:L1-L76` |
+| CocoaPods `Latchway/AppAttest` | `1.2.0` | `README.md:L1-L76` |
+| CocoaPods `Latchway/AppExtensions` | `1.2.0` | `README.md:L1-L76` |
+| CocoaPods `Latchway/FirebaseAuth` | `1.2.0` | `README.md:L1-L76` |
 | iOS | `15.0` | `Latchway.podspec:L19-L20` |
 | macOS minimum (Swift Package) | `12` | `Package.swift:L5-L10` |
 | Swift language | `6.0` | `Latchway.podspec:L19-L20` |
@@ -44,20 +44,544 @@ description: "Generated, version-bound examples and compatibility metadata for i
 | Foundation Models macOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
 | Foundation Models visionOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
 | Foundation Models watchOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
-| Foundation Models tvOS availability | `unavailable` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L6-L8` |
+| Foundation Models tvOS availability | `unavailable` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L8-L9` |
 
 ## Version-bound examples
 
-### `frameworks/foundation-models.swift`
+### `frameworks/foundation-models-request.swift`
 
-Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/92a394acbc00d1af6d258372f22b11ddae8e1750/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L43-L204)
+Source: [Sources/LatchwayFoundationModels/FoundationModelsRequest.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwayFoundationModels/FoundationModelsRequest.swift#L1-L220)
 
 ```swift
+#if canImport(FoundationModels) && compiler(>=6.4)
+import Foundation
+import FoundationModels
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+enum FoundationModelsRequest {
+    static func encode(_ request: LanguageModelExecutorGenerationRequest) throws -> Data {
+        var instructions: [String] = []
+        var input: [[String: Any]] = []
+        for entry in request.transcript {
+            switch entry {
+            case let .instructions(value):
+                instructions.append(try text(value.segments, entry: entry))
+            case let .prompt(value):
+                input.append(["role": "user", "content": try text(value.segments, entry: entry)])
+            case let .response(value):
+                input.append(["role": "assistant", "content": try text(value.segments, entry: entry)])
+            case let .toolCalls(value):
+                for call in value {
+                    guard call.arguments.isComplete else { throw LatchwayFoundationModelsError.invalidTranscript }
+                    input.append([
+                        "type": "function_call", "call_id": call.id,
+                        "name": call.toolName, "arguments": call.arguments.jsonString,
+                    ])
+                }
+            case let .toolOutput(value):
+                input.append([
+                    "type": "function_call_output", "call_id": value.id,
+                    "output": try text(value.segments, entry: entry),
+                ])
+            case let .reasoning(value):
+                var item: [String: Any] = [
+                    "type": "reasoning", "id": value.id,
+                    "summary": [["type": "summary_text", "text": try text(value.segments, entry: entry)]],
+                ]
+                // Responses encrypted reasoning is an opaque UTF-8 string. Do
+                // not reinterpret it, expose it to prompts, or log it.
+                if let signature = value.signature {
+                    guard let encrypted = String(data: signature, encoding: .utf8) else {
+                        throw LatchwayFoundationModelsError.invalidTranscript
+                    }
+                    item["encrypted_content"] = encrypted
+                }
+                input.append(item)
+            @unknown default:
+                throw unsupported(entry)
+            }
+        }
+        guard !input.isEmpty else { throw LatchwayFoundationModelsError.invalidTranscript }
+
+        var body: [String: Any] = [
+            "model": "latchway-feature", "input": input, "stream": true, "store": false,
+        ]
+        let options = request.generationOptions
+        if let temperature = options.temperature {
+            guard temperature.isFinite, (0 ... 2).contains(temperature) else {
+                throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            body["temperature"] = temperature
+        }
+        if let maximum = options.maximumResponseTokens {
+            guard maximum > 0 else { throw LatchwayFoundationModelsError.invalidTranscript }
+            body["max_output_tokens"] = maximum
+        }
+        if let sampling = options.samplingMode {
+            switch sampling.kind {
+            case .greedy:
+                body["temperature"] = 0
+            case let .randomProbabilityThreshold(probability, seed):
+                guard seed == nil else { throw LatchwayFoundationModelsError.unsupportedSamplingMode }
+                guard probability.isFinite, probability > 0, probability <= 1 else {
+                    throw LatchwayFoundationModelsError.invalidTranscript
+                }
+                body["top_p"] = probability
+            case let .randomTopK(count, seed):
+                guard seed == nil else { throw LatchwayFoundationModelsError.unsupportedSamplingMode }
+                guard count > 0 else { throw LatchwayFoundationModelsError.invalidTranscript }
+                body["top_k"] = count
+            @unknown default:
+                throw LatchwayFoundationModelsError.unsupportedSamplingMode
+            }
+        }
+
+        // Only the enabled subset is exposed for NEW calls. Historical calls
+        // remain in input even when a tool is disabled on a subsequent turn.
+        let tools = request.enabledToolDefinitions
+        guard tools.count <= 128, Set(tools.map(\.name)).count == tools.count else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        if !tools.isEmpty {
+            body["tools"] = try tools.map { tool -> [String: Any] in
+                ["type": "function", "name": tool.name, "description": tool.description,
+                 "parameters": try schemaObject(tool.parameters), "strict": true]
+            }
+        }
+        if let mode = options.toolCallingMode {
+            switch mode.kind {
+            case .allowed: body["tool_choice"] = tools.isEmpty ? "none" : "auto"
+            case .required:
+                guard !tools.isEmpty else { throw LatchwayFoundationModelsError.invalidTranscript }
+                body["tool_choice"] = "required"
+            case .disallowed: body["tool_choice"] = "none"
+            @unknown default: throw LatchwayFoundationModelsError.invalidTranscript
+            }
+        }
+
+        if let schema = request.schema {
+            let object = try schemaObject(schema)
+            // Swift type names may contain punctuation that the wire schema
+            // name disallows. The name is a label, not a change to the guide.
+            let name = String(schema.name.unicodeScalars.map {
+                CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "_" || $0 == "-"
+                    ? Character($0) : "_"
+            }.prefix(64))
+            body["text"] = ["format": ["type": "json_schema", "name": name.isEmpty ? "response" : name,
+                                       "schema": object, "strict": true]]
+            if request.contextOptions.includeSchemaInPrompt == true {
+                let encoded = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+                instructions.append("Respond with JSON matching this schema:\n" + String(decoding: encoded, as: UTF8.self))
+            }
+        }
+        if let reasoning = request.contextOptions.reasoningLevel {
+            let effort: String
+            switch reasoning {
+            case .light: effort = "low"
+            case .moderate: effort = "medium"
+            case .deep: effort = "high"
+            case let .custom(value): effort = value
+            @unknown default: throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            body["reasoning"] = ["effort": effort, "summary": "auto"]
+        }
+        if !instructions.isEmpty { body["instructions"] = instructions.joined(separator: "\n\n") }
+
+        // Metadata is upstream-visible, never an authorization or policy input.
+        // Structured GeneratedContent is losslessly represented as JSON text
+        // because Responses accepts string-valued metadata only.
+        guard request.metadata.count <= 15, request.metadata["latchway_generation_id"] == nil else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        var metadata = ["latchway_generation_id": request.id.uuidString]
+        for (key, content) in request.metadata {
+            let value: String
+            if case let .string(string) = content.kind { value = string }
+            else { value = content.jsonString }
+            guard !key.isEmpty, key.utf8.count <= 64, !key.contains("["), !key.contains("]"),
+                  !key.contains("\0"), value.utf8.count <= 512, !value.contains("\0"), content.isComplete else {
+                throw LatchwayFoundationModelsError.invalidTranscript
+            }
+            metadata[key] = value
+        }
+        body["metadata"] = metadata
+        let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .fragmentsAllowed])
+        guard data.count <= 4 * 1024 * 1024 else { throw LatchwayFoundationModelsError.invalidTranscript }
+        return data
+    }
+
+    static func schemaObject(_ schema: GenerationSchema) throws -> [String: Any] {
+        guard let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(schema)) as? [String: Any] else {
+            throw LatchwayFoundationModelsError.invalidTranscript
+        }
+        return try strictSchema(object, depth: 0)
+    }
+
+    private static func strictSchema(_ schema: [String: Any], depth: Int) throws -> [String: Any] {
+        guard depth < 64 else { throw LatchwayFoundationModelsError.invalidTranscript }
+        var result = schema
+        // Strict providers require all properties to be present; optional
+        // @Generable properties use explicit null instead of omission.
+        if let properties = schema["properties"] as? [String: [String: Any]] {
+            let required = Set(schema["required"] as? [String] ?? [])
+            var normalized: [String: Any] = [:]
+            for (name, property) in properties {
+                let value = try strictSchema(property, depth: depth + 1)
+                normalized[name] = required.contains(name) ? value : ["anyOf": [value, ["type": "null"]]]
+            }
+            result["properties"] = normalized
+            result["required"] = properties.keys.sorted()
+            result["additionalProperties"] = false
+        }
+        for key in ["$defs", "definitions"] {
+            if let definitions = schema[key] as? [String: [String: Any]] {
+                result[key] = try definitions.mapValues { try strictSchema($0, depth: depth + 1) }
+            }
+        }
+        for key in ["items", "additionalProperties"] {
+            if let child = schema[key] as? [String: Any] {
+                result[key] = try strictSchema(child, depth: depth + 1)
+            }
+        }
+        for key in ["anyOf", "oneOf", "allOf"] {
+            if let children = schema[key] as? [[String: Any]] {
+                result[key] = try children.map { try strictSchema($0, depth: depth + 1) }
+            }
+        }
+        return result
+    }
+
+    private static func text(_ segments: [Transcript.Segment], entry: Transcript.Entry) throws -> String {
+        try segments.map { segment in
+            switch segment {
+            case let .text(value): return value.content
+            case let .structure(value):
+                guard value.content.isComplete else { throw LatchwayFoundationModelsError.invalidTranscript }
+                return value.content.jsonString
+            case .attachment: throw unsupported(entry)
+            @unknown default: throw unsupported(entry)
+            }
+        }.joined()
+    }
+
+    private static func unsupported(_ entry: Transcript.Entry) -> LanguageModelError {
+        .unsupportedTranscriptContent(.init(
+            unsupportedContent: [entry],
+            debugDescription: "This Responses route supports text, structured content, local tools, and reasoning, but not image attachments."
+        ))
+    }
+}
+#endif
+```
+
+### `frameworks/foundation-models-stream.swift`
+
+Source: [Sources/LatchwayFoundationModels/FoundationModelsStream.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwayFoundationModels/FoundationModelsStream.swift#L1-L247)
+
+```swift
+#if canImport(FoundationModels) && compiler(>=6.4)
+import Foundation
+import FoundationModels
+#if !COCOAPODS
+import Latchway
+#endif
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+struct FoundationModelsStream {
+    private struct Event: Decodable {
+        var type: String
+        var delta: String?
+        var item_id: String?
+        var content_index: Int?
+        var summary_index: Int?
+        var item: Item?
+        var response: Response?
+    }
+    private struct Item: Decodable {
+        var type: String
+        var id: String?
+        var call_id: String?
+        var name: String?
+        var arguments: String?
+        var content: [Part]?
+        var summary: [Part]?
+        var encrypted_content: String?
+    }
+    private struct Part: Decodable {
+        var type: String
+        var text: String?
+        var refusal: String?
+    }
+    private struct Response: Decodable {
+        var id: String?
+        var status: String?
+        var output: [Item]?
+        var usage: Usage?
+    }
+    private struct Usage: Decodable {
+        struct InputDetails: Decodable { var cached_tokens: Int? }
+        struct OutputDetails: Decodable { var reasoning_tokens: Int? }
+        var input_tokens: Int
+        var output_tokens: Int
+        var input_tokens_details: InputDetails?
+        var output_tokens_details: OutputDetails?
+    }
+    private struct Call {
+        var id: String
+        var name: String
+        var arguments: String
+    }
+
+    private var completed = false
+    private var textSeen = false
+    private var callOrder: [String] = []
+    private var calls: [String: Call] = [:]
+    private var textBySegment: [String: String] = [:]
+    private var reasoningBySegment: [String: String] = [:]
+    private let enabled: Set<String>
+    private let generationID: String
+    private let correlationID: String?
+    private let channel: LanguageModelExecutorGenerationChannel
+
+    static func consume(
+        _ stream: LatchwayStreamingResponse,
+        request: LanguageModelExecutorGenerationRequest,
+        channel: LanguageModelExecutorGenerationChannel
+    ) async throws {
+        let contentType = stream.response.value(forHTTPHeaderField: "Content-Type") ?? ""
+        guard contentType.lowercased().hasPrefix("text/event-stream") else { throw invalid }
+        var parser = Self(
+            enabled: request.generationOptions.toolCallingMode?.kind == .disallowed
+                ? [] : Set(request.enabledToolDefinitions.map(\.name)),
+            generationID: request.id.uuidString,
+            correlationID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID"),
+            channel: channel
+        )
+        var line = Data()
+        var event = Data()
+        var total = 0
+        var previousCR = false
+        for try await byte in stream.bytes {
+            try Task.checkCancellation()
+            total += 1
+            guard total <= 16 * 1024 * 1024, line.count <= 1024 * 1024 else { throw invalid }
+            if byte == 10 && previousCR { previousCR = false; continue }
+            previousCR = byte == 13
+            if byte != 10 && byte != 13 { line.append(byte); continue }
+            try await parser.line(line, event: &event)
+            line.removeAll(keepingCapacity: true)
+        }
+        if !line.isEmpty { try await parser.line(line, event: &event) }
+        if !event.isEmpty { try await parser.event(event) }
+        guard parser.completed else { throw invalid }
+        // Execute no tool from a failed/truncated stream. Foundation Models
+        // owns the call loop and invokes Tools only after this executor returns.
+        for key in parser.callOrder {
+            try Task.checkCancellation()
+            guard let call = parser.calls[key],
+                  let object = try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)),
+                  object is [String: Any] else { throw invalid }
+        }
+        for key in parser.callOrder {
+            guard let call = parser.calls[key] else { throw invalid }
+            await channel.send(.toolCalls(action: .toolCall(
+                id: call.id, name: call.name,
+                action: .appendArguments(call.arguments, tokenCount: 0)
+            )))
+        }
+    }
+
+    private mutating func line(_ data: Data, event: inout Data) async throws {
+        guard var line = String(data: data, encoding: .utf8) else { throw Self.invalid }
+        if line.hasSuffix("\r") { line.removeLast() }
+        if line.isEmpty {
+            if !event.isEmpty { try await self.event(event); event.removeAll(keepingCapacity: true) }
+        } else if line.hasPrefix("data:") {
+            var value = line.dropFirst(5)
+            if value.first == " " { value = value.dropFirst() }
+            if !event.isEmpty { event.append(10) }
+            event.append(contentsOf: value.utf8)
+            guard event.count <= 2 * 1024 * 1024 else { throw Self.invalid }
+        }
+    }
+
+    private mutating func event(_ data: Data) async throws {
+        if data == Data("[DONE]".utf8) {
+            guard completed else { throw Self.invalid }
+            return
+        }
+        guard !completed, let event = try? JSONDecoder().decode(Event.self, from: data) else { throw Self.invalid }
+        switch event.type {
+        case "response.output_text.delta":
+            guard let delta = event.delta else { throw Self.invalid }
+            let key = "\(event.item_id ?? "response"):\(event.content_index ?? 0)"
+            textBySegment[key, default: ""] += delta
+            textSeen = textSeen || !delta.isEmpty
+            await channel.send(.response(action: .appendText(delta, segmentID: key, tokenCount: 0)))
+        case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+            guard let delta = event.delta else { throw Self.invalid }
+            let key = "\(event.item_id ?? "reasoning"):\(event.summary_index ?? 0)"
+            reasoningBySegment[key, default: ""] += delta
+            await channel.send(.reasoning(entryID: event.item_id, action: .appendText(delta, segmentID: key, tokenCount: 0)))
+        case "response.output_item.added", "response.output_item.done":
+            guard let item = event.item else { throw Self.invalid }
+            try await reconcile(item, done: event.type == "response.output_item.done")
+        case "response.function_call_arguments.delta":
+            guard let id = event.item_id, let delta = event.delta, var call = calls[id] else { throw Self.invalid }
+            call.arguments += delta
+            guard call.arguments.utf8.count <= 1024 * 1024 else { throw Self.invalid }
+            calls[id] = call
+        case "response.completed":
+            guard let response = event.response, response.status == nil || response.status == "completed" else {
+                throw Self.invalid
+            }
+            for item in response.output ?? [] { try await reconcile(item, done: true) }
+            guard textSeen || !calls.isEmpty else { throw Self.invalid }
+            var metadata = ["latchway_generation_id": generationID]
+            if let correlationID { metadata["latchway_request_id"] = correlationID }
+            if let id = response.id { metadata["response_id"] = id }
+            if calls.isEmpty {
+                await channel.send(.response(action: .updateMetadata(metadata)))
+            } else {
+                await channel.send(.toolCalls(action: .updateMetadata(metadata)))
+            }
+            if let usage = response.usage {
+                let cached = usage.input_tokens_details?.cached_tokens ?? 0
+                let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
+                guard usage.input_tokens >= 0, usage.output_tokens >= 0,
+                      cached >= 0, cached <= usage.input_tokens, reasoning >= 0, reasoning <= usage.output_tokens else {
+                    throw Self.invalid
+                }
+                let input = LanguageModelExecutorGenerationChannel.Usage.Input(totalTokenCount: usage.input_tokens, cachedTokenCount: cached)
+                let output = LanguageModelExecutorGenerationChannel.Usage.Output(totalTokenCount: usage.output_tokens, reasoningTokenCount: reasoning)
+                if calls.isEmpty { await channel.send(.response(action: .updateUsage(input: input, output: output))) }
+                else { await channel.send(.toolCalls(action: .updateUsage(input: input, output: output))) }
+            }
+            completed = true
+        case "response.refusal.delta", "response.refusal.done":
+            throw Self.refusal
+        case "response.failed", "response.incomplete", "error":
+            throw Self.invalid
+        default:
+            // Lifecycle/annotation events carry no generation delta. They
+            // never count as completion and cannot trigger a tool invocation.
+            break
+        }
+    }
+
+    private mutating func reconcile(_ item: Item, done: Bool) async throws {
+        switch item.type {
+        case "function_call":
+            guard let id = item.id, let callID = item.call_id, let name = item.name,
+                  !id.isEmpty, !callID.isEmpty, enabled.contains(name),
+                  (item.arguments?.utf8.count ?? 0) <= 1024 * 1024 else { throw Self.invalid }
+            if let existing = calls[id] {
+                guard existing.id == callID, existing.name == name else { throw Self.invalid }
+                if done, let arguments = item.arguments {
+                    guard existing.arguments.isEmpty || arguments == existing.arguments else { throw Self.invalid }
+                    calls[id]?.arguments = arguments
+                }
+            } else {
+                guard calls.count < 128, !calls.values.contains(where: { $0.id == callID }) else { throw Self.invalid }
+                calls[id] = Call(id: callID, name: name, arguments: item.arguments ?? "")
+                callOrder.append(id)
+            }
+        case "message":
+            guard done else { return }
+            for (index, part) in (item.content ?? []).enumerated() {
+                if part.type == "refusal" { throw Self.refusal }
+                guard part.type == "output_text", let text = part.text else { throw Self.invalid }
+                let key = "\(item.id ?? "response"):\(index)"
+                if let existing = textBySegment[key] {
+                    guard existing == text else { throw Self.invalid }
+                } else {
+                    textBySegment[key] = text
+                    textSeen = textSeen || !text.isEmpty
+                    await channel.send(.response(action: .appendText(text, segmentID: key, tokenCount: 0)))
+                }
+            }
+        case "reasoning":
+            guard done else { return }
+            for (index, part) in (item.summary ?? []).enumerated() {
+                guard part.type == "summary_text", let text = part.text else { throw Self.invalid }
+                let key = "\(item.id ?? "reasoning"):\(index)"
+                if let existing = reasoningBySegment[key] {
+                    guard existing == text else { throw Self.invalid }
+                } else {
+                    reasoningBySegment[key] = text
+                    await channel.send(.reasoning(entryID: item.id, action: .appendText(text, segmentID: key, tokenCount: 0)))
+                }
+            }
+            if let encrypted = item.encrypted_content {
+                await channel.send(.reasoning(entryID: item.id, action: .updateSignature(Data(encrypted.utf8), tokenCount: 0)))
+            }
+        default: throw Self.invalid
+        }
+    }
+
+    private static var invalid: LatchwayFoundationModelsError { .invalidGatewayStream }
+    private static var refusal: LanguageModelError {
+        .refusal(.init(explanation: "The upstream model declined this request.", debugDescription: "Responses reported a refusal."))
+    }
+}
+#endif
+```
+
+### `frameworks/foundation-models.swift`
+
+Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L1-L165)
+
+```swift
+#if canImport(FoundationModels) && compiler(>=6.4)
+@preconcurrency import Foundation
+import FoundationModels
+#if !COCOAPODS
+import Latchway
+#endif
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public enum LatchwayFoundationModelsError: Error, Sendable, LocalizedError {
+    case invalidTranscript
+    case unsupportedSamplingMode
+    case gateway(statusCode: Int, requestID: String?)
+    case invalidGatewayStream
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidTranscript:
+            "The Foundation Models request contains invalid, incomplete, or oversized content."
+        case .unsupportedSamplingMode:
+            "The Responses backend cannot honor this seeded or unknown sampling mode. Use an unseeded greedy, top-p, or supported top-k mode."
+        case let .gateway(statusCode, requestID):
+            "Latchway returned HTTP \(statusCode)\(requestID.map { " (request \($0))" } ?? "")."
+        case .invalidGatewayStream:
+            "Latchway returned an invalid or incomplete Responses stream."
+        }
+    }
+
+    /// Stable redaction-safe code for adapter-local failures.
+    public var code: String {
+        switch self {
+        case .invalidTranscript: "foundation_models_invalid_transcript"
+        case .unsupportedSamplingMode: "foundation_models_sampling_unsupported"
+        case .gateway: "foundation_models_gateway_error"
+        case .invalidGatewayStream: "foundation_models_gateway_stream_invalid"
+        }
+    }
+
+    /// Stable public remediation documentation for ``code``.
+    public var documentationURL: URL {
+        URL(string: "https://docs.latchway.dev/errors/\(code.replacingOccurrences(of: "_", with: "-"))")!
+    }
+}
+
 /// A Foundation Models custom provider backed by a feature-bound Latchway
-/// Responses transport. Its capability declaration is intentionally empty:
-/// v1 supports text transcripts and streaming, while guided generation,
-/// attachments, reasoning, and tool calling fail explicitly until their wire
-/// translations pass conformance.
+/// Responses transport. The server-selected physical model must support the
+/// requested tools, JSON Schema guides, and reasoning level. No provider key
+/// or physical model selector is exposed to the application.
 @available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
 @available(tvOS, unavailable)
 public struct LatchwayLanguageModel: LanguageModel, Sendable {
@@ -83,7 +607,7 @@ public struct LatchwayLanguageModel: LanguageModel, Sendable {
 
     public typealias Executor = LatchwayLanguageModelExecutor
 
-    public let capabilities = LanguageModelCapabilities([])
+    public let capabilities = LanguageModelCapabilities([.guidedGeneration, .toolCalling, .reasoning])
     public let executorConfiguration: Configuration
 
     public init(configuration: Configuration) {
@@ -139,28 +663,12 @@ public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
         streamingInto channel: LanguageModelExecutorGenerationChannel
     ) async throws {
         try Task.checkCancellation()
-        if request.schema != nil {
-            throw LanguageModelError.unsupportedGenerationGuide(.init(
-                schemaName: nil,
-                debugDescription: "Latchway v1 does not yet translate Foundation Models generation schemas."
-            ))
-        }
-        if !request.enabledToolDefinitions.isEmpty {
-            throw LanguageModelError.unsupportedCapability(.init(
-                capability: .toolCalling,
-                debugDescription: "Latchway v1 does not yet translate Foundation Models tool calls."
-            ))
-        }
-        if request.generationOptions.samplingMode != nil {
-            throw LatchwayFoundationModelsError.unsupportedSamplingMode
-        }
-
-        let body = try Self.makeRequestBody(from: request)
+        let body = try FoundationModelsRequest.encode(request)
         var urlRequest = URLRequest(
             url: try configuration.transport.endpoint(path: "v1/responses")
         )
         urlRequest.httpMethod = "POST"
-        urlRequest.httpBody = try JSONEncoder().encode(body)
+        urlRequest.httpBody = body
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
@@ -170,56 +678,32 @@ public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
             throw Self.gatewayError(from: stream.response)
         }
 
-        var receivedTerminalEvent = false
-        for try await line in stream.bytes.lines {
-            try Task.checkCancellation()
-            guard line.hasPrefix("data:") else { continue }
-            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-            if payload == "[DONE]" {
-                receivedTerminalEvent = true
-                break
-            }
-            guard let data = payload.data(using: .utf8),
-                  let event = try? JSONDecoder().decode(ResponsesEvent.self, from: data)
-            else { throw LatchwayFoundationModelsError.invalidGatewayStream }
-            switch event.type {
-            case "response.output_text.delta":
-                guard let delta = event.delta else {
-                    throw LatchwayFoundationModelsError.invalidGatewayStream
-                }
-                await channel.send(.response(action: .appendText(delta, tokenCount: 0)))
-            case "response.completed":
-                if let usage = event.response?.usage {
-                    await channel.send(.response(action: .updateUsage(
-                        input: .init(
-                            totalTokenCount: usage.inputTokens,
-                            cachedTokenCount: usage.inputTokensDetails?.cachedTokens ?? 0
-                        ),
-                        output: .init(
-                            totalTokenCount: usage.outputTokens,
-                            reasoningTokenCount: usage.outputTokensDetails?.reasoningTokens ?? 0
-                        )
-                    )))
-                }
-                receivedTerminalEvent = true
-            case "response.failed", "error":
-                throw LatchwayFoundationModelsError.gateway(
-                    statusCode: stream.response.statusCode,
-                    requestID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
-                )
-            default:
-                continue
-            }
-        }
-        guard receivedTerminalEvent else {
-            throw LatchwayFoundationModelsError.invalidGatewayStream
-        }
+        try await FoundationModelsStream.consume(stream, request: request, channel: channel)
+        stream.finish()
     }
+
+    private static func gatewayError(from response: HTTPURLResponse) -> Error {
+        if response.statusCode == 429 {
+            return LanguageModelError.rateLimited(.init(
+                resetDate: nil,
+                debugDescription: "Latchway quota or rate limit exceeded.",
+                metadata: [
+                    "request_id": response.value(forHTTPHeaderField: "X-Latchway-Request-ID") ?? "unknown",
+                ]
+            ))
+        }
+        return LatchwayFoundationModelsError.gateway(
+            statusCode: response.statusCode,
+            requestID: response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
+        )
+    }
+}
+#endif
 ```
 
 ### `frameworks/swift-openai.swift`
 
-Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/92a394acbc00d1af6d258372f22b11ddae8e1750/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
+Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
 
 ```swift
 public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
@@ -315,7 +799,7 @@ public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
 
 ### `quickstart/app-extension-component.swift`
 
-Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/92a394acbc00d1af6d258372f22b11ddae8e1750/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L37-L89)
+Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L37-L89)
 
 ```swift
     func prepareWidget() async {
@@ -373,9 +857,98 @@ Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://gi
     }
 ```
 
+### `quickstart/supplied-identity.md`
+
+Source: [Documentation/SuppliedIdentity.md](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Documentation/SuppliedIdentity.md#L1-L82)
+
+````text
+# Developer-supplied identity (1.2.0)
+
+The application authenticates its user. Latchway accepts the resulting ID token,
+verifies it through the gateway, and owns device-bound shared native sessions.
+Core, App Attest and the React Native bridge do not depend on Firebase.
+
+```swift
+import Latchway
+import LatchwayAppAttest
+
+let app = try await LatchwayApp.configure(.init(
+    baseURL: URL(string: "https://gateway.example.com")!,
+    applicationID: "your-latchway-application-id",
+    environment: "development",
+    rootKeychainAccessGroup: "YOURTEAM.your.signed.bundle.id",
+    suppliedIdentity: try .firebaseProject(projectID: "your-project-id")
+))
+
+// Existing application auth code obtains this token; Latchway imports no Auth SDK.
+let account = try await app.signIn { try await yourAuth.currentIDToken() }
+let client = try await account.makeClient()
+
+// Existing auth flow obtained a new token for the SAME account.
+try await account.updateIdToken { try await yourAuth.currentIDToken() }
+
+// Offline Latchway logout, shared by RN and native. External auth logout is yours.
+try await account.logout()
+```
+
+Already have a current token? Use `app.signIn(idToken:)` and
+`account.updateIdToken(_:)`. Async producers capture a native transition ticket
+before token retrieval; cancelling the Swift task invalidates pending work.
+
+For a non-Firebase gateway-supported issuer, use
+`LatchwaySuppliedIdentityConfiguration(providerID:issuer:audience:tenantID:)`.
+`firebaseProject` only derives public issuer/audience values; it does not fetch,
+persist or validate the signature of a token. The gateway authenticates tokens.
+
+## Either team can configure first
+
+Equivalent `configure` calls join one process-wide native app. Omitted settings
+inherit existing settings. Conflicting explicit settings fail without replacing
+the account. Native and RN must use the same gateway/application/environment,
+JWT metadata, root Keychain group and platform policy. No owner transfer or
+native-team Latchway bootstrap is needed. A second surface joins with
+`try await app.makeClient()` or `try await app.currentAccount()` without signing in.
+
+The App Attest module supplies the default attestation factory through the
+two-argument `configure` overload. Apps still enable App Attest and provide the
+actual signed root Keychain group. Unknown legacy extension/custom stores still
+require explicit migration inventory; do not supply an invented empty list.
+
+## Account and token lifetime
+
+- ID tokens remain in native memory only, never Keychain or diagnostics. An
+  RN-created account therefore survives JS destruction while its token is fresh.
+- Missing/expired identity yields `identityRefreshRequired`; it does not log out.
+  A same-user gateway-verified update resumes that account. The SDK cannot refresh
+  an external provider token or observe a sign-out the app did not report.
+- Forward external sign-out/account changes through these APIs. Keep one
+  application auth lifecycle, not independent screen-owned login listeners.
+- `app.restore` resumes only an unretired matching account or a fresh app. It
+  never undoes a persisted logout; a later accepted login calls `signIn` explicitly.
+- A new user requires `signIn`, which retires the previous account first. Old
+  account handles cannot refresh or log out a later user, including A → B → A.
+- Closing a client releases that client only. `account.logout()` fences native
+  and RN requests and components without resetting server per-user quotas.
+- Serialize your provider's account mutations; Latchway does not call Firebase
+  `signOut`, register hidden listeners, or control third-party auth changes.
+
+## Server requirements
+
+Use server 1.1.1 or later. Shared mode uses wire 3 with required native-host attestation and allowed shared
+callers. Discovery must advertise `supplied_identity_v1` and the canonical
+`/client/v1/sessions/identity` endpoint. Unsupported servers fail explicitly.
+Initial sign-in establishes an attested session. Token updates prove possession
+of its refresh grant and the installation's DPoP key and verify the new token;
+they do not rotate keys, change users or reset quotas. Refresh credentials that
+have expired require attested re-establishment without reviving a retired login.
+
+The legacy authority APIs remain available, but are a separate mode. A live
+custom/JS-owned registration is never silently replaced by supplied identity.
+````
+
 ### `quickstart/url-session.swift`
 
-Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/92a394acbc00d1af6d258372f22b11ddae8e1750/Examples/BasicURLSession/BasicURLSession.swift#L1-L247)
+Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Examples/BasicURLSession/BasicURLSession.swift#L1-L247)
 
 ```swift
 @preconcurrency import Foundation

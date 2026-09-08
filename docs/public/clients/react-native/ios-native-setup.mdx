@@ -4,9 +4,9 @@ description: "Wire CocoaPods, App Attest, bundle identity, Keychain groups, and 
 icon: "apple"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
@@ -35,9 +35,18 @@ entitlements rather than inferring expansion from the Xcode project.
 
 Require App Attest and disallow software-key fallback for the protected root.
 Match the App Attest entitlement and signing category to the selected environment.
-Server 1.0.3 permits native `ios` and `react_native_ios` main-app roots to share
-the signed bundle only when both are directly App Attest verified. Configure
-each platform explicitly; adding one does not automatically authorize the other.
+For shared native/RN mode, configure the gateway's native `ios` host with an
+explicit `sharedNativeCallers` policy admitting the intended callers and
+required direct App Attest. Existing standalone `ios` / `react_native_ios`
+root-pair policies remain compatible; upgrading does not merge them or widen
+their permissions automatically.
+
+No Firebase package, application-delegate authentication code or native
+Latchway bootstrap is required for the supplied-identity API. React Native
+calls `Latchway.configure` with the signed group and public identity metadata.
+Native can configure before or after it with equivalent settings. If the host
+uses Latchway natively, resolve the same iOS 1.2.0 SDK copy instead of linking
+another version through Swift Package Manager and CocoaPods simultaneously.
 
 ## Keep the bridge narrow
 
@@ -45,9 +54,10 @@ The TypeScript layer may supply non-secret configuration and a current external
 identity token. It must not supply or receive an App Attest challenge, raw
 evidence, DPoP private key, access token, refresh token, or provider credential.
 
-Equivalent JavaScript clients in one runtime share the same native security
-scope. Conflicting gateway, application, environment, Keychain, or trust
-configuration must fail closed.
+Native and React Native share the same process-wide account and security scope.
+Conflicting explicit gateway, app name, application, environment, identity,
+Keychain or trust configuration fails closed. Use the shared account's logout
+for sign-out; disposing a screen client does not log out native callers.
 
 ## Verify
 

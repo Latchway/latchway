@@ -1,52 +1,72 @@
 ---
 title: "Install the React Native SDK"
-description: "Install the published npm package and its locked CocoaPods and Maven dependencies in a React Native application."
+description: "Install the minimal React Native package and compatible native SDKs for application-owned authentication."
 icon: "package"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
-<Badge color="blue">npm 1.1.2</Badge> <Badge color="purple">Native dependencies</Badge>
+<Badge color="blue">SDK 1.2.0</Badge> <Badge color="purple">Native dependencies</Badge>
 
 ## Outcome
 
 The application resolves `@latchway/react-native` and the exact reviewed iOS,
-Android, JavaScript, contract, and gateway compatibility coordinates without
-using local source overrides.
+Android, JavaScript, contract, and gateway compatibility coordinates. Confirm
+the package's publication in [Release status](/release-status) before installing
+a newly prepared release; source validation alone is not a registry receipt.
 
 ## Meet the baseline
 
-- React Native 0.82.x with the New Architecture enabled;
+- React Native `>=0.74.0 <1.0.0` and React `^18.2.0 || ^19.0.0`, with the New
+  Architecture enabled;
 - iOS 15+ and the version-locked Latchway CocoaPods/Swift source;
 - Android API 24+ and the version-locked `dev.latchway` source modules; and
 - the repository-pinned Node, pnpm, CocoaPods, Gradle, Java, and Android
   toolchains used by the example.
 
-Legacy Architecture behavior and Expo-managed integration are not claimed by
-the source candidate.
+These are supported peer ranges, not a claim that every future React Native
+version has been tested. Use a compatible React/React Native pair from your
+host application. Legacy Architecture and Expo-managed integration are not
+claimed. The Android libraries compile against API 34; the host and other
+dependencies may require a newer compile or target SDK.
 
 ## Install in an application
 
 ```bash
-npm install --save-exact @latchway/react-native@1.1.2
+npm install --save-exact @latchway/react-native@1.2.0
 cd ios
 bundle exec pod install
 cd ..
 ```
 
 Use `pod install` if the host does not use Bundler. The npm podspec resolves
-`Latchway/AppAttest` 1.0.0; Gradle resolves the locked `dev.latchway` 1.0.0
+`Latchway/AppAttest` 1.2.0; Gradle resolves the locked `dev.latchway` 1.1.0
 artifacts from Maven Central. Do not add local SDK paths or a second native
 implementation. Rebuild the native app after installation; a JS reload is not enough.
 
-The base SDK requires only `@latchway/client` 1.0.0 and a private stream fallback.
+The base SDK requires only `@latchway/client` 1.1.0 and a private stream fallback.
 It does not install LangChain or initialize global runtime polyfills. For that
 integration, follow [framework setup](/clients/react-native/framework-integrations)
-before importing dependent libraries. Reuse the host's Firebase App/Auth stack.
+before importing dependent libraries. There is no Firebase dependency or
+Latchway-specific native bootstrap. Supply public identity metadata and a
+current ID token from your application's existing authentication system.
+
+## Standalone and embedded React Native
+
+Both use `Latchway.configure`. Matching native and React Native configuration
+joins the same process-wide app and account regardless of which side configured
+first. Do not install another native SDK copy or create an extra authentication
+owner for the React Native screen. Conflicting explicit configuration fails with
+`configuration_conflict` instead of silently changing the shared app.
+
+App Attest entitlements, the signed private root Keychain group and Play
+Integrity configuration are still native host setup. An SDK cannot grant those
+permissions from JavaScript. Follow [authentication](/clients/react-native/authentication)
+for sign-in, token refresh and shared logout.
 
 ## Develop the SDK workspace
 

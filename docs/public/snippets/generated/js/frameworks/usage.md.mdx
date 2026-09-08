@@ -1,0 +1,144 @@
+<Info>
+  Generated from [docs/framework-integrations.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/framework-integrations.md#L1-L138) at documentation source commit `b6f1eab929a5cb7b7656448f28d0edd2b4970d93` for SDK `v1.1.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `70e4034b9029eae1ff2df070dca99e3aadba232cc3c8f5ef9b2cba6c4af5a7b2`.
+</Info>
+
+````text
+# Framework integrations
+
+Latchway framework packages are thin adapters over the public
+`AuthenticatedTransport` interface. Applications continue to use framework
+messages, tools, output schemas, streams, callbacks, and errors. Every adapter
+binds one Latchway feature and injects a request-time fetch; it does not cache
+an Authorization or DPoP header.
+
+The versions below are the exact packages exercised by this repository. The
+canonical core `compatibility/frameworks.yaml` registry records these
+JavaScript integrations as `experimental`; hosted common conformance remains
+required before stronger support claims. The local minimum and latest profiles
+are intentionally the same exact versions. A scheduled job observes newer
+releases only inside bounded candidate majors and never widens the supported
+range automatically.
+
+| Package | Framework package tested | Injection seam | Local evidence |
+| --- | --- | --- | --- |
+| `@latchway/openai` | `openai` 7.8.0 | official custom `fetch` and `baseURL` | Responses, Chat, embeddings, SSE usage, Chat/Responses tools and schemas, timeout/cancellation, request IDs, and error/retry mapping |
+| `@latchway/vercel-ai` | `ai` 7.0.85 and `@ai-sdk/openai` 4.0.52 | custom provider backed by a custom `fetch` | Responses/Chat `generateText`, embeddings, incremental `streamText`, middleware, telemetry lifecycle/recording options, timeout/cancellation, tools/typed output, and error/retry mapping |
+| `@latchway/langchain` | `@langchain/openai` 1.5.10 | underlying OpenAI client `configuration.fetch` | Chat, embeddings, streaming usage, bounded batches, isolated batch errors, batch cancellation, timeout/cancellation, tools/structured output, and error/retry mapping |
+
+## OpenAI JavaScript SDK
+
+```ts
+import { createLatchwayOpenAI } from "@latchway/openai";
+
+const openai = createLatchwayOpenAI({
+  latchway,
+  feature: "habit_assistant",
+  clientOptions: { timeout: 30_000, maxRetries: 0 },
+});
+
+const response = await openai.responses.create({
+  model: "latchway",
+  input: "Summarize today",
+});
+```
+
+The official SDK currently requires a model field and API-key constructor
+value. The adapter supplies non-secret compatibility placeholders; Latchway's
+transport removes the placeholder Authorization header before dispatch. The
+server selects and rewrites the physical model. `clientOptions` deliberately
+excludes `apiKey`, `baseURL`, and arbitrary default headers so application code
+cannot replace the authenticated boundary.
+
+OpenAI's SDK-level retries return through the custom fetch and therefore obtain
+a current session and fresh proof. Latchway itself performs only the one safe
+nonce retry and one pre-dispatch session-expiry retry. Set `maxRetries: 0` when
+the application requires a single framework attempt.
+
+## Vercel AI SDK
+
+```ts
+import { generateText, streamText } from "ai";
+import { createLatchwayProvider } from "@latchway/vercel-ai";
+
+const latchwayAI = createLatchwayProvider({ client: latchway });
+
+const result = await generateText({
+  model: latchwayAI("habit_assistant"),
+  prompt: "Summarize today",
+});
+
+const stream = streamText({
+  model: latchwayAI.chat("habit_assistant"),
+  prompt: "Summarize today",
+});
+```
+
+The provider exposes feature selectors, not physical provider/model selectors.
+`responses`, `chat`, and `embedding` choose the corresponding OpenAI-compatible
+wire surface while preserving AI SDK request/response objects.
+
+AI SDK telemetry integrations are application-owned observers. Latchway
+preserves `recordInputs` and `recordOutputs`, but those flags do not redact the
+event objects delivered to a custom integration; treat every custom telemetry
+integration as trusted code with access to prompts and generated content.
+
+## LangChain.js
+
+```ts
+import {
+  createLatchwayChatOpenAI,
+  createLatchwayEmbeddings,
+} from "@latchway/langchain";
+
+const chat = createLatchwayChatOpenAI({
+  latchway,
+  feature: "journal_analysis",
+});
+
+const embeddings = createLatchwayEmbeddings({
+  latchway,
+  feature: "semantic_search",
+});
+
+const message = await chat.invoke("Find this week's themes");
+const vector = await embeddings.embedQuery("sleep quality");
+```
+
+The adapter removes API-key, model, and underlying client configuration from
+its public option types. Embeddings request float encoding because Latchway's
+OpenAI-compatible response returns numeric vectors.
+
+## Security and accounting boundary
+
+- Never pass a provider API key to an adapter or add one through framework
+  headers or query parameters.
+- The adapter records its exact framework identifier and package version in
+  `X-Latchway-Framework` and `X-Latchway-Framework-Version`.
+- The base transport enforces the gateway origin, declared route/method,
+  feature namespace, redirect policy, placeholder stripping, replay rules,
+  cancellation, and streaming.
+- Trusted input-token preflight is performed by the server after physical
+  model selection and request rewriting. Client token counters and model
+  placeholders are never authoritative quota inputs.
+- Provider-compatible final HTTP failures remain framework-visible. Session
+  and protocol setup failures surface as `LatchwayError` before framework
+  dispatch.
+- Adapters mirror `X-Latchway-Request-ID` to the conventional
+  `X-Request-ID` response header without buffering the body, allowing the
+  underlying OpenAI-compatible clients to retain the Latchway correlation ID.
+
+## Current limitations
+
+The case-ID local harness proves the applicable authentication boundary,
+Responses/Chat/embeddings surfaces, incremental streaming and usage,
+AbortSignal and timeout propagation, safe headers, tools, structured output,
+success correlation, Vercel AI middleware and telemetry option behavior, LangChain
+batch concurrency/error/cancellation semantics, quota/provider errors, session
+refresh, framework retries with fresh proofs, placeholder stripping, origin
+rejection, redaction, and lack of global-fetch mutation. It uses a
+protocol-valid in-memory gateway and debug attestation, so it is not hosted or
+exact-image evidence.
+Revocation, real identity reauthentication, live providers, audio, image, and
+remote-file surfaces still require server/environment evidence before a
+support claim.
+````

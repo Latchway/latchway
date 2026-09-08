@@ -1,0 +1,253 @@
+<Info>
+  Generated from [Sources/LatchwayFoundationModels/FoundationModelsStream.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Sources/LatchwayFoundationModels/FoundationModelsStream.swift#L1-L247) at documentation source commit `37f46733d95e659230f460f44f3ecbd7c7d03a14` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274`.
+</Info>
+
+```swift
+#if canImport(FoundationModels) && compiler(>=6.4)
+import Foundation
+import FoundationModels
+#if !COCOAPODS
+import Latchway
+#endif
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+struct FoundationModelsStream {
+    private struct Event: Decodable {
+        var type: String
+        var delta: String?
+        var item_id: String?
+        var content_index: Int?
+        var summary_index: Int?
+        var item: Item?
+        var response: Response?
+    }
+    private struct Item: Decodable {
+        var type: String
+        var id: String?
+        var call_id: String?
+        var name: String?
+        var arguments: String?
+        var content: [Part]?
+        var summary: [Part]?
+        var encrypted_content: String?
+    }
+    private struct Part: Decodable {
+        var type: String
+        var text: String?
+        var refusal: String?
+    }
+    private struct Response: Decodable {
+        var id: String?
+        var status: String?
+        var output: [Item]?
+        var usage: Usage?
+    }
+    private struct Usage: Decodable {
+        struct InputDetails: Decodable { var cached_tokens: Int? }
+        struct OutputDetails: Decodable { var reasoning_tokens: Int? }
+        var input_tokens: Int
+        var output_tokens: Int
+        var input_tokens_details: InputDetails?
+        var output_tokens_details: OutputDetails?
+    }
+    private struct Call {
+        var id: String
+        var name: String
+        var arguments: String
+    }
+
+    private var completed = false
+    private var textSeen = false
+    private var callOrder: [String] = []
+    private var calls: [String: Call] = [:]
+    private var textBySegment: [String: String] = [:]
+    private var reasoningBySegment: [String: String] = [:]
+    private let enabled: Set<String>
+    private let generationID: String
+    private let correlationID: String?
+    private let channel: LanguageModelExecutorGenerationChannel
+
+    static func consume(
+        _ stream: LatchwayStreamingResponse,
+        request: LanguageModelExecutorGenerationRequest,
+        channel: LanguageModelExecutorGenerationChannel
+    ) async throws {
+        let contentType = stream.response.value(forHTTPHeaderField: "Content-Type") ?? ""
+        guard contentType.lowercased().hasPrefix("text/event-stream") else { throw invalid }
+        var parser = Self(
+            enabled: request.generationOptions.toolCallingMode?.kind == .disallowed
+                ? [] : Set(request.enabledToolDefinitions.map(\.name)),
+            generationID: request.id.uuidString,
+            correlationID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID"),
+            channel: channel
+        )
+        var line = Data()
+        var event = Data()
+        var total = 0
+        var previousCR = false
+        for try await byte in stream.bytes {
+            try Task.checkCancellation()
+            total += 1
+            guard total <= 16 * 1024 * 1024, line.count <= 1024 * 1024 else { throw invalid }
+            if byte == 10 && previousCR { previousCR = false; continue }
+            previousCR = byte == 13
+            if byte != 10 && byte != 13 { line.append(byte); continue }
+            try await parser.line(line, event: &event)
+            line.removeAll(keepingCapacity: true)
+        }
+        if !line.isEmpty { try await parser.line(line, event: &event) }
+        if !event.isEmpty { try await parser.event(event) }
+        guard parser.completed else { throw invalid }
+        // Execute no tool from a failed/truncated stream. Foundation Models
+        // owns the call loop and invokes Tools only after this executor returns.
+        for key in parser.callOrder {
+            try Task.checkCancellation()
+            guard let call = parser.calls[key],
+                  let object = try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)),
+                  object is [String: Any] else { throw invalid }
+        }
+        for key in parser.callOrder {
+            guard let call = parser.calls[key] else { throw invalid }
+            await channel.send(.toolCalls(action: .toolCall(
+                id: call.id, name: call.name,
+                action: .appendArguments(call.arguments, tokenCount: 0)
+            )))
+        }
+    }
+
+    private mutating func line(_ data: Data, event: inout Data) async throws {
+        guard var line = String(data: data, encoding: .utf8) else { throw Self.invalid }
+        if line.hasSuffix("\r") { line.removeLast() }
+        if line.isEmpty {
+            if !event.isEmpty { try await self.event(event); event.removeAll(keepingCapacity: true) }
+        } else if line.hasPrefix("data:") {
+            var value = line.dropFirst(5)
+            if value.first == " " { value = value.dropFirst() }
+            if !event.isEmpty { event.append(10) }
+            event.append(contentsOf: value.utf8)
+            guard event.count <= 2 * 1024 * 1024 else { throw Self.invalid }
+        }
+    }
+
+    private mutating func event(_ data: Data) async throws {
+        if data == Data("[DONE]".utf8) {
+            guard completed else { throw Self.invalid }
+            return
+        }
+        guard !completed, let event = try? JSONDecoder().decode(Event.self, from: data) else { throw Self.invalid }
+        switch event.type {
+        case "response.output_text.delta":
+            guard let delta = event.delta else { throw Self.invalid }
+            let key = "\(event.item_id ?? "response"):\(event.content_index ?? 0)"
+            textBySegment[key, default: ""] += delta
+            textSeen = textSeen || !delta.isEmpty
+            await channel.send(.response(action: .appendText(delta, segmentID: key, tokenCount: 0)))
+        case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+            guard let delta = event.delta else { throw Self.invalid }
+            let key = "\(event.item_id ?? "reasoning"):\(event.summary_index ?? 0)"
+            reasoningBySegment[key, default: ""] += delta
+            await channel.send(.reasoning(entryID: event.item_id, action: .appendText(delta, segmentID: key, tokenCount: 0)))
+        case "response.output_item.added", "response.output_item.done":
+            guard let item = event.item else { throw Self.invalid }
+            try await reconcile(item, done: event.type == "response.output_item.done")
+        case "response.function_call_arguments.delta":
+            guard let id = event.item_id, let delta = event.delta, var call = calls[id] else { throw Self.invalid }
+            call.arguments += delta
+            guard call.arguments.utf8.count <= 1024 * 1024 else { throw Self.invalid }
+            calls[id] = call
+        case "response.completed":
+            guard let response = event.response, response.status == nil || response.status == "completed" else {
+                throw Self.invalid
+            }
+            for item in response.output ?? [] { try await reconcile(item, done: true) }
+            guard textSeen || !calls.isEmpty else { throw Self.invalid }
+            var metadata = ["latchway_generation_id": generationID]
+            if let correlationID { metadata["latchway_request_id"] = correlationID }
+            if let id = response.id { metadata["response_id"] = id }
+            if calls.isEmpty {
+                await channel.send(.response(action: .updateMetadata(metadata)))
+            } else {
+                await channel.send(.toolCalls(action: .updateMetadata(metadata)))
+            }
+            if let usage = response.usage {
+                let cached = usage.input_tokens_details?.cached_tokens ?? 0
+                let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
+                guard usage.input_tokens >= 0, usage.output_tokens >= 0,
+                      cached >= 0, cached <= usage.input_tokens, reasoning >= 0, reasoning <= usage.output_tokens else {
+                    throw Self.invalid
+                }
+                let input = LanguageModelExecutorGenerationChannel.Usage.Input(totalTokenCount: usage.input_tokens, cachedTokenCount: cached)
+                let output = LanguageModelExecutorGenerationChannel.Usage.Output(totalTokenCount: usage.output_tokens, reasoningTokenCount: reasoning)
+                if calls.isEmpty { await channel.send(.response(action: .updateUsage(input: input, output: output))) }
+                else { await channel.send(.toolCalls(action: .updateUsage(input: input, output: output))) }
+            }
+            completed = true
+        case "response.refusal.delta", "response.refusal.done":
+            throw Self.refusal
+        case "response.failed", "response.incomplete", "error":
+            throw Self.invalid
+        default:
+            // Lifecycle/annotation events carry no generation delta. They
+            // never count as completion and cannot trigger a tool invocation.
+            break
+        }
+    }
+
+    private mutating func reconcile(_ item: Item, done: Bool) async throws {
+        switch item.type {
+        case "function_call":
+            guard let id = item.id, let callID = item.call_id, let name = item.name,
+                  !id.isEmpty, !callID.isEmpty, enabled.contains(name),
+                  (item.arguments?.utf8.count ?? 0) <= 1024 * 1024 else { throw Self.invalid }
+            if let existing = calls[id] {
+                guard existing.id == callID, existing.name == name else { throw Self.invalid }
+                if done, let arguments = item.arguments {
+                    guard existing.arguments.isEmpty || arguments == existing.arguments else { throw Self.invalid }
+                    calls[id]?.arguments = arguments
+                }
+            } else {
+                guard calls.count < 128, !calls.values.contains(where: { $0.id == callID }) else { throw Self.invalid }
+                calls[id] = Call(id: callID, name: name, arguments: item.arguments ?? "")
+                callOrder.append(id)
+            }
+        case "message":
+            guard done else { return }
+            for (index, part) in (item.content ?? []).enumerated() {
+                if part.type == "refusal" { throw Self.refusal }
+                guard part.type == "output_text", let text = part.text else { throw Self.invalid }
+                let key = "\(item.id ?? "response"):\(index)"
+                if let existing = textBySegment[key] {
+                    guard existing == text else { throw Self.invalid }
+                } else {
+                    textBySegment[key] = text
+                    textSeen = textSeen || !text.isEmpty
+                    await channel.send(.response(action: .appendText(text, segmentID: key, tokenCount: 0)))
+                }
+            }
+        case "reasoning":
+            guard done else { return }
+            for (index, part) in (item.summary ?? []).enumerated() {
+                guard part.type == "summary_text", let text = part.text else { throw Self.invalid }
+                let key = "\(item.id ?? "reasoning"):\(index)"
+                if let existing = reasoningBySegment[key] {
+                    guard existing == text else { throw Self.invalid }
+                } else {
+                    reasoningBySegment[key] = text
+                    await channel.send(.reasoning(entryID: item.id, action: .appendText(text, segmentID: key, tokenCount: 0)))
+                }
+            }
+            if let encrypted = item.encrypted_content {
+                await channel.send(.reasoning(entryID: item.id, action: .updateSignature(Data(encrypted.utf8), tokenCount: 0)))
+            }
+        default: throw Self.invalid
+        }
+    }
+
+    private static var invalid: LatchwayFoundationModelsError { .invalidGatewayStream }
+    private static var refusal: LanguageModelError {
+        .refusal(.init(explanation: "The upstream model declined this request.", debugDescription: "Responses reported a refusal."))
+    }
+}
+#endif
+```

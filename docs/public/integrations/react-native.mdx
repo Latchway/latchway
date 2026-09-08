@@ -1,153 +1,180 @@
 ---
 title: "React Native framework integration"
-description: "Evaluate the experimental native-backed fetch for JavaScript AI frameworks without moving keys or session credentials into JavaScript."
+description: "Choose feature-bound native transport for JavaScript AI frameworks while keeping authentication and runtime dependencies application-owned."
 icon: "plug"
 audience: "mixed"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-02"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "framework-integrations"
 ---
 
-<Warning>
-  The React Native source candidate exposes a native-backed fetch-shaped API,
-  but named framework compatibility remains pre-release. Installation Family
-  and component behavior pass local conformance; hosted replay rejection,
-  protected native isolation, and physical-device evidence remain release
-  gates.
-</Warning>
-
 ## 1. What this integration does
 
-The transport gives JavaScript safe response data and stream events while the
-iOS or Android bridge owns key storage, refresh state, DPoP signing, attestation,
-authenticated dispatch, and origin checks.
+Pass a native-backed Latchway client to a framework's custom-fetch adapter.
+Swift or Kotlin owns session credentials, keys, attestation, DPoP and network
+dispatch. Frameworks receive safe response data and stream chunks.
+
+For LangChain, follow [React Native framework setup](/clients/react-native/framework-integrations).
+For application configuration and supplied identity, follow the
+[quickstart](/clients/react-native/quickstart). Standalone and embedded React
+Native use the same API with no Firebase dependency or native auth bootstrap.
 
 ## 2. Supported framework versions
 
-React Native `0.82.0` has an `experimental` native-backed-fetch row based on
-bounded local tests and a supplemental physical iPadOS 26.5 run. React Native
-commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` ran in Debug configuration
-with automatic Apple Development signing. It passed App Attest registration
-and same-key assertion, Secure Enclave DPoP, upstream non-streaming and
-streaming requests, quota, typed component denial, bridge behavior, and cleanup
-against the current source gateway. It is not a published supported
-integration, and the named JavaScript framework rows do not automatically
-apply to React Native.
-
-React Native predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99`
-materially adds root-owned component lifecycle and a Debug native App Intent
-delegated-request path. Its Apple Development app and embedded extension passed
-strict entitlement/provisioning, registered-device install, and launch checks
-without new App Attest or App Intent execution. Current
-`ba23c750ec662834b4d480940c4067508723defb` carries the release retry-closure
-and transition-order hardening, locks the released contract plus final sibling
-SDK successor commits, and passes 103 Vitest tests, 62 Node tests, 19 Python
-tests, 8/8 dependency-scan tests, Swift bridge 5/5,
-Android Robolectric 6/6, locked iOS semantics 10/10, locked Android semantics
-8/8, and a real CocoaPods/TurboModule build. Its physical path was not rerun. The
-historical root-app run above does not establish extension execution for the
-current source, and the operator has deferred that evidence.
+The application guide uses `@latchway/langchain` 1.1.0,
+`@langchain/core` 1.2.9, `@langchain/openai` 1.5.10 and `openai` 7.8.0.
+The [compatibility matrix](/reference/compatibility) retains its independently
+versioned conformance evidence, including pre-release or experimental rows.
+Package publication does not silently promote those rows or establish a fresh
+physical-device result for every framework.
 
 ## 3. Supported Latchway versions
 
-The source candidate targets released contract `1.0.0` and current protocol
-`2`; protocol `1` remains accepted for compatible legacy routes. Installation
-Family and Client Component operations are included in the released wire-2
-contract. The React Native package and protected compatibility evidence remain
-unpublished.
+The shared-account line uses React Native 1.2.0, iOS 1.2.0, Android 1.1.0,
+JavaScript client 1.1.0 and server 1.1.1, with contract 1.1.0 and wire 3.
+See [Release status](/release-status) for registry receipts and the
+[SDK source bundle](/reference/sdk-bundles/react-native) for documentation
+commits and exact source regions.
 
 ## 4. Security level
 
-| Capability | Target and current status |
+| Capability | Boundary |
 | --- | --- |
-| Full DPoP preserved | Local compiled/native iOS and Android gates pass; Secure Enclave DPoP passed on development-signed physical iOS, while protected hardware-key proof and physical Android remain open |
-| Private key remains native | Local Swift bridge, Android Robolectric, locked native-semantic, and CocoaPods/TurboModule gates pass; protected physical runtime isolation remains open |
-| Streaming | Native pull streaming passes local iOS and Android gates and a physical iOS upstream run; physical Android remains open |
-| Cancellation | Native cancellation passes local gates |
-| App extensions | Not provided by the React Native framework-fetch integration |
-| Structured output | Local React Native behavior conformance passes; protected named-framework and physical evidence remain open |
-| Tool calls | Local React Native behavior conformance passes; protected named-framework and physical evidence remain open |
-| Protocol | Released source contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
+| Full DPoP | Native signing and session-key binding; JavaScript does not construct authenticated proofs |
+| Private key remains native | Native Keychain/Keystore owns key material; the bridge returns no private key |
+| Streaming | Native-backed incremental response consumption with backpressure |
+| Cancellation | `AbortSignal` reaches native dispatch; local tool cancellation remains app-owned |
+| App extensions | Not granted by this main-app framework integration |
+| Structured output | Requires the matching route/model and supported schema |
+| Tool calls | Transported as bounded protocol content; authorized execution remains application-owned |
+| Protocol | Shared native accounts use wire 3; legacy compatible wire-1/2 routes remain on the gateway |
+
+These boundaries do not replace tests of your signed application and its
+required App Attest or Play Integrity policy.
 
 ## 5. Install packages
 
-`@latchway/react-native` version `1.0.0` is not published. Use only the pinned
-source candidate and example for evaluation.
+Use the exact [installation coordinates](/clients/react-native/installation)
+and [LangChain runtime setup](/clients/react-native/framework-integrations#install-langchain-in-the-host-app).
+The host owns frameworks, Babel and any URL/decoder/randomness polyfills.
+Latchway does not install Firebase or LangChain. Reuse working host globals
+and do not patch global fetch or add duplicate native randomness modules.
 
 ## 6. Create the Latchway client
 
-Follow [React Native](/mobile/react-native). Native modules must receive the
-platform configuration and identity callback without returning reusable
-credentials to JavaScript.
+Configure with public identity metadata through `Latchway.configure`. After
+accepted application login, supply a current token through
+`app.signIn({getIdToken})`, then `account.makeClient()`. If another native or
+React Native caller is already signed in, attach with `app.makeClient()`.
+Screen mount is not a new login; use `restore` for initial auth restoration.
 
 ## 7. Bind a feature
 
-The source `fetchFor` surface binds one feature. Its signature remains
-pre-release rather than a published contract.
+Each feature selects one protocol: Chat Completions, Responses, Embeddings,
+Anthropic Messages or an allowed opaque route. Use its matching adapter and a
+fetch bound to that feature. The gateway selects the provider/model and applies
+quota; no upstream API key belongs in the client.
 
 ## 8. Create the framework client
 
-Pass the native-backed fetch only through a framework's supported request-time
-transport seam. A static API key or static header path is insufficient.
+```ts
+import {createLatchwayChatOpenAI} from '@latchway/langchain';
+
+const model = createLatchwayChatOpenAI({
+  latchway: client,
+  feature: 'assistant-chat',
+  chatOptions: {maxTokens: 1024, maxRetries: 0},
+});
+```
+
+Use `createLatchwayResponsesModel` for an `openai_responses` feature instead.
+Generation options must fit the configured model and trusted accounting profile.
 
 ## 9. Send a non-streaming request
 
-The bridge returns safe status, headers, and bytes while native code owns
-authorization. A request body already buffered within the 8 MiB bridge limit
-may receive one exact pre-dispatch retry; a streaming or otherwise
-non-replayable body is never retried.
+```ts
+const result = await model.invoke('Help me plan tomorrow.', {
+  signal: controller.signal,
+});
+```
+
+Retain safe request IDs and complete messages. Do not log credentials or
+request/response content as part of routine diagnostics.
 
 ## 10. Send a streaming request
 
-The local bridge gates preserve incremental pull events and cancellation
-without exposing session material or buffering the complete response.
+```ts
+for await (const chunk of await model.stream('Explain the plan.', {
+  signal: controller.signal,
+})) {
+  // Render incremental text only while the captured account is still current.
+}
+```
+
+Consume incrementally with bounded history. Do not store partial turns as
+complete replay history.
 
 ## 11. Use tools
 
-Tools remain framework concepts. JavaScript executes them; Latchway only
-transports permitted protocol content.
+Follow [Chat tools](/clients/react-native/framework-integrations#chat-function-tools-and-quotas).
+Validate tool names and arguments, authorize side effects, bound rounds/time/
+result size, and append complete correlated assistant/tool messages only.
+Every model round consumes quota, including schema and replayed history.
+Latchway transports tools; it does not execute them.
 
 ## 12. Use structured output
 
-Support is framework- and runtime-specific and requires an explicit conformance
-row.
+Use strict schema output only with a compatible Responses route and model.
+A framework exposing an API does not guarantee every server protocol accepts
+it. Unsupported media, remote state or hosted tools must not bypass accounting.
 
 ## 13. Handle cancellation
 
-Abort cancellation reaches native dispatch in local tests and does not authorize
-an automatic replay.
+Pass an `AbortSignal` to each model operation. Abort on user cancel, account
+change and teardown. Also stop application tool work and discard old-generation
+UI callbacks. Cancellation is not permission to replay an uncertain dispatch.
 
 ## 14. Handle quota failures
 
-Surface the canonical problem and safe request ID across the native bridge.
+Show the stable error code and safe request ID and read authoritative quota
+from the gateway. Limits belong to the configured user/feature scope; native
+and React Native callers do not get separate allowances. Logout does not reset
+the server's quota.
 
 ## 15. Handle session renewal
 
-Native modules single-flight refresh and generate a fresh proof for a permitted
-pre-dispatch retry. JavaScript never reads the refresh credential.
+Native code coordinates session refresh. The application supplies fresh
+external ID tokens with `account.updateIdToken`; the gateway verifies them for
+the same durable account. `identity_refresh_required` suspends protected work
+until a valid update. Logout is shared by native and React Native and works
+offline; screen disposal is not logout.
 
 ## 16. Known limitations
 
-Browser-only streams, uploads, or framework hooks may not exist in React
-Native. The iPadOS 26.5 Debug observation used automatic Apple Development
-signing, not an Apple distribution-derived protected immutable candidate. The
-current Debug App Intent still requires physical invocation, and the broader
-protected extension matrix remains open. Local compiled Android conformance
-passes; physical Play-distributed Android evidence remains open.
+Browser middleware, Node filesystem APIs, service workers, Realtime, uploads,
+audio, image accounting and streaming request bodies are not inferred from a
+working custom-fetch path. React Native extension behavior is a separate
+capability. Package availability is not Apple distribution or Play-distributed
+physical acceptance.
 
 ## 17. Verify the integration
 
-Test raw fetch and each named framework separately on both iOS and Android,
-including streaming, cancellation, refresh, quotas, and credential isolation.
+Test raw fetch and each selected framework on both native hosts: non-streaming,
+streaming, cancellation, renewal, account switching, quota failure, complete
+tool loops and credential isolation. Check the Console's native host and caller
+attribution without exposing tokens, proofs or content.
 
 ## 18. Troubleshooting
 
-Check native diagnostics, runtime support, and exact dependency versions. Do not
-log bridge payloads that can contain application request bodies.
+Confirm exact dependency locks, required host signing, the matching feature
+protocol, and the app's token-refresh notifications. Fix incomplete runtime
+capabilities at the application entrypoint; never widen destination allowlists
+or disable attestation to hide integration errors.
 
 ## 19. Compatibility matrix
 
-No supported named-framework row is published. See
-[Compatibility](/reference/compatibility).
+Use [Compatibility](/reference/compatibility) only for its recorded coverage.
+Generated SDK documentation commits can be newer documentation-only follow-ups
+to immutable package tags; they do not create new physical-device evidence.

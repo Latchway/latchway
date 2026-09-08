@@ -2,46 +2,46 @@
   "reference/sdk-bundles": {
     "audience": "reference",
     "icon": "package-search",
-    "lastVerified": "2026-09-02",
+    "lastVerified": "2026-09-08",
     "owner": "docs-supply-chain",
     "pageType": "reference",
-    "sdkVersion": "1.0.0",
-    "serverVersion": "1.0.0"
+    "sdkVersion": "not-applicable",
+    "serverVersion": "1.1.1"
   },
   "reference/sdk-bundles/android": {
     "audience": "reference",
     "icon": "smartphone",
-    "lastVerified": "2026-09-02",
+    "lastVerified": "2026-09-08",
     "owner": "android-sdk",
     "pageType": "reference",
-    "sdkVersion": "1.0.0",
-    "serverVersion": "1.0.0"
+    "sdkVersion": "1.1.0",
+    "serverVersion": "1.1.1"
   },
   "reference/sdk-bundles/ios": {
     "audience": "reference",
     "icon": "apple",
-    "lastVerified": "2026-09-02",
+    "lastVerified": "2026-09-08",
     "owner": "ios-sdk",
     "pageType": "reference",
-    "sdkVersion": "1.0.0",
-    "serverVersion": "1.0.0"
+    "sdkVersion": "1.2.0",
+    "serverVersion": "1.1.1"
   },
   "reference/sdk-bundles/js": {
     "audience": "reference",
     "icon": "globe-2",
-    "lastVerified": "2026-09-02",
+    "lastVerified": "2026-09-08",
     "owner": "javascript-sdk",
     "pageType": "reference",
-    "sdkVersion": "1.0.0",
-    "serverVersion": "1.0.0"
+    "sdkVersion": "1.1.0",
+    "serverVersion": "1.1.1"
   },
   "reference/sdk-bundles/react-native": {
     "audience": "reference",
     "icon": "atom",
-    "lastVerified": "2026-09-02",
+    "lastVerified": "2026-09-08",
     "owner": "react-native-sdk",
     "pageType": "reference",
-    "sdkVersion": "1.0.0",
-    "serverVersion": "1.0.0"
+    "sdkVersion": "1.2.0",
+    "serverVersion": "1.1.1"
   }
 }

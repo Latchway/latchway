@@ -4,9 +4,9 @@ description: "Consume the pull-driven native response stream, preserve AbortSign
 icon: "waves"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
@@ -33,6 +33,13 @@ remain incremental.
 Wire one `AbortController` to the owning operation. Component unmount, user
 cancel, or product timeout should abort the native request. Cancellation is a
 terminal outcome, not permission to clone and replay the request in JavaScript.
+
+Account changes must also stop local tool execution and discard stale UI
+callbacks. Native account fencing stops old protected work, but it does not
+own your chat history or authorize external tool side effects. Bind the screen
+to its captured account rather than silently attaching old callbacks to a new
+login. At identity expiry, supply a fresh same-account token through
+`account.updateIdToken`; disposing a stream client is not shared logout.
 
 ## Keep recovery native
 

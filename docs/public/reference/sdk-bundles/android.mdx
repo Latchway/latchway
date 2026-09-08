@@ -1,6 +1,6 @@
 ---
 title: "Android SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for Android SDK 1.0.0."
+description: "Generated, version-bound examples and compatibility metadata for Android SDK 1.1.0."
 ---
 
 <Warning>
@@ -13,31 +13,31 @@ description: "Generated, version-bound examples and compatibility metadata for A
 | Field | Value |
 | --- | --- |
 | Package | `dev.latchway` |
-| Release | `v1.0.0` |
-| Commit | `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` |
+| Documented SDK release | `v1.1.0` |
+| Documentation source commit | `22602393d215eee9f08927bd079171acaba98d47` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `1a13c6834b960dbfc7fb91c390167624eadbf5f6e8d12325bd82423cc4f4a7f7` |
+| Bundle SHA-256 | `13392ca4fe96f0ff75346010e4e26a03fa87b95bced56a2642740737f0a4f288` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| dev.latchway:latchway-core | `1.0.0` | `docs/publishing.md:L3-L36` |
-| dev.latchway:latchway-okhttp | `1.0.0` | `docs/publishing.md:L3-L36` |
-| dev.latchway:latchway-play-integrity | `1.0.0` | `docs/publishing.md:L3-L36` |
-| dev.latchway:latchway-firebase-auth | `1.0.0` | `docs/publishing.md:L3-L36` |
-| dev.latchway:latchway-bom | `1.0.0` | `docs/publishing.md:L3-L36` |
-| Android API | `23` | `README.md:L27-L29` |
-| Android compile SDK | `37` | `latchway-core/build.gradle.kts:L7-L12` |
+| dev.latchway:latchway-core | `1.1.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L6-L8` |
+| dev.latchway:latchway-okhttp | `1.1.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L6-L8` |
+| dev.latchway:latchway-play-integrity | `1.1.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L6-L8` |
+| dev.latchway:latchway-firebase-auth | `1.1.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L6-L8` |
+| dev.latchway:latchway-bom | `1.1.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L6-L8` |
+| Android API | `23` | `latchway-core/build.gradle.kts:L11-L14` |
+| Android compile SDK | `34` | `latchway-core/build.gradle.kts:L7-L12` |
 | Android Gradle Plugin | `9.3.2` | `gradle/libs.versions.toml:L1-L3` |
 | Gradle | `9.5.0` | `gradle/wrapper/gradle-wrapper.properties:L3-L3` |
 | Kotlin | `2.3.21` | `build.gradle.kts:L12-L16` |
 | Java bytecode | `17` | `latchway-core/build.gradle.kts:L16-L19` |
-| OkHttp minimum | `4.9.2` | `README.md:L27-L31` |
+| OkHttp minimum | `4.9.2` | `README.md:L37-L41` |
 | OkHttp latest | `5.3.0` | `gradle/libs.versions.toml:L1-L15` |
-| Retrofit minimum | `2.11.0` | `README.md:L32-L35` |
+| Retrofit minimum | `2.11.0` | `README.md:L42-L47` |
 | Retrofit latest | `3.0.0` | `gradle/libs.versions.toml:L1-L15` |
-| OpenAI Kotlin minimum | `4.0.1` | `README.md:L32-L35` |
+| OpenAI Kotlin minimum | `4.0.1` | `README.md:L42-L47` |
 | OpenAI Kotlin latest | `4.1.0` | `gradle/libs.versions.toml:L1-L15` |
 | Ktor OkHttp | `3.3.3` | `gradle/libs.versions.toml:L1-L15` |
 | LangChain4j | `1.19.0` | `gradle/libs.versions.toml:L1-L15` |
@@ -45,13 +45,13 @@ description: "Generated, version-bound examples and compatibility metadata for A
 | Koog | `1.1.1` | `gradle/libs.versions.toml:L1-L15` |
 | Play Integrity | `1.6.0` | `gradle/libs.versions.toml:L1-L15` |
 | Firebase BOM | `34.18.0` | `gradle/libs.versions.toml:L1-L15` |
-| React Native bridge | `0.82.0` | `latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt:L59-L66` |
+| React Native bridge | `0.82.0` | `latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt:L64-L68` |
 
 ## Version-bound examples
 
 ### `frameworks/koog.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L43-L92)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L43-L92)
 
 ```kotlin
     @Test
@@ -108,7 +108,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConfor
 
 ### `frameworks/langchain4j.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
 
 ```kotlin
 class LangChain4jFrameworkConformanceTest {
@@ -151,7 +151,7 @@ class LangChain4jFrameworkConformanceTest {
 
 ### `frameworks/openai-kotlin.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
 
 ```kotlin
 import java.util.concurrent.TimeUnit
@@ -187,7 +187,7 @@ class OpenAiKotlinFrameworkConformanceTest {
 
 ### `frameworks/retrofit.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L30-L104)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L30-L104)
 
 ```kotlin
     @Test
@@ -269,7 +269,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkCo
 
 ### `quickstart/basic-client.kt`
 
-Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
+Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
 
 ```kotlin
 package dev.latchway.sample.basic
@@ -315,7 +315,7 @@ public object BasicLatchwayFactory {
 
 ### `quickstart/firebase-auth.kt`
 
-Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/694cb4d2bff9e91582896e3cbbe140e960d9e4e4/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L299)
+Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L299)
 
 ```kotlin
 package dev.latchway.sample.firebase
@@ -618,3 +618,113 @@ private fun safeFailure(stage: GoldenJourneyStage, error: Exception): String = w
 private const val MAXIMUM_STREAM_BYTES = 1_048_576L
 private val SAFE_REQUEST_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 ```
+
+### `quickstart/supplied-identity.kt`
+
+Source: [publication-smoke/src/main/kotlin/dev/latchway/publicationsmoke/SuppliedIdentitySmoke.kt](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/publication-smoke/src/main/kotlin/dev/latchway/publicationsmoke/SuppliedIdentitySmoke.kt#L1-L20)
+
+```kotlin
+package dev.latchway.publicationsmoke
+
+import android.content.Context
+import dev.latchway.core.firebaseProject
+import dev.latchway.okhttp.LatchwayAppOptions
+import dev.latchway.okhttp.LatchwayAppRegistry
+import okhttp3.HttpUrl.Companion.toHttpUrl
+
+/** Compile-only binary consumer: this function is never executed by the fixture. */
+internal suspend fun suppliedIdentityPublicApi(context: Context, idToken: String) {
+    val app = LatchwayAppRegistry.configure(context, LatchwayAppOptions(
+        "https://gateway.example.test/".toHttpUrl(), "app_01J00000000000000000000000", "development",
+        firebaseProject("example-project"), 123456789L,
+    ))
+    val account = app.signIn { idToken }
+    account.updateIdToken { idToken }
+    account.makeClient().close()
+    app.currentAccount()
+    account.logout()
+}
+```
+
+### `quickstart/supplied-identity.md`
+
+Source: [docs/supplied-identity.md](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/docs/supplied-identity.md#L1-L76)
+
+````text
+# Shared supplied identity (Android 1.1.0)
+
+Configure public metadata once, supply a token, and use the native account. No
+Firebase SDK, auth listener, identity-owner bootstrap or RN/native ordering switch
+is required by Latchway. The existing app owns login and token refresh.
+
+```kotlin
+val app = LatchwayAppRegistry.configure(applicationContext, LatchwayAppOptions(
+    baseUrl = "https://latchway.habitify.me/".toHttpUrl(),
+    applicationId = "app_01M1RF27R52YQDHCTH2EZY6DHZ",
+    environment = "development",
+    identity = firebaseProject("habitify-dev"),
+    playIntegrityCloudProjectNumber = 51819855588L,
+))
+val account = app.signIn { yourAuth.getIdToken() }
+val client = account.makeClient()
+val http = client.buildOkHttpClient()
+// Set the configured feature on each gateway request:
+val request = Request.Builder().url("https://latchway.habitify.me/v1/chat/completions")
+    .latchwayFeature("habi-assistant")
+    // Set the ordinary JSON body and POST method as required by your integration.
+    .build()
+```
+
+`firebaseProject` only produces issuer/audience metadata. Other JWT providers use
+`LatchwayIdentityConfiguration(providerId, issuer, audience, tenantId)` directly.
+The gateway—not decoded JWT hints—validates identity. Supply the Latchway app
+resource ID, not a Firebase app ID or Android package name. Play project numbers
+remain explicit and independent of Firebase metadata.
+
+## Sharing and authentication lifetime
+
+- Matching native/RN configuration returns the existing native app; conflicting
+  explicit settings fail. Standard manifest/signing/Play distribution remains
+  the host application's responsibility.
+- `app.currentAccount()` returns the existing opaque login, and
+  `app.makeClient()` attaches to it without another sign-in.
+- Use `account.updateIdToken { yourAuth.getIdToken() }` for the same user's new
+  token. The gateway verifies it with installation-bound refresh possession;
+  generation, keys and quota remain unchanged.
+- Expired/missing supplied identity blocks protected work without retiring the
+  account. A fresh verified update resumes that generation. Latchway never calls
+  Firebase or an external provider to fetch a token itself.
+- `account.logout()` retires the captured account across native and RN, including
+  cached clients and components. A stale A handle cannot retire B. It is offline
+  capable and does not reset user quota or sign out your external auth provider.
+- `app.restore { ... }` is for initial auth restoration. It cannot undo recorded
+  logout; an accepted new login calls `signIn` explicitly.
+- Closing a client/RN surface does not log out the app. Fresh supplied ID tokens
+  remain in native process memory after the JS runtime is destroyed. They are
+  never persisted; supply identity again after process restart.
+
+Prefer one-shot suspending token producers. Latchway captures the account intent
+before invoking them and fences cancellation before late results may commit.
+Already available tokens also use `signIn(idToken)` and `updateIdToken(idToken)`;
+auth races that occurred before these calls are the application's responsibility.
+Serialize your external auth mutations and report every logout/account change.
+
+## Requirements and migration
+
+Use server 1.1.1 or later, capability `supplied_identity_v1`, and contract 1.1.0/wire 3. The SDK
+checks discovery and fails explicitly on older servers. New users establish an
+attested session first; token updates call `/client/v1/sessions/identity`, never a
+dummy model request. Expired session possession requires attested re-establishment
+with the supplied token and the same unretired account key.
+
+The default SDK stores follow the existing guarded legacy migration. Custom
+legacy stores require an explicit audited cleanup callback and stable migration
+identifier; they are never guessed. Existing authority-based registrations are
+compatibility mode and cannot silently become supplied identity.
+
+Install only the BOM and `latchway-okhttp` for this path. Core, Play Integrity and
+all new helpers are Firebase-free. `latchway-firebase-auth` remains a separate
+legacy compatibility artifact; do not add it to a new supplied-identity install.
+All libraries advertise compile SDK 34; runtime minimum remains API 23. RN and
+other application dependencies may impose their own higher host requirements.
+````

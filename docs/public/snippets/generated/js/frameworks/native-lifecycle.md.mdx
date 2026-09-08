@@ -1,0 +1,30 @@
+<Info>
+  Generated from [docs/release/v1.1.0.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/release/v1.1.0.md#L1-L24) at documentation source commit `b6f1eab929a5cb7b7656448f28d0edd2b4970d93` for SDK `v1.1.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `70e4034b9029eae1ff2df070dca99e3aadba232cc3c8f5ef9b2cba6c4af5a7b2`.
+</Info>
+
+```text
+# JavaScript client 1.1.0
+
+Only `@latchway/client` is published by this release. OpenAI and Vercel AI adapters
+remain 1.0.0; LangChain remains 1.1.0. Their existing `^1.0.0` client peer range
+accepts client 1.1.0, so no adapter republish is necessary.
+
+- Add portable typed errors for shared native/RN account lifecycle, including
+  `identity_refresh_required`. That condition suspends protected work until the
+  application supplies a fresh token; it is not logout or an automatic retry.
+- Consume the exact released 1.1.0 core contract and shared-native fixtures.
+  Browser/Node clients still emit wire 2, parse retained legacy grants and accept
+  supported server diagnostics. A server's current wire 3 does not change the
+  browser client's platform or imply native hardware trust.
+- Preserve native/RN authority: HTTP Problems cannot manufacture native-local
+  logout/account transitions. Native registry and supplied-token APIs belong to
+  `@latchway/react-native`, Swift and Kotlin, not the browser/Node transport.
+- No Firebase dependency is added. The application's existing authentication
+  system remains responsible for identity tokens and external logout.
+
+The release pins core commit `0a60cbef57d904664430e235e1e165fea14f610b` and bundle
+SHA-256 `deb25aaae5160a7342bfae0efa4a9ce0403d8c40ed8da74eb2c99be4d4ede293`.
+Local unit/build/contract/package results and registry publication are separate
+evidence. This release does not claim new App Check, Turnstile, native-device or
+cloud acceptance from source-level verification alone.
+```

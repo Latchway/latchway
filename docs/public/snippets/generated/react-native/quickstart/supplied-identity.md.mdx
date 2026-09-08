@@ -1,0 +1,151 @@
+<Info>
+  Generated from [docs/supplied-identity.md](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/docs/supplied-identity.md#L1-L145) at documentation source commit `6e00e1ae34bdb69f418bd7ee5460c510649423ac` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `6b65b13d1c38f0a87b68e66636206161b406065ffba78623e1951c42683c2878`.
+</Info>
+
+````text
+# Shared accounts with developer-supplied identity
+
+Release line: React Native 1.2.0, iOS 1.2.0, Android 1.1.0, JavaScript client
+1.1.0 and server 1.1.1 or later (contract 1.1.0).
+
+The same integration works in a standalone RN app or an RN screen embedded in
+a native app. Either side can configure first. Matching public configuration
+reuses one native app, installation, account session and refresh coordinator.
+There is no Firebase dependency, native Latchway bootstrap, authority registration
+or embedded-mode switch in this integration.
+
+## Configure
+
+Install `@latchway/react-native@1.2.0`, install Pods, and rebuild both native apps.
+The native dependencies are pinned to compatible releases. Keep one native SDK
+copy if the host already uses Latchway directly.
+
+```ts
+import {Latchway, firebaseProject} from '@latchway/react-native';
+
+export const app = await Latchway.configure({
+  baseURL: 'https://your-gateway.example',
+  applicationID: 'app_01J00000000000000000000000',
+  environment: 'production',
+  identity: firebaseProject({projectID: 'your-project-id'}),
+  apple: {rootKeychainAccessGroup: 'YOURTEAM.com.example.app'},
+  android: {playIntegrityCloudProjectNumber: '123456789012'},
+});
+```
+
+Use the actual signed root Keychain access group; do not guess it from the team
+and bundle alone. Keep App Attest and Play Integrity configured for the signed
+application. Supplying these public identifiers cannot grant trust by itself.
+`applicationID` is a Latchway resource ID, not a Firebase app ID or bundle ID.
+
+`firebaseProject` formats issuer/audience metadata only. It imports no Firebase
+module, fetches no token and installs no listener. A generic issuer uses
+`identity: {providerID, issuer, audience, tenantID?}`. The provider must already
+be configured in the selected gateway environment.
+
+`configure` does not sign in or reactivate a logged-out account. Omitted optional
+values inherit an existing registration; conflicting explicit values throw
+`configuration_conflict`. Named apps must agree between native and RN callers.
+
+## Supply identity and use the client
+
+After an accepted login in your application's existing authentication flow:
+
+```ts
+const account = await app.signIn({
+  getIdToken: () => yourAuth.getIdToken(),
+});
+const client = await account.makeClient();
+```
+
+`yourAuth` belongs to your application. The callback is invoked once after the
+native SDK captures a lifecycle ticket; it is not kept as a permanent JS owner.
+Use `{idToken: token}` if you already have a current token. Do not put tokens in
+static configuration, source files, logs or crash-report metadata.
+
+An already-configured native/RN caller can attach without another login:
+
+```ts
+const client = await app.makeClient();
+// Or capture the shared account for later token updates/logout:
+const account = await app.currentAccount();
+```
+
+For initial application-auth restoration use `app.restore({getIdToken})`, not an
+unconditional `signIn` on every screen mount. Restore cannot reverse a recorded
+Latchway logout; an accepted new login or explicit user resume action can sign in.
+
+## Refresh, logout and cancellation
+
+```ts
+// Same account only. The gateway verifies the replacement before accepting it.
+await account.updateIdToken({getIdToken: () => yourAuth.getIdToken()});
+
+// Logout affects native and RN for this account; no online provider call needed.
+await account.logout();
+// Your serialized application auth flow then signs out its external provider.
+
+// Screen teardown only:
+abortController.abort();
+await client.dispose();
+```
+
+All acquisition operations accept `signal`. Aborting also fences the native
+ticket, including when first sign-in has not returned an account. The native
+backend rejects stale completions and account A's late refresh/logout cannot
+change account B. Keep external provider login/logout mutations serialized in
+your application; Latchway cannot order provider calls that bypass it.
+
+ID tokens live in native process memory and are erased on logout/replacement.
+Native requests can continue after JS stops while the supplied identity remains
+fresh and has not been reported changed. At expiry, `identity_refresh_required`
+blocks protected work until the application supplies a valid fresh token.
+Expiry suspends rather than logs out; refresh cannot reactivate a retired account.
+
+The library cannot detect an unreported Firebase/Auth0/etc. logout or refresh
+tokens from a project ID. Every application auth-changing surface must notify
+Latchway. Process restart requires a token supplied by application auth again.
+
+## Optional provider-neutral binding
+
+Applications with centralized auth events can use one injected subscription:
+
+```ts
+import {bindLatchwayAuth} from '@latchway/react-native';
+
+const binding = await bindLatchwayAuth(app, {
+  subscribe: listener => yourAuth.subscribeLatchwayEvents(listener),
+  onError: error => showConnectionError(error),
+});
+```
+
+Your event adapter emits `{type: 'restore' | 'signIn' | 'tokenChanged', getIdToken}`
+or `{type: 'signOut'}`. Events express application intent; the helper never
+infers a fresh login from a changed Firebase User object. A native binding lease
+rejects a competing subscription, including through another RN wrapper/runtime.
+Dispose the binding when its auth owner ends, not on every screen unmount.
+`await binding.dispose()` cancels pending work and releases the subscription;
+it does not log out the shared account. Other teams need only attach to the app.
+
+## LangChain
+
+Keep LangChain and any runtime polyfills in the consuming app. Pass the client
+to the existing feature-bound adapter; the server selects the upstream/model.
+See [the LangChain guide](https://docs.latchway.dev/clients/react-native/framework-integrations). Account changes should abort streams,
+tool execution and UI updates and clear in-memory chat history. The SDK handles
+native account isolation; it does not own your screen's state.
+
+## Migration and limits
+
+- Shared mode requires an explicit `sharedNativeCallers` policy with the same
+  required host attestation. Upgrading the server does not widen app policies.
+- `createLatchwayClient` and explicit authority APIs remain compatibility paths.
+  Do not silently change an active legacy authority into supplied identity.
+- SDK-owned legacy storage uses the native migration journal. Applications with
+  custom stores or delegated extensions must inventory their actual storage and
+  groups; an invented empty list is not a migration strategy.
+- Logout never resets server-side per-user quotas or logs out other devices.
+- Android libraries compile against API 34; the host's target SDK and other
+  dependencies can require a newer compile SDK. React Native 0.74+/React 18.2+
+  still require the compatible host toolchain and New Architecture.
+````

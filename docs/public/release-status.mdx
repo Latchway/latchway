@@ -4,8 +4,8 @@ description: "Published server and SDK versions, upgrade boundaries, and verific
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.0.4"
-sdkVersion: "1.1.3"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
 lastVerified: "2026-09-08"
 owner: "release-engineering"
 ---
@@ -17,19 +17,38 @@ The current distributions are:
 
 | Component | Version | Distribution |
 | --- | --- | --- |
-| Server and Console | 1.0.4 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.0.4), GHCR `ghcr.io/latchway/latchway:1.0.4` |
-| iOS SDK | 1.1.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.1.0), CocoaPods `Latchway` |
-| Android SDK | 1.0.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.0.0), Maven Central `dev.latchway` |
-| React Native SDK | 1.1.3 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.1.3), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.1.3) |
-| JavaScript client | 1.0.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.0.0) |
+| Server and Console | 1.1.1 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.1), GHCR `ghcr.io/latchway/latchway:1.1.1` |
+| iOS SDK | 1.2.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.2.0), CocoaPods `Latchway` |
+| Android SDK | 1.1.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.1.0), Maven Central `dev.latchway` |
+| React Native SDK | 1.2.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.2.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.2.0) |
+| JavaScript client | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.1.0) |
 | LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
 | OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
 
 The server image includes Linux amd64 and arm64. Pin the published image digest
-for repeatable deployments. Moving aliases `1.0`, `1` and `latest` are not
+for repeatable deployments. Moving minor/major aliases and `latest` are not
 immutable version locks. Use the same image for server and migrator.
 
 ## What changed
+
+Server 1.1.1 fixes identity renewal after session issuance with schema 31.
+The same-account verifier keeps credentials, original issuance/expiry,
+attestation and quotas unchanged. The 1.1.0 contract and wire 3 are unchanged;
+use 1.1.1 for supplied identity rather than the first 1.1.0 image.
+
+iOS 1.2.0 and Android 1.1.0 add shared native accounts, application-supplied
+tokens, same-account refresh and offline logout. React Native 1.2.0 is the
+published matching integration release. Neither
+native nor React Native needs a Firebase dependency or native authentication
+bootstrap for the new API. Applications still own token refresh, provider
+logout notification and account-specific UI/tool cleanup.
+
+Shared native/RN mode requires an explicit `sharedNativeCallers` policy on the
+native host. Upgrading does not widen an application's enabled platforms or
+remove required attestation. Caller attribution is observational, not a second
+quota owner. See [React Native authentication](/clients/react-native/authentication).
+
+### Earlier releases
 
 Server 1.0.4 enables bounded Chat function tools under trusted input, total-token
 and input-priced cost quotas. Local schemas and complete call/result history
@@ -63,9 +82,17 @@ every-model support. See the
 
 ## Upgrade and rollback
 
-Contract 1.0.0 and wire 2 remain current, with compatible legacy wire-1 grants
-supported. Database schema remains 29; 1.0.4 adds no migration. Keep the database
-URL, public origin and encryption master key.
+Contract 1.1.0 and wire 3 are current; compatible legacy wire-1/2 routes remain
+supported. Server 1.1.1 requires schema 31. Back up PostgreSQL and preserve the
+database URL, public origin, encryption/signing configuration and image digest.
+Stop the old gateway, run the matching new image's migration, then start that
+image and confirm readiness reports schema 31.
+
+Migrations are forward-only and readiness requires an exact schema match.
+Server 1.1.0/schema 30 is not an application-only rollback after migration 31.
+Roll forward or restore the pre-migration database backup with its compatible
+image. Do not edit the migration ledger or identity timestamps to force an old
+binary to start.
 
 Upgrade the gateway before activating shared native/RN identities. Before
 rolling back to an older server, activate compatible revisions without those
@@ -80,14 +107,26 @@ Trunk publication.
 
 ## Evidence and limits
 
+Server 1.1.1 passes the complete isolated-PostgreSQL Go suite, targeted race
+tests, static analysis, advancing-clock identity-renewal regression and
+transactional migration rollback/upgrade checks. Its released contract archive
+is byte-identical to 1.1.0. These are server checks, not physical Android or
+extension acceptance.
+
+A development-signed physical iOS 1.2.0 run exercised Firebase identity, real
+App Attest, supplied-token update and streaming chat against server 1.1.1. This
+does not establish Apple distribution, another application's signing, Android
+Play Integrity or extension execution.
+
 Server 1.0.4 passes the full Go suite, targeted race tests and authenticated
 PostgreSQL tool-loop tests with JSON/streaming responses and durable quota
 settlement. These use synthetic providers, not fresh physical-device evidence.
 
-The full server Go package suite and Console production build pass. React Native
-runtime regressions, 103 SDK unit tests, types, lint, code generation, both
+Earlier release baselines passed the full server Go package suite and Console
+production build, React Native runtime regressions, 103 SDK unit tests, types,
+lint, code generation, both
 platform Metro bundles, native-boundary checks and deterministic package
-inspection pass. Its full historical `pnpm check` still fails in release-policy
+inspection. The full historical `pnpm check` still fails in release-policy
 tests referring to CI workflows removed under the maintainer's earlier decision.
 Those failures are not relabeled as passes, and no replacement CI gate was added.
 
@@ -110,9 +149,8 @@ combination, another application's signing, or Android.
   not establish the original strict A-to-Z release qualification.
 </Warning>
 
-Frozen generated SDK bundles and compatibility tables identify their historical
-source checkpoint. They are not rewritten to claim new device or provider
-evidence. Use the versioned release notes and guides above for current package
-installation; use those generated records only for the coverage they actually
-describe. A synchronized Mintlify source repository is not a production-hosting
-receipt.
+Generated SDK bundles identify exact documentation source commits, which may
+be documentation-only follow-ups to immutable SDK release tags. Compatibility
+tables retain their separately versioned conformance evidence. Neither is
+rewritten to claim new physical-device or provider acceptance. A synchronized
+Mintlify source repository is not a production-hosting receipt.

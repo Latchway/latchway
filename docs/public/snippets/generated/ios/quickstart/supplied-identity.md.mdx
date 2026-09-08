@@ -1,0 +1,88 @@
+<Info>
+  Generated from [Documentation/SuppliedIdentity.md](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Documentation/SuppliedIdentity.md#L1-L82) at documentation source commit `37f46733d95e659230f460f44f3ecbd7c7d03a14` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274`.
+</Info>
+
+````text
+# Developer-supplied identity (1.2.0)
+
+The application authenticates its user. Latchway accepts the resulting ID token,
+verifies it through the gateway, and owns device-bound shared native sessions.
+Core, App Attest and the React Native bridge do not depend on Firebase.
+
+```swift
+import Latchway
+import LatchwayAppAttest
+
+let app = try await LatchwayApp.configure(.init(
+    baseURL: URL(string: "https://gateway.example.com")!,
+    applicationID: "your-latchway-application-id",
+    environment: "development",
+    rootKeychainAccessGroup: "YOURTEAM.your.signed.bundle.id",
+    suppliedIdentity: try .firebaseProject(projectID: "your-project-id")
+))
+
+// Existing application auth code obtains this token; Latchway imports no Auth SDK.
+let account = try await app.signIn { try await yourAuth.currentIDToken() }
+let client = try await account.makeClient()
+
+// Existing auth flow obtained a new token for the SAME account.
+try await account.updateIdToken { try await yourAuth.currentIDToken() }
+
+// Offline Latchway logout, shared by RN and native. External auth logout is yours.
+try await account.logout()
+```
+
+Already have a current token? Use `app.signIn(idToken:)` and
+`account.updateIdToken(_:)`. Async producers capture a native transition ticket
+before token retrieval; cancelling the Swift task invalidates pending work.
+
+For a non-Firebase gateway-supported issuer, use
+`LatchwaySuppliedIdentityConfiguration(providerID:issuer:audience:tenantID:)`.
+`firebaseProject` only derives public issuer/audience values; it does not fetch,
+persist or validate the signature of a token. The gateway authenticates tokens.
+
+## Either team can configure first
+
+Equivalent `configure` calls join one process-wide native app. Omitted settings
+inherit existing settings. Conflicting explicit settings fail without replacing
+the account. Native and RN must use the same gateway/application/environment,
+JWT metadata, root Keychain group and platform policy. No owner transfer or
+native-team Latchway bootstrap is needed. A second surface joins with
+`try await app.makeClient()` or `try await app.currentAccount()` without signing in.
+
+The App Attest module supplies the default attestation factory through the
+two-argument `configure` overload. Apps still enable App Attest and provide the
+actual signed root Keychain group. Unknown legacy extension/custom stores still
+require explicit migration inventory; do not supply an invented empty list.
+
+## Account and token lifetime
+
+- ID tokens remain in native memory only, never Keychain or diagnostics. An
+  RN-created account therefore survives JS destruction while its token is fresh.
+- Missing/expired identity yields `identityRefreshRequired`; it does not log out.
+  A same-user gateway-verified update resumes that account. The SDK cannot refresh
+  an external provider token or observe a sign-out the app did not report.
+- Forward external sign-out/account changes through these APIs. Keep one
+  application auth lifecycle, not independent screen-owned login listeners.
+- `app.restore` resumes only an unretired matching account or a fresh app. It
+  never undoes a persisted logout; a later accepted login calls `signIn` explicitly.
+- A new user requires `signIn`, which retires the previous account first. Old
+  account handles cannot refresh or log out a later user, including A → B → A.
+- Closing a client releases that client only. `account.logout()` fences native
+  and RN requests and components without resetting server per-user quotas.
+- Serialize your provider's account mutations; Latchway does not call Firebase
+  `signOut`, register hidden listeners, or control third-party auth changes.
+
+## Server requirements
+
+Use server 1.1.1 or later. Shared mode uses wire 3 with required native-host attestation and allowed shared
+callers. Discovery must advertise `supplied_identity_v1` and the canonical
+`/client/v1/sessions/identity` endpoint. Unsupported servers fail explicitly.
+Initial sign-in establishes an attested session. Token updates prove possession
+of its refresh grant and the installation's DPoP key and verify the new token;
+they do not rotate keys, change users or reset quotas. Refresh credentials that
+have expired require attested re-establishment without reviving a retired login.
+
+The legacy authority APIs remain available, but are a separate mode. A live
+custom/JS-owned registration is never silently replaced by supplied identity.
+````

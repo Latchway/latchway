@@ -4,8 +4,8 @@ description: "Connect tested OpenAI, Vercel AI, LangChain, and Anthropic consume
 icon: "plug"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.4"
-sdkVersion: "1.1.3"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
 lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
@@ -18,7 +18,8 @@ streaming.
 
 ## Start from generated evidence
 
-For a current LangChain application, use the published setup below. Generated
+For a current LangChain application, use the release-line setup below and check
+[Release status](/release-status) for publication. Generated
 framework tables retain their historical conformance coordinates; they are not
 evidence of fresh physical-device testing for these package versions.
 
@@ -36,13 +37,13 @@ fetch seam remain outside the tested surface.
 ## Install LangChain in the host app
 
 ```bash
-npm install --save-exact @latchway/react-native@1.1.3 @latchway/langchain@1.1.0 \
-  @latchway/client@1.0.0 @langchain/core@1.2.9 @langchain/openai@1.5.10 openai@7.8.0
+npm install --save-exact @latchway/react-native@1.2.0 @latchway/langchain@1.1.0 \
+  @latchway/client@1.1.0 @langchain/core@1.2.9 @langchain/openai@1.5.10 openai@7.8.0
 ```
 
 The base SDK does not depend on LangChain, Babel helpers or global URL/decoder
 polyfills. Follow the versioned
-[runtime and Babel guide](https://github.com/Latchway/latchway-react-native-sdk/blob/v1.1.3/docs/langchain.md)
+[runtime and Babel guide](https://github.com/Latchway/latchway-react-native-sdk/blob/main/docs/langchain.md)
 and copy its application-owned bootstrap before importing frameworks. Reuse
 complete globals already supplied by the host; do not install duplicate native
 randomness modules or replace global fetch. Recopy old bootstrap files when
@@ -55,11 +56,15 @@ working host implementations. Never widen the SDK destination allowlist to hide
 
 ## Create a Chat Completions model
 
-After native setup and Firebase/other user login, pass the client directly:
+Configure with the public coordinates in the
+[quickstart](/clients/react-native/quickstart). After an accepted application
+login, supply a current ID token and pass the resulting client directly:
 
 ```ts
 import {createLatchwayChatOpenAI} from '@latchway/langchain';
 
+const account = await app.signIn({getIdToken: () => yourAuth.getIdToken()});
+const latchway = await account.makeClient();
 const model = createLatchwayChatOpenAI({
   latchway,
   feature: 'assistant-chat',
@@ -79,9 +84,21 @@ options and accounting. The server chooses the physical model; no upstream key
 belongs in either constructor. Defaults disable framework retries; preserve
 cancellation and never replay an uncertain dispatch automatically.
 
-Scope the client and in-memory history to the signed-in user and environment.
-On account change, abort work, ignore stale callbacks, clear history and dispose
-the old client. Use the user's Firebase ID token, not a UID, App Check token,
+If native or another React Native surface already signed in, use
+`await app.makeClient()` without another sign-in. Screen mount does not imply
+login. For application-auth restoration, use `app.restore({getIdToken})`.
+The provider and token getter are application-owned; no Firebase package or
+native authentication bootstrap is required by Latchway.
+
+Scope the client and in-memory history to the captured account and environment.
+Push fresh tokens with `account.updateIdToken({getIdToken})`; at expiry,
+`identity_refresh_required` suspends protected work until a verified update.
+On account change, abort streams and tool execution, ignore stale callbacks,
+clear history and dispose the old client. Logout uses `account.logout()` and
+affects native and React Native without resetting user quotas. Serialize
+external-provider login/logout calls in your app. See
+[authentication](/clients/react-native/authentication) for lifecycle details.
+Use the user's ID token, not a UID, App Check token,
 custom sign-in token or service-account JSON. Read authoritative quota from the
 server. Tool execution remains app-owned: validate arguments, enforce an
 allowlist, bound the loop and append complete correlated tool results only.

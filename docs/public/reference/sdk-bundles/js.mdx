@@ -1,6 +1,6 @@
 ---
 title: "JavaScript SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for JavaScript SDK 1.0.0."
+description: "Generated, version-bound examples and compatibility metadata for JavaScript SDK 1.1.0."
 ---
 
 <Warning>
@@ -13,21 +13,21 @@ description: "Generated, version-bound examples and compatibility metadata for J
 | Field | Value |
 | --- | --- |
 | Package | `@latchway/client` |
-| Release | `v1.0.0` |
-| Commit | `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` |
+| Documented SDK release | `v1.1.0` |
+| Documentation source commit | `b6f1eab929a5cb7b7656448f28d0edd2b4970d93` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `f4e814289055bad88d508dde862ebdbd105b03483db807c2f128b0681da07711` |
+| Bundle SHA-256 | `70e4034b9029eae1ff2df070dca99e3aadba232cc3c8f5ef9b2cba6c4af5a7b2` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| `@latchway/client` | `1.0.0` | `package.json:L1-L13` |
+| `@latchway/client` | `1.1.0` | `package.json:L1-L13` |
 | `@latchway/openai` | `1.0.0` | `packages/openai/package.json:L1-L4` |
 | `@latchway/vercel-ai` | `1.0.0` | `packages/vercel-ai/package.json:L1-L4` |
-| `@latchway/langchain` | `1.0.0` | `packages/langchain/package.json:L1-L4` |
+| `@latchway/langchain` | `1.1.0` | `packages/langchain/package.json:L1-L4` |
 | Node.js | `24.19.0` | `package.json:L10-L14` |
-| Web browser matrix | `1.56.0` | `package.json:L88-L95` |
+| Web browser matrix | `1.56.0` | `package.json:L93-L99` |
 | openai minimum | `7.8.0` | `conformance/framework-versions.json:L5-L11` |
 | openai latest | `7.8.0` | `conformance/framework-versions.json:L12-L18` |
 | ai minimum | `7.0.85` | `conformance/framework-versions.json:L5-L11` |
@@ -41,7 +41,7 @@ description: "Generated, version-bound examples and compatibility metadata for J
 
 ### `frameworks/langchain.ts`
 
-Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/packages/langchain/src/index.ts#L1-L103)
+Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/langchain/src/index.ts#L1-L196)
 
 ```typescript
 import {
@@ -51,6 +51,7 @@ import {
   type OpenAIEmbeddingsParams,
 } from "@langchain/openai";
 import langchainOpenAIPackage from "@langchain/openai/package.json" with { type: "json" };
+import { AIMessage, type AIMessageChunk } from "@langchain/core/messages";
 
 const frameworkVersion = langchainOpenAIPackage.version;
 const placeholder = "latchway-managed-not-a-provider-secret";
@@ -92,6 +93,7 @@ export function createLatchwayChatOpenAI(options: CreateLatchwayChatOpenAIOption
   });
   return new ChatOpenAI({
     ...options.chatOptions,
+    maxRetries: options.chatOptions?.maxRetries ?? 0,
     apiKey: placeholder,
     model: "latchway",
     configuration: {
@@ -108,6 +110,7 @@ export function createLatchwayEmbeddings(options: CreateLatchwayEmbeddingsOption
   });
   return new OpenAIEmbeddings({
     ...options.embeddingsOptions,
+    maxRetries: options.embeddingsOptions?.maxRetries ?? 0,
     apiKey: placeholder,
     encodingFormat: "float",
     model: "latchway",
@@ -119,6 +122,96 @@ export function createLatchwayEmbeddings(options: CreateLatchwayEmbeddingsOption
 }
 
 export const LANGCHAIN_OPENAI_VERSION = frameworkVersion;
+
+export interface CreateLatchwayResponsesModelOptions extends Omit<CreateLatchwayChatOpenAIOptions, "chatOptions"> {
+  /** Explicit route/model capability: the non-authoritative model alias cannot infer it. */
+  reasoning?: ChatOpenAIFields["reasoning"];
+  chatOptions?: Omit<LatchwayChatOpenAIOptions, "useResponsesApi" | "zdrEnabled" | "reasoning" | "reasoningEffort">;
+}
+
+/**
+ * Opt-in stateless text/function-tool Responses profile (gateway 1.0.2+).
+ * Own history locally; provider storage/references and opaque reasoning are not
+ * enabled. No reasoning setting is guessed from the server-owned model alias.
+ */
+export function createLatchwayResponsesModel(options: CreateLatchwayResponsesModelOptions): ChatOpenAI {
+  const chatOptions = options.chatOptions ?? {};
+  const kwargs = chatOptions.modelKwargs ?? {};
+  for (const key of ["include", "previous_response_id", "conversation", "reasoning", "reasoning_effort"]) {
+    if (kwargs[key] !== undefined) {
+      throw new Error(`The stateless Latchway Responses profile does not accept modelKwargs.${key}. Use explicit reasoning options and local message history.`);
+    }
+  }
+  if (kwargs.store !== undefined && kwargs.store !== false) {
+    throw new Error("The stateless Latchway Responses profile requires store:false.");
+  }
+  return createLatchwayChatOpenAI({
+    latchway: options.latchway,
+    feature: options.feature,
+    chatOptions: {
+      ...chatOptions,
+      useResponsesApi: true,
+      zdrEnabled: true,
+      modelKwargs: {
+        ...kwargs,
+        store: false,
+        ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
+      },
+    },
+  });
+}
+
+/** Bind ordinary LangChain tools with explicit boolean strict and serial defaults. */
+export function bindLatchwayTools(
+  model: ChatOpenAI,
+  tools: Parameters<ChatOpenAI["bindTools"]>[0],
+  options: NonNullable<Parameters<ChatOpenAI["bindTools"]>[1]> = {},
+): ReturnType<ChatOpenAI["bindTools"]> {
+  if (options.strict !== undefined && typeof options.strict !== "boolean") {
+    throw new Error("Latchway tool strict must be a boolean.");
+  }
+  if (options.parallel_tool_calls !== undefined && typeof options.parallel_tool_calls !== "boolean") {
+    throw new Error("Latchway parallel_tool_calls must be a boolean.");
+  }
+  return model.bindTools(tools, { ...options,
+    parallel_tool_calls: options.parallel_tool_calls ?? false, strict: options.strict ?? true,
+  });
+}
+
+/**
+ * Make an explicit text/function-call replay message after a complete response.
+ * Removes provider item IDs and observational metadata, preserves tool-call IDs,
+ * and refuses opaque/unsupported content instead of silently dropping it.
+ * Do not call on partial/failed streams; retain the original for usage metadata.
+ */
+export function toLatchwayReplayMessage(message: AIMessage | AIMessageChunk): AIMessage {
+  if (message.invalid_tool_calls?.length) throw new Error("Cannot replay invalid tool calls.");
+  for (const key of ["reasoning", "refusal", "audio", "function_call"]) {
+    if (message.additional_kwargs[key] != null) {
+      throw new Error(`Cannot replay unsupported ${key} content on the stateless text/tool profile.`);
+    }
+  }
+  let content: string;
+  if (typeof message.content === "string") {
+    content = message.content;
+  } else {
+    content = message.content.map((part) => {
+      if (part.type !== "text" || typeof part.text !== "string") {
+        throw new Error("Only text and function-tool calls can be replayed on this profile.");
+      }
+      return part.text;
+    }).join("");
+  }
+  const ids = new Set<string>();
+  const toolCalls = (message.tool_calls ?? []).map((call) => {
+    if (!call.id || !call.name || ids.has(call.id)) {
+      throw new Error("Replay requires unique, non-empty tool-call IDs and names.");
+    }
+    ids.add(call.id);
+    return { ...call, args: { ...call.args } };
+  });
+  return new AIMessage({ content, tool_calls: toolCalls });
+}
 
 function withProviderRequestID(
   fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
@@ -149,9 +242,40 @@ function preserveResponseLocation(target: Response, source: Response): void {
 }
 ```
 
+### `frameworks/native-lifecycle.md`
+
+Source: [docs/release/v1.1.0.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/release/v1.1.0.md#L1-L24)
+
+```text
+# JavaScript client 1.1.0
+
+Only `@latchway/client` is published by this release. OpenAI and Vercel AI adapters
+remain 1.0.0; LangChain remains 1.1.0. Their existing `^1.0.0` client peer range
+accepts client 1.1.0, so no adapter republish is necessary.
+
+- Add portable typed errors for shared native/RN account lifecycle, including
+  `identity_refresh_required`. That condition suspends protected work until the
+  application supplies a fresh token; it is not logout or an automatic retry.
+- Consume the exact released 1.1.0 core contract and shared-native fixtures.
+  Browser/Node clients still emit wire 2, parse retained legacy grants and accept
+  supported server diagnostics. A server's current wire 3 does not change the
+  browser client's platform or imply native hardware trust.
+- Preserve native/RN authority: HTTP Problems cannot manufacture native-local
+  logout/account transitions. Native registry and supplied-token APIs belong to
+  `@latchway/react-native`, Swift and Kotlin, not the browser/Node transport.
+- No Firebase dependency is added. The application's existing authentication
+  system remains responsible for identity tokens and external logout.
+
+The release pins core commit `0a60cbef57d904664430e235e1e165fea14f610b` and bundle
+SHA-256 `deb25aaae5160a7342bfae0efa4a9ce0403d8c40ed8da74eb2c99be4d4ede293`.
+Local unit/build/contract/package results and registry publication are separate
+evidence. This release does not claim new App Check, Turnstile, native-device or
+cloud acceptance from source-level verification alone.
+```
+
 ### `frameworks/openai.ts`
 
-Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/packages/openai/src/index.ts#L1-L71)
+Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/openai/src/index.ts#L1-L71)
 
 ```typescript
 import OpenAI, { type ClientOptions } from "openai";
@@ -227,9 +351,154 @@ function preserveResponseLocation(target: Response, source: Response): void {
 }
 ```
 
+### `frameworks/usage.md`
+
+Source: [docs/framework-integrations.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/framework-integrations.md#L1-L138)
+
+````text
+# Framework integrations
+
+Latchway framework packages are thin adapters over the public
+`AuthenticatedTransport` interface. Applications continue to use framework
+messages, tools, output schemas, streams, callbacks, and errors. Every adapter
+binds one Latchway feature and injects a request-time fetch; it does not cache
+an Authorization or DPoP header.
+
+The versions below are the exact packages exercised by this repository. The
+canonical core `compatibility/frameworks.yaml` registry records these
+JavaScript integrations as `experimental`; hosted common conformance remains
+required before stronger support claims. The local minimum and latest profiles
+are intentionally the same exact versions. A scheduled job observes newer
+releases only inside bounded candidate majors and never widens the supported
+range automatically.
+
+| Package | Framework package tested | Injection seam | Local evidence |
+| --- | --- | --- | --- |
+| `@latchway/openai` | `openai` 7.8.0 | official custom `fetch` and `baseURL` | Responses, Chat, embeddings, SSE usage, Chat/Responses tools and schemas, timeout/cancellation, request IDs, and error/retry mapping |
+| `@latchway/vercel-ai` | `ai` 7.0.85 and `@ai-sdk/openai` 4.0.52 | custom provider backed by a custom `fetch` | Responses/Chat `generateText`, embeddings, incremental `streamText`, middleware, telemetry lifecycle/recording options, timeout/cancellation, tools/typed output, and error/retry mapping |
+| `@latchway/langchain` | `@langchain/openai` 1.5.10 | underlying OpenAI client `configuration.fetch` | Chat, embeddings, streaming usage, bounded batches, isolated batch errors, batch cancellation, timeout/cancellation, tools/structured output, and error/retry mapping |
+
+## OpenAI JavaScript SDK
+
+```ts
+import { createLatchwayOpenAI } from "@latchway/openai";
+
+const openai = createLatchwayOpenAI({
+  latchway,
+  feature: "habit_assistant",
+  clientOptions: { timeout: 30_000, maxRetries: 0 },
+});
+
+const response = await openai.responses.create({
+  model: "latchway",
+  input: "Summarize today",
+});
+```
+
+The official SDK currently requires a model field and API-key constructor
+value. The adapter supplies non-secret compatibility placeholders; Latchway's
+transport removes the placeholder Authorization header before dispatch. The
+server selects and rewrites the physical model. `clientOptions` deliberately
+excludes `apiKey`, `baseURL`, and arbitrary default headers so application code
+cannot replace the authenticated boundary.
+
+OpenAI's SDK-level retries return through the custom fetch and therefore obtain
+a current session and fresh proof. Latchway itself performs only the one safe
+nonce retry and one pre-dispatch session-expiry retry. Set `maxRetries: 0` when
+the application requires a single framework attempt.
+
+## Vercel AI SDK
+
+```ts
+import { generateText, streamText } from "ai";
+import { createLatchwayProvider } from "@latchway/vercel-ai";
+
+const latchwayAI = createLatchwayProvider({ client: latchway });
+
+const result = await generateText({
+  model: latchwayAI("habit_assistant"),
+  prompt: "Summarize today",
+});
+
+const stream = streamText({
+  model: latchwayAI.chat("habit_assistant"),
+  prompt: "Summarize today",
+});
+```
+
+The provider exposes feature selectors, not physical provider/model selectors.
+`responses`, `chat`, and `embedding` choose the corresponding OpenAI-compatible
+wire surface while preserving AI SDK request/response objects.
+
+AI SDK telemetry integrations are application-owned observers. Latchway
+preserves `recordInputs` and `recordOutputs`, but those flags do not redact the
+event objects delivered to a custom integration; treat every custom telemetry
+integration as trusted code with access to prompts and generated content.
+
+## LangChain.js
+
+```ts
+import {
+  createLatchwayChatOpenAI,
+  createLatchwayEmbeddings,
+} from "@latchway/langchain";
+
+const chat = createLatchwayChatOpenAI({
+  latchway,
+  feature: "journal_analysis",
+});
+
+const embeddings = createLatchwayEmbeddings({
+  latchway,
+  feature: "semantic_search",
+});
+
+const message = await chat.invoke("Find this week's themes");
+const vector = await embeddings.embedQuery("sleep quality");
+```
+
+The adapter removes API-key, model, and underlying client configuration from
+its public option types. Embeddings request float encoding because Latchway's
+OpenAI-compatible response returns numeric vectors.
+
+## Security and accounting boundary
+
+- Never pass a provider API key to an adapter or add one through framework
+  headers or query parameters.
+- The adapter records its exact framework identifier and package version in
+  `X-Latchway-Framework` and `X-Latchway-Framework-Version`.
+- The base transport enforces the gateway origin, declared route/method,
+  feature namespace, redirect policy, placeholder stripping, replay rules,
+  cancellation, and streaming.
+- Trusted input-token preflight is performed by the server after physical
+  model selection and request rewriting. Client token counters and model
+  placeholders are never authoritative quota inputs.
+- Provider-compatible final HTTP failures remain framework-visible. Session
+  and protocol setup failures surface as `LatchwayError` before framework
+  dispatch.
+- Adapters mirror `X-Latchway-Request-ID` to the conventional
+  `X-Request-ID` response header without buffering the body, allowing the
+  underlying OpenAI-compatible clients to retain the Latchway correlation ID.
+
+## Current limitations
+
+The case-ID local harness proves the applicable authentication boundary,
+Responses/Chat/embeddings surfaces, incremental streaming and usage,
+AbortSignal and timeout propagation, safe headers, tools, structured output,
+success correlation, Vercel AI middleware and telemetry option behavior, LangChain
+batch concurrency/error/cancellation semantics, quota/provider errors, session
+refresh, framework retries with fresh proofs, placeholder stripping, origin
+rejection, redaction, and lack of global-fetch mutation. It uses a
+protocol-valid in-memory gateway and debug attestation, so it is not hosted or
+exact-image evidence.
+Revocation, real identity reauthentication, live providers, audio, image, and
+remote-file surfaces still require server/environment evidence before a
+support claim.
+````
+
 ### `frameworks/vercel-ai.ts`
 
-Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/packages/vercel-ai/src/index.ts#L1-L78)
+Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/vercel-ai/src/index.ts#L1-L78)
 
 ```typescript
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
@@ -314,7 +583,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `quickstart/firebase-app-check.ts`
 
-Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/examples/firebase/client.ts#L1-L23)
+Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/firebase/client.ts#L1-L23)
 
 ```typescript
 import { createLatchwayClient } from "@latchway/client";
@@ -344,7 +613,7 @@ export function createFirebaseClient(dependencies: FirebaseDependencies) {
 
 ### `quickstart/vanilla-development-client.ts`
 
-Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/examples/vanilla/development-client.ts#L1-L82)
+Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/development-client.ts#L1-L82)
 
 ```typescript
 import {
@@ -433,7 +702,7 @@ export async function safeBrowserDiagnostics(
 
 ### `quickstart/vanilla-development-helper.ts`
 
-Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/examples/vanilla/development-helper.ts#L1-L142)
+Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/development-helper.ts#L1-L142)
 
 ```typescript
 import type { AttestationContext } from "@latchway/client";
@@ -582,7 +851,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 
 ### `quickstart/vanilla-streaming-fetch.ts`
 
-Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/efa0a1074fd5639a02c4b852eac9ecaf4baf00f7/examples/vanilla/streaming-fetch.ts#L1-L93)
+Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/streaming-fetch.ts#L1-L93)
 
 ```typescript
 import {

@@ -1,17 +1,33 @@
 {
   "examples": [
     {
+      "kind": "framework",
+      "name": "LatchwayChat shared native and React Native account integration",
+      "source": {
+        "commit": "6e00e1ae34bdb69f418bd7ee5460c510649423ac",
+        "file": "Examples/LatchwayChat/src/latchway-app.ts",
+        "region": {
+          "end_line": 78,
+          "start_line": 1
+        },
+        "region_sha256": "582966ecb5bd4b327d4fb290d245131e287104632b20dae11edcc8d891640f1a",
+        "release": "v1.2.0",
+        "repository": "https://github.com/Latchway/latchway-react-native-sdk",
+        "source_sha256": "582966ecb5bd4b327d4fb290d245131e287104632b20dae11edcc8d891640f1a"
+      }
+    },
+    {
       "kind": "physical_device",
       "name": "React Native physical-device application",
       "source": {
-        "commit": "ba23c750ec662834b4d480940c4067508723defb",
+        "commit": "6e00e1ae34bdb69f418bd7ee5460c510649423ac",
         "file": "example/src/App.tsx",
         "region": {
           "end_line": 1274,
           "start_line": 1
         },
         "region_sha256": "c3e5d37efae903a668cdc85039f88c612b6c244a5f4be4df1e9d5b6907cb95e6",
-        "release": "v1.0.0",
+        "release": "v1.2.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "c3e5d37efae903a668cdc85039f88c612b6c244a5f4be4df1e9d5b6907cb95e6"
       }
@@ -20,14 +36,14 @@
       "kind": "framework",
       "name": "OpenAI, Vercel AI, LangChain, and Anthropic consumers",
       "source": {
-        "commit": "ba23c750ec662834b4d480940c4067508723defb",
+        "commit": "6e00e1ae34bdb69f418bd7ee5460c510649423ac",
         "file": "example/src/framework-consumers.ts",
         "region": {
           "end_line": 153,
           "start_line": 1
         },
         "region_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270",
-        "release": "v1.0.0",
+        "release": "v1.2.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270"
       }
@@ -36,14 +52,14 @@
       "kind": "component",
       "name": "iOS App Intent extension",
       "source": {
-        "commit": "ba23c750ec662834b4d480940c4067508723defb",
+        "commit": "6e00e1ae34bdb69f418bd7ee5460c510649423ac",
         "file": "example/ios/AppIntents/AppIntents.swift",
         "region": {
           "end_line": 264,
           "start_line": 1
         },
         "region_sha256": "170130f1424b91bb52246dba503b48d06dbafced41e39e70142bc2045855991d",
-        "release": "v1.0.0",
+        "release": "v1.2.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "170130f1424b91bb52246dba503b48d06dbafced41e39e70142bc2045855991d"
       }
@@ -52,14 +68,14 @@
       "kind": "physical_device",
       "name": "Android host application",
       "source": {
-        "commit": "ba23c750ec662834b4d480940c4067508723defb",
+        "commit": "6e00e1ae34bdb69f418bd7ee5460c510649423ac",
         "file": "example/android/app/src/main/java/com/latchwayexample/MainApplication.kt",
         "region": {
           "end_line": 22,
           "start_line": 1
         },
         "region_sha256": "185d1a1a0dbe5d346a55780b115dc67ee29a2dd556e528f9c0e8884c0b0ce91c",
-        "release": "v1.0.0",
+        "release": "v1.2.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "185d1a1a0dbe5d346a55780b115dc67ee29a2dd556e528f9c0e8884c0b0ce91c"
       }

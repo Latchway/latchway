@@ -5,30 +5,33 @@ description: "Trace generated SDK examples and API catalogs to versioned source 
 
 SDK quickstarts and framework examples are imported only through
 `scripts/docs-sync-sdk`. Every generated source file identifies the SDK repository,
-release, commit, file, and exact line region. CI verifies the archive, manifest,
-checksums, lock, provenance, and generated output before documentation can merge.
+documented SDK version, documentation source commit, file, and exact line region.
+The validator checks the archive, manifest, checksums, lock, provenance, and generated output.
+
+A documentation-only follow-up may have a newer source commit than the immutable SDK
+release tag. Source links use the recorded documentation commit, not an assumed tag target.
 
 <Warning>
   A checked-in source bundle is not evidence that its registry package or GitHub
   release is public. See [Release status](/release-status) for protected external gates.
 </Warning>
 
-| SDK | Package | Release | Source tree clean | Commit | Bundle SHA-256 |
+| SDK | Package | Documented release | Source tree clean | Documentation commit | Bundle SHA-256 |
 | --- | --- | --- | --- | --- | --- |
-| [android](/reference/sdk-bundles/android) | `dev.latchway` | `v1.0.0` | `yes` | `694cb4d2bff9e91582896e3cbbe140e960d9e4e4` | `1a13c6834b960dbfc7fb91c390167624eadbf5f6e8d12325bd82423cc4f4a7f7` |
-| [ios](/reference/sdk-bundles/ios) | `Latchway` | `v1.0.0` | `yes` | `92a394acbc00d1af6d258372f22b11ddae8e1750` | `c0cdad255cde507faaad173f9a2dba05a29e6be53130f07a25c2e4e831498f00` |
-| [js](/reference/sdk-bundles/js) | `@latchway/client` | `v1.0.0` | `yes` | `efa0a1074fd5639a02c4b852eac9ecaf4baf00f7` | `f4e814289055bad88d508dde862ebdbd105b03483db807c2f128b0681da07711` |
-| [react-native](/reference/sdk-bundles/react-native) | `@latchway/react-native` | `v1.0.0` | `yes` | `ba23c750ec662834b4d480940c4067508723defb` | `db7c9a569a86ec2f88750de80a1bc2f44dceb0c6db2d9f1613a309dcbbed37a2` |
+| [android](/reference/sdk-bundles/android) | `dev.latchway` | `v1.1.0` | `yes` | `22602393d215eee9f08927bd079171acaba98d47` | `13392ca4fe96f0ff75346010e4e26a03fa87b95bced56a2642740737f0a4f288` |
+| [ios](/reference/sdk-bundles/ios) | `Latchway` | `v1.2.0` | `yes` | `37f46733d95e659230f460f44f3ecbd7c7d03a14` | `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274` |
+| [js](/reference/sdk-bundles/js) | `@latchway/client` | `v1.1.0` | `yes` | `b6f1eab929a5cb7b7656448f28d0edd2b4970d93` | `70e4034b9029eae1ff2df070dca99e3aadba232cc3c8f5ef9b2cba6c4af5a7b2` |
+| [react-native](/reference/sdk-bundles/react-native) | `@latchway/react-native` | `v1.2.0` | `yes` | `6e00e1ae34bdb69f418bd7ee5460c510649423ac` | `6b65b13d1c38f0a87b68e66636206161b406065ffba78623e1951c42683c2878` |
 
 ## Update a bundle
 
 Run the source repository's bundle producer, then import the exact coordinate:
 
 ```shell
-scripts/docs-sync-sdk ios 1.0.0
-scripts/docs-sync-sdk android 1.0.0
-scripts/docs-sync-sdk js 1.0.0
-scripts/docs-sync-sdk react-native 1.0.0
+scripts/docs-sync-sdk android 1.1.0
+scripts/docs-sync-sdk ios 1.2.0
+scripts/docs-sync-sdk js 1.1.0
+scripts/docs-sync-sdk react-native 1.2.0
 ```
 
 The command rejects archive traversal, links, non-canonical metadata, unknown files,

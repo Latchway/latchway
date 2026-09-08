@@ -1,487 +1,289 @@
 ---
 title: "Send a protected request from React Native"
-description: "Use published packages and exercise one TypeScript API through native iOS and Android security modules."
+description: "Configure from React Native, supply your application's identity token and send a feature-bound request through native security."
 icon: "atom"
 audience: "client-react-native"
 pageType: "tutorial"
-serverVersion: "1.0.3"
-sdkVersion: "1.1.2"
-lastVerified: "2026-09-07"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
-import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
-import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 import { SetupCoordinates } from "/components/SetupPath.jsx";
 
-<Badge color="purple">SDK 1.1.2</Badge> <Badge color="blue">React Native 0.82</Badge>
+<Badge color="purple">SDK 1.2.0</Badge> <Badge color="blue">Shared native account</Badge>
 
-**Expected time:** 15 minutes after the published package installation,
-gateway resources, Firebase identity, and one native host configuration exist;
-repeat the native run on the other platform for completion proof.
+**Expected time:** 15 minutes after gateway resources, application login and
+native signing are configured. This guide targets server 1.1.1, React Native
+SDK 1.2.0, iOS SDK 1.2.0 and Android SDK 1.1.0. Check
+[Release status](/release-status) for package availability; a prepared source
+release does not itself establish publication or physical-device acceptance.
 
-**Mode:** Application integration; iOS and Android compilation is distinct from
-protected App Attest, Play Integrity, or distribution evidence.
+**Mode:** Application integration, standalone or embedded React Native.
 
-**Coordinates:** server `1.0.3`, contract `1.0.0`; React Native SDK `1.1.2`
-with its published iOS/Android `1.0.0` dependency locks.
+**Coordinates:** server `1.1.1`, contract `1.1.0`, wire `3`; React Native `1.2.0`,
+iOS `1.2.0`, Android `1.1.0` and JavaScript client `1.1.0`.
 
 ## Outcome
 
-Run one complete TypeScript screen on iOS and Android, bind its fetch function
-to `habit-assistant`, consume a streamed Responses body, and find both requests
-in the Console. Native modules continue to own component keys, DPoP, session
-rotation, and platform attestation.
+Configure Latchway from React Native, supply a current identity token from your
+existing login flow, and send one Chat Completions request to `habit-assistant`.
+Find its request ID and usage in the Console. The same setup works in a
+standalone app or a React Native screen embedded in a native app.
+
+Either native or React Native can configure first. Equivalent configuration
+reuses one native app, account and session. You do not need a native Latchway
+bootstrap, Firebase dependency, or separate embedded-mode setting.
 
 ## Before you start
 
-- a reachable Latchway `1.0.3` gateway with an application resource ID,
-  environment, `habit-assistant` feature, Responses route, and limits
-- published `@latchway/react-native@1.1.2` and its locked native dependencies
-- React Native 0.82 with the New Architecture enabled
-- a signed-in Firebase user whose ID token the gateway identity provider accepts
-- either the iOS 15+ toolchain or the Android API 24+ toolchain for the first
-  run; both are required for the final React Native completion proof
-
-<Note>
-  The Firebase packages belong to the checked-in example, not the Latchway
-  runtime package. You can use another supported identity provider by replacing
-  only `getIdentityToken`; it must return your application's current user JWT.
-  Never put an upstream provider key in React Native code or configuration.
-</Note>
-
-<Warning>
-  Published packages are available, but compilation does not prove your app's
-  signing or attestation. Historical evidence covers React Native
-  commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` on a real iPad running
-  iPadOS 26.5 in Debug configuration with automatic Apple Development signing.
-  Predecessor `4264b47e270f5e9c05938d8108eacb79c7bf4e99` adds a Debug
-  native delegated-request path and passed strict Apple Development
-  root/extension entitlement/provisioning, registered-device install, and
-  launch checks without new App Attest or App Intent execution. Historical source
-  `ba23c750ec662834b4d480940c4067508723defb` carries the release retry-closure
-  and transition-order hardening, locks the released contract plus final
-  sibling SDK successor commits, and passes the full local plus generic iOS
-  and isolated Debug/Release build gates; its physical path was not rerun.
-  Android physical, App Intent, and protected extension-matrix evidence are
-  operator-deferred release gates. Protected Apple distribution evidence
-  remains open and is not claimed as deferred.
-</Warning>
-
-### Use one public coordinate set on both hosts
+- A reachable server 1.1.1 gateway with an application resource ID, environment,
+  identity provider and `habit-assistant` feature routed to `openai_chat`.
+- React Native `>=0.74.0 <1.0.0`, React `^18.2.0 || ^19.0.0`, and the New
+  Architecture. Use a compatible React/React Native pair for your host.
+- An application login flow that can return a current user ID token accepted
+  by the gateway. A project ID alone is not authentication.
+- A signed iOS 15+ app with App Attest and the private root Keychain group, or
+  an Android API 24+ app with Play Integrity configured for its package and
+  signing certificate. Complete both hosts when shipping both platforms.
+- An explicit gateway `sharedNativeCallers` policy permitting the intended
+  native and React Native callers, with the required host attestation unchanged.
 
 <SetupCoordinates platform="react-native" />
 
-The gateway origin, application resource ID, environment, feature, model
-placeholder, and identity callback are shared. Signing, package identity, App
-Attest, Play Integrity, key storage, and distribution proof remain
-native-platform steps. Passing the iOS path does not mark the Android path
-complete.
+Never put upstream provider keys, service-account JSON, App Check tokens or
+admin credentials into this client. The application resource ID (`app_...`) is
+not a Firebase app ID, bundle identifier or Android package name.
 
 ## What you will build
 
 ```text
-TypeScript feature-bound fetch
-  -> native iOS or Android module
-  -> platform key + native DPoP signing
-  -> Latchway feature and server-owned route
+Application login -> shared native account -> feature-bound request -> Console usage
 ```
 
-JavaScript never receives a private key, attestation evidence, access token, or
-refresh token from the native bridge.
+Authentication belongs to your app. Native modules own keys, attestation, DPoP,
+session credentials and networking; the gateway owns routing and quota.
 
 ## Procedure
 
 <Steps>
-  <Step title="Install the published package">
-    From your React Native host, install the package and retain the lockfile.
-    Reuse existing Firebase App/Auth modules and login UI. The versioned
-    [npm-only example](https://github.com/Latchway/latchway-react-native-sdk/tree/v1.1.2/Examples/LatchwayChat)
-    demonstrates the full host setup; its original dependency lock predates the
-    1.1.2 publication, so use the current main example for the refreshed npm lock.
+  <Step title="Install and rebuild the native host">
 
 ```bash
-npm install --save-exact @latchway/react-native@1.1.2
-```
-
-    Expected result: npm resolves the public archive, with no local SDK links.
-    Diagnostic: check the lockfile version and registry integrity. For LangChain,
-    complete [runtime setup](/clients/react-native/framework-integrations) before
-    importing the framework; the ordinary SDK import does not install globals.
-  </Step>
-  <Step title="Complete one native host, then the other">
-    <Tabs>
-      <Tab title="iOS">
-        Use iOS 15 or newer. Enable the New Architecture and App Attest for the
-        exact bundle identifier. Put the fully resolved private app-ID Keychain
-        group first in the signed root entitlement; list only explicit
-        extension-shared groups as legacy migration inputs. The group in
-        TypeScript must match the signed entitlement byte-for-byte.
-
-```bash
+npm install --save-exact @latchway/react-native@1.2.0
 cd ios
 pod install
 cd ..
-npm run ios
 ```
 
-        Expected result: CocoaPods resolves `LatchwayReactNative` and the pinned
-        `Latchway/AppAttest` 1.0.0 release, and the host compiles without exposing a
-        key or token to JavaScript. Diagnostic: inspect only non-secret build
-        coordinates with `grep -n "Latchway" Podfile.lock`. A simulator proves
-        compilation, not App Attest; use a correctly provisioned physical
-        device for that verdict.
-      </Tab>
-      <Tab title="Android">
-        Use API 24 or newer with compile SDK 37, JDK 17, and the New
-        Architecture. Resolve the bridge's native dependencies from Maven Central,
-        without a local SDK repository override. Configure the decimal-string Play Cloud project number in
-        TypeScript; the package and signing-certificate digest must match the
-        gateway application before a protected verdict can succeed.
+    CocoaPods resolves `Latchway/AppAttest` 1.2.0; Android resolves the locked
+    `dev.latchway` 1.1.0 modules from Maven Central. Retain the lockfiles and
+    rebuild the native application. Do not add a second native SDK copy or
+    local source override in a registry-based integration.
 
-```bash
-cd android
-./gradlew :app:compileDebugKotlin :app:lintDebug --no-daemon
-```
+    Follow [iOS host setup](/clients/react-native/ios-native-setup) or
+    [Android host setup](/clients/react-native/android-native-setup). Android
+    libraries compile against API 34; your host or other dependencies may
+    require a newer compile or target SDK. Simulator or emulator compilation
+    does not establish a physical App Attest or Play Integrity verdict.
 
-        Expected result: Gradle resolves the pinned `dev.latchway` artifacts and
-        compiles the TurboModule host. Diagnostic: run the same command with
-        `:app:dependencyInsight --dependency dev.latchway --configuration
-        debugRuntimeClasspath`. An emulator or sideloaded Debug APK proves
-        compilation and bridge behavior, not a Play Integrity production
-        verdict; that requires a Play-distributed build on a physical device.
-      </Tab>
-    </Tabs>
+    Expected result: npm and native dependency locks resolve the listed versions
+    and the host compiles. Diagnostic: inspect `Podfile.lock` or Gradle dependency
+    output for duplicate Latchway copies; a JavaScript reload cannot update native code.
+
   </Step>
-  <Step title="Add the complete TypeScript request screen">
-    Put the following file at `src/App.tsx` in a host that has completed the
-    native step. Replace the seven non-secret values in `configuration`. The
-    application resource ID is the generated `app_...` ID from Latchway, not a
-    bundle identifier, package name, or display name. The model value is a
-    protocol compatibility placeholder; the feature and active server
-    configuration still own physical provider and model routing.
+  <Step title="Configure public app and identity metadata">
 
-```tsx
-import { useEffect, useRef, useState } from "react";
-import {
-  Button,
-  Linking,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import firebaseAuth from "@react-native-firebase/auth";
-import {
-  createLatchwayClient,
-  errorFromResponse,
-  LatchwayError,
-  type LatchwayClient,
-} from "@latchway/react-native";
+    Put this in an application service module. Replace the public coordinates
+    with values from your own gateway and signed app:
 
-const configuration = {
-  baseURL: "https://gateway.example.com",
-  applicationID: "app_01J00000000000000000000000",
-  environment: "development",
-  feature: "habit-assistant",
-  model: "latchway",
-  iosRootKeychainAccessGroup: "ABCDE12345.com.example.habits",
-  androidPlayIntegrityCloudProjectNumber: "123456789012",
-} as const;
+```ts
+import {Latchway, firebaseProject} from '@latchway/react-native';
 
-async function getIdentityToken(): Promise<string> {
-  const user = firebaseAuth().currentUser;
-  if (user === null) {
-    throw new Error("Sign in with Firebase before calling Latchway.");
-  }
-  return user.getIdToken();
-}
-
-function createAppClient(): LatchwayClient {
-  const shared = {
-    baseURL: configuration.baseURL,
-    applicationID: configuration.applicationID,
-    environment: configuration.environment,
-    identityProvider: "firebase",
-    getIdentityToken,
-  };
-
-  if (Platform.OS === "ios") {
-    return createLatchwayClient({
-      ...shared,
-      apple: {
-        rootKeychainAccessGroup: configuration.iosRootKeychainAccessGroup,
-      },
-    });
-  }
-  if (Platform.OS === "android") {
-    return createLatchwayClient({
-      ...shared,
-      android: {
-        playIntegrityCloudProjectNumber:
-          configuration.androidPlayIntegrityCloudProjectNumber,
-      },
-    });
-  }
-  throw new Error("This example supports only native iOS and Android hosts.");
-}
-
-const latchway = createAppClient();
-const habitAssistantFetch = latchway.fetchFor(configuration.feature);
-
-export default function App(): React.JSX.Element {
-  const [input, setInput] = useState("Plan a focused afternoon.");
-  const [output, setOutput] = useState("");
-  const [status, setStatus] = useState("Ready");
-  const [documentationURL, setDocumentationURL] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const activeRequest = useRef<AbortController | null>(null);
-
-  useEffect(() => () => {
-    activeRequest.current?.abort();
-    void latchway.dispose();
-  }, []);
-
-  const send = async (): Promise<void> => {
-    if (activeRequest.current !== null) return;
-    const controller = new AbortController();
-    activeRequest.current = controller;
-    setBusy(true);
-    setOutput("");
-    setDocumentationURL(undefined);
-    try {
-      await latchway.ready;
-      const response = await habitAssistantFetch("/v1/responses", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Accept: "text/event-stream",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: configuration.model,
-          input,
-          stream: true,
-        }),
-      });
-      if (!response.ok) throw await errorFromResponse(response);
-
-      const requestID = safeRequestID(
-        response.headers.get("X-Latchway-Request-ID"),
-      );
-      setStatus(requestID === undefined
-        ? "Streaming response"
-        : `Streaming · request ${requestID}`);
-      await consumeBoundedStream(response, (text) => {
-        setOutput((current) => current + text);
-      });
-      setStatus(requestID === undefined
-        ? "Completed"
-        : `Completed · request ${requestID}`);
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        setStatus("Cancelled; start a new request when ready.");
-      } else if (error instanceof LatchwayError) {
-        const request = error.requestID === undefined
-          ? ""
-          : ` · request ${error.requestID}`;
-        setStatus(`${error.code}${request}: ${error.message}`);
-        setDocumentationURL(error.documentationURL);
-      } else {
-        setStatus(error instanceof Error ? error.message : "Request failed.");
-      }
-    } finally {
-      if (activeRequest.current === controller) activeRequest.current = null;
-      setBusy(false);
-    }
-  };
-
-  return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={{ gap: 12, padding: 24 }}>
-        <Text>Habit assistant</Text>
-        <TextInput
-          editable={!busy}
-          multiline
-          onChangeText={setInput}
-          value={input}
-        />
-        <View style={{ gap: 8 }}>
-          <Button
-            disabled={busy || input.trim().length === 0}
-            onPress={() => { void send(); }}
-            title={busy ? "Streaming…" : "Send request"}
-          />
-          <Button
-            disabled={!busy}
-            onPress={() => { activeRequest.current?.abort(); }}
-            title="Cancel"
-          />
-        </View>
-        <Text selectable>{status}</Text>
-        <Text selectable>{output}</Text>
-        {documentationURL === undefined ? null : (
-          <Button
-            onPress={() => { void Linking.openURL(documentationURL); }}
-            title="Open error guide"
-          />
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-async function consumeBoundedStream(
-  response: Response,
-  append: (text: string) => void,
-): Promise<void> {
-  if (response.body === null) {
-    throw new Error("Gateway did not return a response stream.");
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += chunk.value.byteLength;
-      if (bytes > 1_048_576) {
-        await reader.cancel("Quickstart display limit reached");
-        throw new Error("Stream exceeded the 1 MiB display limit.");
-      }
-      append(decoder.decode(chunk.value, { stream: true }));
-    }
-    const tail = decoder.decode();
-    if (tail.length > 0) append(tail);
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function safeRequestID(value: string | null): string | undefined {
-  return value !== null && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(value)
-    ? value
-    : undefined;
-}
+export const configuredApp = Latchway.configure({
+  baseURL: 'https://gateway.example.com',
+  applicationID: 'app_01J00000000000000000000000',
+  environment: 'development',
+  identity: firebaseProject({projectID: 'your-project-id'}),
+  apple: {rootKeychainAccessGroup: 'YOUR_SIGNED_ROOT_KEYCHAIN_GROUP'},
+  android: {playIntegrityCloudProjectNumber: '123456789012'},
+});
 ```
 
-    Expected result: one stable client verifies native compatibility, obtains
-    the signed-in user's identity JWT only when native session work needs it,
-    binds fetch permanently to `habit-assistant`, and renders the native-backed
-    response stream incrementally. Cancel is terminal for that dispatch; Send
-    creates a new request. Typed failures retain a safe request ID and open the
-    canonical error guide. Diagnostic: run `corepack pnpm example:check` and
-    `corepack pnpm example:bundle:check` before treating a failure as
-    device-specific.
+    `firebaseProject` formats issuer/audience metadata only. It imports no
+    Firebase module, acquires no token and installs no listener. Other
+    gateway-supported JWT providers use
+    `identity: {providerID, issuer, audience, tenantID?}`. The gateway must have
+    the matching verifier configured.
 
-    <Accordion title="Compare the source-verified example regions">
-      The release bundle extracts these regions from the checked-in,
-      type-checked example. They show the equivalent environment-driven client
-      construction and native-backed streaming dispatch used by repository CI.
+    Use the actual signed private root Keychain group, not an unresolved Xcode
+    expression or a guessed Team ID and bundle combination. Matching native
+    and React Native configurations reuse the same app. Conflicting explicit
+    values fail with `configuration_conflict`; configure never signs in or
+    reactivates a logged-out account.
 
-      <ReactNativeCreateClient />
-      <ReactNativeStreamingFetch />
-    </Accordion>
+    Expected result: configuration returns the shared app handle regardless of
+    which caller configured first. Diagnostic: compare explicit coordinates on
+    `configuration_conflict`, including the actual signed Keychain group.
+
   </Step>
-  <Step title="Run the request on iOS and Android">
-    Start Metro from the SDK root, run the host you configured, sign in through
-    the application's Firebase flow, and press **Send request**. Repeat with the
-    other native host; do not reuse an iOS verdict as Android proof.
+  <Step title="Supply identity after an accepted login">
 
-```bash
-corepack pnpm --filter latchway-react-native-example start
+```ts
+const app = await configuredApp;
+const account = await app.signIn({
+  getIdToken: () => yourAuth.getIdToken(),
+});
+const client = await account.makeClient();
+const assistantFetch = client.fetchFor('habit-assistant');
 ```
 
-```bash
-corepack pnpm --filter latchway-react-native-example ios
-corepack pnpm --filter latchway-react-native-example android
+    `yourAuth` is your application-owned authentication integration. Its getter
+    returns a current user ID token. Latchway invokes it once after capturing
+    the native operation; it is not retained as a permanent JS auth owner.
+    Already acquired tokens can use `app.signIn({idToken})`.
+
+    If another native or React Native caller already signed in, attach with
+    `await app.makeClient()` instead. Initial application-auth restoration uses
+    `app.restore({getIdToken})`; it cannot reverse a recorded Latchway logout.
+    A screen mounting is not a new login.
+
+    Expected result: a verified account returns a native-backed client without
+    exposing session credentials. Diagnostic: check the gateway identity provider
+    and current token's source on identity rejection; never print the token.
+
+  </Step>
+  <Step title="Send one request and retain its safe request ID">
+
+```ts
+import {errorFromResponse} from '@latchway/react-native';
+
+const controller = new AbortController();
+const response = await assistantFetch('/v1/chat/completions', {
+  method: 'POST',
+  signal: controller.signal,
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({
+    model: 'latchway',
+    messages: [{role: 'user', content: 'Suggest one small habit for tomorrow.'}],
+    max_tokens: 256,
+    stream: false,
+  }),
+});
+if (!response.ok) throw await errorFromResponse(response);
+
+const requestID = response.headers.get('X-Latchway-Request-ID');
+const answer = await response.json();
+// Render answer.choices[0].message.content in your app and show requestID.
+// Do not log the token, request body, response body or native proof material.
 ```
 
-    Expected result: the screen appends streamed bytes and ends with
-    `Completed · request ...` on each platform. Diagnostic: preserve that safe
-    request ID, open the matching Console row, and use the typed error's **Open
-    error guide** action instead of logging identity tokens, attestation
-    evidence, DPoP proofs, or response bodies.
+    The model value is a compatibility placeholder. The feature's active route
+    owns the upstream and physical model. Use `/v1/responses` only with a
+    separately configured Responses feature and its matching request body.
+    Every model round consumes configured quota, including tool rounds.
+
+    Connect the controller to your screen's Stop action, teardown and account
+    changes. Cancellation does not authorize retrying an uncertain provider
+    dispatch. For streaming and tools, continue with the
+    [LangChain integration](/clients/react-native/framework-integrations).
+
+    Expected result: the response contains an assistant message and a safe
+    request ID. Diagnostic: match that ID to the Console row and confirm the
+    feature uses `openai_chat`; a Responses feature needs its own request shape.
+
+  </Step>
+  <Step title="Wire token refresh and shared logout">
+
+```ts
+// On a same-account token refresh:
+await account.updateIdToken({getIdToken: () => yourAuth.getIdToken()});
+
+// On logout, in your serialized application auth flow:
+controller.abort();
+await account.logout();
+await yourAuth.signOut();
+
+// Screen teardown alone releases a client, not the shared account:
+await client.dispose();
+```
+
+    Tokens remain only in native process memory. When supplied identity
+    expires, `identity_refresh_required` suspends protected work until a
+    verified same-account update. After process restart, application auth
+    supplies a token again. Latchway cannot discover an external-provider
+    logout that the application never reported.
+
+    Logout is shared by native and React Native and works offline. It does
+    not reset server-side user quotas, revoke the whole installation or log
+    out other devices. Abort pending sign-in with its `signal`, cancel old
+    streams/tools, and clear in-memory chat on account changes. See
+    [authentication](/clients/react-native/authentication) for restoration,
+    cancellation and an optional provider-neutral event binding.
+
+    Expected result: same-account refresh resumes suspended work, and logout
+    blocks old native/RN clients. Diagnostic: confirm every application auth
+    surface reports changes; disposing a client is not a logout operation.
+
   </Step>
 </Steps>
 
 ## Verification
 
-Run the example once per native platform. Correlate each displayed request ID
-to exactly one successful Console row:
+Run the request on each platform you ship. Correlate the returned request ID
+with one successful Console row: expected environment, feature, normalized
+user, native host, React Native caller, required attestation, DPoP and token
+usage. Test native-first and RN-first configuration, same-user token refresh,
+expiry/recovery, logout and switching accounts.
 
-```text
-Platform: react_native_ios or react_native_android
-Feature: habit-assistant
-User: usr_...
-Installation Family: fam_...
-Client Component: cmp_...
-Identity: accepted
-Attestation: development or platform verdict expected by this environment
-DPoP: verified
-Input usage: present
-Output usage: present
-```
-
-For the development journey, both native-backed example requests are the
-completion proof. Mark production iOS evidence pending until a protected
-App Attest run succeeds, and production Android evidence pending until the
-exact Play-distributed application succeeds on a physical device.
+Fresh source tests or package publication do not replace physical acceptance.
+For iOS, verify the exact signing and App Attest environment. For Android,
+verify the Play-distributed build on a physical device; a sideloaded Debug APK
+is not production Play Integrity evidence.
 
 ## What Latchway established
 
 <SecurityGuarantee
   establishes={[
-    "The same TypeScript API completed through both selected native SDKs.",
-    "The request possessed the native component key bound to its session.",
-    "The server applied the configured identity, trust, feature, route, and quota policy.",
+    "The gateway verified the supplied identity and required native attestation.",
+    "The request possessed the native key bound to the active session.",
+    "The server applied the configured feature, route and per-user quota policy.",
   ]}
   doesNotEstablish={[
     "JavaScript storage became hardware-backed.",
-    "Development signing proved protected Apple distribution.",
-    "iOS evidence proved Android or delegated-extension runtime behavior.",
+    "An unreported external-provider logout was detected automatically.",
+    "One platform's test established another platform or extension's behavior.",
   ]}
 />
 
-## Production next step
-
-<Card title="Complete both native release proofs" icon="badge-check" href="/mobile/device-proof">
-  Bind each exact signed artifact to its platform verdict, gateway image,
-  source commit, contract coordinate, and request evidence.
-</Card>
-
 ## Troubleshooting
 
-<AccordionGroup>
-  <Accordion title="The native module is unavailable">
-    Confirm React Native 0.82 and the New Architecture, then rebuild the native
-    host; a Metro reload cannot add a TurboModule. On iOS, confirm both
-    Latchway pods in `Podfile.lock`. On Android, confirm the `dev.latchway`
-    dependency insight. Continue with [iOS native setup](/clients/react-native/ios-native-setup)
-    or [Android native setup](/clients/react-native/android-native-setup).
-  </Accordion>
-  <Accordion title="The request returns a typed Latchway error">
-    Use **Open error guide** for the exact stable code, then correlate its safe
-    request ID in the Console. Check the gateway origin, generated application
-    resource ID, environment, feature grant, and signed-in identity. Respect the
-    error's retry guidance; never blindly replay a consumed stream or an
-    indeterminate dispatch. See [React Native error handling](/clients/react-native/error-handling).
-  </Accordion>
-  <Accordion title="Attestation is unsupported or required">
-    Simulator, emulator, sideloaded, and Debug results do not establish the
-    protected platform verdict. Check the exact iOS entitlement and provisioned
-    bundle ID, or the Android cloud project, package, certificate, Play track,
-    and install source. Continue with [physical-device proof](/mobile/device-proof).
-  </Accordion>
-</AccordionGroup>
+- `configuration_conflict`: compare explicit native/RN app name, origin,
+  environment, identity metadata and signed security coordinates.
+- `identity_refresh_required`: obtain a current ID token through application
+  auth and update the captured account; do not disable identity verification.
+- Missing server capability: confirm server 1.1.1 advertises
+  `supplied_identity_v1`. An SDK upgrade alone cannot add server capabilities.
+- Native module unavailable: rebuild with the New Architecture and inspect
+  the [installation](/clients/react-native/installation) dependency locks.
+- Attestation denied: inspect the safe request ID in the Console and compare
+  the signed app with the gateway policy. Do not substitute a development
+  bypass for production App Attest or Play Integrity.
 
-<Prompt title="Integrate Latchway React Native source candidate 1.0.0">
-Use React Native SDK 1.0.0 with React Native 0.82 New Architecture and server
-1.0.0. Keep keys, attestation, DPoP, and refresh state in native modules. Use
-one stable TypeScript client, bind fetch to a feature, preserve AbortSignal and
-streaming, and never expose native credentials or provider keys to JavaScript.
+## Production next step
+
+Complete the [production checklist](/clients/react-native/production-checklist)
+and retain platform-specific [device proof](/mobile/device-proof) for the exact
+application artifacts you distribute.
+
+<Prompt title="Integrate Latchway React Native 1.2.0">
+Use React Native SDK 1.2.0 with server 1.1.1, iOS 1.2.0 and Android 1.1.0.
+Configure from React Native with public app and identity metadata; do not add
+Firebase dependencies or a native authentication bootstrap. Supply current
+tokens from existing application auth, attach to already-active shared accounts,
+push token refresh and fence logout/cancellation. Preserve required native
+attestation, feature-bound transport, per-user quotas and application-owned
+LangChain tools/runtime dependencies. Never add upstream credentials to clients.
 </Prompt>

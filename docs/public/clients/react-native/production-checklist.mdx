@@ -4,9 +4,9 @@ description: "Verify JavaScript, TurboModule, native iOS and Android trust, tran
 icon: "list-checks"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.1"
+sdkVersion: "1.2.0"
+lastVerified: "2026-09-08"
 owner: "react-native-sdk"
 ---
 
@@ -19,13 +19,20 @@ test.
 
 ## Shared package and bridge
 
-- [ ] React Native 0.82 New Architecture codegen, TypeScript, Metro bundles,
+- [ ] The selected React Native/React pair satisfies the supported peer ranges;
+  New Architecture codegen, TypeScript, Metro bundles,
   clean packed consumer, and exact compatibility locks pass.
 - [ ] Local native overrides are absent from published package metadata.
 - [ ] JavaScript receives no private key, access or refresh token, DPoP proof,
   raw attestation evidence, or credential-bearing request.
-- [ ] One stable client owns each native security scope and conflicting
-  configurations fail closed.
+- [ ] Native-first and React-Native-first configuration reuse one shared app,
+  account and session; conflicting explicit configuration fails closed.
+- [ ] The app supplies identity tokens, reports external-auth changes, refreshes
+  before expiry and resumes `identity_refresh_required` only after verification.
+- [ ] Shared offline logout fences old requests, tools and UI callbacks. Screen
+  teardown only disposes the client. Restart restoration cannot undo logout.
+- [ ] No Firebase dependency or native authentication bootstrap is required by
+  Latchway; all existing application auth surfaces participate in the lifecycle.
 
 ## iOS proof
 
