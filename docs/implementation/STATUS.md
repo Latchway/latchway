@@ -1,6 +1,68 @@
 # Implementation status
 
-Status date: 2026-09-08
+Status date: 2026-09-10
+
+## Server 1.1.3 release preparation: provider-specific development attestation
+
+App Attest policy accepts `development`, `production` or `any`, while stored key
+identity remains the actual Apple-verified environment. Console setup separates
+Apple environment acceptance from distribution categories. Production defaults
+remain strict; accepting Apple development there needs explicit acknowledgment.
+
+Google Play Console test responses remain debug trust. Only an explicit
+Development policy accepts them through session creation, refresh and feature
+access; Staging and Production cannot opt in. Native and RN shared roots use the
+same server policy. After any configuration revision change, native App Attest
+and Play grants need fresh evidence before refreshing into that revision. This
+avoids inferring provider-specific facts from historical grants without adding a
+database migration. No global trust-order change, client bypass flag, Firebase
+dependency, identity or quota change is introduced.
+
+SDK work strengthens existing key-recovery/opaque-token regression coverage and
+developer instructions; current native runtime behavior already supports the
+flow. The PostgreSQL-backed Go suite, affected-package race checks, executable
+build and static analysis pass. Console passes 307 unit and 43 browser tests;
+iOS passes 234 tests, Android 189, and RN 188 unit/13 runtime/24 native-bridge
+tests. One live-conformance test is skipped in each native SDK. The historical
+Python assertion about removed release CI remains failing and was not disabled.
+The renamed `any` release candidate repeats the full PostgreSQL-backed Go suite,
+seven affected-package race suites, static/build/module checks, 18 focused
+contract/reference tests, all 307 Console unit and 43 browser tests, and canonical
+public-docs checks successfully. The first parallel browser run had two navigation
+timeouts; the full single-worker rerun passes unchanged. One optional live-stack
+browser test stays skipped. The pinned vulnerability scan finds zero reachable
+vulnerabilities; non-reachable dependency advisories remain recorded follow-ups.
+An unrelated pre-existing formatting issue remains in untouched
+`internal/adminapi/credential_selftest.go`; changed Go files are formatted.
+Live Apple/Google/device proof, publication and VPS activation remain
+separate work, not inferred from fixture tests. See the
+[implementation and verification report](DEVELOPMENT_ATTESTATION.md) and
+[provider-specific acceptance decision](../adr/0039-provider-specific-development-attestation.md).
+
+## Security library reuse: included in server 1.1.3 release preparation
+
+The high-priority dependency audit batch delegates Google assertion/token exchange
+and metadata requests to official Google Go libraries, replaces handwritten JSON
+value assembly with the bounded Go 1.27 decoder adapter, and consolidates strict
+P-256 decoding/ES256 verification around existing standard/JWT libraries. The
+proposed additional JOSE dependency was rejected after a compatibility prototype
+showed that it retained the strict checks while adding conversion complexity.
+
+The security-reuse batch itself changes no schema/wire version, persisted key,
+identity derivation, quota/replay policy or production configuration. It is
+included in server 1.1.3 alongside the additive attestation contract. Android separately uses
+platform Base64/JsonWriter with no new production dependency; iOS/RN working
+changes are preserved. Migration/queue refactors remain a later batch.
+
+Focused, full PostgreSQL-15-backed Go, affected race and compatibility/fuzz tests
+pass. Generated SQL, static analysis, contracts and dependency checks pass. The
+full repository command still stops on the recorded historical release-tooling
+failures (18 failures / 133 errors); no removed CI is reinstated. The scanner
+reports no reachable vulnerable symbols, with non-reachable dependency advisories
+retained as follow-ups. Final results and performance/security tradeoffs are in
+[security library reuse](SECURITY_LIBRARY_REUSE.md). This source checkpoint does
+not imply publication, a VPS deployment, physical attestation or a clean complete
+historical release-tooling gate.
 
 ## Server 1.1.2: evidence-based failure settlement and diagnostics
 

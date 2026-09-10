@@ -1363,8 +1363,11 @@ export interface components {
             allowedValidationCategories: (1 | 2 | 3 | 4 | 5 | 6 | 10)[];
             appIdPrefix: string;
             bundleId: string;
-            /** @enum {unknown} */
-            environment: "development" | "production";
+            /**
+             * @description Accepted Apple App Attest environments, independent of the Latchway environment and signing distribution. Any accepts either cryptographically verified Apple environment; it is not an Apple entitlement value. Production Latchway environments require production unless dangerousAllowInProduction is explicitly acknowledged on the platform selection.
+             * @enum {unknown}
+             */
+            environment: "development" | "production" | "any";
         };
         Application: {
             /** Format: date-time */
@@ -1853,7 +1856,10 @@ export interface components {
                     allowedOrigins?: string[];
                     appAttest?: components["schemas"]["AppAttestConfiguration"];
                     applicationIdentifiers?: string[];
-                    /** @default false */
+                    /**
+                     * @description Explicit production acknowledgment for otherwise disallowed weak/debug policies, including Apple development or any acceptance. Does not permit Google Play testing responses outside a development environment.
+                     * @default false
+                     */
                     dangerousAllowInProduction: boolean;
                     firebaseAppCheck?: components["schemas"]["FirebaseAppCheckConfiguration"];
                     /** @enum {unknown} */
@@ -1875,10 +1881,14 @@ export interface components {
                     allowedValidationCategories: (1 | 2 | 3 | 4 | 5 | 6 | 10)[];
                     appIdPrefix: string;
                     bundleId: string;
-                    /** @enum {unknown} */
-                    environment: "development" | "production";
+                    /**
+                     * @description Accepted Apple App Attest environments, independent of the Latchway environment and signing distribution. Any accepts either cryptographically verified Apple environment; it is not an Apple entitlement value. Production Latchway environments require production unless dangerousAllowInProduction is explicitly acknowledged on the platform selection.
+                     * @enum {unknown}
+                     */
+                    environment: "development" | "production" | "any";
                 };
                 PlayIntegrityConfiguration: {
+                    /** @description Explicit opt-in to Google Play Console testing responses, permitted only in a development Latchway environment. Verified testing responses retain debug trust; no signature, request-binding, package, certificate, licensing, or configured device-verdict checks are bypassed. False is the recommended default. */
                     allowTestingResponses: boolean;
                     certificateSha256Digests: string[];
                     cloudProjectNumber: number;
@@ -2780,7 +2790,10 @@ export interface components {
             allowedOrigins?: string[];
             appAttest?: components["schemas"]["AppAttestConfiguration"];
             applicationIdentifiers?: string[];
-            /** @default false */
+            /**
+             * @description Explicit production acknowledgment for otherwise disallowed weak/debug policies, including Apple development or any acceptance. Does not permit Google Play testing responses outside a development environment.
+             * @default false
+             */
             dangerousAllowInProduction: boolean;
             firebaseAppCheck?: components["schemas"]["FirebaseAppCheckConfiguration"];
             /** @enum {unknown} */
@@ -2796,6 +2809,7 @@ export interface components {
             turnstile?: components["schemas"]["TurnstileConfiguration"];
         } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
         PlayIntegrityConfiguration: {
+            /** @description Explicit opt-in to Google Play Console testing responses, permitted only in a development Latchway environment. Verified testing responses retain debug trust; no signature, request-binding, package, certificate, licensing, or configured device-verdict checks are bypassed. False is the recommended default. */
             allowTestingResponses: boolean;
             certificateSha256Digests: string[];
             cloudProjectNumber: number;

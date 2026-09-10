@@ -73,6 +73,7 @@ type EnvironmentFacts struct {
 }
 
 type authorizationFacts struct {
+	environmentKind          string
 	organizationID           string
 	applicationID            string
 	environmentID            string
@@ -176,7 +177,8 @@ func NewSimulationInput(facts SimulationFacts) (Input, error) {
 	horizon := evaluatedAt.Add(30 * 24 * time.Hour)
 	input := Input{
 		authorization: authorizationFacts{
-			organizationID: facts.OrganizationID, applicationID: facts.ApplicationID,
+			environmentKind: facts.EnvironmentKind,
+			organizationID:  facts.OrganizationID, applicationID: facts.ApplicationID,
 			environmentID: facts.EnvironmentID, policyRevisionID: facts.PolicyRevisionID,
 			userOverrideID: facts.UserOverrideID, limitPlanOverride: facts.LimitPlanOverride,
 			userID: facts.ApplicationUserID, installationID: facts.InstallationID,
@@ -232,7 +234,8 @@ func inputFromAuthorization(authorization session.Authorization, logicalID reque
 	}
 	return Input{
 		authorization: authorizationFacts{
-			organizationID: authorization.OrganizationID, applicationID: authorization.ApplicationID,
+			environmentKind: authorization.EnvironmentKind,
+			organizationID:  authorization.OrganizationID, applicationID: authorization.ApplicationID,
 			environmentID: authorization.EnvironmentID, policyRevisionID: authorization.PolicyRevisionID,
 			userOverrideID: authorization.UserOverrideID, limitPlanOverride: authorization.LimitPlanOverride,
 			userID: authorization.ApplicationUserID, installationID: authorization.InstallationID,
@@ -839,7 +842,7 @@ func enforceFeatureAttestation(snapshot Snapshot, feature configuration.Feature,
 		// baseline. This avoids the paradox where unrelated evidence succeeds but
 		// weaker evidence from the preferred provider creates an endless step-up.
 		if selection.Provider == authorization.attestationProvider &&
-			session.TrustSatisfies(authorization.trustLevel, selection.MinimumTrustLevel) &&
+			session.TrustSatisfiesSelection(authorization.environmentKind, selection, authorization.attestationProvider, authorization.trustLevel) &&
 			configuredAttestationFresh(policy, authorization, now) == nil {
 			return nil
 		}
@@ -864,7 +867,7 @@ func enforceFeatureAttestation(snapshot Snapshot, feature configuration.Feature,
 		// Evaluate those before age so a stale weak proof cannot be reported as
 		// refreshable under the wrong policy.
 		if selection.Provider != authorization.attestationProvider ||
-			!session.TrustSatisfies(authorization.trustLevel, selection.MinimumTrustLevel) {
+			!session.TrustSatisfiesSelection(authorization.environmentKind, selection, authorization.attestationProvider, authorization.trustLevel) {
 			return session.ErrAttestationStepUpRequired
 		}
 		return configuredAttestationFresh(policy, authorization, now)

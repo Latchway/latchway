@@ -1192,11 +1192,16 @@ def render_all() -> Mapping[Path, str]:
                     "published SDKs and server 1.0.x do not provide them. Do not treat this reference as release evidence."
                 ) + "</Warning>\n" + body
             documents[path] = content
-    if protocol["contract_version"] == "1.1.1" and client_contract_version == "1.1.0":
-        documents[ADMIN_OUTPUT] = re.sub(
-            r'^serverVersion: .*$', 'serverVersion: "1.1.2"',
-            documents[ADMIN_OUTPUT], count=1, flags=re.MULTILINE,
-        )
+    if protocol["contract_version"] == "1.1.2" and client_contract_version == "1.1.0":
+        for path in (ADMIN_OUTPUT, CONFIG_OUTPUT):
+            documents[path] = re.sub(
+                r'^serverVersion: .*$', 'serverVersion: "1.1.3"',
+                documents[path], count=1, flags=re.MULTILINE,
+            )
+            documents[path] = re.sub(
+                r'^lastVerified: .*$', 'lastVerified: "2026-09-10"',
+                documents[path], count=1, flags=re.MULTILINE,
+            )
     if protocol["contract_status"] == "draft" and protocol["contract_version"] != client_contract_version:
         frontmatter, body = documents[ADMIN_OUTPUT].split("\n---\n", 1)
         documents[ADMIN_OUTPUT] = frontmatter + "\n---\n\n<Warning>" + (

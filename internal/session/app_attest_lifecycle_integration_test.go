@@ -28,6 +28,8 @@ func TestAppAttestKeyLinksInSessionTransactionAndRevokesPostgreSQL(t *testing.T)
 	revisionID := activateChallengeTestRevisionWithPolicy(
 		t, ctx, pool, fixture, now, "app_attest", "required", "app_verified", "10m",
 	)
+	revisionID = activateRefreshPolicyRevision(t, ctx, pool, fixture, revisionID, 2, now,
+		refreshIdentityProviders("firebase"), refreshAttestationPolicies(appleAcceptanceTestPolicy("any")))
 	configurationStore, err := configuration.NewStore(pool)
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +224,37 @@ func TestAppAttestKeyLinksInSessionTransactionAndRevokesPostgreSQL(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A sandbox key accepted by "any" must not refresh into a later
+	// production-only revision. Reject before consuming any refresh credential
+	// or changing the assertion counter, including component-root sessions.
+	refresh, err := NewRefreshToken(issued.RefreshToken.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshBinding, err := sessionStore.InspectRefresh(ctx, refresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := configurationStore.ActiveSnapshot(ctx, configuration.TenantScope{
+		OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID, EnvironmentID: fixture.environmentID,
+	})
+	if err != nil || currentRefreshPolicyError(active, refreshBinding, now) != nil {
+		t.Fatalf("same-revision App Attest refresh policy rejected: %v", err)
+	}
+	activateRefreshPolicyRevision(t, ctx, pool, fixture, revisionID, 3, now,
+		refreshIdentityProviders("firebase"), refreshAttestationPolicies(appleAcceptanceTestPolicy("production")))
+	refreshTarget := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions/refresh")
+	before := loadRefreshPolicyCounts(t, ctx, pool)
+	if _, err := sessionStore.Rotate(ctx, RotateInput{
+		RefreshToken: refresh, HTTPMethod: "POST", RequestURI: refreshTarget,
+		DPoPProof: signedSessionDPoP(t, dpopKey, "POST", refreshTarget, now, "apple-environment-narrowing"),
+	}); !errors.Is(err, ErrAttestationStepUpRequired) {
+		t.Fatalf("sandbox proof refreshed after policy narrowing: %v", err)
+	}
+	if after := loadRefreshPolicyCounts(t, ctx, pool); after != before {
+		t.Fatalf("rejected narrowed-policy refresh mutated credentials: before=%+v after=%+v", before, after)
+	}
+	assertAppAttestKeyLink(t, ctx, pool, keyID, issued.Installation.ID, "active", true, 1, true)
 	revokeTarget := mustSessionURL(t, "https://gateway.example.test/client/v1/installations/current")
 	if err := sessionStore.RevokeCurrentInstallation(ctx, AccessRequestInput{
 		AccessToken: accessToken, Principal: principal,
@@ -233,6 +266,21 @@ func TestAppAttestKeyLinksInSessionTransactionAndRevokesPostgreSQL(t *testing.T)
 		t.Fatalf("revoke App Attest installation: %v", err)
 	}
 	assertAppAttestKeyLink(t, ctx, pool, keyID, issued.Installation.ID, "revoked", true, 1, true)
+}
+
+func appleAcceptanceTestPolicy(environment string) map[string]any {
+	return map[string]any{
+		"id": "native", "maxAge": "10m", "platforms": map[string]any{
+			"ios": map[string]any{
+				"provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified",
+				"appAttest": map[string]any{
+					"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
+					"environment": environment, "allowedValidationCategories": []any{2, 3},
+					"allowedBundleVersions": []any{"*"},
+				},
+			},
+		},
+	}
 }
 
 func appAttestAssertionPayload(

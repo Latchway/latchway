@@ -538,7 +538,7 @@
           "type": "array", "maxItems": 2, "uniqueItems": true,
           "items": { "enum": ["ios", "android", "react-native"] }
         },
-        "dangerousAllowInProduction": { "type": "boolean", "default": false },
+        "dangerousAllowInProduction": { "type": "boolean", "default": false, "description": "Explicit production acknowledgment for otherwise disallowed weak/debug policies, including Apple development or any acceptance. Does not permit Google Play testing responses outside a development environment." },
         "appAttest": { "$ref": "#/$defs/AppAttestConfiguration" },
         "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" },
         "firebaseAppCheck": { "$ref": "#/$defs/FirebaseAppCheckConfiguration" },
@@ -717,7 +717,10 @@
           "maxLength": 255,
           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"
         },
-        "environment": { "enum": ["development", "production"] },
+        "environment": {
+          "enum": ["development", "production", "any"],
+          "description": "Accepted Apple App Attest environments, independent of the Latchway environment and signing distribution. Any accepts either cryptographically verified Apple environment; it is not an Apple entitlement value. Production Latchway environments require production unless dangerousAllowInProduction is explicitly acknowledged on the platform selection."
+        },
         "allowedValidationCategories": {
           "type": "array",
           "description": "Exact Apple launch ValidationCategory allowlist: 2 TestFlight, 3 development signing, 4 App Store, 5 ad hoc or enterprise, 6 Developer ID, 10 otherwise classified signing; category 1 is reserved for operating-system executables.",
@@ -778,7 +781,10 @@
         },
         "minimumDeviceIntegrity": { "enum": ["device", "strong"] },
         "requireLicensed": { "type": "boolean" },
-        "allowTestingResponses": { "type": "boolean" },
+        "allowTestingResponses": {
+          "type": "boolean",
+          "description": "Explicit opt-in to Google Play Console testing responses, permitted only in a development Latchway environment. Verified testing responses retain debug trust; no signature, request-binding, package, certificate, licensing, or configured device-verdict checks are bypassed. False is the recommended default."
+        },
         "minimumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "maximumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "credentialSource": { "enum": ["metadata", "service_account"] }

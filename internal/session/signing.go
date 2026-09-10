@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	jwkcodec "github.com/latchway/latchway/internal/jwk"
 	"github.com/latchway/latchway/internal/secrets"
 )
 
@@ -478,21 +478,7 @@ func (jwk PublicSigningJWK) publicKey() (*ecdsa.PublicKey, error) {
 	if jwk.Kty != "EC" || jwk.Crv != "P-256" || jwk.Use != "sig" || jwk.Alg != "ES256" || len(jwk.Kid) < 8 || len(jwk.Kid) > 128 {
 		return nil, ErrSigningKeyUnavailable
 	}
-	x, errX := base64.RawURLEncoding.Strict().DecodeString(jwk.X)
-	y, errY := base64.RawURLEncoding.Strict().DecodeString(jwk.Y)
-	if errX != nil || errY != nil || len(x) != 32 || len(y) != 32 || base64.RawURLEncoding.EncodeToString(x) != jwk.X || base64.RawURLEncoding.EncodeToString(y) != jwk.Y {
-		return nil, ErrSigningKeyUnavailable
-	}
-	var zeroCoordinate [32]byte
-	if subtle.ConstantTimeCompare(x, zeroCoordinate[:]) == 1 ||
-		subtle.ConstantTimeCompare(y, zeroCoordinate[:]) == 1 {
-		return nil, ErrSigningKeyUnavailable
-	}
-	encoded := make([]byte, 1+len(x)+len(y))
-	encoded[0] = 4
-	copy(encoded[1:], x)
-	copy(encoded[1+len(x):], y)
-	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	publicKey, err := jwkcodec.ParseP256(jwk.X, jwk.Y)
 	if err != nil {
 		return nil, ErrSigningKeyUnavailable
 	}

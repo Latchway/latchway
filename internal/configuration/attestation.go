@@ -115,7 +115,7 @@ func validAppAttestConfiguration(configuration *AppAttestConfiguration) bool {
 	if configuration == nil ||
 		!configuredAppAttestPrefixPattern.MatchString(configuration.AppIDPrefix) ||
 		!validConfiguredBundleID(configuration.BundleID) ||
-		(configuration.Environment != "development" && configuration.Environment != "production") ||
+		(configuration.Environment != "development" && configuration.Environment != "production" && configuration.Environment != "any") ||
 		len(configuration.AllowedValidationCategories) == 0 ||
 		len(configuration.AllowedValidationCategories) > 7 ||
 		len(configuration.AllowedBundleVersions) == 0 ||

@@ -50,6 +50,7 @@ func (store *Store) ExplanationSnapshot(
 	if err != nil {
 		return SimulationSnapshot{}, ErrConfigurationInvalid
 	}
+	snapshot.EnvironmentKind = environment.EnvironmentKind
 	return SimulationSnapshot{
 		Snapshot: snapshot,
 		Scope: TenantScope{

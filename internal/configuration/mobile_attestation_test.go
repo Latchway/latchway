@@ -34,7 +34,7 @@ func TestValidatorMobileAttestationProviderConfiguration(t *testing.T) {
 			issue: "attestation_trust_unreachable",
 		},
 		{
-			name: "Play testing response without production acknowledgement", platform: "android",
+			name: "Play testing response in production", platform: "android",
 			mutate: func(selection map[string]any) {
 				objectValue(selection, "playIntegrity")["allowTestingResponses"] = true
 			},
@@ -111,6 +111,83 @@ func TestValidatorMobileAttestationProviderConfiguration(t *testing.T) {
 				t.Fatalf("invalid mobile attestation compiled: %+v", report.Issues)
 			}
 		})
+	}
+}
+
+func TestValidatorAppAttestEnvironmentAcceptancePolicy(t *testing.T) {
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"development", "staging", "production"} {
+		for _, apple := range []string{"development", "production", "any"} {
+			for _, dangerous := range []bool{false, true} {
+				name := kind + "/" + apple
+				if dangerous {
+					name += "/acknowledged"
+				}
+				t.Run(name, func(t *testing.T) {
+					document := configurationObject(t)
+					environment := testEnvironment()
+					environment.EnvironmentKind, environment.EnvironmentSlug = kind, kind
+					objectValue(document, "metadata")["environment"] = kind
+					selection := objectValue(objectValue(objectArray(objectValue(document, "spec"), "attestationPolicies")[0], "platforms"), "ios")
+					objectValue(selection, "appAttest")["environment"] = apple
+					selection["dangerousAllowInProduction"] = dangerous
+					encoded, err := json.Marshal(document)
+					if err != nil {
+						t.Fatal(err)
+					}
+					report, compiled := validator.Validate(encoded, environment, time.Now())
+					wantValid := kind != "production" || apple == "production" || dangerous
+					if report.Valid != wantValid || (compiled != nil) != wantValid {
+						t.Fatalf("valid=%t want=%t issues=%+v", report.Valid, wantValid, report.Issues)
+					}
+					if !wantValid && !hasIssue(report.Issues, "app_attest_environment_forbidden") {
+						t.Fatalf("missing environment policy issue: %+v", report.Issues)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestValidatorPlayTestingResponsesOnlyInDevelopmentWithoutWeakeningMinimumTrust(t *testing.T) {
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"development", "staging", "production"} {
+		for _, dangerous := range []bool{false, true} {
+			for _, trust := range []string{"device_verified", "debug"} {
+				name := kind + "/" + trust
+				if dangerous {
+					name += "/acknowledged"
+				}
+				t.Run(name, func(t *testing.T) {
+					document := configurationObject(t)
+					environment := testEnvironment()
+					environment.EnvironmentKind, environment.EnvironmentSlug = kind, kind
+					objectValue(document, "metadata")["environment"] = kind
+					selection := objectValue(objectValue(objectArray(objectValue(document, "spec"), "attestationPolicies")[0], "platforms"), "android")
+					objectValue(selection, "playIntegrity")["allowTestingResponses"] = true
+					selection["dangerousAllowInProduction"] = dangerous
+					selection["minimumTrustLevel"] = trust
+					encoded, err := json.Marshal(document)
+					if err != nil {
+						t.Fatal(err)
+					}
+					report, compiled := validator.Validate(encoded, environment, time.Now())
+					wantValid := kind == "development" && trust == "device_verified"
+					if report.Valid != wantValid || (compiled != nil) != wantValid {
+						t.Fatalf("valid=%t want=%t issues=%+v", report.Valid, wantValid, report.Issues)
+					}
+					if kind != "development" && !hasIssue(report.Issues, "play_integrity_testing_forbidden") {
+						t.Fatalf("missing testing environment issue: %+v", report.Issues)
+					}
+				})
+			}
+		}
 	}
 }
 

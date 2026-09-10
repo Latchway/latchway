@@ -4,13 +4,11 @@ package dpop
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"net"
 	"net/url"
 	"strconv"
@@ -19,7 +17,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/jwk"
 )
 
 const (
@@ -65,24 +65,7 @@ func (j PublicJWK) PublicKey() (*ecdsa.PublicKey, error) {
 	if j.Kty != "EC" || j.Crv != "P-256" {
 		return nil, validationError("dpop_invalid")
 	}
-	xBytes, err := decodeCoordinate(j.X)
-	if err != nil {
-		return nil, err
-	}
-	yBytes, err := decodeCoordinate(j.Y)
-	if err != nil {
-		return nil, err
-	}
-	var zeroCoordinate [32]byte
-	if subtle.ConstantTimeCompare(xBytes, zeroCoordinate[:]) == 1 ||
-		subtle.ConstantTimeCompare(yBytes, zeroCoordinate[:]) == 1 {
-		return nil, validationError("dpop_invalid")
-	}
-	encoded := make([]byte, 1+len(xBytes)+len(yBytes))
-	encoded[0] = 4
-	copy(encoded[1:], xBytes)
-	copy(encoded[1+len(xBytes):], yBytes)
-	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	publicKey, err := jwk.ParseP256(j.X, j.Y)
 	if err != nil {
 		return nil, validationError("dpop_invalid")
 	}
@@ -166,10 +149,7 @@ func Validate(proof string, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	digest := sha256.Sum256([]byte(segments[0] + "." + segments[1]))
-	r := new(big.Int).SetBytes(signature[:32])
-	s := new(big.Int).SetBytes(signature[32:])
-	if r.Sign() <= 0 || s.Sign() <= 0 || !ecdsa.Verify(publicKey, digest[:], r, s) {
+	if err := jwt.SigningMethodES256.Verify(segments[0]+"."+segments[1], signature, publicKey); err != nil {
 		return Result{}, validationError("dpop_invalid")
 	}
 
@@ -404,14 +384,6 @@ func parsePublicJWK(values map[string]any) (PublicJWK, error) {
 		return PublicJWK{}, err
 	}
 	return jwk, nil
-}
-
-func decodeCoordinate(encoded string) ([]byte, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
-		return nil, validationError("dpop_invalid")
-	}
-	return decoded, nil
 }
 
 func decodeSegment(segment string) ([]byte, error) {

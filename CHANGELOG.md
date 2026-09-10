@@ -2,6 +2,40 @@
 
 All notable project changes will be documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versioning follows Semantic Versioning once distributable artifacts exist.
 
+## [Unreleased]
+
+## [1.1.3] - 2026-09-10
+
+### Added
+
+- Accept Apple development, production, or any App Attest environments per
+  server policy. Persist the actual verified key environment, never `any`;
+  require explicit acknowledgment for development acceptance in Production.
+- Separate accepted Apple environments from signing/distribution categories in
+  Console setup. New Development setups support local signing and TestFlight;
+  existing environment documents are not changed automatically.
+
+### Fixed
+
+- Honor explicit Development-only Play Integrity testing responses through
+  session exchange, refresh, and feature access without promoting `debug` to
+  device trust. Keep real verdict checks and global trust ordering unchanged.
+- Require fresh App Attest or Play Integrity evidence after configuration
+  revision changes; do not refresh older provider evidence into a narrowed
+  policy. Preserve direct-component provider signals alongside delegation data.
+
+### Changed
+
+- Delegate Google service-account JWT assertions/OAuth exchange and metadata
+  requests to Google's maintained Go libraries. Keep fixed endpoints/scopes,
+  bounded duplicate-safe responses, cancellable refresh and secret-safe errors.
+- Replace the security JSON decoder's handwritten recursive value assembly with
+  Go 1.27's standard JSON decoder. Preserve exact numbers, UTF-8 policy, duplicate
+  rejection, and depth/node/byte limits without changing JSON serialization.
+- Share strict P-256 public-coordinate decoding between DPoP and stored signing
+  keys; use the existing JWT library for ES256 signature verification. No new
+  JOSE dependency, wire/schema version, key format or replay-policy change.
+
 ## [1.1.2] - 2026-09-08
 
 ### Fixed

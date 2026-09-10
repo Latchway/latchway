@@ -15,6 +15,7 @@ import {
   requirePlayCertificateDigest,
   requireTurnstileHostname
 } from "./client-proof-validation";
+import { resolveApplePolicy, requirePlayTestingPolicy, type ApplePolicyInput } from "./attestation-policy-input";
 
 const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
 const protocols = ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages"] as const;
@@ -117,7 +118,7 @@ export function buildConnectionDocument(document: JSONRecord, input: ConnectionT
   return next;
 }
 
-export interface ClientAccessTaskInput {
+export interface ClientAccessTaskInput extends ApplePolicyInput {
   androidCertificateDigest?: string;
   androidCloudProjectNumber?: number;
   androidPackageName?: string;
@@ -136,6 +137,7 @@ export interface ClientAccessTaskInput {
   identityProviderID?: string;
   platform: ClientPlatform;
   playIntegrityCredential?: { type: "metadata" } | { type: "service_account"; secretName: string };
+  allowPlayTestingResponses?: boolean;
   turnstileExpectedAction?: string;
   turnstileSecretName?: string;
   webVerificationProvider?: WebVerificationProvider;
@@ -169,12 +171,8 @@ export function buildClientAccessDocument(document: JSONRecord, input: ClientAcc
     if (!input.appIDPrefix?.match(/^[A-Z0-9]{1,64}$/)) throw new Error("Enter the exact App ID prefix, bundle ID, and CFBundleVersion.");
     const bundleID = requireAppleBundleID(input.appleBundleID);
     const bundleVersion = requireAppleBundleVersion(input.appleBundleVersion);
-    const category = input.appleValidationCategory ?? (input.environmentKind === "development" ? 3 : 4);
-    const appAttestEnvironment = category === 3 ? "development" : "production";
-    if (input.environmentKind === "production" && appAttestEnvironment !== "production") {
-      throw new Error("Production environments require TestFlight, App Store, or ad hoc / enterprise distribution.");
-    }
-    selection = { appAttest: { allowedBundleVersions: [bundleVersion], allowedValidationCategories: [category], appIdPrefix: input.appIDPrefix, bundleId: bundleID, environment: appAttestEnvironment }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" };
+    const applePolicy = resolveApplePolicy(input);
+    selection = { appAttest: { allowedBundleVersions: [bundleVersion], ...applePolicy, appIdPrefix: input.appIDPrefix, bundleId: bundleID }, ...(input.dangerousAllowInProduction ? { dangerousAllowInProduction: true } : {}), minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" };
     component = { allowedFeatures: [featureID], attestation: { provider: "app_attest", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { bundleIdentifiers: [bundleID] }, kind: "main_app", platform: input.platform };
   } else if (input.platform === "android" || input.platform === "react_native_android") {
     const packageName = requireAndroidPackageName(input.androidPackageName);
@@ -185,7 +183,7 @@ export function buildClientAccessDocument(document: JSONRecord, input: ClientAcc
     if (!credential || (credential.type !== "metadata" && credential.type !== "service_account")) {
       throw new Error("Choose the Play Integrity server credential source.");
     }
-    selection = { minimumTrustLevel: "device_verified", mode: "required", ...(credential.type === "service_account" ? { secretRef: `secret/${requireIdentifier(credential.secretName, "Play Integrity secret name")}` } : {}), playIntegrity: { allowTestingResponses: input.environmentKind !== "production", certificateSha256Digests: [certificateDigest], cloudProjectNumber: project, credentialSource: credential.type, maximumVersionCode: version, minimumDeviceIntegrity: "device", minimumVersionCode: version, packageName, requireLicensed: input.environmentKind === "production" }, provider: "play_integrity" };
+    selection = { minimumTrustLevel: "device_verified", mode: "required", ...(credential.type === "service_account" ? { secretRef: `secret/${requireIdentifier(credential.secretName, "Play Integrity secret name")}` } : {}), playIntegrity: { allowTestingResponses: requirePlayTestingPolicy(input.environmentKind, input.allowPlayTestingResponses), certificateSha256Digests: [certificateDigest], cloudProjectNumber: project, credentialSource: credential.type, maximumVersionCode: version, minimumDeviceIntegrity: "device", minimumVersionCode: version, packageName, requireLicensed: true }, provider: "play_integrity" };
     component = { allowedFeatures: [featureID], attestation: { provider: "play_integrity", strategy: "direct" }, familyRole: "root", id: componentID, identifiers: { packageNames: [packageName] }, kind: "android_app", platform: input.platform };
   } else {
     const origin = requireCanonicalBrowserOrigin(input.webOrigin, input.environmentKind);

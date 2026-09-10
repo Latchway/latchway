@@ -3,11 +3,13 @@
 package jsonsafe
 
 import (
-	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"unicode/utf8"
 )
 
@@ -16,36 +18,59 @@ const (
 	maxNodes = 100_000
 )
 
+var (
+	errNestingLimit = errors.New("JSON input exceeds nesting limit")
+	errNodeLimit    = errors.New("JSON input exceeds structural limit")
+)
+
 // Decode parses exactly one UTF-8 JSON value and preserves numbers as
 // json.Number.
 func Decode(input []byte) (any, error) {
 	if !utf8.Valid(input) {
 		return nil, errors.New("JSON input is not valid UTF-8")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(input))
-	decoder.UseNumber()
-	state := decodeState{}
-	value, err := state.value(decoder, 0)
-	if err != nil {
-		return nil, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, errors.New("JSON input contains multiple values")
+	// The standard decoder owns grammar, duplicate names, and value assembly.
+	// This hook only bounds value slots and preserves v1's exact number lexemes.
+	nodes := 0
+	bounded := jsonv2.UnmarshalFromFunc(func(decoder *jsontext.Decoder, value *any) error {
+		if decoder.StackDepth() > maxDepth {
+			return errNestingLimit
 		}
-		return nil, err
+		nodes++
+		if nodes > maxNodes {
+			return errNodeLimit
+		}
+		if decoder.PeekKind() == '0' {
+			number, err := decoder.ReadValue()
+			if err == nil {
+				*value = json.Number(string(number))
+			}
+			return err
+		}
+		return errors.ErrUnsupported // Delegate all other values without consuming input.
+	})
+	// Raw UTF-8 was checked above. This option only preserves v1's treatment of
+	// escaped unpaired surrogates as U+FFFD, including duplicate-name collisions.
+	var value any
+	if err := jsonv2.Unmarshal(input, &value, jsonv2.WithUnmarshalers(bounded),
+		jsontext.AllowInvalidUTF8(true)); err != nil {
+		for _, limit := range []error{errNestingLimit, errNodeLimit} {
+			if errors.Is(err, limit) {
+				return nil, limit
+			}
+		}
+		// Decoder diagnostics may contain attacker-controlled member names.
+		return nil, errors.New("invalid JSON input")
 	}
 	return value, nil
 }
 
 // DecodeReader reads at most maxBytes and decodes one JSON value.
 func DecodeReader(reader io.Reader, maxBytes int64) (any, error) {
-	if maxBytes <= 0 {
-		return nil, errors.New("positive JSON size limit required")
+	if maxBytes <= 0 || maxBytes == math.MaxInt64 {
+		return nil, errors.New("positive, bounded JSON size limit required")
 	}
-	limited := io.LimitReader(reader, maxBytes+1)
-	input, err := io.ReadAll(limited)
+	input, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read JSON input: %w", err)
 	}
@@ -53,69 +78,4 @@ func DecodeReader(reader io.Reader, maxBytes int64) (any, error) {
 		return nil, errors.New("JSON input exceeds size limit")
 	}
 	return Decode(input)
-}
-
-type decodeState struct {
-	nodes int
-}
-
-func (s *decodeState) value(decoder *json.Decoder, depth int) (any, error) {
-	if depth > maxDepth {
-		return nil, errors.New("JSON input exceeds nesting limit")
-	}
-	s.nodes++
-	if s.nodes > maxNodes {
-		return nil, errors.New("JSON input exceeds structural limit")
-	}
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, err
-	}
-	delimiter, isDelimiter := token.(json.Delim)
-	if !isDelimiter {
-		return token, nil
-	}
-	switch delimiter {
-	case '{':
-		object := make(map[string]any)
-		for decoder.More() {
-			keyToken, err := decoder.Token()
-			if err != nil {
-				return nil, err
-			}
-			key, ok := keyToken.(string)
-			if !ok {
-				return nil, errors.New("JSON object key must be a string")
-			}
-			if _, exists := object[key]; exists {
-				return nil, fmt.Errorf("duplicate JSON member %q", key)
-			}
-			value, err := s.value(decoder, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			object[key] = value
-		}
-		closing, err := decoder.Token()
-		if err != nil || closing != json.Delim('}') {
-			return nil, errors.New("invalid JSON object")
-		}
-		return object, nil
-	case '[':
-		array := make([]any, 0)
-		for decoder.More() {
-			value, err := s.value(decoder, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			array = append(array, value)
-		}
-		closing, err := decoder.Token()
-		if err != nil || closing != json.Delim(']') {
-			return nil, errors.New("invalid JSON array")
-		}
-		return array, nil
-	default:
-		return nil, errors.New("unexpected JSON delimiter")
-	}
 }

@@ -1,4 +1,6 @@
-export interface NativeTemplateInput {
+import { resolveApplePolicy, requirePlayTestingPolicy, type ApplePolicyInput } from "./attestation-policy-input";
+
+export interface NativeTemplateInput extends ApplePolicyInput {
   application: string;
   environment: string;
   environmentKind: "development" | "staging" | "production";
@@ -7,13 +9,14 @@ export interface NativeTemplateInput {
   appIDPrefix: string;
   bundleID: string;
   bundleVersion: string;
-  appleDistribution: "development" | "testflight" | "app_store" | "ad_hoc_enterprise";
   packageName: string;
   androidVersionCode?: number;
   clientSurface?: "native" | "react_native";
   cloudProject: number;
   certificateDigest: string;
   playIntegrityCredential?: { type: "metadata" } | { type: "service_account"; secretName: string };
+  allowPlayTestingResponses?: boolean;
+  requirePlayLicensed?: boolean;
   upstreamURL: string;
   physicalModel: string;
   maximumFramingTokensPerRequest: number;
@@ -33,19 +36,11 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
   if (input.bundleID === input.packageName) {
     throw new Error("component_identifier_duplicate");
   }
-  const appAttestPolicy = {
-    development: { environment: "development", validationCategory: 3 },
-    testflight: { environment: "production", validationCategory: 2 },
-    app_store: { environment: "production", validationCategory: 4 },
-    ad_hoc_enterprise: { environment: "production", validationCategory: 5 }
-  } as const;
-  const appAttest = appAttestPolicy[input.appleDistribution];
-  if (!appAttest || (input.environmentKind !== "development" && input.environmentKind !== "staging" && input.environmentKind !== "production")) {
+  if (input.environmentKind !== "development" && input.environmentKind !== "staging" && input.environmentKind !== "production") {
     throw new Error("app_attest_distribution_invalid");
   }
-  if (input.environmentKind === "production" && appAttest.environment !== "production") {
-    throw new Error("app_attest_environment_mismatch");
-  }
+  const appAttest = resolveApplePolicy(input);
+  const allowTestingResponses = requirePlayTestingPolicy(input.environmentKind, input.allowPlayTestingResponses);
   const clientSurface = input.clientSurface ?? "react_native";
   const androidVersionCode = input.androidVersionCode ?? 1;
   if (!Number.isSafeInteger(androidVersionCode) || androidVersionCode < 1) {
@@ -62,18 +57,19 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
   const androidDefinitionID = clientSurface === "react_native" ? "react-native-android-main" : "android-main";
   const appAttestSelection = {
     provider: "app_attest", mode: "required", minimumTrustLevel: "app_verified",
+    ...(input.dangerousAllowInProduction ? { dangerousAllowInProduction: true } : {}),
     appAttest: {
       appIdPrefix: input.appIDPrefix,
       bundleId: input.bundleID,
       environment: appAttest.environment,
-      allowedValidationCategories: [appAttest.validationCategory],
+      allowedValidationCategories: appAttest.allowedValidationCategories,
       allowedBundleVersions: [input.bundleVersion]
     }
   };
   const playIntegritySelection = {
     provider: "play_integrity", mode: "required", minimumTrustLevel: "device_verified",
     ...(playIntegrityCredential.type === "service_account" ? { secretRef: `secret/${playIntegrityCredential.secretName}` } : {}),
-    playIntegrity: { packageName: input.packageName, cloudProjectNumber: input.cloudProject, certificateSha256Digests: [input.certificateDigest], minimumDeviceIntegrity: "device", requireLicensed: input.environmentKind === "production", allowTestingResponses: input.environmentKind !== "production", minimumVersionCode: androidVersionCode, maximumVersionCode: androidVersionCode, credentialSource: playIntegrityCredential.type }
+    playIntegrity: { packageName: input.packageName, cloudProjectNumber: input.cloudProject, certificateSha256Digests: [input.certificateDigest], minimumDeviceIntegrity: "device", requireLicensed: input.requirePlayLicensed ?? true, allowTestingResponses, minimumVersionCode: androidVersionCode, maximumVersionCode: androidVersionCode, credentialSource: playIntegrityCredential.type }
   };
   return JSON.stringify({
     apiVersion: "latchway.dev/v1alpha1",

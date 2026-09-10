@@ -678,10 +678,10 @@ func (store *Store) activeSnapshotRevisionID(ctx context.Context, scope TenantSc
 }
 
 func (store *Store) loadActiveSnapshot(ctx context.Context, scope TenantScope) (ActiveSnapshot, error) {
-	var revisionID string
+	var revisionID, environmentKind string
 	var document, compiled []byte
 	if err := store.pool.QueryRow(ctx, `
-		SELECT revision.config_revision_id, revision.document, revision.compiled_document
+		SELECT revision.config_revision_id, revision.document, revision.compiled_document, environment.kind
 		FROM active_config_revisions AS active_revision
 		JOIN config_revisions AS revision
 		  ON revision.organization_id = active_revision.organization_id
@@ -704,7 +704,7 @@ func (store *Store) loadActiveSnapshot(ctx context.Context, scope TenantScope) (
 		WHERE active_revision.organization_id = $1
 		  AND active_revision.application_id = $2
 		  AND active_revision.environment_id = $3
-	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID).Scan(&revisionID, &document, &compiled); err != nil {
+	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID).Scan(&revisionID, &document, &compiled, &environmentKind); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ActiveSnapshot{}, ErrNotFound
 		}
@@ -713,7 +713,12 @@ func (store *Store) loadActiveSnapshot(ctx context.Context, scope TenantScope) (
 	if len(compiled) == 0 {
 		return ActiveSnapshot{}, errors.New("active configuration has no compiled snapshot")
 	}
-	return newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
+	snapshot, err := newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
+	if err != nil {
+		return ActiveSnapshot{}, err
+	}
+	snapshot.EnvironmentKind = environmentKind
+	return snapshot, nil
 }
 
 // SimulationSnapshot returns the exact compiled policy for a tenant-scoped
@@ -756,6 +761,7 @@ func (store *Store) SimulationSnapshot(
 	if err != nil {
 		return SimulationSnapshot{}, ErrConfigurationInvalid
 	}
+	snapshot.EnvironmentKind = environment.EnvironmentKind
 	return SimulationSnapshot{
 		Snapshot: snapshot,
 		Scope: TenantScope{

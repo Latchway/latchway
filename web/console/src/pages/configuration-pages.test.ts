@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFirstRunTemplate, type FirstRunTemplateInput, type SetupPlatformScope } from "./configuration-pages";
+import { buildFirstRunTemplate, resumeSetupPageWorkspace, type FirstRunTemplateInput, type SetupPlatformScope } from "./configuration-pages";
 import { buildNativeSnippets, buildNativeTemplate, type NativeTemplateInput } from "./native-template";
 import nativeTemplateFixture from "./native-template.fixture.json";
 
@@ -168,6 +168,32 @@ describe("platform-scoped first-run template", () => {
 });
 
 describe("native setup template", () => {
+  it("resumes exact multi-category Apple and historical explicit Play policy values", () => {
+    for (const requirePlayLicensed of [false, true]) {
+      const input = nativeTemplateInput({ environment: "development", environmentKind: "development", appleDistribution: undefined, allowPlayTestingResponses: true, requirePlayLicensed });
+      const document = JSON.parse(buildFirstRunTemplate({ ...input, platformScope: "react_native_both", androidVersionCode: 1, playIntegrityCredential: { type: "metadata" } }));
+      expect(resumeSetupPageWorkspace({ applicationID: "app_1234567890123456", applicationSlug: input.application, environmentID: "env_1234567890123456", environmentSlug: input.environment, document })).toMatchObject({ platformScope: "react_native_both", environmentSlug: "development" });
+    }
+  });
+
+  it("emits both Apple environments and explicit Play testing only when requested for Development", () => {
+    const input = nativeTemplateInput({ environmentKind: "development", appleDistribution: undefined, allowPlayTestingResponses: true });
+    const platforms = JSON.parse(buildNativeTemplate(input)).spec.attestationPolicies[0].platforms;
+    expect(platforms.react_native_ios).toMatchObject({ minimumTrustLevel: "app_verified", appAttest: { environment: "any", allowedValidationCategories: [2, 3] } });
+    expect(platforms.react_native_android).toMatchObject({ minimumTrustLevel: "device_verified", playIntegrity: { allowTestingResponses: true, requireLicensed: true } });
+    expect(JSON.parse(buildNativeTemplate({ ...input, allowPlayTestingResponses: undefined })).spec.attestationPolicies[0].platforms.react_native_android.playIntegrity.allowTestingResponses).toBe(false);
+    expect(() => buildNativeTemplate({ ...input, environmentKind: "staging" })).toThrow("Development environment");
+    expect(() => buildNativeTemplate({ ...input, environmentKind: "production" })).toThrow("Development environment");
+  });
+
+  it("serializes explicit Apple production acknowledgment without granting Play testing", () => {
+    const input = nativeTemplateInput({ appAttestEnvironment: "any", appleValidationCategories: [2, 3], dangerousAllowInProduction: true });
+    const platforms = JSON.parse(buildNativeTemplate(input)).spec.attestationPolicies[0].platforms;
+    expect(platforms.react_native_ios).toMatchObject({ dangerousAllowInProduction: true, appAttest: { environment: "any", allowedValidationCategories: [2, 3] } });
+    expect(platforms.react_native_android.playIntegrity.allowTestingResponses).toBe(false);
+    expect(() => buildNativeTemplate({ ...input, allowPlayTestingResponses: true })).toThrow("Development environment");
+  });
+
   it("binds all native platforms and trusted Responses accounting", () => {
     const document = JSON.parse(buildNativeTemplate({
       application: "mobile-app",

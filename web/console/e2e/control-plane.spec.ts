@@ -538,6 +538,33 @@ test("first-run exposes only the evidence fields for each selected platform scop
   }
 });
 
+test("first-run separates Apple acceptance from distribution and confines Play testing to Development", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await page.getByLabel("Environment kind").selectOption("development");
+  await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("any");
+  await expect(page.getByLabel("Development signing", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("TestFlight", { exact: true })).toBeChecked();
+  await page.getByLabel("Accepted App Attest environment").selectOption("production");
+  await expect(page.getByLabel("Development signing", { exact: true })).toBeChecked();
+  const playTesting = page.getByLabel(/Accept Google Play Console testing responses/);
+  await expect(playTesting).not.toBeChecked();
+  await playTesting.check();
+  await page.getByLabel("Environment kind").selectOption("staging");
+  await expect(playTesting).toBeDisabled();
+  await expect(playTesting).not.toBeChecked();
+  await page.getByLabel("Environment kind").selectOption("production");
+  await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("production");
+  await expect(page.getByLabel("App Store", { exact: true })).toBeChecked();
+  await expect(page.getByLabel(/explicitly allow Apple development/)).not.toBeChecked();
+  await expect(playTesting).toBeDisabled();
+  expectOnlyAdminMutations(fixture.mutations);
+});
+
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
   const fixture = await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
@@ -553,7 +580,8 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Environment kind").selectOption("production");
   await page.getByLabel("App ID prefix").fill("TEAM1234");
   await page.getByLabel("Bundle ID", { exact: true }).fill("com.example.mobile");
-  await page.getByLabel("Signing or distribution").selectOption("app_store");
+  await page.getByLabel("Accepted App Attest environment").selectOption("production");
+  await page.getByLabel("App Store", { exact: true }).check();
   await page.getByLabel("Allowed CFBundleVersion (build number)").fill("234");
   await page.getByLabel("Package name").fill("com.example.mobile.android");
   await page.getByLabel("Cloud project number").fill("123456789");

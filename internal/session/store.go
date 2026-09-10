@@ -223,7 +223,8 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 	if err != nil {
 		return IssuedSession{}, ErrSessionInvalid
 	}
-	if !challengeAttestationAllows(challenge.Attestation, verifiedAttestation, now) {
+	_, selection, selected := snapshot.RequiredAttestationForPlatform(challenge.Binding.Platform)
+	if !selected || !challengeAttestationAllowsSelection(challenge.Attestation, verifiedAttestation, now, snapshot.EnvironmentKind, selection) {
 		return IssuedSession{}, ErrSessionInvalid
 	}
 	if !replayMethodPattern.MatchString(input.HTTPMethod) {

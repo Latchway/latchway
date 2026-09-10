@@ -53,7 +53,7 @@ func TestGoogleServiceAccountTokenSourceSignsCachesAndRefreshes(t *testing.T) {
 		if err != nil || form.Get("grant_type") != googleServiceAccountGrantType || len(form) != 2 {
 			t.Fatalf("invalid OAuth form: %v %#v", err, form)
 		}
-		assertGoogleServiceAccountAssertion(t, form.Get("assertion"), &privateKey.PublicKey, now)
+		assertGoogleServiceAccountAssertion(t, form.Get("assertion"), &privateKey.PublicKey, time.Now())
 		return googleDecodeResponse(
 			http.StatusOK, "application/json",
 			[]byte(`{"access_token":"ya29.service-account-access-token-01","expires_in":3600,"token_type":"Bearer"}`),
@@ -90,8 +90,8 @@ func TestGoogleServiceAccountTokenSourceSignsCachesAndRefreshes(t *testing.T) {
 	}
 	var logOutput bytes.Buffer
 	slog.New(slog.NewJSONHandler(&logOutput, nil)).Info("credential", "source", *source)
-	if strings.Contains(logOutput.String(), source.clientEmail) ||
-		strings.Contains(logOutput.String(), source.privateKeyID) ||
+	if strings.Contains(logOutput.String(), "fixture-service@fixture-project.iam.gserviceaccount.com") ||
+		strings.Contains(logOutput.String(), "0123456789abcdef0123456789abcdef01234567") ||
 		!strings.Contains(logOutput.String(), "REDACTED") {
 		t.Fatalf("structured service-account source log was not redacted: %s", logOutput.String())
 	}
@@ -189,6 +189,8 @@ func TestGoogleServiceAccountTokenSourceRejectsUnsafeCredentials(t *testing.T) {
 	}{
 		{name: "duplicate JSON member", raw: []byte(`{"type":"service_account","type":"service_account"}`)},
 		{name: "type", mutate: func(value map[string]any) { value["type"] = "authorized_user" }},
+		{name: "external account", mutate: func(value map[string]any) { value["type"] = "external_account" }},
+		{name: "impersonation", mutate: func(value map[string]any) { value["type"] = "impersonated_service_account" }},
 		{name: "email", mutate: func(value map[string]any) { value["client_email"] = "attacker@example.com" }},
 		{name: "key id", mutate: func(value map[string]any) { value["private_key_id"] = "short" }},
 		{name: "private key", mutate: func(value map[string]any) { value["private_key"] = "not PEM" }},
@@ -234,6 +236,10 @@ func TestGoogleServiceAccountTokenSourceSanitizesTokenEndpointFailures(t *testin
 		{name: "short token", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"short","expires_in":3600,"token_type":"Bearer"}`)},
 		{name: "token type", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"ya29.valid-access-token-value","expires_in":3600,"token_type":"MAC"}`)},
 		{name: "expiry", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"ya29.valid-access-token-value","expires_in":1,"token_type":"Bearer"}`)},
+		{name: "unbounded expiry", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"ya29.valid-access-token-value","expires_in":86401,"token_type":"Bearer"}`)},
+		{name: "fractional expiry", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"ya29.valid-access-token-value","expires_in":3600.5,"token_type":"Bearer"}`)},
+		{name: "string expiry", status: http.StatusOK, contentType: "application/json", body: []byte(`{"access_token":"ya29.valid-access-token-value","expires_in":"3600","token_type":"Bearer"}`)},
+		{name: "invalid UTF-8", status: http.StatusOK, contentType: "application/json", body: []byte("{\"access_token\":\"ya29.invalid-\xff-token\",\"expires_in\":3600,\"token_type\":\"Bearer\"}")},
 		{name: "oversized", status: http.StatusOK, contentType: "application/json", body: make([]byte, maximumGoogleTokenResponseBytes+1)},
 		{name: "transport", transportErr: errors.New("transport included private-key-secret")},
 	}
@@ -257,6 +263,43 @@ func TestGoogleServiceAccountTokenSourceSanitizesTokenEndpointFailures(t *testin
 				t.Fatalf("token endpoint error = %v, want sanitized service error", err)
 			}
 		})
+	}
+}
+
+func TestGoogleServiceAccountTokenSourceIgnoresUnconfiguredCredentialFlows(t *testing.T) {
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/does-not-exist/latchway-must-not-discover-credentials.json")
+	t.Setenv("GOOGLE_SDK_GO_LOGGING_LEVEL", "debug")
+	t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", "attacker.invalid")
+	privateKey := googleTestPrivateKey(t)
+	var calls int
+	source := mustGoogleServiceAccountTokenSource(t,
+		googleServiceAccountCredentials(t, privateKey, func(value map[string]any) {
+			value["universe_domain"] = "attacker.invalid"
+			value["service_account_impersonation_url"] = "https://attacker.invalid/impersonate"
+		}), GoogleServiceAccountTokenSourceOptions{
+			Now: func() time.Time { return playIntegrityTestNow },
+			Transport: playIntegrityRoundTripper(func(request *http.Request) (*http.Response, error) {
+				calls++
+				if request.URL.String() != googleOAuthTokenEndpoint {
+					t.Fatalf("unconfigured endpoint: %s", request.URL.Redacted())
+				}
+				body, err := io.ReadAll(request.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				form, err := url.ParseQuery(string(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertGoogleServiceAccountAssertion(t, form.Get("assertion"), &privateKey.PublicKey, time.Now())
+				return googleDecodeResponse(http.StatusOK, "application/json", []byte(
+					`{"access_token":"ya29.fixed-access-token-value","expires_in":3600,"token_type":"Bearer","id_token":"not-an-id-token"}`,
+				)), nil
+			}),
+		})
+	token, err := source.AccessToken(context.Background())
+	if err != nil || calls != 1 || !token.ExpiresAt.Equal(playIntegrityTestNow.Add(time.Hour)) {
+		t.Fatalf("fixed access-token exchange: calls=%d expiry=%s error=%v", calls, token.ExpiresAt, err)
 	}
 }
 
@@ -345,8 +388,9 @@ func assertGoogleServiceAccountAssertion(
 		header["kid"] != "0123456789abcdef0123456789abcdef01234567" ||
 		claims["aud"] != googleOAuthTokenEndpoint || claims["iss"] != "fixture-service@fixture-project.iam.gserviceaccount.com" ||
 		claims["scope"] != googlePlayIntegrityScope ||
-		int64(claims["iat"].(float64)) != now.Unix() ||
-		int64(claims["exp"].(float64)) != now.Add(time.Hour).Unix() {
+		int64(claims["iat"].(float64)) < now.Add(-15*time.Second).Unix() ||
+		int64(claims["iat"].(float64)) > now.Unix() ||
+		int64(claims["exp"].(float64))-int64(claims["iat"].(float64)) != 3600 {
 		t.Fatalf("unexpected assertion header/claims: %#v %#v", header, claims)
 	}
 	signature, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])

@@ -392,7 +392,7 @@ func (store *Store) ExchangeComponentAttestation(
 		return IssuedSession{}, ErrComponentNotConfigured
 	}
 	verified, err := input.Attestation.ValidatedSnapshot(input.Challenge.BindingHash, now)
-	if err != nil || !challengeAttestationAllows(input.Challenge.Attestation, verified, now) {
+	if err != nil || !challengeAttestationAllowsSelection(input.Challenge.Attestation, verified, now, snapshot.EnvironmentKind, selection) {
 		return IssuedSession{}, ErrSessionInvalid
 	}
 	preparedAccess, err := store.accessTokens.Prepare(ctx)
@@ -524,6 +524,12 @@ func (store *Store) ExchangeComponentAttestation(
 		trustSignals := map[string]any{
 			"delegated": true, "direct_attestation": true,
 			"direct_attestation_provider": verified.Provider,
+		}
+		// Preserve the authenticated provider facts (including the actual Apple
+		// environment), not just the delegation label. Never infer these from
+		// the client's build mode or from the policy's acceptance value "any".
+		for key, value := range verified.NormalizedSignals {
+			trustSignals[key] = value
 		}
 		encodedTrustSignals, err := json.Marshal(trustSignals)
 		if err != nil {

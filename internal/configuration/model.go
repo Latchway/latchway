@@ -220,7 +220,9 @@ func (selection PlatformAttestation) clone() PlatformAttestation {
 }
 
 // AppAttestConfiguration is the server-owned Apple verifier configuration for
-// one immutable platform selection. It contains no secret material.
+// one immutable platform selection. Environment selects development, production,
+// or any as an acceptance policy; durable evidence always records the actual
+// Apple environment. It contains no secret material.
 type AppAttestConfiguration struct {
 	AppIDPrefix                 string   `json:"appIdPrefix"`
 	BundleID                    string   `json:"bundleId"`
@@ -231,7 +233,9 @@ type AppAttestConfiguration struct {
 
 // PlayIntegrityConfiguration is the server-owned Google Play verifier
 // configuration. CredentialSource selects a fixed production credential
-// mechanism; SecretRef, when required, remains on PlatformAttestation.
+// mechanism; SecretRef, when required, remains on PlatformAttestation. Testing
+// responses may be accepted only in development and retain debug trust, never
+// device_verified or strong_device_verified.
 type PlayIntegrityConfiguration struct {
 	PackageName              string   `json:"packageName"`
 	CloudProjectNumber       int64    `json:"cloudProjectNumber"`
@@ -706,6 +710,8 @@ func (policy AttestationPolicy) clone() AttestationPolicy {
 type ActiveSnapshot struct {
 	RevisionID    string
 	EnvironmentID string
+	// EnvironmentKind is authoritative database metadata, never document input.
+	EnvironmentKind string
 
 	document        json.RawMessage
 	compiled        json.RawMessage

@@ -6,6 +6,21 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.3 provider-specific development attestation
+
+`appAttest.environment` adds the server acceptance value `any`, independent of
+Apple signing/distribution categories. Existing singular values are unchanged.
+Google Play Console test responses remain `debug` and require an explicit
+Development-only provider exception; they do not become real device trust.
+Client wire 3 and client contract 1.1.0 stay unchanged. No client environment flag
+or Firebase dependency is introduced, and no schema migration is required.
+Servers predating this update reject `any` and do not implement the scoped Google
+testing exception. Restore compatible policies before rollback. The additive
+Admin/schema bundle edition is 1.1.2; previously published bundle bytes and SDK
+client-contract 1.1.0 locks remain unchanged. See
+[ADR 0039](../adr/0039-provider-specific-development-attestation.md) and
+[the release notes](../release/v1.1.3.md).
+
 ### Server 1.1.2 diagnostic patch
 
 Client discovery and session diagnostics retain client contract 1.1.0, wire 3

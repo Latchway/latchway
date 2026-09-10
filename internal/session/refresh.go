@@ -926,7 +926,18 @@ func currentRefreshPolicyError(snapshot configuration.ActiveSnapshot, binding Re
 		!trustLevelPattern.MatchString(selection.MinimumTrustLevel) ||
 		policy.MaxAge < time.Minute || policy.MaxAge > 30*24*time.Hour ||
 		selection.Provider != binding.AttestationProvider ||
-		!trustSatisfies(binding.TrustLevel, selection.MinimumTrustLevel) {
+		!TrustSatisfiesSelection(snapshot.EnvironmentKind, selection, binding.AttestationProvider, binding.TrustLevel) {
+		return ErrAttestationStepUpRequired
+	}
+	// A grant contains an assurance level, not immutable provider-specific
+	// evidence. In particular, app_verified does not identify Apple's actual
+	// environment. Do not upgrade old evidence into a different revision by
+	// refreshing: re-attest against the new policy, including its environment,
+	// app identity, signing categories and build constraints. This also keeps
+	// legacy grants without durable provider facts fail-closed without a DB
+	// migration or a guess based on another key's state.
+	if (binding.AttestationProvider == "app_attest" || binding.AttestationProvider == "play_integrity") &&
+		binding.PolicyRevisionID != snapshot.RevisionID {
 		return ErrAttestationStepUpRequired
 	}
 	if binding.AttestedAt.IsZero() || !binding.AttestationExpiresAt.After(now) {

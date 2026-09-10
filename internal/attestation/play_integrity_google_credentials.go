@@ -3,24 +3,20 @@ package attestation
 import (
 	"bytes"
 	"context"
-	"crypto"
-	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
+
+	"cloud.google.com/go/auth"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
@@ -32,7 +28,6 @@ const (
 	maximumGoogleTokenRequestTimeout = 30 * time.Second
 	maximumServiceAccountJSONBytes   = 64 << 10
 	maximumGoogleTokenResponseBytes  = 32 << 10
-	googleServiceAccountAssertionTTL = time.Hour
 	googleAccessTokenRefreshMargin   = time.Minute
 )
 
@@ -50,15 +45,7 @@ type GoogleServiceAccountTokenSourceOptions struct {
 }
 
 type GoogleServiceAccountTokenSource struct {
-	client       *http.Client
-	clientEmail  string
-	privateKeyID string
-	privateKey   *rsa.PrivateKey
-	tokenURI     *url.URL
-	timeout      time.Duration
-	now          func() time.Time
-	gate         chan struct{}
-	cached       PlayIntegrityAccessToken
+	*googleTokenSource
 }
 
 // NewGoogleServiceAccountTokenSource parses a bounded Google service-account
@@ -107,7 +94,7 @@ func newGoogleServiceAccountTokenSource(
 		tokenURI != endpoint.String() {
 		return nil, ErrConfiguration
 	}
-	privateKey, err := parseGoogleServiceAccountPrivateKey([]byte(privateKeyPEM))
+	_, err = parseGoogleServiceAccountPrivateKey([]byte(privateKeyPEM))
 	if err != nil {
 		return nil, ErrConfiguration
 	}
@@ -125,129 +112,51 @@ func newGoogleServiceAccountTokenSource(
 		transport = http.DefaultTransport
 	}
 	client := &http.Client{
-		Transport: transport,
+		Transport: &googleTokenTransport{base: transport, endpoint: *endpoint},
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	ownedEndpoint := *endpoint
-	return &GoogleServiceAccountTokenSource{
-		client: client, clientEmail: clientEmail, privateKeyID: privateKeyID,
-		privateKey: privateKey, tokenURI: &ownedEndpoint, timeout: options.Timeout,
-		now: options.Now, gate: make(chan struct{}, 1),
-	}, nil
+	// Use the explicit 2LO provider, not ambient credential discovery. The typed
+	// JSON loader also installs a cache whose clock/cancellation/refresh behavior
+	// differs from this boundary. Only the validated service-account fields are
+	// passed to Google; credential JSON cannot enable delegation or other flows.
+	provider, err := auth.New2LOTokenProvider(&auth.Options2LO{
+		Email: clientEmail, PrivateKeyID: privateKeyID, PrivateKey: []byte(privateKeyPEM),
+		TokenURL: endpoint.String(), Scopes: []string{googlePlayIntegrityScope},
+		Client: client, Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		return nil, ErrConfiguration
+	}
+	return &GoogleServiceAccountTokenSource{googleTokenSource: newGoogleTokenSource(
+		options.Timeout, options.Now,
+		func(ctx context.Context, now time.Time) (PlayIntegrityAccessToken, error) {
+			token, err := provider.Token(ctx)
+			if err != nil || token == nil {
+				return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
+			}
+			// The bounded transport normalizes expires_in to an integer in [60,
+			// 86400]. Keep expiry anchored to the start of the request, including
+			// the injectable policy clock, rather than extending it by HTTP latency.
+			seconds, ok := token.Metadata["expires_in"].(float64)
+			if !ok || seconds < 60 || seconds > 86400 || seconds != float64(int64(seconds)) {
+				return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
+			}
+			return PlayIntegrityAccessToken{
+				Value: token.Value, ExpiresAt: now.Add(time.Duration(seconds) * time.Second),
+			}, nil
+		},
+	)}, nil
 }
 
 func (source *GoogleServiceAccountTokenSource) AccessToken(
 	ctx context.Context,
 ) (PlayIntegrityAccessToken, error) {
-	if source == nil || ctx == nil || source.client == nil || source.privateKey == nil ||
-		source.tokenURI == nil || source.now == nil || source.gate == nil || source.timeout <= 0 {
+	if source == nil {
 		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
 	}
-	if err := ctx.Err(); err != nil {
-		return PlayIntegrityAccessToken{}, err
-	}
-	select {
-	case source.gate <- struct{}{}:
-		defer func() { <-source.gate }()
-	case <-ctx.Done():
-		return PlayIntegrityAccessToken{}, ctx.Err()
-	}
-	now := source.now().UTC()
-	if now.IsZero() || now.Year() < 1 || now.Year() > 9998 {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if validPlayIntegrityAccessToken(source.cached, now.Add(googleAccessTokenRefreshMargin)) {
-		return source.cached, nil
-	}
-	assertion, err := source.signedAssertion(now)
-	if err != nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	form := url.Values{
-		"grant_type": []string{googleServiceAccountGrantType},
-		"assertion":  []string{assertion},
-	}
-	requestContext, cancel := context.WithTimeout(ctx, source.timeout)
-	defer cancel()
-	request, err := http.NewRequestWithContext(
-		requestContext, http.MethodPost, source.tokenURI.String(),
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", "latchway/google-service-account-v1")
-	response, err := source.client.Do(request)
-	if err != nil {
-		if response != nil && response.Body != nil {
-			_ = response.Body.Close()
-		}
-		if contextErr := requestContext.Err(); contextErr != nil {
-			return PlayIntegrityAccessToken{}, contextErr
-		}
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if response == nil || response.Body == nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	encoded, readErr := io.ReadAll(io.LimitReader(response.Body, maximumGoogleTokenResponseBytes+1))
-	closeErr := response.Body.Close()
-	if readErr != nil || closeErr != nil || len(encoded) > maximumGoogleTokenResponseBytes || response.StatusCode != http.StatusOK {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	mediaType, _, contentTypeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if contentTypeErr != nil || mediaType != "application/json" {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	token, err := parseGoogleAccessTokenResponse(encoded, now)
-	if err != nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if err := requestContext.Err(); err != nil {
-		return PlayIntegrityAccessToken{}, err
-	}
-	source.cached = token
-	return token, nil
-}
-
-func (source *GoogleServiceAccountTokenSource) signedAssertion(now time.Time) (string, error) {
-	if source == nil || source.privateKey == nil || now.IsZero() {
-		return "", ErrConfiguration
-	}
-	header, err := json.Marshal(struct {
-		Algorithm string `json:"alg"`
-		KeyID     string `json:"kid"`
-		Type      string `json:"typ"`
-	}{Algorithm: "RS256", KeyID: source.privateKeyID, Type: "JWT"})
-	if err != nil {
-		return "", ErrConfiguration
-	}
-	issuedAt := now.Unix()
-	claims, err := json.Marshal(struct {
-		Audience  string `json:"aud"`
-		ExpiresAt int64  `json:"exp"`
-		IssuedAt  int64  `json:"iat"`
-		Issuer    string `json:"iss"`
-		Scope     string `json:"scope"`
-	}{
-		Audience: source.tokenURI.String(), ExpiresAt: issuedAt + int64(googleServiceAccountAssertionTTL/time.Second),
-		IssuedAt: issuedAt, Issuer: source.clientEmail, Scope: googlePlayIntegrityScope,
-	})
-	if err != nil {
-		return "", ErrConfiguration
-	}
-	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." +
-		base64.RawURLEncoding.EncodeToString(claims)
-	digest := sha256.Sum256([]byte(unsigned))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, source.privateKey, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", ErrPlayIntegrityService
-	}
-	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+	return source.googleTokenSource.AccessToken(ctx)
 }
 
 func parseGoogleServiceAccountPrivateKey(encoded []byte) (*rsa.PrivateKey, error) {

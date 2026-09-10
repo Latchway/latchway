@@ -8,11 +8,45 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
+
+func TestValidateRejectsInvalidES256SignatureEncodings(t *testing.T) {
+	key := fixedDPoPFuzzKey(t)
+	now := time.Unix(1_787_820_000, 0)
+	target, _ := url.Parse("https://gateway.example.test/client/v1/session-challenges")
+	proof := signProof(t, key, map[string]any{
+		"jti": "signature-codec-test", "htm": "POST", "htu": target.String(), "iat": now.Unix(),
+	})
+	parts := strings.Split(proof, ".")
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Method: "POST", URI: target, Now: now}
+	if _, err := Validate(proof, opts); err != nil {
+		t.Fatalf("valid ES256 proof rejected: %v", err)
+	}
+	zeroR, zeroS := append([]byte(nil), signature...), append([]byte(nil), signature...)
+	clear(zeroR[:32])
+	clear(zeroS[32:])
+	for name, badSignature := range map[string][]byte{
+		"zero r": zeroR, "zero s": zeroS, "both zero": make([]byte, 64),
+		"short": signature[:63], "long": append(append([]byte(nil), signature...), 0),
+		"out of range": []byte(strings.Repeat("\xff", 64)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(badSignature)
+			if _, err := Validate(bad, opts); !IsCode(err, "dpop_invalid") {
+				t.Fatalf("invalid signature did not return stable error: %v", err)
+			}
+		})
+	}
+}
 
 func TestValidate(t *testing.T) {
 	t.Parallel()

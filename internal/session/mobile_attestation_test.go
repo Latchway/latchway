@@ -387,6 +387,69 @@ func TestCoordinatorVerifiesPlayIntegrityWithFixedGoogleClients(t *testing.T) {
 	}
 }
 
+func TestCoordinatorBuildsAppAttestEnvironmentPoliciesWithExplicitProductionAcknowledgment(t *testing.T) {
+	now := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	for _, kind := range []string{"development", "staging", "production"} {
+		for _, apple := range []string{"development", "production", "any"} {
+			for _, dangerous := range []bool{false, true} {
+				name := kind + "/" + apple
+				if dangerous {
+					name += "/acknowledged"
+				}
+				t.Run(name, func(t *testing.T) {
+					coordinator := &clientCoordinator{now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{}}
+					environment := clientEnvironment{
+						OrganizationID: "org_00000000000000000000000000",
+						ApplicationID:  "app_00000000000000000000000000", EnvironmentID: "env_00000000000000000000000000",
+						Slug: kind, Kind: kind,
+					}
+					selection := validAppAttestSelection()
+					selection.AppAttest.Environment = apple
+					selection.DangerousAllowInProduction = dangerous
+					verifier, err := coordinator.buildMobileAttestationVerifier(environment, configuration.ActiveSnapshot{},
+						configuration.AttestationPolicy{ID: "native", MaxAge: 10 * time.Minute}, selection, "ios")
+					wantValid := kind != "production" || apple == "production" || dangerous
+					if (err == nil) != wantValid || (verifier != nil) != wantValid {
+						t.Fatalf("verifier=%v err=%v want valid=%t", verifier != nil, err, wantValid)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCoordinatorPlayTestingResponsesRequireDevelopmentWithUnchangedMinimumTrust(t *testing.T) {
+	now := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	for _, kind := range []string{"development", "staging", "production"} {
+		for _, dangerous := range []bool{false, true} {
+			for _, minimumTrust := range []string{"device_verified", "debug"} {
+				name := kind + "/" + minimumTrust
+				if dangerous {
+					name += "/acknowledged"
+				}
+				t.Run(name, func(t *testing.T) {
+					coordinator := &clientCoordinator{now: nowClock(now)}
+					environment := clientEnvironment{
+						OrganizationID: "org_00000000000000000000000000",
+						ApplicationID:  "app_00000000000000000000000000", EnvironmentID: "env_00000000000000000000000000",
+						Slug: kind, Kind: kind,
+					}
+					selection := validPlayIntegritySelection("metadata")
+					selection.PlayIntegrity.AllowTestingResponses = true
+					selection.MinimumTrustLevel = minimumTrust
+					selection.DangerousAllowInProduction = dangerous
+					verifier, err := coordinator.buildMobileAttestationVerifier(environment, configuration.ActiveSnapshot{},
+						configuration.AttestationPolicy{ID: "native", MaxAge: 10 * time.Minute}, selection, "android")
+					wantValid := kind == "development" && minimumTrust == "device_verified"
+					if (err == nil) != wantValid || (verifier != nil) != wantValid {
+						t.Fatalf("verifier=%v err=%v want valid=%t", verifier != nil, err, wantValid)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestSecretServiceAccountTokenSourceDoesNotRetainCredentialAndSingleFlights(t *testing.T) {
 	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	credentials := generatedServiceAccountCredentials(t)

@@ -4,9 +4,9 @@ description: "Bind an iOS application, App Attest key, challenge, component DPoP
 icon: "badge-check"
 audience: "client-ios"
 pageType: "how-to"
-serverVersion: "1.0.0"
+serverVersion: "1.1.3"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-10"
 owner: "ios-sdk"
 ---
 
@@ -27,7 +27,7 @@ environment:
 
 - application resource ID and environment;
 - Apple Team ID and bundle identifier;
-- App Attest development or production environment;
+- accepted Apple App Attest environments, independently of the Latchway environment;
 - allowed application version or build policy;
 - directly trusted root Client Component definition; and
 - accepted key-storage fallback policy.
@@ -35,6 +35,69 @@ environment:
 The SDK persists its App Attest key before returning from first registration.
 Later exchanges use assertions from the same key. Invalid-key recovery is
 bounded; it must not loop until a server accepts a different identity.
+
+## Local builds and TestFlight in one environment
+
+<Note>
+The `any` acceptance policy requires server 1.1.3 or later. It does not change
+an already deployed environment or require a new client configuration flag.
+Upgrade the server before activating this policy.
+</Note>
+
+Apple's entitlement selects `development` or `production`. TestFlight and
+App Store distribution use production App Attest. A local development build
+normally uses development App Attest. See
+[Apple's entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.devicecheck.appattest-environment).
+
+The server's `appAttest.environment` accepts `development`, `production`, or
+`any`. The last value means accept either verified Apple environment; never
+put `any` in an Apple entitlement. For a Latchway Development environment that
+accepts local builds and TestFlight, configure:
+
+```json
+{
+  "provider": "app_attest",
+  "mode": "required",
+  "minimumTrustLevel": "app_verified",
+  "appAttest": {
+    "appIdPrefix": "YOURTEAMID",
+    "bundleId": "com.example.app",
+    "environment": "any",
+    "allowedValidationCategories": [2, 3],
+    "allowedBundleVersions": ["*"]
+  }
+}
+```
+
+Use this selection for each configured native or React Native iOS platform.
+`2` allows TestFlight signing metadata, `3` development signing, and `4` App Store
+signing. Distribution categories are a separate filter from the Apple App
+Attest environment: choosing `any` alone does not permit additional categories.
+On older OS evidence without signed launch metadata, the verifier cannot establish
+or enforce that missing distribution/build value. Core certificate, app identity,
+environment, challenge binding, assertion signature, and replay checks still apply.
+
+Development App Attest is genuine Apple evidence and retains `app_verified`
+trust; it is not the simulated `debug` trust used by Google testing responses.
+The server stores each key's actual Apple environment, never `any`. Narrowing
+the policy can deny previously accepted evidence and require fresh attestation.
+After any configuration activation, App Attest session renewal conservatively
+requires fresh evidence for the new revision; same-revision renewal is unchanged.
+Applications should expect the SDK to re-establish attestation rather than assume
+uninterrupted reuse of an old grant.
+
+Keep Production set to `production`, with only intended distribution categories.
+Accepting `development` or `any` in Production requires the platform selection's
+explicit `dangerousAllowInProduction: true` acknowledgment; activation remains
+audited. That exception is not recommended for ordinary deployments.
+
+Native iOS and React Native configure only their Latchway application and backend
+environment. They do not submit a claimed Apple trust environment. Keep the
+entitlement in the host app's signing configuration; no Firebase dependency or
+extra native bootstrap is needed for this policy. Local-build/TestFlight
+transitions still require device verification: Apple sandbox and production keys
+are not interchangeable. See
+[Apple's preparation guide](https://developer.apple.com/documentation/devicecheck/preparing-to-use-the-app-attest-service).
 
 ## Verify a device run
 

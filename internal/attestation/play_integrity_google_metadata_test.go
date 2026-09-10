@@ -79,9 +79,13 @@ func TestGoogleMetadataTokenSourceDefaultTransportNeverUsesEnvironmentProxy(t *t
 	source := mustGoogleMetadataTokenSource(t, GoogleMetadataTokenSourceOptions{
 		Now: func() time.Time { return playIntegrityTestNow },
 	})
-	transport, ok := source.client.Transport.(*http.Transport)
+	bounded, ok := source.client.Transport.(*googleTokenTransport)
 	if !ok {
 		t.Fatalf("default metadata transport type = %T", source.client.Transport)
+	}
+	transport, ok := bounded.base.(*http.Transport)
+	if !ok {
+		t.Fatalf("default metadata base transport type = %T", bounded.base)
 	}
 	if transport.Proxy != nil {
 		request, err := http.NewRequest(http.MethodGet, googleMetadataTokenEndpoint, nil)
@@ -90,6 +94,29 @@ func TestGoogleMetadataTokenSourceDefaultTransportNeverUsesEnvironmentProxy(t *t
 		}
 		proxy, proxyErr := transport.Proxy(request)
 		t.Fatalf("default metadata transport proxy=%v err=%v, want direct transport", proxy, proxyErr)
+	}
+}
+
+func TestGoogleMetadataTokenSourceIgnoresAmbientCredentialAndMetadataOverrides(t *testing.T) {
+	t.Setenv("GCE_METADATA_HOST", "attacker.invalid/alternate?scope=admin#fragment")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/does-not-exist/latchway-must-not-discover-credentials.json")
+	var calls int
+	source := mustGoogleMetadataTokenSource(t, GoogleMetadataTokenSourceOptions{
+		Now: func() time.Time { return playIntegrityTestNow },
+		Transport: playIntegrityRoundTripper(func(request *http.Request) (*http.Response, error) {
+			calls++
+			if request.URL.String() != googleMetadataTokenEndpoint || request.Host != "" {
+				t.Fatalf("metadata request escaped fixed endpoint: %s host=%s", request.URL.Redacted(), request.Host)
+			}
+			response := googleDecodeResponse(http.StatusOK, "application/json", []byte(
+				`{"access_token":"ya29.fixed-metadata-token-value","expires_in":3600,"token_type":"Bearer"}`,
+			))
+			response.Header.Set(googleMetadataFlavorHeader, googleMetadataFlavorExpectedValue)
+			return response, nil
+		}),
+	})
+	if _, err := source.AccessToken(context.Background()); err != nil || calls != 1 {
+		t.Fatalf("metadata fixed-endpoint result: calls=%d error=%v", calls, err)
 	}
 }
 

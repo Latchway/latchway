@@ -163,7 +163,8 @@ func (coordinator *clientCoordinator) buildMobileAttestationVerifier(
 			(platform != "ios" && platform != "react_native_ios" && platform != "watchos") ||
 			selection.MinimumTrustLevel != "app_verified" ||
 			nilCoordinatorDependency(coordinator.appAttestKeys) ||
-			(environment.Kind == "production" && configuration.Environment != "production") {
+			(environment.Kind == "production" && configuration.Environment != "production" &&
+				!selection.DangerousAllowInProduction) {
 			return nil, attestation.ErrConfiguration
 		}
 		verifier, err := attestation.NewAppAttestVerifier(attestation.AppAttestConfig{
@@ -187,8 +188,7 @@ func (coordinator *clientCoordinator) buildMobileAttestationVerifier(
 		configuration := selection.PlayIntegrity
 		if configuration == nil || selection.AppAttest != nil ||
 			(platform != "android" && platform != "react_native_android") ||
-			(environment.Kind == "production" && configuration.AllowTestingResponses &&
-				!selection.DangerousAllowInProduction) {
+			(environment.Kind != "development" && configuration.AllowTestingResponses) {
 			return nil, attestation.ErrConfiguration
 		}
 		if (configuration.MinimumDeviceIntegrity == "device" && selection.MinimumTrustLevel != "device_verified") ||

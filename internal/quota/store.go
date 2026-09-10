@@ -1998,7 +1998,7 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		inputBound, outputBound, totalBound,
 		decisionAttempt.requestMeasurementSHA256,
 		decisionAttempt.measuredRequestBytes, decisionAttempt.measuredImageUnits,
-			decisionAttempt.measuredToolCalls, accountingBreakdown)
+		decisionAttempt.measuredToolCalls, accountingBreakdown)
 	entryCount := queueAttemptQuotaEntries(batch, lockedReservation, attemptID, entries, initialAllocations)
 	results := tx.SendBatch(ctx, batch)
 	if _, err := results.Exec(); err != nil {

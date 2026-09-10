@@ -644,12 +644,12 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 				issues = append(issues, errorIssue("attestation_trust_unreachable", selectionPath+"/minimumTrustLevel", "The selected provider configuration cannot produce the required minimum trust level."))
 			}
 			if typedSelectionOK && provider == "app_attest" && typedSelection.AppAttest != nil &&
-				environmentKind == "production" && typedSelection.AppAttest.Environment != "production" {
-				issues = append(issues, errorIssue("app_attest_environment_forbidden", selectionPath+"/appAttest/environment", "Production environments require Apple's production App Attest trust environment."))
+				environmentKind == "production" && typedSelection.AppAttest.Environment != "production" && !allowDangerous {
+				issues = append(issues, errorIssue("app_attest_environment_forbidden", selectionPath+"/appAttest/environment", "Accepting Apple's development App Attest environment in production requires explicit dangerous acknowledgement."))
 			}
 			if typedSelectionOK && provider == "play_integrity" && typedSelection.PlayIntegrity != nil &&
-				environmentKind == "production" && typedSelection.PlayIntegrity.AllowTestingResponses && !allowDangerous {
-				issues = append(issues, errorIssue("play_integrity_testing_forbidden", selectionPath+"/playIntegrity/allowTestingResponses", "Play Integrity testing responses in production require explicit dangerous acknowledgement."))
+				environmentKind != "development" && typedSelection.PlayIntegrity.AllowTestingResponses {
+				issues = append(issues, errorIssue("play_integrity_testing_forbidden", selectionPath+"/playIntegrity/allowTestingResponses", "Play Integrity testing responses are permitted only in development environments."))
 			}
 			if mode == "required" && stringValue(selection, "minimumTrustLevel") == "none" {
 				issues = append(issues, errorIssue("attestation_trust_too_weak", selectionPath+"/minimumTrustLevel", "Required attestation must require a verified trust level."))

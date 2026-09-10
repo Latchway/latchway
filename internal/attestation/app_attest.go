@@ -44,14 +44,23 @@ var (
 	)
 )
 
-// AppAttestEnvironment selects the Apple trust environment. Development and
-// production keys are intentionally not interchangeable.
+// AppAttestEnvironment identifies an Apple trust environment or an acceptance
+// policy. Any is a verifier policy only: Apple keys always belong to one actual
+// environment and are never relabeled when the acceptance policy changes.
 type AppAttestEnvironment string
 
 const (
 	AppAttestDevelopment AppAttestEnvironment = "development"
 	AppAttestProduction  AppAttestEnvironment = "production"
+	AppAttestAny         AppAttestEnvironment = "any"
 )
+
+// Allows reports whether a policy accepts an actual, verified Apple environment.
+// Unknown values and Any as an observed key environment always fail closed.
+func (policy AppAttestEnvironment) Allows(actual AppAttestEnvironment) bool {
+	return (actual == AppAttestDevelopment || actual == AppAttestProduction) &&
+		(policy == actual || policy == AppAttestAny)
+}
 
 // AppAttestStoredKey is the minimum durable state needed to authenticate an
 // assertion and reject counter replay. ExtensionsPresent distinguishes iOS 27
@@ -152,7 +161,8 @@ func newAppAttestVerifier(config AppAttestConfig, roots *x509.CertPool) (*AppAtt
 		!environmentPattern.MatchString(config.EnvironmentID) ||
 		!appAttestAppIDPrefixPattern.MatchString(config.AppIDPrefix) ||
 		!validAppAttestBundleID(config.BundleID) ||
-		(config.AttestationEnvironment != AppAttestDevelopment && config.AttestationEnvironment != AppAttestProduction) ||
+		(config.AttestationEnvironment != AppAttestDevelopment && config.AttestationEnvironment != AppAttestProduction &&
+			config.AttestationEnvironment != AppAttestAny) ||
 		nilPlayIntegrityDependency(config.Store) || roots == nil {
 		return nil, ErrConfiguration
 	}
@@ -339,7 +349,8 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 			AppAttestFailurePhaseAttestationAuthenticator, invalid("app attest authenticator data"),
 		)
 	}
-	if !appAttestAAGUIDMatches(parsed.authenticator.aaguid, verifier.attestationEnvironment) {
+	actualEnvironment := appAttestAAGUIDEnvironment(parsed.authenticator.aaguid)
+	if !verifier.attestationEnvironment.Allows(actualEnvironment) {
 		return AppAttestStoredKey{}, appAttestFailure(
 			AppAttestFailurePhaseAttestationEnvironment, invalid("app attest environment"),
 		)
@@ -363,7 +374,7 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 
 	next := AppAttestStoredKey{
 		PublicKeyX963: append([]byte(nil), publicKeyX963...), AppIDHash: verifier.appIDHash,
-		AttestationEnvironment: verifier.attestationEnvironment,
+		AttestationEnvironment: actualEnvironment,
 		ApplicationID:          binding.ApplicationID, EnvironmentID: binding.Environment,
 		Platform: binding.Platform, PrincipalID: binding.PrincipalID, DPoPJKT: binding.DPoPJKT,
 		Counter: 0, ExtensionsPresent: parsed.authenticator.extensions.present,
@@ -480,7 +491,7 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 		if current.ApplicationID != binding.ApplicationID || current.EnvironmentID != binding.Environment ||
 			current.Platform != binding.Platform || current.PrincipalID != binding.PrincipalID ||
 			current.DPoPJKT != binding.DPoPJKT ||
-			current.AttestationEnvironment != verifier.attestationEnvironment ||
+			!verifier.attestationEnvironment.Allows(current.AttestationEnvironment) ||
 			subtle.ConstantTimeCompare(current.AppIDHash[:], verifier.appIDHash[:]) != 1 {
 			callbackPhase = AppAttestFailurePhaseAssertionScope
 			callbackErr = invalid("app attest assertion scope")
@@ -770,18 +781,23 @@ func validAppAttestValidationCategory(category uint32) bool {
 }
 
 func appAttestAAGUIDMatches(aaguid [16]byte, environment AppAttestEnvironment) bool {
+	return environment.Allows(appAttestAAGUIDEnvironment(aaguid))
+}
+
+// appAttestAAGUIDEnvironment decodes only Apple's recognized AAGUIDs. The caller
+// must verify the certificate nonce binding before persisting the environment.
+func appAttestAAGUIDEnvironment(aaguid [16]byte) AppAttestEnvironment {
 	production := [16]byte{'a', 'p', 'p', 'a', 't', 't', 'e', 's', 't'}
 	developmentLegacy := [16]byte{'a', 'p', 'p', 'a', 't', 't', 'e', 's', 't', 'd', 'e', 'v', 'e', 'l', 'o', 'p'}
 	developmentSandbox := [16]byte{'a', 'p', 'p', 'a', 't', 't', 'e', 's', 't', 's', 'a', 'n', 'd', 'b', 'o', 'x'}
-	switch environment {
-	case AppAttestProduction:
-		return subtle.ConstantTimeCompare(aaguid[:], production[:]) == 1
-	case AppAttestDevelopment:
-		return subtle.ConstantTimeCompare(aaguid[:], developmentLegacy[:]) == 1 ||
-			subtle.ConstantTimeCompare(aaguid[:], developmentSandbox[:]) == 1
-	default:
-		return false
+	if subtle.ConstantTimeCompare(aaguid[:], production[:]) == 1 {
+		return AppAttestProduction
 	}
+	if subtle.ConstantTimeCompare(aaguid[:], developmentLegacy[:]) == 1 ||
+		subtle.ConstantTimeCompare(aaguid[:], developmentSandbox[:]) == 1 {
+		return AppAttestDevelopment
+	}
+	return ""
 }
 
 func appleAppAttestationRoots() (*x509.CertPool, error) {

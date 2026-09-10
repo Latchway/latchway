@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
+
+	"cloud.google.com/go/compute/metadata"
 )
 
 const (
@@ -33,12 +34,8 @@ type GoogleMetadataTokenSourceOptions struct {
 // Google Cloud workloads with an attached service identity, avoiding a stored
 // service-account private key.
 type GoogleMetadataTokenSource struct {
-	client   *http.Client
-	endpoint *url.URL
-	timeout  time.Duration
-	now      func() time.Time
-	gate     chan struct{}
-	cached   PlayIntegrityAccessToken
+	*googleTokenSource
+	client *http.Client
 }
 
 func NewGoogleMetadataTokenSource(
@@ -82,85 +79,35 @@ func newGoogleMetadataTokenSource(
 		}
 	}
 	client := &http.Client{
-		Transport: transport,
+		Transport: &googleTokenTransport{base: transport, endpoint: *endpoint, metadata: true},
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	ownedEndpoint := *endpoint
+	metadataClient := metadata.NewWithOptions(&metadata.Options{
+		Client: client, Logger: slog.New(slog.DiscardHandler),
+	})
 	return &GoogleMetadataTokenSource{
-		client: client, endpoint: &ownedEndpoint, timeout: options.Timeout,
-		now: options.Now, gate: make(chan struct{}, 1),
+		client: client,
+		googleTokenSource: newGoogleTokenSource(options.Timeout, options.Now,
+			func(ctx context.Context, now time.Time) (PlayIntegrityAccessToken, error) {
+				encoded, err := metadataClient.GetWithContext(ctx,
+					"instance/service-accounts/default/token?"+googleMetadataTokenQuery)
+				if err != nil {
+					return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
+				}
+				return parseGoogleAccessTokenResponse([]byte(encoded), now)
+			}),
 	}, nil
 }
 
 func (source *GoogleMetadataTokenSource) AccessToken(
 	ctx context.Context,
 ) (PlayIntegrityAccessToken, error) {
-	if source == nil || ctx == nil || source.client == nil || source.endpoint == nil ||
-		source.now == nil || source.gate == nil || source.timeout <= 0 {
+	if source == nil {
 		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
 	}
-	if err := ctx.Err(); err != nil {
-		return PlayIntegrityAccessToken{}, err
-	}
-	select {
-	case source.gate <- struct{}{}:
-		defer func() { <-source.gate }()
-	case <-ctx.Done():
-		return PlayIntegrityAccessToken{}, ctx.Err()
-	}
-	now := source.now().UTC()
-	if now.IsZero() || now.Year() < 1 || now.Year() > 9998 {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if validPlayIntegrityAccessToken(source.cached, now.Add(googleAccessTokenRefreshMargin)) {
-		return source.cached, nil
-	}
-	requestContext, cancel := context.WithTimeout(ctx, source.timeout)
-	defer cancel()
-	request, err := http.NewRequestWithContext(
-		requestContext, http.MethodGet, source.endpoint.String(), nil,
-	)
-	if err != nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	request.Header.Set(googleMetadataFlavorHeader, googleMetadataFlavorExpectedValue)
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", "latchway/google-metadata-v1")
-	response, err := source.client.Do(request)
-	if err != nil {
-		if response != nil && response.Body != nil {
-			_ = response.Body.Close()
-		}
-		if contextErr := requestContext.Err(); contextErr != nil {
-			return PlayIntegrityAccessToken{}, contextErr
-		}
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if response == nil || response.Body == nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	encoded, readErr := io.ReadAll(io.LimitReader(response.Body, maximumGoogleTokenResponseBytes+1))
-	closeErr := response.Body.Close()
-	if readErr != nil || closeErr != nil || len(encoded) > maximumGoogleTokenResponseBytes ||
-		response.StatusCode != http.StatusOK ||
-		response.Header.Get(googleMetadataFlavorHeader) != googleMetadataFlavorExpectedValue {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	mediaType, _, contentTypeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if contentTypeErr != nil || mediaType != "application/json" {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	token, err := parseGoogleAccessTokenResponse(encoded, now)
-	if err != nil {
-		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
-	}
-	if err := requestContext.Err(); err != nil {
-		return PlayIntegrityAccessToken{}, err
-	}
-	source.cached = token
-	return token, nil
+	return source.googleTokenSource.AccessToken(ctx)
 }
 
 func (GoogleMetadataTokenSource) Format(state fmt.State, _ rune) {

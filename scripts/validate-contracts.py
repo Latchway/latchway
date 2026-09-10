@@ -722,7 +722,7 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version, client_contract_version = contract_document_versions(manifest)
-    if (contract_version, client_contract_version) != ("1.1.1", "1.1.0") or manifest["wire_protocol"] != {
+    if (contract_version, client_contract_version) != ("1.1.2", "1.1.0") or manifest["wire_protocol"] != {
         "current": 3,
         "supported": [1, 2, 3],
         "minimum": 1,
