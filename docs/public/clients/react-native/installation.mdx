@@ -48,6 +48,12 @@ Use `pod install` if the host does not use Bundler. The npm podspec resolves
 artifacts from Maven Central. Do not add local SDK paths or a second native
 implementation. Rebuild the native app after installation; a JS reload is not enough.
 
+When upgrading an existing host, `Podfile.lock` may still pin the older native
+SDK. After updating npm, run `bundle exec pod update Latchway --repo-update`
+from `ios` (or `pod update Latchway --repo-update` without Bundler). This unlocks
+the Latchway pod specifically; ordinary `pod install` preserves the old lock and
+can reject the new exact dependency. Do not update every unrelated pod.
+
 Version 2 removes legacy migration, credential-adoption and callback-authority
 APIs. It does not migrate old storage automatically. Do not ship this bridge
 upgrade as an OTA-only JavaScript update.

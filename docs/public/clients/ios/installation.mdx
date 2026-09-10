@@ -38,6 +38,11 @@ For a CocoaPods host:
 pod 'Latchway/AppAttest', '2.0.0'
 ```
 
+For an existing CocoaPods installation, update the declared version and run
+`bundle exec pod update Latchway --repo-update` (omit `bundle exec` if unused).
+An ordinary `pod install` preserves the older locked version. Keep this update
+scoped to Latchway rather than upgrading unrelated pods.
+
 The optional Foundation Models product/subspec requires OS 27 and server 1.0.2+
 for expanded generation requests. See the versioned
 [Foundation Models guide](https://github.com/Latchway/latchway-ios-sdk/blob/v2.0.0/Documentation/FoundationModels.md).
