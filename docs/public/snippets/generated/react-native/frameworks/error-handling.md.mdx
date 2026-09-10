@@ -1,0 +1,34 @@
+<Info>
+  Generated from [docs/release/v2.0.1.md](https://github.com/Latchway/latchway-react-native-sdk/blob/71d0bdd24667125bde88e8ae726c16b5375712d2/docs/release/v2.0.1.md#L1-L28) at documentation source commit `71d0bdd24667125bde88e8ae726c16b5375712d2` for SDK `v2.0.1`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `b1955188f5ddcaf68a73d9409bd6bee691832181cc159ed49dfcc0e3cf06148b`.
+</Info>
+
+```text
+# React Native SDK 2.0.1
+
+This patch uses JavaScript client 1.1.1, iOS SDK 2.0.1 and Android SDK 1.2.2.
+Install the updated npm package, reinstall CocoaPods and rebuild native apps.
+The minimum React Native/React versions and shared native app/account model do
+not change. No new bootstrap or Firebase dependency is introduced.
+
+- Preserve safe gateway messages, retry-after times, feature and validation
+  errors, supported protocol versions, titles and instance references across the
+  native error boundary. Continue rejecting credential fields, malformed known
+  metadata and mismatched documentation/correlation identifiers.
+- Preserve the response request ID and HTTP status when a native body read fails
+  after headers. Such an interrupted response is not marked replayable, and the
+  transport never retries it automatically.
+- The chat example reads canonical gateway Problems in direct-fetch mode and
+  displays actionable detail, code, request ID, retry timing and safe field
+  guidance. Its direct stream reader rejects upstream errors and missing
+  completion rather than accepting a partial answer as complete.
+
+For custom fetch calls, use `errorFromResponse(response)` when `!response.ok`.
+It is exported from `@latchway/react-native`. In UI, show `error.message` and
+`error.requestID`; `validationErrors` holds safe path/message guidance. Do not log
+entire requests, provider bodies or authentication material. Framework adapters
+still own protocol parsing; an HTTP 200 stream is not complete until the
+protocol's final event is observed.
+
+The wire contract and error code registry are unchanged. Source regressions are
+not a claim of new physical-device attestation or cloud verification.
+```

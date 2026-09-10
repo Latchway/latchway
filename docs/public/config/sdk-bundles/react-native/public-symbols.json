@@ -4,14 +4,14 @@
     {
       "name": "AndroidKeyPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 23,
           "start_line": 23
         },
         "region_sha256": "30d99b3b053b207280f08249d91ee5dd94beb5eac1277d4a981bdc1975c57936",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -19,14 +19,14 @@
     {
       "name": "AndroidKeyPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 7,
           "start_line": 7
         },
         "region_sha256": "e8dab1aee016f4d80006448ebd876a0d56a81c8877f43cca4289929295ae59d6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -34,14 +34,14 @@
     {
       "name": "AndroidSecurityOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 24,
           "start_line": 24
         },
         "region_sha256": "045ab2031827b7f66b67563f01ac87eddc097fd786d26ca53c194ac86e233067",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -49,14 +49,14 @@
     {
       "name": "AndroidSecurityOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 20,
           "start_line": 20
         },
         "region_sha256": "389510813d9a68409368cac22eab843f0bf325ef3c89314957003185c39774f5",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -64,14 +64,14 @@
     {
       "name": "AppleSecurityOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 25,
           "start_line": 25
         },
         "region_sha256": "4c6bd1dd0375d134db5c7cc1ba2e0f7c7eb11fec05073a59d3d7d7355be88258",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -79,14 +79,14 @@
     {
       "name": "AppleSecurityOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 12,
           "start_line": 12
         },
         "region_sha256": "115bbff2814ead05a8f92d3e019c55e081d914a10618956fb650c1ad9748b985",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -94,14 +94,14 @@
     {
       "name": "AppleSoftwareKeyFallbackPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 26,
           "start_line": 26
         },
         "region_sha256": "fed315525e5a61ee4880212b748a5788428efdc12c6f604973fdd2045db261ee",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -109,14 +109,14 @@
     {
       "name": "AppleSoftwareKeyFallbackPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 5,
           "start_line": 5
         },
         "region_sha256": "4ed23feab1cb1303cbb29b2c06e3148b560aea82dc5f3cc9b9591a6d99438223",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -124,14 +124,14 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 16,
           "start_line": 16
         },
         "region_sha256": "9ed27f334e20f19e8e48cd21e7025274e6d65fafc53d90cc8a4e0cecf1c5bfdf",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -139,29 +139,29 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 2,
           "start_line": 2
         },
         "region_sha256": "49489759a80fc8b1852fff375c6edefa92b8beeb744713f811a2feb777635118",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 27,
           "start_line": 27
         },
         "region_sha256": "d9f3680cf5582154c31e025e80b52c869539cb8ada22f3ad4997ec7ddecc1285",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -169,14 +169,14 @@
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 28,
           "start_line": 28
         },
         "region_sha256": "d96829ffe281359ec1b10867b8c20ef387cbea56e6df2486195debef7c3206de",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -184,14 +184,14 @@
     {
       "name": "Latchway",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 336,
           "start_line": 336
         },
         "region_sha256": "ae7b0ccb5e6e2ab1defe958c740d4be8315a5405ab1dd83313ad71eb528335be",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -199,14 +199,14 @@
     {
       "name": "Latchway",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 11,
           "start_line": 11
         },
         "region_sha256": "122d599b4eed1f1219f3b5f660bcf9cc578e0994347193689e1648741564ed0b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -214,14 +214,14 @@
     {
       "name": "LatchwayAccount",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 307,
           "start_line": 307
         },
         "region_sha256": "28feabf3a20e5691215323820332d2b28dc15d2742fad108eb56add4adc23cde",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -229,14 +229,14 @@
     {
       "name": "LatchwayApp",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 67,
           "start_line": 67
         },
         "region_sha256": "856f94d496a92d1fef223bcba7d90bf7945b774d2e883407a8a3020de701bcdd",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -244,14 +244,14 @@
     {
       "name": "LatchwayApp",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 11,
           "start_line": 11
         },
         "region_sha256": "122d599b4eed1f1219f3b5f660bcf9cc578e0994347193689e1648741564ed0b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -259,14 +259,14 @@
     {
       "name": "LatchwayAppOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 14,
           "start_line": 14
         },
         "region_sha256": "66bf64168f77e994c537f8cb23d46aad53c87148e9e4e2085ac7f906f608d242",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -274,14 +274,14 @@
     {
       "name": "LatchwayAppOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 12,
           "start_line": 12
         },
         "region_sha256": "6fee2c1546381c57e7de76e30c5f7a3ccaf0c4070b06c60d5d9431e3c4f7c275",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -289,14 +289,14 @@
     {
       "name": "LatchwayAppSnapshot",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 26,
           "start_line": 26
         },
         "region_sha256": "390584127958b17e363762f45f1630173758b4be6c8c0eb1beb12464e0f33141",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -304,14 +304,14 @@
     {
       "name": "LatchwayAppSnapshot",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 12,
           "start_line": 12
         },
         "region_sha256": "6fee2c1546381c57e7de76e30c5f7a3ccaf0c4070b06c60d5d9431e3c4f7c275",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -319,14 +319,14 @@
     {
       "name": "LatchwayAuthBinding",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 46,
           "start_line": 46
         },
         "region_sha256": "f70331b2302b9c03aefd8e7a10ed4f98c5ce6b650104650d372f7989ce90097b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -334,14 +334,14 @@
     {
       "name": "LatchwayAuthEvent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 42,
           "start_line": 42
         },
         "region_sha256": "47aaa60ee50ad4a27fe931bf502df0c61dace3b400017ebd6c5b6592c4d79353",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -349,14 +349,14 @@
     {
       "name": "LatchwayAuthEvent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 14,
           "start_line": 14
         },
         "region_sha256": "1f268022cf9a09a3234928f85e1f6149e43ec259d943831b96ea07da635a2142",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -364,14 +364,14 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 28,
           "start_line": 28
         },
         "region_sha256": "256f687a5e581c070b01b1f857486ebc46df8b8e36a25a474b03a7203a721215",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -379,14 +379,14 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 148,
           "start_line": 148
         },
         "region_sha256": "62c371cbb7dd7098c7ef7f2f3efe91312514438c528d9fa896cd3a751f2bb00b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -394,14 +394,14 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 4,
           "start_line": 4
         },
         "region_sha256": "fcded75b4c3874e16b7ff77ba94b95d0dd0af6be8738647aa9322ec2db2e5a7d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -409,14 +409,14 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 29,
           "start_line": 29
         },
         "region_sha256": "fcded75b4c3874e16b7ff77ba94b95d0dd0af6be8738647aa9322ec2db2e5a7d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -424,14 +424,14 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 142,
           "start_line": 142
         },
         "region_sha256": "d5f708c58de22daff527a81e18411a26db14b33baff6a5aacbc34585449f2421",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -439,14 +439,14 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 5,
           "start_line": 5
         },
         "region_sha256": "a3e2846944fb825867fa2f6d2bc5bc989d4ac0404fe8d37492c26b678838c17c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -454,14 +454,14 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 30,
           "start_line": 30
         },
         "region_sha256": "a3e2846944fb825867fa2f6d2bc5bc989d4ac0404fe8d37492c26b678838c17c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -469,14 +469,14 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 102,
           "start_line": 102
         },
         "region_sha256": "5b5ca9879596352491c05887da7b64e75e2fc35068e8864b6bd11ce9c9006355",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -484,14 +484,14 @@
     {
       "name": "LatchwayError",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 8,
           "start_line": 8
         },
         "region_sha256": "3d48137d6f51ea1a1b6e078031e4442156d2a0a01d587c2dc277b0a971ecfccc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -499,14 +499,14 @@
     {
       "name": "LatchwayFetch",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 32,
           "start_line": 32
         },
         "region_sha256": "15acc467d346f12f11d02d8a32d86a5c5333186962053c23b7bca92a13e54241",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -514,14 +514,14 @@
     {
       "name": "LatchwayFetch",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 26,
           "start_line": 26
         },
         "region_sha256": "e0444b0595fb174e5d2f11cbece4a5a81993fc314afdda7a339332252a65aada",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -529,14 +529,14 @@
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 31,
           "start_line": 31
         },
         "region_sha256": "5826d15f6fb6b705ee25492304c3bedb2a5b4af77decb62280aeb2e510316f9a",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -544,14 +544,14 @@
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 30,
           "start_line": 30
         },
         "region_sha256": "590ca55c8af2c59e9893027c05944220b0c1ff28e0e53c6b98b728947984e146",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -559,14 +559,14 @@
     {
       "name": "LatchwayIdentityConfiguration",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 5,
           "start_line": 5
         },
         "region_sha256": "d1ff34e01e4ad3914780edc142a3f5b1e9e70da9d68e63a6ea1b1be0e0019b57",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -574,14 +574,14 @@
     {
       "name": "LatchwayIdentityConfiguration",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 14,
           "start_line": 14
         },
         "region_sha256": "1f268022cf9a09a3234928f85e1f6149e43ec259d943831b96ea07da635a2142",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -589,29 +589,29 @@
     {
       "name": "LatchwayLifecycleCode",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/errors.ts",
         "region": {
           "end_line": 6,
           "start_line": 6
         },
         "region_sha256": "266ea036dbc44af323e410656420222c5c583efd2241165eb9245f60dd14b6e1",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "71bb222a5ecc3b3c2abd9757ff1ffffd9a8b629256b22481b71fe3a34795554d"
+        "source_sha256": "01dd6db4c4d1e4b74d8be3c18aa0b140de9a14c900ee4d7833afbf8dc0315ae3"
       }
     },
     {
       "name": "LatchwayLifecycleCode",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 10,
           "start_line": 10
         },
         "region_sha256": "002070b92bb116201fda2dd9d0b86154743dcd0a12ffa763aea6a9c3a3b0c127",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -619,29 +619,29 @@
     {
       "name": "LatchwayLifecycleError",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/errors.ts",
         "region": {
           "end_line": 16,
           "start_line": 16
         },
         "region_sha256": "9f83f21f34fef9af951c266b50488f19aa1e2eb6e1c87d6804b2e1f61a4e2324",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "71bb222a5ecc3b3c2abd9757ff1ffffd9a8b629256b22481b71fe3a34795554d"
+        "source_sha256": "01dd6db4c4d1e4b74d8be3c18aa0b140de9a14c900ee4d7833afbf8dc0315ae3"
       }
     },
     {
       "name": "LatchwayLifecycleError",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 9,
           "start_line": 9
         },
         "region_sha256": "854fef2b0f4a1871682ba69b1c05532f7457ab9ebe4cd2b26371896df8ded557",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -649,14 +649,14 @@
     {
       "name": "LatchwayTokenInput",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 11,
           "start_line": 11
         },
         "region_sha256": "3369cc99bc47b06595a5f09c96113c06360c94867cd2195a7701feb27a192a7e",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -664,14 +664,14 @@
     {
       "name": "NativeLatchwayModule",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/testing.ts",
         "region": {
           "end_line": 9,
           "start_line": 9
         },
         "region_sha256": "2a45c48f649b2807ab50ed2e13bbe1dd0417ec68140a7e1e95912c285856abdc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "018b16b5b18197689443eb7881432b105bc3b1337f1ef0792d350f1d5dd24c34"
       }
@@ -679,14 +679,14 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 17,
           "start_line": 17
         },
         "region_sha256": "05b10158896549779350e40f7ec2d3f6a897448910ed79f9073357dea5384ff0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -694,29 +694,29 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 3,
           "start_line": 3
         },
         "region_sha256": "ce5155966dfd1897d08cc144bd2f3e65b72839454fab0e687d066aac14480776",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 33,
           "start_line": 33
         },
         "region_sha256": "97bf5578907ee40f33c405c078209703005bc8051eb09b646f6d6e7dedad358b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -724,14 +724,14 @@
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 34,
           "start_line": 34
         },
         "region_sha256": "467c4161a0d26866e1b88592a0d8b5f27ccc8e1240527ffa0788a3f57003efb0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -739,14 +739,14 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 34,
           "start_line": 34
         },
         "region_sha256": "af53122230fba14c690a61e11acfa707017d55613cccd875fba015445dc6ed5a",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -754,14 +754,14 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 44,
           "start_line": 44
         },
         "region_sha256": "48389295f090b5f8a3003e62bc87482a8cdfdb059e7f029e2784e9880533fb92",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -769,44 +769,44 @@
     {
       "name": "REACT_NATIVE_FRAMEWORK_ID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 6,
           "start_line": 6
         },
         "region_sha256": "01f74deae9edf25b54f0bc87405b1ff9218599489e4b05b82b3f54985c3d6c43",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "REACT_NATIVE_FRAMEWORK_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 7,
           "start_line": 7
         },
         "region_sha256": "319a70367cf13f72d18ea0420bbdb410198c75d00594fd15bef963327c0e5ed4",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "ReactNativeComponentDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 35,
           "start_line": 35
         },
         "region_sha256": "82ed45aaf748c65de0b55568265addde4d7e302195ee8d2fd7653e83d99bdcf4",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -814,14 +814,14 @@
     {
       "name": "ReactNativeComponentDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 124,
           "start_line": 124
         },
         "region_sha256": "6eeadc35a684ffd58890f1abe0d6ffee97c6f885f7f52c1de68df834e89f9f95",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -829,14 +829,14 @@
     {
       "name": "ReactNativeComponentTrustSource",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 36,
           "start_line": 36
         },
         "region_sha256": "ae1493ab864be185345c4fcb5bb2806f0bfef646eb46709c89d356c92b40e4c3",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -844,14 +844,14 @@
     {
       "name": "ReactNativeComponentTrustSource",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 114,
           "start_line": 114
         },
         "region_sha256": "5bd04cb69ca636ebab20778de543d212f6a83788411f0fdb657a241aebb33e61",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -859,14 +859,14 @@
     {
       "name": "ReactNativeDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 37,
           "start_line": 37
         },
         "region_sha256": "492f22ff7f7e3b45bc0dc023edd78afb6381d68480cb366cb42131cf23f2fb02",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -874,14 +874,14 @@
     {
       "name": "ReactNativeDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 50,
           "start_line": 50
         },
         "region_sha256": "8345327215964b34b59decccbc9c05ec7493bae400909944e8715000f1d08e6f",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -889,14 +889,14 @@
     {
       "name": "ReactNativeIOSComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 38,
           "start_line": 38
         },
         "region_sha256": "9b622e2092424f81767047dad44fe70b57569507c30b0e3338b485ceeb5302f5",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -904,14 +904,14 @@
     {
       "name": "ReactNativeIOSComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 94,
           "start_line": 94
         },
         "region_sha256": "c25bc957d5f22e8362f5b3a7ec89c5e2aed1d345dc8ae55b09a2ef04c816a26b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -919,14 +919,14 @@
     {
       "name": "ReactNativeIOSComponentKind",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 39,
           "start_line": 39
         },
         "region_sha256": "ab5c9a23c7675da6936f87d63e341920763bfd29202900c96d7bab34cb3b042b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -934,14 +934,14 @@
     {
       "name": "ReactNativeIOSComponentKind",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 82,
           "start_line": 82
         },
         "region_sha256": "db6609f73f0764d2588ca5be3d1e277838fada0f4485c8f71a311280fca4d582",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -949,14 +949,14 @@
     {
       "name": "ReactNativePlatform",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 40,
           "start_line": 40
         },
         "region_sha256": "d46aa4072b40d47480c5373128c1b4a7530827e0f621ccad4b69c12ccd5ba672",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -964,14 +964,14 @@
     {
       "name": "ReactNativePlatform",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 3,
           "start_line": 3
         },
         "region_sha256": "a640ec0830e2c3d1012a97428c25ee385ea5b845825e8098f7fe4a44c1c27994",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -979,14 +979,14 @@
     {
       "name": "SDK_KIND",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 18,
           "start_line": 18
         },
         "region_sha256": "37134dbc3752b767572086b68f1e3f3c4579fd70a3c46b5da843248c251863e0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -994,29 +994,29 @@
     {
       "name": "SDK_KIND",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 5,
           "start_line": 5
         },
         "region_sha256": "fa42b31e1982a38f77f5c3e945f5bd266ebb577fd1d25d469e21a50fdf4573c3",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 19,
           "start_line": 19
         },
         "region_sha256": "636da59082d51a4887e3f7b7e7712e0f644b4c5e863407164cff53b07a41a5c8",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -1024,29 +1024,29 @@
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 1,
           "start_line": 1
         },
-        "region_sha256": "6bf1bb4ddd894ae2081cc0334faed0323d31d856e4d86bcfe63ed9b1f40f9d1a",
-        "release": "v2.0.0",
+        "region_sha256": "fa4c11b0e3ff94d7a4e804e283620307eb793cd5c6d9c9b081a74c531d59aaa2",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 20,
           "start_line": 20
         },
         "region_sha256": "b734759eaedcafc32f2d120077d4faef6b5387be0e7165144b925d4d3c1393fb",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -1054,29 +1054,29 @@
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/version.ts",
         "region": {
           "end_line": 4,
           "start_line": 4
         },
         "region_sha256": "bec05fbf56bdb8f0107b70d701f91545b6fbe4155745e6f0c0e9cd5415dd3048",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "d8fe012277adafa8e70e205778ac0bd031e7c038f6ae0cbe10d44eb0816bd859"
+        "source_sha256": "92aa044a6a5bd5a9dece6a025570ca10c0c848ac9120700a8da6fccc22dfa663"
       }
     },
     {
       "name": "account",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 108,
           "start_line": 108
         },
         "region_sha256": "990420a54bfb2dd47c4e9f20624b64c9bd69f48097cbe59e4526db2ca2f8d008",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1084,14 +1084,14 @@
     {
       "name": "allowInsecureLoopback",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 111,
           "start_line": 111
         },
         "region_sha256": "6c88263111e2691a85af13435f5bdbd87ee7af165307bda31323781d806b7420",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1099,14 +1099,14 @@
     {
       "name": "android",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 23,
           "start_line": 23
         },
         "region_sha256": "e4acfcc0cb4272854d88621daa80255037d11987feb25f7989ef25d3006d4867",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1114,14 +1114,14 @@
     {
       "name": "appAttestEnabled",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 16,
           "start_line": 16
         },
         "region_sha256": "7347adfad1cfc3606e80110f5da18b5c66c9daf73202219cde1d43462335c3c5",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1129,14 +1129,14 @@
     {
       "name": "appCommand",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 5,
           "start_line": 5
         },
         "region_sha256": "6d65317bb2d1f0e325a83bb830ef50747f0bee78d60a9f3c39b091fa4c2313be",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1144,14 +1144,14 @@
     {
       "name": "appInstanceID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 27,
           "start_line": 27
         },
         "region_sha256": "d8ea9681a54c398f19a06ef6b7161b849d5fb119fa153caeddbb416831ccce59",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1159,14 +1159,14 @@
     {
       "name": "appVersion",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 109,
           "start_line": 109
         },
         "region_sha256": "a6408aa317902552435f35cd45f2c339b268eeba4e296b4248c52a05e28cb23a",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1174,14 +1174,14 @@
     {
       "name": "apple",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 19,
           "start_line": 19
         },
         "region_sha256": "86c4642732dceb872cc8b17fddfb1c845c0a4d4f9975cdb4a377ffa0ff72cdab",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1189,14 +1189,14 @@
     {
       "name": "applicationID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 16,
           "start_line": 16
         },
         "region_sha256": "7574c56d9ba510c92083ffaff662d9394ae2aff8a73d0495fad25291d53f45ef",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1204,14 +1204,14 @@
     {
       "name": "applicationID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 39,
           "start_line": 39
         },
         "region_sha256": "7574c56d9ba510c92083ffaff662d9394ae2aff8a73d0495fad25291d53f45ef",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1219,14 +1219,14 @@
     {
       "name": "applicationID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 104,
           "start_line": 104
         },
         "region_sha256": "7574c56d9ba510c92083ffaff662d9394ae2aff8a73d0495fad25291d53f45ef",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1234,14 +1234,14 @@
     {
       "name": "attestation",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 57,
           "start_line": 57
         },
         "region_sha256": "db139c3a829439b636f359ca87b060fe2f3efa66f2b740f0b717321f07f8a72c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1249,14 +1249,14 @@
     {
       "name": "audience",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 8,
           "start_line": 8
         },
         "region_sha256": "80de97d15772b5e1527eb529ee064a6ba491f50b8b29cd4afafa4baf6034f6ee",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1264,14 +1264,14 @@
     {
       "name": "baseURL",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 15,
           "start_line": 15
         },
         "region_sha256": "5e2ecde6e3c8017413f8324cb621246ec6b03c90b2684c3081f48bf659c897db",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1279,14 +1279,14 @@
     {
       "name": "baseURL",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 38,
           "start_line": 38
         },
         "region_sha256": "5e2ecde6e3c8017413f8324cb621246ec6b03c90b2684c3081f48bf659c897db",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1294,14 +1294,14 @@
     {
       "name": "baseURL",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 103,
           "start_line": 103
         },
         "region_sha256": "5e2ecde6e3c8017413f8324cb621246ec6b03c90b2684c3081f48bf659c897db",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1309,14 +1309,14 @@
     {
       "name": "bindLatchwayAuth",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 56,
           "start_line": 56
         },
         "region_sha256": "9c4c3415482b9f7c0c8af212aa5fac5045226a06c1dbc28b17bdb36ee2bdce87",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1324,14 +1324,14 @@
     {
       "name": "cancel",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 56,
           "start_line": 56
         },
         "region_sha256": "97a6602ff093aae8e0b4eeb094a471473bed7e0e0406665b78d730c322112df7",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1339,14 +1339,14 @@
     {
       "name": "closeResponse",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 22,
           "start_line": 22
         },
         "region_sha256": "74957babef4563018408f8edfa7d147ab3ed4c289297cd0a4853ade3de074ef7",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1354,14 +1354,14 @@
     {
       "name": "component",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 106,
           "start_line": 106
         },
         "region_sha256": "419d4e5e6cda9aecec9bfccb83ed33ccbf2669f8105a3213c37ccb0ddd3cfd99",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1369,14 +1369,14 @@
     {
       "name": "componentAccount",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 167,
           "start_line": 167
         },
         "region_sha256": "226d319c4c631fc08baa1bbebbd33fc932558f947667adf068dffe1bbaf0ced3",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1384,14 +1384,14 @@
     {
       "name": "componentDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 30,
           "start_line": 30
         },
         "region_sha256": "4541e3e92ad5e1c9fda75b9b82b10ee33f0706438dacaf843d4118fc6cd578e9",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1399,14 +1399,14 @@
     {
       "name": "componentDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 172,
           "start_line": 172
         },
         "region_sha256": "e6c571cccd63715828a22698047b37d7366fa1b6cd2dffefba62e01a5b964134",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1414,14 +1414,14 @@
     {
       "name": "componentID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 126,
           "start_line": 126
         },
         "region_sha256": "63abc4f4255a21cebf7577c3ae371c31d4dada7fb5162ec26441e636df216e76",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1429,14 +1429,14 @@
     {
       "name": "configure",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 336,
           "start_line": 336
         },
         "region_sha256": "ae7b0ccb5e6e2ab1defe958c740d4be8315a5405ab1dd83313ad71eb528335be",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1444,14 +1444,14 @@
     {
       "name": "configureComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 6,
           "start_line": 6
         },
         "region_sha256": "60363dc79601a51d8d3386f350843b22f261d006c75f53f7c39558ae735c0d29",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1459,14 +1459,14 @@
     {
       "name": "configureLatchwayApp",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 318,
           "start_line": 318
         },
         "region_sha256": "3c455a90c487fb7ca72e1da08c6ed9cef84a323e7c174d21b1f05315f41dd85d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1474,14 +1474,14 @@
     {
       "name": "containingAppActionRequired",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 135,
           "start_line": 135
         },
         "region_sha256": "4ebbf3101ec45c6826b720b809edebc03fbebfd0d1bb300787c587c2e57313c2",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1489,14 +1489,14 @@
     {
       "name": "contractVersion",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 53,
           "start_line": 53
         },
         "region_sha256": "14b6b559c449c58348c7fa04aa25fa6b477f3a4b7633f629d6eed6b2f56bc629",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1504,14 +1504,14 @@
     {
       "name": "createLatchwayComponentClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 44,
           "start_line": 44
         },
         "region_sha256": "737c8812836e89e7e1840c75a59979735706d8801285e1a9a7d12c9e028aebad",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -1519,14 +1519,14 @@
     {
       "name": "currentAccount",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 135,
           "start_line": 135
         },
         "region_sha256": "b3430a288da8d7c5bc4b26c647e93b4b93eb631df3e22182419835a0dc89f002",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1534,14 +1534,14 @@
     {
       "name": "definitionID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 95,
           "start_line": 95
         },
         "region_sha256": "6bb5fc3162b762787fe76f9d98ff443a6129d387d3403e0cd4adfefcf9c882a6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1549,14 +1549,14 @@
     {
       "name": "definitionID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 127,
           "start_line": 127
         },
         "region_sha256": "6bb5fc3162b762787fe76f9d98ff443a6129d387d3403e0cd4adfefcf9c882a6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1564,14 +1564,14 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 29,
           "start_line": 29
         },
         "region_sha256": "bacd0ee64678f8e8e09f2aec70bf8719619aeedb5404e6dd9cdb202a328b0bfe",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1579,14 +1579,14 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 144,
           "start_line": 144
         },
         "region_sha256": "29583d72eb835a036e7e71e82223c5132530b16f2bf45a1659a117e4e03b9e34",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1594,14 +1594,14 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 159,
           "start_line": 159
         },
         "region_sha256": "2dfaf63aebd1e20d4ec22dfd320cf47776825e330e047b58a61ab858bf4a6c38",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1609,14 +1609,14 @@
     {
       "name": "dispose",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 48,
           "start_line": 48
         },
         "region_sha256": "3f166f6ed88057cb545a7379075aedfb7c05d6a8e3d0b343af468dc7b1158bdc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1624,14 +1624,14 @@
     {
       "name": "dispose",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 57,
           "start_line": 57
         },
         "region_sha256": "58e79010a142eadd29b95a3b82eaacae4947dc4b593d2e66baf32dfab50c2a87",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -1639,14 +1639,14 @@
     {
       "name": "dispose",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 145,
           "start_line": 145
         },
         "region_sha256": "3f166f6ed88057cb545a7379075aedfb7c05d6a8e3d0b343af468dc7b1158bdc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1654,14 +1654,14 @@
     {
       "name": "dispose",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 184,
           "start_line": 184
         },
         "region_sha256": "3f166f6ed88057cb545a7379075aedfb7c05d6a8e3d0b343af468dc7b1158bdc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1669,14 +1669,14 @@
     {
       "name": "environment",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 17,
           "start_line": 17
         },
         "region_sha256": "39f204149c5402ec0e0653ad1c62659886ea390ca201893ad0a83edec302ef12",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1684,14 +1684,14 @@
     {
       "name": "environment",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 40,
           "start_line": 40
         },
         "region_sha256": "39f204149c5402ec0e0653ad1c62659886ea390ca201893ad0a83edec302ef12",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1699,14 +1699,14 @@
     {
       "name": "environment",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 105,
           "start_line": 105
         },
         "region_sha256": "39f204149c5402ec0e0653ad1c62659886ea390ca201893ad0a83edec302ef12",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1714,14 +1714,14 @@
     {
       "name": "errorFromResponse",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 8,
           "start_line": 8
         },
         "region_sha256": "3d48137d6f51ea1a1b6e078031e4442156d2a0a01d587c2dc277b0a971ecfccc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -1729,14 +1729,14 @@
     {
       "name": "familyID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 125,
           "start_line": 125
         },
         "region_sha256": "3f9c946909f8a763dc181681a4a2368ec1ada2df73d6e8f56b2139a428237208",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1744,14 +1744,14 @@
     {
       "name": "feature",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 45,
           "start_line": 45
         },
         "region_sha256": "968c2153fda84c779694fb6f19d70e25a7b1b579eeb1dc690e912f3d272ebf42",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1759,14 +1759,14 @@
     {
       "name": "fetch",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 155,
           "start_line": 155
         },
         "region_sha256": "3df1b89c39bd6c0bef8395399aa0a08ef2c171df6ec86ecaf731026faee92fc3",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1774,14 +1774,14 @@
     {
       "name": "fetchFor",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 157,
           "start_line": 157
         },
         "region_sha256": "e9c78108fb7b261b32890357e49383ede3908643126a7ffdf3baa3916527dd01",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1789,14 +1789,14 @@
     {
       "name": "firebaseProject",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 13,
           "start_line": 13
         },
         "region_sha256": "692e54631491ba8e77e210c1357d23eb43afb1a2bdc08af948c5cd90ee6e92ee",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1804,14 +1804,14 @@
     {
       "name": "firebaseProject",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 13,
           "start_line": 13
         },
         "region_sha256": "016335bb93675fe3a07741fd6e884f06821e770ea293a60d4a88f1ae0c00b3cf",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -1819,14 +1819,14 @@
     {
       "name": "gatewayURL",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 70,
           "start_line": 70
         },
         "region_sha256": "36e634d281780b92ba8e0792872043fb1715dffe0647530af92ee24a5be83a34",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1834,14 +1834,14 @@
     {
       "name": "gatewayURL",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 152,
           "start_line": 152
         },
         "region_sha256": "36e634d281780b92ba8e0792872043fb1715dffe0647530af92ee24a5be83a34",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1849,14 +1849,14 @@
     {
       "name": "generationID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 28,
           "start_line": 28
         },
         "region_sha256": "894ce29e986c6aed670906ec16f710e38f68df5f56c92ed0859b47e7ea0a95bb",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1864,14 +1864,14 @@
     {
       "name": "getLatchwayApp",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 331,
           "start_line": 331
         },
         "region_sha256": "60d26b18a9dfba062f15dd4716b5b3802d7c4b41364d459181a6bde8a79e1584",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1879,14 +1879,14 @@
     {
       "name": "grantAvailable",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 131,
           "start_line": 131
         },
         "region_sha256": "41d36695fd1086670cb8a961de2ecb232d6d8486e6c42f73c589bebb29a35c98",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1894,14 +1894,14 @@
     {
       "name": "hard",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 41,
           "start_line": 41
         },
         "region_sha256": "bc855b5288e78621a354c69ec449528331f426f7f99307b28e52b5879c58b5ad",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1909,14 +1909,14 @@
     {
       "name": "identity",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 18,
           "start_line": 18
         },
         "region_sha256": "8ba26537e4c91d1350108c1b919bd15cd625148c2e5efbfb5f79d4c2516e2811",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1924,14 +1924,14 @@
     {
       "name": "installNativeModuleForTesting",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/testing.ts",
         "region": {
           "end_line": 4,
           "start_line": 4
         },
         "region_sha256": "e0c898f99404b233cbba0bde2c30c4505d59ada172378f3137ece07f2cf5b4bb",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "018b16b5b18197689443eb7881432b105bc3b1337f1ef0792d350f1d5dd24c34"
       }
@@ -1939,14 +1939,14 @@
     {
       "name": "installation",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 70,
           "start_line": 70
         },
         "region_sha256": "f1ee54f318ed416a555cc8378ae61c623ca0c2600d41ecc9274dc15960b6c1f3",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -1954,14 +1954,14 @@
     {
       "name": "instanceID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 69,
           "start_line": 69
         },
         "region_sha256": "f50ae7967e0bf339a2f9b86f811b63363c9db92013bab9a1e2e1c63bc961fc99",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -1969,14 +1969,14 @@
     {
       "name": "issuer",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 7,
           "start_line": 7
         },
         "region_sha256": "7afdc16739cc91d95367bc90afc47c8b2d88a7a798e14288ecf446929dab6db8",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1984,14 +1984,14 @@
     {
       "name": "jwtIdentity",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 23,
           "start_line": 23
         },
         "region_sha256": "32eaa2c5efb410f65e4e6e894a2aeef1086b7283bc63df2880256860a56445e5",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -1999,14 +1999,14 @@
     {
       "name": "jwtIdentity",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/index.ts",
         "region": {
           "end_line": 13,
           "start_line": 13
         },
         "region_sha256": "016335bb93675fe3a07741fd6e884f06821e770ea293a60d4a88f1ae0c00b3cf",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "d3a5aadb0a15f2d747878fdc23a452314a23b7f56952b8214c58248137de8ea1"
       }
@@ -2014,14 +2014,14 @@
     {
       "name": "keyAvailable",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 129,
           "start_line": 129
         },
         "region_sha256": "340d6cd9d53867b6428e81b620e5355d26f508fde3c671109317263355e8ccb5",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2029,14 +2029,14 @@
     {
       "name": "keyPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 23,
           "start_line": 23
         },
         "region_sha256": "961f4f7791c9b48b08d743739fdf8cb72eb52545376f05cc0d7a3bb2320aae2c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2044,14 +2044,14 @@
     {
       "name": "keyStorage",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 56,
           "start_line": 56
         },
         "region_sha256": "2a1c548bd34ac1e7031f78702d0f3d5ac1fa5814e6012b167b28c596d4449d89",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2059,14 +2059,14 @@
     {
       "name": "keyStorage",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 130,
           "start_line": 130
         },
         "region_sha256": "2a1c548bd34ac1e7031f78702d0f3d5ac1fa5814e6012b167b28c596d4449d89",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2074,14 +2074,14 @@
     {
       "name": "keychainAccessGroup",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 97,
           "start_line": 97
         },
         "region_sha256": "826362133b64800f68dbba2f662454fafde11c89a751f36245aa20bcce9dea55",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2089,14 +2089,14 @@
     {
       "name": "keychainAccessGroup",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 128,
           "start_line": 128
         },
         "region_sha256": "826362133b64800f68dbba2f662454fafde11c89a751f36245aa20bcce9dea55",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2104,14 +2104,14 @@
     {
       "name": "kind",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 96,
           "start_line": 96
         },
         "region_sha256": "ed7ad4297d67cd260fe44b94453156402df8247d03cab6b07de970a31a37bbf8",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2119,14 +2119,14 @@
     {
       "name": "lastErrorCode",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 78,
           "start_line": 78
         },
         "region_sha256": "1b9d53f554a0b93ce3472c9f6573ab550f5f82c4da6a511664f121ee17d9c6a6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2134,14 +2134,14 @@
     {
       "name": "latchwayFeature",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 31,
           "start_line": 31
         },
         "region_sha256": "05d5d01e5ac84c23ee13c7687541e4ef45d9eac6ce01545c16cd9b07231e503b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2149,14 +2149,14 @@
     {
       "name": "limits",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 47,
           "start_line": 47
         },
         "region_sha256": "f1b774422c6419afc8dfcf99d5d5b6aa1ee170a8c7e4dfda16d82bc1008bdade",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2164,14 +2164,14 @@
     {
       "name": "logout",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 238,
           "start_line": 238
         },
         "region_sha256": "94ee50f99768b89e6a49af05e185090443fec981e059bb68ee04c88359dae4c0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2179,14 +2179,14 @@
     {
       "name": "logout",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 314,
           "start_line": 314
         },
         "region_sha256": "5d94d29f8dfa888ff63e216edf3120a2df81932caf855679bf066fb35736cd8f",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2194,14 +2194,14 @@
     {
       "name": "logout",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 150,
           "start_line": 150
         },
         "region_sha256": "1f2161c946e7ff391dfd760962c7d6a2f70d519b3bbe375d3d2a3cbc46694177",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2209,14 +2209,14 @@
     {
       "name": "makeClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 242,
           "start_line": 242
         },
         "region_sha256": "4e52f9cc71995c1a2fd2eef179871e36fff28477c1eccc9e75fc146eb20e5311",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2224,14 +2224,14 @@
     {
       "name": "makeClient",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 310,
           "start_line": 310
         },
         "region_sha256": "afe3ef70d5cb07876162a71b074f21a8fe41ed2f8d407f7dd54dd816475be11f",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2239,14 +2239,14 @@
     {
       "name": "maximum",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 36,
           "start_line": 36
         },
         "region_sha256": "237ccef2c9d317a37f65690c08a36763662768b1dc520483a3bd0225d2f70e9f",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2254,14 +2254,14 @@
     {
       "name": "metric",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 35,
           "start_line": 35
         },
         "region_sha256": "c7f49bc9e85831c312adb50109502470e2a49efdf3e0b6e85da4cdda3a911bb0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2269,14 +2269,14 @@
     {
       "name": "name",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 68,
           "start_line": 68
         },
         "region_sha256": "1fcd255edffa12e6e0c19772e30a5eb1f577549201f36cd45e73f2bbd863ed88",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2284,14 +2284,14 @@
     {
       "name": "nativeSDKVersion",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 52,
           "start_line": 52
         },
         "region_sha256": "6d921cf79919a3d9216d8cfd66244ead879e7f68009c804ab72019f8b53ca00e",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2299,14 +2299,14 @@
     {
       "name": "observed_at",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 46,
           "start_line": 46
         },
         "region_sha256": "9efc0ade237e0011705d8abc9ea15add52dc9397664edf9b0c57d651eb8d0136",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2314,14 +2314,14 @@
     {
       "name": "platform",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 55,
           "start_line": 55
         },
         "region_sha256": "f3df8f36ba5872605533f202d2615f234c07277f711fdfa8404d8fab21221979",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2329,14 +2329,14 @@
     {
       "name": "playIntegrityCloudProjectNumber",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 22,
           "start_line": 22
         },
         "region_sha256": "68ae99d43bc772cda1495e85fa554147aebf70dc15d783e611664762bcd5a52d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2344,14 +2344,14 @@
     {
       "name": "prepareComponents",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 34,
           "start_line": 34
         },
         "region_sha256": "d2a93568cb31232b07c5b1eca0d97e6658b69efa5d1c77f98d2d089209a2d8db",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2359,14 +2359,14 @@
     {
       "name": "prepareComponents",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 168,
           "start_line": 168
         },
         "region_sha256": "bc2dd9e8b3e1affcaa7d1d3b6fd7b2407ab14b71476cd5c644d1f8a5f43061e6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2374,14 +2374,14 @@
     {
       "name": "protocolVersion",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 54,
           "start_line": 54
         },
         "region_sha256": "a144941cda2dfee30b8812776c335d08539cfc0d2aeacd4d2f2602087299a2a7",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2389,14 +2389,14 @@
     {
       "name": "providerID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 6,
           "start_line": 6
         },
         "region_sha256": "a18184e725223dd905f3926ba166831f6efbb43fc791bcbe05758c8a2a4a9f01",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -2404,14 +2404,14 @@
     {
       "name": "quota",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 24,
           "start_line": 24
         },
         "region_sha256": "37c0380aebf3337a0fc34805f1ccb59e34638a8dd58b966909df1409f19dd2db",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2419,14 +2419,14 @@
     {
       "name": "quota",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 158,
           "start_line": 158
         },
         "region_sha256": "5ffa9e4be0e6b78477d21da4143ac84810985f700695a14d569c675a7e44a0f4",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2434,14 +2434,14 @@
     {
       "name": "readResponseChunk",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 16,
           "start_line": 16
         },
         "region_sha256": "a1aaa9e9ee618a911be5c636197af5a843ec6ef09ce2458e961dcd65f196c115",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2449,14 +2449,14 @@
     {
       "name": "ready",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 143,
           "start_line": 143
         },
         "region_sha256": "c55c913424abfd57833be77f216389e40485236096358ee05c1371598bf29bcc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2464,14 +2464,14 @@
     {
       "name": "ready",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 154,
           "start_line": 154
         },
         "region_sha256": "c55c913424abfd57833be77f216389e40485236096358ee05c1371598bf29bcc",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2479,14 +2479,14 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 23,
           "start_line": 23
         },
         "region_sha256": "cbcd530b0c8ff754fdc7122f919c642de626d4fbcebb65d220b211a67f764565",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2494,14 +2494,14 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 161,
           "start_line": 161
         },
         "region_sha256": "7d0169b19260430786aecbb86f8626608807d4574915c31789a31bca1765d2c2",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2509,14 +2509,14 @@
     {
       "name": "remaining",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 39,
           "start_line": 39
         },
         "region_sha256": "dd79ad980f5ffe563a715e48fe3882bbaa6914b5320adfbdc35a82522c3d4e93",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2524,14 +2524,14 @@
     {
       "name": "replaceComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 39,
           "start_line": 39
         },
         "region_sha256": "a986441612e3877513198aca4c03fa4db496c27b34cdc9ffadeb992d02e2ba54",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2539,14 +2539,14 @@
     {
       "name": "replaceComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 170,
           "start_line": 170
         },
         "region_sha256": "9cccd83a896eba155fdb5e1f4b93a98d98a578becfa38504ff9f084ae1f193ad",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2554,14 +2554,14 @@
     {
       "name": "requestedFeatures",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 98,
           "start_line": 98
         },
         "region_sha256": "ef76825c429706503f0ed594e94990c110548a5bc44c76354b102e0924d5f04c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2569,14 +2569,14 @@
     {
       "name": "reserved",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 38,
           "start_line": 38
         },
         "region_sha256": "9be699a1a35ca6f0fd41d77bd2fa180d8ad8e66399096aea4a82360dbf93efb6",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2584,14 +2584,14 @@
     {
       "name": "resets_at",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 40,
           "start_line": 40
         },
         "region_sha256": "1bd1b70736c73284995d128b8487741f5e5c5a212c43f5dad0aba0c05c1ee2ad",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2599,14 +2599,14 @@
     {
       "name": "restore",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 91,
           "start_line": 91
         },
         "region_sha256": "d74731891f0e28fec7befae412a5914a095453f2061239e4209b4b9ba1161581",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2614,14 +2614,14 @@
     {
       "name": "revision",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 29,
           "start_line": 29
         },
         "region_sha256": "615a6f1f4d190044c0a2f76c1aeb83defff76c49c3a2a22b6137948615b3143d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2629,14 +2629,14 @@
     {
       "name": "revoke",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 54,
           "start_line": 54
         },
         "region_sha256": "bf0fd5c6d23eb01309f68dae82f2c5a5465d97114049f2e9ae74da112c418422",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2644,14 +2644,14 @@
     {
       "name": "revokeComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 49,
           "start_line": 49
         },
         "region_sha256": "09148143dd75689e952220c3858f681ca3db9bb55a11abb42f2ecdf8d7828fe1",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2659,14 +2659,14 @@
     {
       "name": "revokeComponent",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 174,
           "start_line": 174
         },
         "region_sha256": "bf27ccb3a2a983ea32119ae2b75a02dd0a01ae82477a4d66296520d3ea66d3d0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2674,14 +2674,14 @@
     {
       "name": "revokeCurrentInstallation",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 176,
           "start_line": 176
         },
         "region_sha256": "e8a3e3d8f2af7831fe13c292165d8bb9187ae30e12fd313c8f5ce32179ace257",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2689,14 +2689,14 @@
     {
       "name": "revokeCurrentInstallationFamily",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 182,
           "start_line": 182
         },
         "region_sha256": "377acb2748f1d7927e9fbb3dfe760969bde8d4af98464031cc4d34d5e716b032",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2704,14 +2704,14 @@
     {
       "name": "revokeFamily",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 55,
           "start_line": 55
         },
         "region_sha256": "3f71b11bbfcb5acc0475ea81c2403b8d573b50dbd9c983e4a8e683b73657a42c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2719,14 +2719,14 @@
     {
       "name": "rootComponentDiagnostics",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 44,
           "start_line": 44
         },
         "region_sha256": "3374c4d42add7e2c948e49cdb5f2a2059831e37777d971dd33ecff6fc743a19c",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2734,14 +2734,14 @@
     {
       "name": "rootKeychainAccessGroup",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 14,
           "start_line": 14
         },
         "region_sha256": "d6c730d6a471b4f314e50a874c480254d46d5f2a88ed1badf3d1745199cfce6e",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2749,14 +2749,14 @@
     {
       "name": "sdkVersion",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 51,
           "start_line": 51
         },
         "region_sha256": "b1ad452d37df44614cda3a3355b0598ebed3e5ee4bc95f4f8cef1250d5055571",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2764,14 +2764,14 @@
     {
       "name": "server",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 74,
           "start_line": 74
         },
         "region_sha256": "b0e66afe310231d2e6091a5d89a63e74985fc7c02364a899b4cacf7f52729651",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2779,14 +2779,14 @@
     {
       "name": "session",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 65,
           "start_line": 65
         },
         "region_sha256": "29ac36964fb7b4ac5f74faa0e2fb0c8ad7dd1ebd6341fb657b60384a98dfcdf4",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2794,14 +2794,14 @@
     {
       "name": "sessionAvailable",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 132,
           "start_line": 132
         },
         "region_sha256": "d8aa999a7ebcf637d291dc9c25b2d0ac182f4f6d64929e046cdf5e60eca3104f",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2809,14 +2809,14 @@
     {
       "name": "settled",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 50,
           "start_line": 50
         },
         "region_sha256": "2b72cd8f238c7fe1a939fa2c5740835568aae84834b1ab896131c3c2ecbe2f96",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -2824,14 +2824,14 @@
     {
       "name": "signIn",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 86,
           "start_line": 86
         },
         "region_sha256": "c2fe033f07324cd7277f1a1d70eb8a5aef7adc69e82254576bfe20abda29e7f9",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2839,14 +2839,14 @@
     {
       "name": "signOut",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 99,
           "start_line": 99
         },
         "region_sha256": "4f399d3572979b11a1bde58f1d78076fad6533ac9938e0a8cca1c74b5e68715e",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2854,14 +2854,14 @@
     {
       "name": "snapshot",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 81,
           "start_line": 81
         },
         "region_sha256": "0fbe01b3c6bc4cbf853b0e0afb4a6c19f3d32cc38953fafee92ac9c0a9f5fb4b",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2869,14 +2869,14 @@
     {
       "name": "softwareKeyFallbackPolicy",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 17,
           "start_line": 17
         },
         "region_sha256": "7711ed3719e645313abddf480f04193fa8e6693b0712b2f1a3862805678ef2c0",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2884,14 +2884,14 @@
     {
       "name": "startRequest",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 11,
           "start_line": 11
         },
         "region_sha256": "96c7ed094e9aa391a32f677f5e6c8010a3a0cf7ffb9d1c4900580713cf2cab78",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5cd8654cb5a4f6a24a4f9ec2ce28047757d09fe5dfdabcec9c41302e5173afb1"
       }
@@ -2899,14 +2899,14 @@
     {
       "name": "state",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 30,
           "start_line": 30
         },
         "region_sha256": "6636e401f285dbe3580ae7ef6f2295e710b77c75732426e31e5a4d80663ce388",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2914,14 +2914,14 @@
     {
       "name": "states",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 282,
           "start_line": 282
         },
         "region_sha256": "3cede6b71e2a1e484aae208b5b891c0ae765989d4941153aa7dd870efacac786",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2929,14 +2929,14 @@
     {
       "name": "tenantID",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/identity.ts",
         "region": {
           "end_line": 9,
           "start_line": 9
         },
         "region_sha256": "c09680260cdf68e6b314e30fa318463375cfefe9ec7bb1c36b924e8fe1bb1393",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "2532baed46406273a328cebc9ef8357c593c63474fd93d26c2c5de03ddcf6662"
       }
@@ -2944,14 +2944,14 @@
     {
       "name": "trustExpiresAt",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 134,
           "start_line": 134
         },
         "region_sha256": "9b4a663dcfedda0ea7d042764cb2cc895e25c825cd86645195dc929d38850817",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2959,14 +2959,14 @@
     {
       "name": "trustSource",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 133,
           "start_line": 133
         },
         "region_sha256": "85ff0e3cf7dcbd2aa48507adeb827d7c5048ee63788f1001539449beb32a383e",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }
@@ -2974,14 +2974,14 @@
     {
       "name": "updateIdToken",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/app.ts",
         "region": {
           "end_line": 311,
           "start_line": 311
         },
         "region_sha256": "34fd6c7c4d1d3121c7ac979d7332360c62e84368dd307298fad8f19ec41c6274",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "527d80627950c61a79256f645bc1703088d968b1314a8af6d09ec30e99a01dc2"
       }
@@ -2989,14 +2989,14 @@
     {
       "name": "used",
       "source": {
-        "commit": "155d26203e3db33099974387c2b9369f30b40c0d",
+        "commit": "71d0bdd24667125bde88e8ae726c16b5375712d2",
         "file": "src/types.ts",
         "region": {
           "end_line": 37,
           "start_line": 37
         },
         "region_sha256": "f8ffe3454579d24a07c5c27a331dfe7891d933efb3a8f74976dadc0150abc43d",
-        "release": "v2.0.0",
+        "release": "v2.0.1",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
         "source_sha256": "5f6d731a52204be32f3c107d052987d638c7d213e3663b4bce2e2861b0c8bcec"
       }

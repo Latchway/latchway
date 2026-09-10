@@ -1,6 +1,6 @@
 ---
 title: "JavaScript SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for JavaScript SDK 1.1.0."
+description: "Generated, version-bound examples and compatibility metadata for JavaScript SDK 1.1.1."
 ---
 
 <Warning>
@@ -13,16 +13,16 @@ description: "Generated, version-bound examples and compatibility metadata for J
 | Field | Value |
 | --- | --- |
 | Package | `@latchway/client` |
-| Documented SDK release | `v1.1.0` |
-| Documentation source commit | `b6f1eab929a5cb7b7656448f28d0edd2b4970d93` |
+| Documented SDK release | `v1.1.1` |
+| Documentation source commit | `8fb3a985565d9e9746377b467384fd8f9096b521` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `70e4034b9029eae1ff2df070dca99e3aadba232cc3c8f5ef9b2cba6c4af5a7b2` |
+| Bundle SHA-256 | `e26e52f75b17c3d96b65faaa696b9e7765ce886e9c43684608d08d418514393a` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| `@latchway/client` | `1.1.0` | `package.json:L1-L13` |
+| `@latchway/client` | `1.1.1` | `package.json:L1-L13` |
 | `@latchway/openai` | `1.0.0` | `packages/openai/package.json:L1-L4` |
 | `@latchway/vercel-ai` | `1.0.0` | `packages/vercel-ai/package.json:L1-L4` |
 | `@latchway/langchain` | `1.1.0` | `packages/langchain/package.json:L1-L4` |
@@ -39,9 +39,36 @@ description: "Generated, version-bound examples and compatibility metadata for J
 
 ## Version-bound examples
 
+### `frameworks/error-handling.md`
+
+Source: [docs/release/v1.1.1.md](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/docs/release/v1.1.1.md#L1-L20)
+
+```text
+# JavaScript client 1.1.1
+
+This patch publishes only `@latchway/client`. Existing OpenAI, Vercel AI and
+LangChain adapter peer ranges accept it without an adapter release.
+
+`LatchwayError` preserves the gateway's safe message, code, status, request ID,
+retryability, retry-after time, operation ID, feature, validation errors,
+supported protocol versions, title and instance reference. Optional unknown
+Problem extensions are ignored, never copied onto the public error. Known fields
+and correlation remain strictly validated, including duplicate JSON rejection,
+body-size limits, canonical documentation URLs and registered error semantics.
+
+Use `errorFromResponse(response)` for unsuccessful direct-fetch responses.
+Show `error.message` and `error.requestID` to explain and correlate failures;
+use `error.validationErrors` for specific safe field guidance. Do not log entire
+requests, tokens or provider response bodies. A retryable error is not permission
+to automatically replay a request whose dispatch or streaming outcome is unknown.
+
+The wire protocol and consumed contract remain unchanged. Source-level regression
+tests are separate from physical-device or live provider verification.
+```
+
 ### `frameworks/langchain.ts`
 
-Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/langchain/src/index.ts#L1-L196)
+Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/packages/langchain/src/index.ts#L1-L196)
 
 ```typescript
 import {
@@ -244,7 +271,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/native-lifecycle.md`
 
-Source: [docs/release/v1.1.0.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/release/v1.1.0.md#L1-L24)
+Source: [docs/release/v1.1.0.md](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/docs/release/v1.1.0.md#L1-L24)
 
 ```text
 # JavaScript client 1.1.0
@@ -275,7 +302,7 @@ cloud acceptance from source-level verification alone.
 
 ### `frameworks/openai.ts`
 
-Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/openai/src/index.ts#L1-L71)
+Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/packages/openai/src/index.ts#L1-L71)
 
 ```typescript
 import OpenAI, { type ClientOptions } from "openai";
@@ -353,7 +380,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/usage.md`
 
-Source: [docs/framework-integrations.md](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/docs/framework-integrations.md#L1-L138)
+Source: [docs/framework-integrations.md](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/docs/framework-integrations.md#L1-L138)
 
 ````text
 # Framework integrations
@@ -498,7 +525,7 @@ support claim.
 
 ### `frameworks/vercel-ai.ts`
 
-Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/packages/vercel-ai/src/index.ts#L1-L78)
+Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/packages/vercel-ai/src/index.ts#L1-L78)
 
 ```typescript
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
@@ -583,7 +610,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `quickstart/firebase-app-check.ts`
 
-Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/firebase/client.ts#L1-L23)
+Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/examples/firebase/client.ts#L1-L23)
 
 ```typescript
 import { createLatchwayClient } from "@latchway/client";
@@ -613,7 +640,7 @@ export function createFirebaseClient(dependencies: FirebaseDependencies) {
 
 ### `quickstart/vanilla-development-client.ts`
 
-Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/development-client.ts#L1-L82)
+Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/examples/vanilla/development-client.ts#L1-L82)
 
 ```typescript
 import {
@@ -702,7 +729,7 @@ export async function safeBrowserDiagnostics(
 
 ### `quickstart/vanilla-development-helper.ts`
 
-Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/development-helper.ts#L1-L142)
+Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/examples/vanilla/development-helper.ts#L1-L142)
 
 ```typescript
 import type { AttestationContext } from "@latchway/client";
@@ -851,7 +878,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 
 ### `quickstart/vanilla-streaming-fetch.ts`
 
-Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/b6f1eab929a5cb7b7656448f28d0edd2b4970d93/examples/vanilla/streaming-fetch.ts#L1-L93)
+Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/8fb3a985565d9e9746377b467384fd8f9096b521/examples/vanilla/streaming-fetch.ts#L1-L93)
 
 ```typescript
 import {

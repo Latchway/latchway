@@ -68,6 +68,10 @@ SDK_SPECS = {
 }
 CATALOGS = {"errors.json", "examples.json", "public-symbols.json", "supported-versions.json"}
 ADDITIONAL_DOCUMENTS = {
+    ("js", "1.1.1"): {"frameworks/native-lifecycle.md", "frameworks/usage.md", "frameworks/error-handling.md"},
+    ("ios", "2.0.1"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md", "frameworks/foundation-models-request.swift", "frameworks/foundation-models-stream.swift"},
+    ("android", "1.2.2"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md", "quickstart/supplied-identity.kt", "quickstart/error-handling.md"},
+    ("react-native", "2.0.1"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md", "frameworks/error-handling.md"},
     ("ios", "1.2.0"): {"quickstart/supplied-identity.md", "frameworks/foundation-models-request.swift", "frameworks/foundation-models-stream.swift"},
     ("android", "1.1.0"): {"quickstart/supplied-identity.md", "quickstart/supplied-identity.kt"},
     ("js", "1.1.0"): {"frameworks/native-lifecycle.md", "frameworks/usage.md"},

@@ -1,6 +1,6 @@
 ---
 title: "iOS SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for iOS SDK 2.0.0."
+description: "Generated, version-bound examples and compatibility metadata for iOS SDK 2.0.1."
 ---
 
 <Warning>
@@ -13,27 +13,27 @@ description: "Generated, version-bound examples and compatibility metadata for i
 | Field | Value |
 | --- | --- |
 | Package | `Latchway` |
-| Documented SDK release | `v2.0.0` |
-| Documentation source commit | `4cb90278597f4cf6881b08c8521cf37dc398c7cf` |
+| Documented SDK release | `v2.0.1` |
+| Documentation source commit | `a2c062b66c334d328754eb5a0d5e73f79b5977df` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `bc0f804c821a1b97b63570e54820aaa8eb2865b954f0dd08bc056b51fe3ed9a8` |
+| Bundle SHA-256 | `e9eba4c3d37ba2fdabfe53d829bd8e3ce671d7ef4d02ea62d5abcd24b3c2ed0d` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| Latchway | `2.0.0` | `Latchway.podspec:L1-L20` |
-| SwiftPM product Latchway | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwayAppAttest | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwayAppExtensions | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwayFirebaseAuth | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwaySwiftOpenAI | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwayFoundationModels | `2.0.0` | `README.md:L1-L178` |
-| SwiftPM product LatchwayTesting | `2.0.0` | `README.md:L1-L178` |
-| CocoaPods `Latchway/Core` | `2.0.0` | `README.md:L1-L178` |
-| CocoaPods `Latchway/AppAttest` | `2.0.0` | `README.md:L1-L178` |
-| CocoaPods `Latchway/AppExtensions` | `2.0.0` | `README.md:L1-L178` |
-| CocoaPods `Latchway/FirebaseAuth` | `2.0.0` | `README.md:L1-L178` |
+| Latchway | `2.0.1` | `Latchway.podspec:L1-L20` |
+| SwiftPM product Latchway | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwayAppAttest | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwayAppExtensions | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwayFirebaseAuth | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwaySwiftOpenAI | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwayFoundationModels | `2.0.1` | `README.md:L1-L195` |
+| SwiftPM product LatchwayTesting | `2.0.1` | `README.md:L1-L195` |
+| CocoaPods `Latchway/Core` | `2.0.1` | `README.md:L1-L195` |
+| CocoaPods `Latchway/AppAttest` | `2.0.1` | `README.md:L1-L195` |
+| CocoaPods `Latchway/AppExtensions` | `2.0.1` | `README.md:L1-L195` |
+| CocoaPods `Latchway/FirebaseAuth` | `2.0.1` | `README.md:L1-L195` |
 | iOS | `15.0` | `Latchway.podspec:L19-L20` |
 | macOS minimum (Swift Package) | `12` | `Package.swift:L5-L10` |
 | Swift language | `6.0` | `Latchway.podspec:L19-L20` |
@@ -50,7 +50,7 @@ description: "Generated, version-bound examples and compatibility metadata for i
 
 ### `frameworks/foundation-models-request.swift`
 
-Source: [Sources/LatchwayFoundationModels/FoundationModelsRequest.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Sources/LatchwayFoundationModels/FoundationModelsRequest.swift#L1-L220)
+Source: [Sources/LatchwayFoundationModels/FoundationModelsRequest.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Sources/LatchwayFoundationModels/FoundationModelsRequest.swift#L1-L220)
 
 ```swift
 #if canImport(FoundationModels) && compiler(>=6.4)
@@ -277,7 +277,7 @@ enum FoundationModelsRequest {
 
 ### `frameworks/foundation-models-stream.swift`
 
-Source: [Sources/LatchwayFoundationModels/FoundationModelsStream.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Sources/LatchwayFoundationModels/FoundationModelsStream.swift#L1-L247)
+Source: [Sources/LatchwayFoundationModels/FoundationModelsStream.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Sources/LatchwayFoundationModels/FoundationModelsStream.swift#L1-L266)
 
 ```swift
 #if canImport(FoundationModels) && compiler(>=6.4)
@@ -350,13 +350,32 @@ struct FoundationModelsStream {
         request: LanguageModelExecutorGenerationRequest,
         channel: LanguageModelExecutorGenerationChannel
     ) async throws {
+        do {
+            try await consumeValidated(stream, request: request, channel: channel)
+        } catch is CancellationError { throw CancellationError() }
+        catch let error as LatchwayLifecycleError { throw error }
+        catch let error as LanguageModelError { throw error }
+        catch {
+            if Task.isCancelled { throw CancellationError() }
+            // Never expose raw upstream error frames or replay partial output.
+            throw LatchwayFoundationModelsStreamError(
+                requestID: LatchwayLanguageModelExecutor.requestID(from: stream.response),
+                generationID: request.id.uuidString)
+        }
+    }
+
+    private static func consumeValidated(
+        _ stream: LatchwayStreamingResponse,
+        request: LanguageModelExecutorGenerationRequest,
+        channel: LanguageModelExecutorGenerationChannel
+    ) async throws {
         let contentType = stream.response.value(forHTTPHeaderField: "Content-Type") ?? ""
         guard contentType.lowercased().hasPrefix("text/event-stream") else { throw invalid }
         var parser = Self(
             enabled: request.generationOptions.toolCallingMode?.kind == .disallowed
                 ? [] : Set(request.enabledToolDefinitions.map(\.name)),
             generationID: request.id.uuidString,
-            correlationID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID"),
+            correlationID: LatchwayLanguageModelExecutor.requestID(from: stream.response),
             channel: channel
         )
         var line = Data()
@@ -531,7 +550,7 @@ struct FoundationModelsStream {
 
 ### `frameworks/foundation-models.swift`
 
-Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L1-L165)
+Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L1-L222)
 
 ```swift
 #if canImport(FoundationModels) && compiler(>=6.4)
@@ -543,7 +562,7 @@ import Latchway
 
 @available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
 @available(tvOS, unavailable)
-public enum LatchwayFoundationModelsError: Error, Sendable, LocalizedError {
+public enum LatchwayFoundationModelsError: Error, Sendable, LocalizedError, CustomStringConvertible {
     case invalidTranscript
     case unsupportedSamplingMode
     case gateway(statusCode: Int, requestID: String?)
@@ -562,6 +581,8 @@ public enum LatchwayFoundationModelsError: Error, Sendable, LocalizedError {
         }
     }
 
+    public var description: String { errorDescription ?? code }
+
     /// Stable redaction-safe code for adapter-local failures.
     public var code: String {
         switch self {
@@ -576,6 +597,34 @@ public enum LatchwayFoundationModelsError: Error, Sendable, LocalizedError {
     public var documentationURL: URL {
         URL(string: "https://docs.latchway.dev/errors/\(code.replacingOccurrences(of: "_", with: "-"))")!
     }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayFoundationModelsGatewayError: Error, Sendable, CustomStringConvertible, LocalizedError {
+    public let problem: LatchwayProblem
+    public init(problem: LatchwayProblem) { self.problem = problem }
+    public var code: String { problem.code.description }
+    public var documentationURL: URL { problem.documentationURL }
+    public var description: String { LatchwayError.server(problem).description }
+    public var errorDescription: String? { description }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayFoundationModelsStreamError: Error, Sendable, CustomStringConvertible, LocalizedError {
+    public let requestID: String?
+    public let generationID: String
+    public init(requestID: String?, generationID: String) {
+        self.requestID = LatchwayHTTPResponseError(statusCode: 200, requestID: requestID).requestID
+        self.generationID = UUID(uuidString: generationID)?.uuidString ?? "unavailable"
+    }
+    public var code: String { "foundation_models_gateway_stream_invalid" }
+    public var documentationURL: URL { LatchwayFoundationModelsError.invalidGatewayStream.documentationURL }
+    public var description: String {
+        "The Responses stream did not complete\(requestID.map { " (request \($0))" } ?? " (generation \(generationID))"). Partial output was not retried."
+    }
+    public var errorDescription: String? { description }
 }
 
 /// A Foundation Models custom provider backed by a feature-bound Latchway
@@ -675,27 +724,54 @@ public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
         let stream = try await configuration.transport.bytes(for: urlRequest)
         defer { stream.cancel() }
         guard (200 ... 299).contains(stream.response.statusCode) else {
-            throw Self.gatewayError(from: stream.response)
+            var body = Data()
+            do {
+                for try await byte in stream.bytes {
+                    try Task.checkCancellation()
+                    guard body.count < 65_536 else {
+                        throw LatchwayFoundationModelsError.gateway(
+                            statusCode: stream.response.statusCode, requestID: Self.requestID(from: stream.response))
+                    }
+                    body.append(byte)
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch let error as LatchwayLifecycleError { throw error }
+            catch {
+                if Task.isCancelled { throw CancellationError() }
+                throw LatchwayFoundationModelsError.gateway(
+                    statusCode: stream.response.statusCode, requestID: Self.requestID(from: stream.response))
+            }
+            throw Self.gatewayError(from: stream.response, body: body)
         }
 
         try await FoundationModelsStream.consume(stream, request: request, channel: channel)
         stream.finish()
     }
 
-    private static func gatewayError(from response: HTTPURLResponse) -> Error {
-        if response.statusCode == 429 {
+    static func gatewayError(from response: HTTPURLResponse, body: Data) -> Error {
+        guard let problem = try? LatchwayProblem.decode(from: body, response: response) else {
+            return LatchwayFoundationModelsError.gateway(
+                statusCode: response.statusCode, requestID: requestID(from: response))
+        }
+        if problem.status == 429, problem.retryable {
             return LanguageModelError.rateLimited(.init(
-                resetDate: nil,
-                debugDescription: "Latchway quota or rate limit exceeded.",
+                resetDate: problem.retryAfter,
+                debugDescription: LatchwayError.server(problem).description,
                 metadata: [
-                    "request_id": response.value(forHTTPHeaderField: "X-Latchway-Request-ID") ?? "unknown",
+                    "request_id": problem.requestID,
+                    "code": problem.code.description,
+                    "retryable": problem.retryable,
+                    "latchway_problem": problem,
                 ]
             ))
         }
-        return LatchwayFoundationModelsError.gateway(
-            statusCode: response.statusCode,
-            requestID: response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
-        )
+        return LatchwayFoundationModelsGatewayError(problem: problem)
+    }
+
+    static func requestID(from response: HTTPURLResponse) -> String? {
+        guard let value = response.value(forHTTPHeaderField: "X-Latchway-Request-ID"),
+              value.range(of: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$", options: .regularExpression) != nil else { return nil }
+        return value
     }
 }
 #endif
@@ -703,7 +779,7 @@ public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
 
 ### `frameworks/swift-openai.swift`
 
-Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
+Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
 
 ```swift
 public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
@@ -799,7 +875,7 @@ public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
 
 ### `quickstart/app-extension-component.swift`
 
-Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L1-L121)
+Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L1-L121)
 
 ```swift
 import Foundation
@@ -927,7 +1003,7 @@ private enum HostIdentityError: Error, LocalizedError {
 
 ### `quickstart/development-attestation.md`
 
-Source: [docs/app-attest-environments.md](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/docs/app-attest-environments.md#L1-L59)
+Source: [docs/app-attest-environments.md](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/docs/app-attest-environments.md#L1-L59)
 
 ```text
 # App Attest development and distribution
@@ -993,7 +1069,7 @@ retains the separate [physical-device requirements](real-device-conformance.md).
 
 ### `quickstart/supplied-identity.md`
 
-Source: [Documentation/SuppliedIdentity.md](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Documentation/SuppliedIdentity.md#L1-L123)
+Source: [Documentation/SuppliedIdentity.md](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Documentation/SuppliedIdentity.md#L1-L123)
 
 ````text
 # Developer-supplied identity (2.0.0)
@@ -1123,7 +1199,7 @@ boundaries and the explicit non-secret component handoff.
 
 ### `quickstart/url-session.swift`
 
-Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Examples/BasicURLSession/BasicURLSession.swift#L1-L237)
+Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a2c062b66c334d328754eb5a0d5e73f79b5977df/Examples/BasicURLSession/BasicURLSession.swift#L1-L237)
 
 ```swift
 @preconcurrency import Foundation

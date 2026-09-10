@@ -4,8 +4,8 @@ description: "Published server and SDK versions, upgrade boundaries, and verific
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.1.3"
-sdkVersion: "2.0.0"
+serverVersion: "1.1.4"
+sdkVersion: "2.0.1"
 lastVerified: "2026-09-10"
 owner: "release-engineering"
 ---
@@ -17,11 +17,11 @@ The current distributions are:
 
 | Component | Version | Distribution |
 | --- | --- | --- |
-| Server and Console | 1.1.3 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.3), GHCR `ghcr.io/latchway/latchway:1.1.3` |
-| iOS SDK | 2.0.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v2.0.0), CocoaPods `Latchway` |
-| Android SDK | 1.2.1 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.1), Maven Central `dev.latchway` |
-| React Native SDK | 2.0.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/2.0.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v2.0.0) |
-| JavaScript client | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.1.0) |
+| Server and Console | 1.1.4 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.4), GHCR `ghcr.io/latchway/latchway:1.1.4` |
+| iOS SDK | 2.0.1 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v2.0.1), CocoaPods `Latchway` |
+| Android SDK | 1.2.2 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.2), Maven Central `dev.latchway` |
+| React Native SDK | 2.0.1 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/2.0.1), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v2.0.1) |
+| JavaScript client | 1.1.1 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.1.1) |
 | LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
 | OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
 
@@ -30,6 +30,26 @@ for repeatable deployments. Moving minor/major aliases and `latest` are not
 immutable version locks. Use the same image for server and migrator.
 
 ## What changed
+
+Server 1.1.4 preserves safe request validation and selected attestation guidance,
+distinguishes impossible request bounds from replenishable quotas, and retains
+known retry timing. Temporary infrastructure errors no longer imply session
+revocation. Failed or incomplete streams terminate abnormally after settlement;
+they are not successful answers or permission to replay. Raw provider bodies,
+credentials and private scope identifiers are not exposed.
+
+JavaScript client 1.1.1, iOS 2.0.1, Android 1.2.2 and React Native 2.0.1 preserve
+the existing diagnostic fields across SDK and native bridge boundaries. Custom
+fetch callers must inspect unsuccessful responses with the SDK's Problem decoder;
+reading only the HTTP status discards useful guidance. See
+[React Native errors](/clients/react-native/error-handling),
+[iOS errors](/clients/ios/error-handling),
+[Android errors](/clients/android/error-handling) and
+[Web errors](/clients/web/errors).
+The wire contract, error code registry, schema, identity and attestation policy
+are unchanged. Publishing this patch does not upgrade an existing deployment.
+
+### Previous releases
 
 Server 1.1.3 adds `appAttest.environment: any` for accepting either verified
 Apple environment and a Development-only opt-in for Google Play testing
@@ -114,11 +134,11 @@ Captured-account `logout()` is still the safe choice for delayed old-account
 work. Neither operation signs out the external identity provider or resets quota.
 
 Contract 1.1.0 and wire 3 are current; compatible legacy wire-1/2 routes remain
-supported. Server 1.1.3 requires schema 33. Back up PostgreSQL and preserve the
+supported. Server 1.1.4 requires schema 33. Back up PostgreSQL and preserve the
 database URL, public origin, encryption/signing configuration and image digest.
 Stop the old gateway, run the matching new image's migration, then start that
 image and confirm readiness reports schema 33. Existing 1.1.2/schema-33
-deployments need no additional SQL migration for 1.1.3.
+deployments need no additional SQL migration for 1.1.4.
 
 Migrations are forward-only and readiness requires an exact schema match.
 Do not start a schema-30/31 binary against a schema-33 database.
@@ -141,6 +161,26 @@ The React Native podspec comes with npm; it does not need its own CocoaPods
 Trunk publication.
 
 ## Evidence and limits
+
+Server 1.1.4 passes the complete isolated-PostgreSQL Go suite, static analysis,
+targeted race checks and real-HTTP partial-stream regression tests. Its contract
+bundle is byte-identical to 1.1.2; the published GHCR image includes Linux amd64
+and arm64. No private VPS rollout was performed for this patch.
+
+JavaScript client 1.1.1 passes 150 tests. Android 1.2.2 passes 223 tests with one
+live-only skip, build/lint and independent API-34 consumers. All five public Maven
+modules and their 240 versioned files match the signed release bundle.
+iOS 2.0.1 passes 118
+affected tests, 20 Foundation Models tests, the example build and a separate
+release-mode consumer that proves existing public error enums remain exhaustive.
+One pre-existing cancellation/logout timing test also fails on unchanged 2.0.0;
+it was excluded from the affected-suite rerun, not fixed or relabeled as passing.
+The public CocoaPods specification, source archive and SwiftPM tag are verified.
+
+React Native 2.0.1 passes 261 unit, 13 runtime, 12 iOS bridge, 13 Android bridge
+and 24 example tests, plus types, lint, codegen and packaging checks. Its native
+bridges were tested against the exact release sources. These are source and
+local integration receipts, not fresh physical-device or live-provider proof.
 
 Server 1.1.3 passes the full isolated-PostgreSQL Go suite, affected-package race
 checks, static analysis, 307 Console unit tests and 43 browser tests. One optional

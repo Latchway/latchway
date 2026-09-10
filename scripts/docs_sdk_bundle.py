@@ -102,6 +102,28 @@ SDK_SPECS: Mapping[str, Mapping[str, Any]] = {
 # New release documentation adds audited payloads without changing the closure
 # of historical bundles. Unknown files remain rejected, including future ones.
 ADDITIONAL_DOCUMENTS = {
+    ("js", "1.1.1"): {
+        "frameworks/native-lifecycle.md": "framework",
+        "frameworks/usage.md": "framework",
+        "frameworks/error-handling.md": "framework",
+    },
+    ("ios", "2.0.1"): {
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+        "frameworks/foundation-models-request.swift": "framework",
+        "frameworks/foundation-models-stream.swift": "framework",
+    },
+    ("android", "1.2.2"): {
+        "quickstart/error-handling.md": "quickstart",
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+        "quickstart/supplied-identity.kt": "quickstart",
+    },
+    ("react-native", "2.0.1"): {
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+        "frameworks/error-handling.md": "framework",
+    },
     ("ios", "1.2.0"): {
         "quickstart/supplied-identity.md": "quickstart",
         "frameworks/foundation-models-request.swift": "framework",

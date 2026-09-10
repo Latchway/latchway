@@ -2,7 +2,7 @@
 
 Status date: 2026-09-10
 
-## Error-diagnostics patch: server 1.1.4 release candidate
+## Error-diagnostics patch: server 1.1.4 published
 
 The server preserves audited adapter validation details, exposes closed safe
 attestation recovery guidance through existing Problem fields, distinguishes
@@ -19,8 +19,45 @@ classification, redaction, attestation reasons, stream failure detection over
 real localhost HTTP, terminal usage, bounded retry dates and finalized failure
 metrics. Eight affected-package race suites and canonical contract validation
 pass. The rebuilt contract archive remains byte-identical to published 1.1.2.
-Physical-device/provider verification
-has not been rerun for this patch. Publication is pending; VPS is unchanged.
+Physical-device/provider verification has not been rerun for this patch.
+VPS is unchanged.
+
+Publication receipt: [server v1.1.4](https://github.com/Latchway/latchway/releases/tag/v1.1.4)
+was published from `55766102b767ef3066715af9c812d2732c9e1d19`.
+The public Linux amd64/arm64 GHCR index is
+`sha256:70d097b279e71ef572d51df2b3c25cdf74ba375ccb3c700ed2ba86f61a3a8302`.
+The contract 1.1.2 SHA-256 remains
+`9f8bba706dc0f66a7285352bafbdc1698dda1851dc4827d31ff55dfe6c175b58`.
+
+The matching SDK patches preserve existing Problem metadata and malformed-body
+correlation without replaying partial output: JavaScript client 1.1.1, iOS 2.0.1,
+Android 1.2.2 and React Native 2.0.1. Native error enums retain their original
+cases; new Swift HTTP/Foundation Models error information uses additive types.
+Verification passes JS 150, Android 223 (one live-only skip), iOS 118 affected
+plus 20 Foundation Models, and React Native 261 unit, 13 runtime, 12 Swift bridge,
+13 Android bridge and 24 example tests. Separate Swift release consumers,
+API-34 Android consumers, builds, lint and packaging checks pass.
+One iOS cancellation/logout timing race reproduces on the unchanged 2.0.0
+baseline; it is excluded from the affected-suite rerun and remains a follow-up.
+Historical SDK checks tied to removed release CI are not relabeled as passing.
+Registry receipts:
+
+- JavaScript client 1.1.1 is public from `3c18dc984eb40c06fcdec3894da048c63f0ddeff`.
+- iOS 2.0.1 is public from `a2c062b66c334d328754eb5a0d5e73f79b5977df`.
+  The anonymous CocoaPods CDN spec and tag resolve correctly; source archive
+  SHA-256 is `29da07fe15854f25430d94503f9f0ca8f706667e982d534cc029a8ead16f2c94`.
+- Android 1.2.2 is public from `176b7e03917ef90f449d2fecf45ac98c7a857ddb`.
+  All five Maven modules and 240 versioned files match the GitHub release bundle;
+  212 checksum sidecars and 24 detached signatures verify. Public availability
+  was observed at 07:05:58 UTC, without a duplicate upload or diagnostic workflow.
+- React Native 2.0.1 is public on npm from
+  `71d0bdd24667125bde88e8ae726c16b5375712d2`; the release workflow succeeded.
+  Its declared dependencies use client 1.1.1 and the private streams fallback.
+
+Canonical documentation imports all four current SDK bundles from clean,
+commit-bound sources. The 13 importer tests and full public documentation suite
+pass, including build, links and accessibility checks. Existing contrast
+advisories remain non-blocking. No verification CI gates were restored.
 
 ## Server 1.1.3 published and deployed: provider-specific development attestation
 
