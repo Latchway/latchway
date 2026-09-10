@@ -6,6 +6,20 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.4 error diagnostics
+
+Client contract 1.1.0, wire versions 1/2/3, bundle edition 1.1.2 and schema 33
+remain unchanged. Diagnostics use existing `detail`, `errors`, `retry_after`
+and correlation members, not new fields or error codes. Registered
+status/title/retryability tuples remain stable for published strict clients.
+Impossible per-request/token-bucket bounds now return permanent `request_invalid`;
+replenishable quota denials remain `quota_exceeded` with meaningful retry timing.
+Upstream HTTP classification is separate from durable usage/refund accounting.
+Started failed responses are terminated abnormally, never replayed or appended
+with out-of-format JSON. Clients must not interpret partial output as complete.
+SDK patches preserve diagnostics and ignore unknown optional members without
+loosening validation of existing fields. See [release notes](../release/v1.1.4.md).
+
 ### Server 1.1.3 provider-specific development attestation
 
 `appAttest.environment` adds the server acceptance value `any`, independent of

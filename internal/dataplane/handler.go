@@ -742,6 +742,13 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 
 		settlementErr := handler.settleFinalAttempt(request.Context(), result.attempt, outcome)
 		if result.relay.ClientStarted {
+			if result.err != nil || settlementErr != nil {
+				// A successful EOF would disguise a partial provider response as
+				// complete. Do not append JSON to arbitrary/SSE framing or replay
+				// output. net/http aborts the stream while retaining correlation
+				// headers already delivered to the client.
+				panic(http.ErrAbortHandler)
+			}
 			return
 		}
 		if settlementErr != nil {
@@ -749,7 +756,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		if result.err != nil {
-			handler.writeMappedError(writer, requestID, declaration.feature, result.err)
+			handler.writeExecutionError(writer, requestID, declaration.feature, result)
 			return
 		}
 		// A successful bounded relay always commits provider response headers,
@@ -2605,6 +2612,8 @@ func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr err
 
 func failureCode(err error) string {
 	switch {
+	case protocol.IsCode(err, "upstream_protocol_error"):
+		return "upstream_protocol_error"
 	case errors.Is(err, errProviderRequestRejected):
 		return "upstream_request_rejected"
 	case isUpstreamTimeout(err):
@@ -2650,7 +2659,8 @@ func (handler *Handler) writeMappedError(writer http.ResponseWriter, requestID, 
 		return
 	}
 	code, retryAfter := errorCode(err, handler.now())
-	writeProblem(writer, requestID, code, feature, retryAfter)
+	value := mappedProblem(code, feature, retryAfter, err)
+	problem.Write(writer, requestID, value)
 }
 
 func errorCode(err error, now time.Time) (string, int) {
@@ -2705,6 +2715,10 @@ func errorCode(err error, now time.Time) (string, int) {
 	case errors.Is(err, quota.ErrConcurrencyExceeded):
 		return "concurrency_exceeded", 0
 	case errors.Is(err, quota.ErrExceeded):
+		var bound interface{ RequestBound() bool }
+		if errors.As(err, &bound) && bound.RequestBound() {
+			return "request_invalid", 0
+		}
 		if errors.As(err, &exceeded) {
 			return "quota_exceeded", quotaRetryAfterSeconds(exceeded.RetryAt(), now)
 		}
@@ -2738,6 +2752,9 @@ func errorCode(err error, now time.Time) (string, int) {
 }
 
 func quotaRetryAfterSeconds(retryAt, now time.Time) int {
+	if retryAt.IsZero() {
+		return 0
+	}
 	now = now.UTC()
 	if !retryAt.After(now) {
 		return 1
@@ -2809,7 +2826,7 @@ func safeProblemDetail(code string) string {
 	case "feature_not_allowed":
 		return "The current principal is not allowed to use this feature."
 	case "quota_exceeded":
-		return "The configured logical request quota has been reached."
+		return "The configured quota has been reached."
 	case "concurrency_exceeded":
 		return "The configured concurrency limit has been reached."
 	case "route_not_found":

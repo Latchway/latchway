@@ -1061,7 +1061,14 @@ func TestHandlerDoesNotAppendProblemAfterClientResponseStarts(t *testing.T) {
 	handler := fixture.handler(t)
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, fixture.request(t))
+	func() {
+		defer func() {
+			if got := recover(); got != http.ErrAbortHandler {
+				t.Fatalf("partial failure must abort transport, got %v", got)
+			}
+		}()
+		handler.ServeHTTP(response, fixture.request(t))
+	}()
 
 	if response.Code != http.StatusOK || response.Body.String() != "partial" {
 		t.Fatalf("started response was corrupted: (%d, %q)", response.Code, response.Body.String())
@@ -3061,6 +3068,7 @@ func TestQuotaRetryAfterSecondsRoundsAndCapsWithoutOverflow(t *testing.T) {
 		retryAt time.Time
 		want    int
 	}{
+		{name: "unknown reset", retryAt: time.Time{}, want: 0},
 		{name: "past", retryAt: now.Add(-time.Second), want: 1},
 		{name: "same instant", retryAt: now, want: 1},
 		{name: "subsecond ceiling", retryAt: now.Add(time.Nanosecond), want: 1},
@@ -3158,7 +3166,7 @@ func TestHandlerClassifiesProviderUsageAboveAppliedMaximumWithoutRewritingClient
 	handler := fixture.handler(t)
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, fixture.request(t))
+	assertTransportAbort(t, func() { handler.ServeHTTP(response, fixture.request(t)) })
 
 	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` {
 		t.Fatalf("already-relayed client response = (%d, %q)", response.Code, response.Body.String())
@@ -3853,7 +3861,7 @@ func TestHandlerNeverFallsBackAfterClientCommit(t *testing.T) {
 	handler := fixture.handler(t)
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, fixture.request(t))
+	assertTransportAbort(t, func() { handler.ServeHTTP(response, fixture.request(t)) })
 
 	if response.Code != http.StatusServiceUnavailable || response.Body.String() != `{"partial":true}` ||
 		fixture.quotas.beginRetryCalls != 0 || fixture.targets.calls != 1 ||

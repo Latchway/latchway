@@ -34,7 +34,7 @@ func (coordinator *clientCoordinator) VerifySessionIdentity(ctx context.Context,
 	}
 	environment, err := coordinator.resolveEnvironmentByID(ctx, binding.OrganizationID, binding.ApplicationID, binding.EnvironmentID)
 	if err != nil {
-		return clientapi.VerifyIdentityResult{}, clientFailure("session_revoked")
+		return clientapi.VerifyIdentityResult{}, environmentLookupFailure(err, "session_revoked")
 	}
 	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
 		OrganizationID: binding.OrganizationID, ApplicationID: binding.ApplicationID, EnvironmentID: binding.EnvironmentID,

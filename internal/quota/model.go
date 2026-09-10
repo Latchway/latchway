@@ -384,6 +384,8 @@ type ExceededError struct {
 	maximum          int64
 	used             int64
 	reserved         int64
+	metric           string
+	requestBound     bool
 }
 
 func (denial *ExceededError) Error() string { return ErrExceeded.Error() }
@@ -395,6 +397,10 @@ func (denial *ExceededError) RetryAt() time.Time { return denial.retryAt }
 func (denial *ExceededError) Maximum() int64     { return denial.maximum }
 func (denial *ExceededError) Used() int64        { return denial.used }
 func (denial *ExceededError) Reserved() int64    { return denial.reserved }
+func (denial *ExceededError) Metric() string     { return denial.metric }
+
+// RequestBound reports a request that cannot fit even an empty/refilled quota.
+func (denial *ExceededError) RequestBound() bool { return denial.requestBound }
 
 // ConcurrencyExceededError reports a durable concurrency denial without a
 // retry timestamp. Capacity becomes available only when another lease is
@@ -975,6 +981,8 @@ func requestBoundExceededError(logicalRequestID string, exceeded []preparedRule)
 	return &ExceededError{
 		logicalRequestID: logicalRequestID,
 		maximum:          selectedMaximum,
+		metric:           selected.Metric,
+		requestBound:     true,
 	}
 }
 

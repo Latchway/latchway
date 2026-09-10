@@ -4,21 +4,48 @@ description: "Map TypeScript, bridge, native key, attestation, session, transpor
 icon: "triangle-alert"
 audience: "client-react-native"
 pageType: "troubleshooting"
-serverVersion: "1.1.3"
-sdkVersion: "2.0.0"
+serverVersion: "1.1.4"
+sdkVersion: "2.0.1"
 lastVerified: "2026-09-10"
 owner: "react-native-sdk"
 ---
 
 ## Capture safe diagnostics
 
-Use the mapped error category, stable server code, safe request ID,
-documentation URL, retryability, and operation ID when required. Add the
-React Native, native SDK, server, contract, OS, and platform tuple for support.
+Native bridge and HTTP failures expose `LatchwayError` with `code`, safe
+`message`, `title`, `status`, `requestID`, `documentationURL`, and `retryable`.
+Optional `retryAfter` is an RFC 3339 timestamp. `feature`, `validationErrors`
+(`path`/`message`), `supportedProtocolVersions`, `operationID`, and `instance`
+preserve canonical gateway context when available. Do not automatically follow
+the instance reference.
+
+Display `message` and `requestID` in your error UI instead of only `error.name`.
+Branch on `code`, not human message text. Include the React Native, native SDK,
+server, contract, OS, and platform tuple when escalating.
 
 Never log the external identity JWT, access or refresh tokens, DPoP proof or
 private key, App Attest or Play Integrity evidence, native credential headers,
 cookies, provider secrets, or application request/response content.
+
+## Handle direct Fetch responses
+
+Protected Fetch keeps normal Fetch semantics: final non-success responses do
+not automatically throw. React Native 2.0.1 re-exports the canonical parser:
+
+```typescript
+import { errorFromResponse } from "@latchway/react-native";
+
+export async function requireLatchwaySuccess(response: Response): Promise<Response> {
+  if (!response.ok) throw await errorFromResponse(response);
+  return response;
+}
+```
+
+Call this after your protected Fetch returns, before parsing its successful
+body. Do not discard a failed response body and replace it with a generic
+`Error`. The bounded parser maps malformed responses to
+`protocol_response_invalid` and keeps safe HTTP status/request correlation.
+The native bridge preserves these diagnostics for control operations too.
 
 ## Diagnose the owning layer
 
@@ -35,6 +62,30 @@ cookies, provider secrets, or application request/response content.
 | Session/DPoP | expired, nonce, replay, or revoked | Allow only native bounded pre-dispatch recovery where the request is replayable |
 | Transport | destination or request not replayable | Correct the path/origin or create a new reconciled product operation |
 | Policy/upstream | quota, route, pricing, timeout, or protocol error | Follow the server-owned policy and request-attempt evidence |
+
+## Quota and attestation guidance
+
+With server 1.1.4, a request that cannot fit a fixed limit returns
+`request_invalid` with `retryable: false`. Reduce its size or requested output.
+An exhausted replenishable allowance returns `quota_exceeded`; respect
+`retryAfter` when provided. `validationErrors` can identify `quota.<metric>` and
+the configured maximum.
+
+Coarse attestation guidance uses existing validation paths such as
+`attestation.apple_environment_rejected`,
+`attestation.android_certificate_rejected`, and
+`attestation.android_testing_response_rejected`. Correct the native signing,
+installed build or development policy; do not disable required attestation.
+`attestation_stale` means obtain a new challenge and fresh evidence.
+
+## Failed streams are not complete answers
+
+HTTP 200 and partial text alone do not prove completion. The gateway aborts a
+failed partial stream; your LangChain or custom parser must reject failed or
+incomplete events and validate protocol completion. Keep the original request
+ID for support. Do not automatically replay after output or uncertain dispatch,
+even when the underlying code is retryable. Disable framework retries that
+would duplicate this work.
 
 ## Preserve uncertain operations
 

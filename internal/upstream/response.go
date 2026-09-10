@@ -66,11 +66,12 @@ type ResponseRelayConfig struct {
 // RelayOutcome describes bytes accepted by the client writer and normalized
 // protocol usage. BodyBytes never includes bytes rejected by the client.
 type RelayOutcome struct {
-	StatusCode    int
-	BodyBytes     int64
-	ClientStarted bool
-	Usage         protocol.Usage
-	ProviderError ProviderErrorDiagnostics
+	StatusCode        int
+	BodyBytes         int64
+	ClientStarted     bool
+	Usage             protocol.Usage
+	ProviderError     ProviderErrorDiagnostics
+	RetryAfterSeconds int
 	// RejectionConfirmed means the trusted provider explicitly rejected an
 	// invalid request before generation. It does not follow from HTTP status
 	// or lack of client-visible bytes alone, and never applies to a 2xx stream.
@@ -136,6 +137,7 @@ func RelayResponse(
 	}
 
 	if err := NormalizeResponseStatus(response.StatusCode); err != nil {
+		outcome.RetryAfterSeconds = safeRetryAfter(response.Header, time.Now())
 		var diagnosticErr error
 		outcome.ProviderError, outcome.RejectionConfirmed, diagnosticErr = inspectProviderError(ctx, response, body, abortUpstream, config)
 		return outcome, errors.Join(err, diagnosticErr)
@@ -255,6 +257,11 @@ func RelayResponse(
 		}
 		if errors.Is(readErr, io.EOF) {
 			usage, err := observer.Finalize()
+			// Terminal provider failures may still report authoritative usage.
+			// Preserve a valid measurement without changing failure semantics.
+			if normalized, usageErr := normalizedUsage(usage); usageErr == nil {
+				outcome.Usage = normalized
+			}
 			if err != nil {
 				return outcome, fmt.Errorf("finalize relayed response observation: %w", err)
 			}

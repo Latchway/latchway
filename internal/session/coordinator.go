@@ -207,7 +207,10 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	environment, err := coordinator.resolveEnvironment(ctx, challenge.Binding.ApplicationID, challenge.Binding.Environment)
-	if err != nil || environment.OrganizationID != challenge.OrganizationID || environment.EnvironmentID != challenge.EnvironmentID {
+	if err != nil {
+		return clientapi.GrantResult{}, environmentLookupFailure(err, "conflict")
+	}
+	if environment.OrganizationID != challenge.OrganizationID || environment.EnvironmentID != challenge.EnvironmentID {
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
 	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
@@ -215,7 +218,10 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		ApplicationID:  environment.ApplicationID,
 		EnvironmentID:  environment.EnvironmentID,
 	})
-	if err != nil || snapshot.RevisionID != challenge.ConfigurationRevisionID {
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure("server_not_ready")
+	}
+	if snapshot.RevisionID != challenge.ConfigurationRevisionID {
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
 	if !requestRuntimeAllowed(snapshot, input.Metadata.Runtime(), challenge.Binding.Platform, false) {
@@ -254,7 +260,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	verified, err := coordinator.verifyAttestationEvidence(ctx, environment, snapshot, policy, selection, evidence, challenge.Binding)
 	if err != nil {
 		coordinator.recordAttestationResult(ctx, challenge, attestationTelemetryOutcome(err), "none")
-		return clientapi.GrantResult{}, clientFailure(mapAttestationError(err))
+		return clientapi.GrantResult{}, attestationClientFailure(err)
 	}
 	coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeSucceeded, verified.TrustLevel)
 	issued, err := coordinator.sessions.Exchange(ctx, ExchangeInput{
@@ -408,13 +414,16 @@ func (coordinator *clientCoordinator) CreateComponentAttestationChallenge(
 		ctx, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
 	)
 	if err != nil {
-		return clientapi.ChallengeResult{}, clientFailure("session_revoked")
+		return clientapi.ChallengeResult{}, environmentLookupFailure(err, "session_revoked")
 	}
 	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
 		OrganizationID: environment.OrganizationID, ApplicationID: environment.ApplicationID,
 		EnvironmentID: environment.EnvironmentID,
 	})
-	if err != nil || snapshot.RevisionID != principal.PolicyRevisionID {
+	if err != nil {
+		return clientapi.ChallengeResult{}, clientFailure("server_not_ready")
+	}
+	if snapshot.RevisionID != principal.PolicyRevisionID {
 		return clientapi.ChallengeResult{}, clientFailure("component_not_configured")
 	}
 	definition, policy, selection, err := componentStepUpSelection(snapshot, principal.ComponentDefinitionID)
@@ -485,14 +494,20 @@ func (coordinator *clientCoordinator) ExchangeComponentAttestation(
 	environment, err := coordinator.resolveEnvironmentByID(
 		ctx, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
 	)
-	if err != nil || environment.Slug != challenge.Binding.Environment {
+	if err != nil {
+		return clientapi.GrantResult{}, environmentLookupFailure(err, "conflict")
+	}
+	if environment.Slug != challenge.Binding.Environment {
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
 	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
 		OrganizationID: environment.OrganizationID, ApplicationID: environment.ApplicationID,
 		EnvironmentID: environment.EnvironmentID,
 	})
-	if err != nil || snapshot.RevisionID != challenge.ConfigurationRevisionID ||
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure("server_not_ready")
+	}
+	if snapshot.RevisionID != challenge.ConfigurationRevisionID ||
 		snapshot.RevisionID != principal.PolicyRevisionID {
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
@@ -526,7 +541,7 @@ func (coordinator *clientCoordinator) ExchangeComponentAttestation(
 	)
 	if err != nil {
 		coordinator.recordComponentAttestationResult(ctx, challenge, attestationTelemetryOutcome(err), "none")
-		return clientapi.GrantResult{}, clientFailure(mapAttestationError(err))
+		return clientapi.GrantResult{}, attestationClientFailure(err)
 	}
 	coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeSucceeded, verified.TrustLevel)
 	issued, err := coordinator.sessions.ExchangeComponentAttestation(ctx, ComponentAttestationExchangeInput{
@@ -1270,6 +1285,8 @@ func mapExchangeChallengeError(err error) string {
 
 func mapAttestationError(err error) string {
 	switch {
+	case errors.Is(err, attestation.ErrStale):
+		return "attestation_stale"
 	case errors.Is(err, attestation.ErrUnsupported):
 		return "attestation_unsupported"
 	case errors.Is(err, attestation.ErrConfiguration),

@@ -974,6 +974,9 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 		return protocol.Usage{}, upstreamMalformed("upstream returned malformed JSON")
 	}
 	usage, err := usageFromValue(value)
+	if root, ok := value.(map[string]any); ok && root["error"] != nil && err == nil {
+		return usage, upstreamMalformed("upstream reported a generation failure")
+	}
 	if err == nil && chatValueContainsToken(value) {
 		o.firstToken = true
 	}
@@ -983,15 +986,16 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 func (o *jsonObserver) FirstTokenObserved() bool { return o.firstToken }
 
 type sseObserver struct {
-	pending    []byte
-	scanOffset int
-	lineStart  int
-	eventEnd   int
-	usage      protocol.Usage
-	found      bool
-	done       bool
-	firstToken bool
-	events     int
+	pending     []byte
+	scanOffset  int
+	lineStart   int
+	eventEnd    int
+	usage       protocol.Usage
+	found       bool
+	done        bool
+	firstToken  bool
+	events      int
+	terminalErr error
 }
 
 func (o *sseObserver) Observe(chunk []byte) error {
@@ -1027,6 +1031,9 @@ func (o *sseObserver) Finalize() (protocol.Usage, error) {
 	}
 	if len(o.pending) > 0 {
 		return protocol.Usage{}, upstreamMalformed("upstream SSE stream ended with an incomplete event")
+	}
+	if o.terminalErr != nil {
+		return o.usage, o.terminalErr
 	}
 	if !o.done {
 		return protocol.Usage{}, upstreamMalformed("upstream SSE stream ended before [DONE]")
@@ -1110,6 +1117,9 @@ func (o *sseObserver) observeEvent(event []byte) error {
 		o.done = true
 		return nil
 	}
+	if o.terminalErr != nil {
+		return upstreamMalformed("upstream SSE stream contains data after a generation failure")
+	}
 	if o.found {
 		return upstreamMalformed("upstream SSE stream contains data after its usage chunk")
 	}
@@ -1120,6 +1130,11 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	usage, err := usageFromValue(value)
 	if err != nil {
 		return err
+	}
+	if root, ok := value.(map[string]any); ok && root["error"] != nil {
+		o.usage = usage
+		o.terminalErr = upstreamMalformed("upstream reported a generation failure")
+		return nil
 	}
 	if chatValueContainsToken(value) {
 		o.firstToken = true

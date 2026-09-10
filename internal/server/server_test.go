@@ -531,3 +531,63 @@ func TestRecovererWritesRegisteredProblem(t *testing.T) {
 		t.Fatalf("incomplete panic problem: %#v", body)
 	}
 }
+
+func TestRecovererPreservesAbnormalStreamTermination(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := recoverer(logger)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Latchway-Request-ID", "request_stream_failure")
+		_, _ = io.WriteString(w, "data: partial\n\n")
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	response, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err == nil || string(body) != "data: partial\n\n" || response.Header.Get("X-Latchway-Request-ID") != "request_stream_failure" {
+		t.Fatalf("failed stream looked complete or lost correlation: %q, %v, %v", body, err, response.Header)
+	}
+}
+
+func TestAbortedRequestFinalizesMetricsAndLogs(t *testing.T) {
+	metrics, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer metrics.Shutdown(context.Background())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	handler := accessLog(logger, metrics)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "partial")
+		panic(http.ErrAbortHandler)
+	}))
+	func() {
+		defer func() {
+			if recover() != http.ErrAbortHandler {
+				t.Fatal("abort was swallowed")
+			}
+		}()
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	}()
+	if !strings.Contains(logs.String(), `"outcome":"failed"`) || !strings.Contains(logs.String(), `"response_aborted":true`) {
+		t.Fatalf("abort log: %s", logs.String())
+	}
+	recorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	if !strings.Contains(body, `outcome="failed"`) {
+		t.Fatalf("missing failure metric: %s", body)
+	}
+	if !strings.Contains(body, "latchway_active_requests{") {
+		t.Fatalf("missing in-flight metric: %s", body)
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "latchway_active_requests{") && !strings.HasSuffix(line, " 0") {
+			t.Fatalf("in-flight request leaked: %s", line)
+		}
+	}
+}

@@ -901,6 +901,15 @@ func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestI
 		Code: failure.Code, Detail: safeFailureDetail(failure.Code),
 		RetryAfterSeconds: failure.RetryAfterSeconds,
 	}
+	if failure.AttestationReason != "" {
+		detail, ok := attestationFailureDetail(failure.Code, failure.AttestationReason)
+		if !ok {
+			api.internal(w, requestID)
+			return
+		}
+		value.Detail = detail
+		value.Fields = []problem.FieldError{{Path: "attestation." + failure.AttestationReason, Message: detail}}
+	}
 	if problemIncludesFeature(failure.Code) {
 		value.Feature = feature
 	}

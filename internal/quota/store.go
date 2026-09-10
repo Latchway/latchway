@@ -1770,6 +1770,7 @@ func exceededError(logicalRequestID string, plans []plannedBucket, exceeded []in
 	if plan.rule.Algorithm == TokenBucketAlgorithm {
 		return &ExceededError{
 			logicalRequestID: logicalRequestID,
+			metric:           plan.rule.Metric,
 			retryAt:          plan.retryAt,
 			maximum:          plan.rule.Capacity,
 			used:             plan.rule.Capacity - plan.tokenState.balance/tokenBalanceScale,
@@ -1778,6 +1779,7 @@ func exceededError(logicalRequestID string, plans []plannedBucket, exceeded []in
 	}
 	return &ExceededError{
 		logicalRequestID: logicalRequestID,
+		metric:           plan.rule.Metric,
 		retryAt:          plan.period.end,
 		maximum:          plan.rule.Maximum,
 		used:             plan.locked.used,

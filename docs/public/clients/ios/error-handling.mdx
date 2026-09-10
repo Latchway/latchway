@@ -4,21 +4,50 @@ description: "Map Swift transport, key, attestation, session, quota, and upstrea
 icon: "triangle-alert"
 audience: "client-ios"
 pageType: "troubleshooting"
-serverVersion: "1.1.3"
-sdkVersion: "2.0.0"
+serverVersion: "1.1.4"
+sdkVersion: "2.0.1"
 lastVerified: "2026-09-10"
 owner: "ios-sdk"
 ---
 
 ## Start with safe fields
 
-Capture the typed SDK category, stable Latchway code when present, response
-request ID, documentation URL, retryable flag, and operation ID when required.
-Do not record the problem detail as a credential-safe substitute unless the
-application has reviewed that display path.
+For native buffered calls, catch `LatchwayError.server(let problem)`.
+`LatchwayProblem` preserves `code`, `title`, safe `detail`, `status`, `requestID`,
+`documentationURL`, `retryable`, and `retryAfter` as a `Date`. Optional `feature`,
+`errors` (`path`/`message`), `supportedProtocolVersions`, `operationID`, and
+`instance` provide more context. The SDK never follows the instance reference.
+
+Display the safe detail with the request ID; branch on `code`, not message text.
+Keep routine logs to the code, request ID and version tuple instead of dumping
+an entire error object.
 
 Never log identity tokens, access or refresh tokens, DPoP proofs, private key
 material, App Attest evidence, cookies, or provider payloads.
+
+## Custom URLSession responses
+
+When your integration owns a buffered HTTP response, read at most 64 KiB for an
+error body and use the same public parser:
+
+```swift
+import Foundation
+import Latchway
+
+func requireLatchwaySuccess(data: Data, response: HTTPURLResponse) throws {
+    guard !(200 ... 299).contains(response.statusCode) else { return }
+    let problem = try LatchwayProblem.decode(from: data, response: response)
+    throw LatchwayError.server(problem)
+}
+```
+
+The parser rejects malformed, oversized or noncanonical Problems without
+exposing the raw body. `LatchwayHTTPResponseError` preserves the HTTP status and
+safe header request ID. Foundation Models preserves canonical gateway failures
+in `LatchwayFoundationModelsGatewayError.problem`; malformed gateway responses
+keep status/correlation through the existing gateway error instead. Retryable
+429 responses retain Apple's rate-limit error with the canonical Problem in
+its `latchway_problem` metadata.
 
 ## Classify the failure
 
@@ -33,10 +62,30 @@ material, App Attest evidence, cookies, or provider payloads.
 | `quota_exceeded` | Request ID and effective limit plan | Show the policy outcome; do not change a client-side counter |
 | `operation_indeterminate` | Required operation ID | Reconcile before presenting another mutating action |
 
+## Quotas, attestation, and streams
+
+Server 1.1.4 distinguishes a request that cannot fit a fixed limit
+(`request_invalid`, not retryable) from an exhausted replenishable allowance
+(`quota_exceeded`). Reduce the former request; honor `retryAfter` when supplied
+for the latter. `errors` can identify the affected `quota.<metric>` and configured
+maximum. No client-side counter overrides the server.
+
+Attestation guidance uses the existing `errors` field, for example
+`attestation.apple_environment_rejected` or
+`attestation.apple_signing_policy_rejected`. Check signing and gateway policy;
+do not disable App Attest. `attestation_stale` requires a new challenge and fresh
+evidence. The response never includes raw evidence or expected secret values.
+
+HTTP 200 and partial text are not proof of a completed stream. The gateway aborts
+failed partial responses; Foundation Models rejects failed, incomplete and
+truncated streams. Custom parsers must validate their provider completion
+marker. Preserve the request ID and do not automatically replay after output or
+uncertain dispatch, even if a failure is normally retryable.
+
 ## Use the canonical page
 
 Every public server code resolves through [Error reference](/reference/errors)
-and `https://docs.latchway.dev/errors/<code>`. Start there, then inspect the
+and `problem.documentationURL`. Start there, then inspect the
 matching request, component, trust event, and policy revision.
 
 ## Escalate safely

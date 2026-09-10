@@ -1231,6 +1231,9 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 		return protocol.Usage{}, upstreamMalformed("upstream JSON must be an object")
 	}
 	usage, err := usageFromResponseObject(root)
+	if status, _ := root["status"].(string); err == nil && (status == "failed" || status == "incomplete" || root["error"] != nil) {
+		return usage, upstreamMalformed("upstream response did not complete successfully")
+	}
 	if err == nil && responseObjectContainsToken(root) {
 		o.firstToken = true
 	}
@@ -1249,6 +1252,7 @@ type sseObserver struct {
 	done         bool
 	sentinelSeen bool
 	firstToken   bool
+	terminalErr  error
 }
 
 func (o *sseObserver) Observe(chunk []byte) error {
@@ -1279,7 +1283,7 @@ func (o *sseObserver) Finalize() (protocol.Usage, error) {
 	if !o.done {
 		return protocol.Usage{}, upstreamMalformed("upstream SSE stream ended before response.completed")
 	}
-	return o.usage, nil
+	return o.usage, o.terminalErr
 }
 
 func (o *sseObserver) FirstTokenObserved() bool { return o.firstToken }
@@ -1382,7 +1386,13 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	if responseEventContainsToken(eventType, root) {
 		o.firstToken = true
 	}
-	if eventType != "response.completed" {
+	if eventType == "error" {
+		o.done = true
+		o.usage = unknownUsage()
+		o.terminalErr = upstreamMalformed("upstream reported a generation failure")
+		return nil
+	}
+	if eventType != "response.completed" && eventType != "response.failed" && eventType != "response.incomplete" {
 		return nil
 	}
 	response, ok := root["response"].(map[string]any)
@@ -1395,6 +1405,9 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	}
 	o.usage = usage
 	o.done = true
+	if status, _ := response["status"].(string); eventType != "response.completed" || status == "failed" || status == "incomplete" || response["error"] != nil {
+		o.terminalErr = upstreamMalformed("upstream response did not complete successfully")
+	}
 	return nil
 }
 

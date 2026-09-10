@@ -4,21 +4,49 @@ description: "Diagnose Kotlin key, integrity, identity, session, transport, quot
 icon: "triangle-alert"
 audience: "client-android"
 pageType: "troubleshooting"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.4"
+sdkVersion: "1.2.2"
+lastVerified: "2026-09-10"
 owner: "android-sdk"
 ---
 
 ## Capture only safe context
 
-Record the typed exception category, stable server code when present, request
-ID, documentation URL, retryability, and operation ID when required. Include
-the SDK/server/contract versions and safe key-storage category for support.
+Control operations throw `LatchwayException`. It preserves `code`, safe
+`message`, `title`, `httpStatus`, `requestId`, `documentationUrl`, and `retryable`.
+Optional `retryAfter` is an RFC 3339 reset timestamp; `retryAfterSeconds` holds a
+valid numeric Retry-After header. Missing timing remains absent.
+
+Use `feature`, `errors` (`path`/`message`), `supportedProtocolVersions`, and
+`operationId` when supplied. `instance` is an opaque correlation reference;
+do not automatically follow it. Display the safe message and request ID, but
+branch on `code`. Exception `toString()` omits diagnostic content.
 
 Never log identity or session tokens, DPoP proofs, Android Keystore material,
 Play Integrity tokens or verdict payloads, cookies, provider headers, or
 response bodies containing application content.
+
+## Decode an OkHttp failure
+
+Protected HTTP calls preserve ordinary OkHttp response semantics. Use the
+extension when your application needs a typed error:
+
+```kotlin
+import dev.latchway.okhttp.latchwayException
+
+http.newCall(request).execute().use { response ->
+    response.latchwayException()?.let { throw it }
+    // Consume the successful response with your existing parser or framework.
+}
+```
+
+The helper returns null for success without reading it. It peeks at a bounded
+error body without consuming the original response. Invalid, oversized or
+unreadable failures become `RESPONSE_INVALID`, preserving safe request
+correlation and HTTP status. Custom transports can use
+`LatchwayException.fromResponse(LatchwayTransportResponse(...))` with the same
+canonical validation. Unknown optional extensions are ignored; required fields
+and known optional fields remain validated.
 
 ## Diagnose by boundary
 
@@ -31,6 +59,27 @@ response bodies containing application content.
 | Destination | Exact HTTPS gateway origin and safe path | Remove redirects or arbitrary proxy targets |
 | Quota | Effective limit plan and reservation | Show the policy result; do not maintain an authoritative client counter |
 | Upstream | Request and attempt metadata | Follow route policy; do not add a provider credential to the app |
+
+## Apply the right recovery
+
+Server 1.1.4 reports requests that cannot fit a fixed limit as nonretryable
+`request_invalid`. Reduce their size or requested output. A replenishable quota
+still reports `quota_exceeded`; honor `retryAfter` when present. Validation
+`errors` can identify `quota.<metric>` and its configured maximum.
+
+Play Integrity guidance appears in the existing `errors` list, for example
+`attestation.android_certificate_rejected`,
+`attestation.android_testing_response_rejected`, or
+`attestation.android_license_rejected`. Correct the installed build, distribution,
+tester account or gateway policy. Testing responses still require an explicitly
+allowed development environment. For `attestation_stale`, generate fresh
+evidence for a new challenge. No client bypass is introduced.
+
+The SDK owns HTTP transport, not provider SSE parsing. Read failures and
+cancellation propagate; your parser/framework must reject explicit failed or
+incomplete events and require its completion marker. HTTP 200 and partial output
+are not completion. Never automatically replay a partial or dispatch-uncertain
+request: `retryable` does not establish that replay is safe.
 
 ## Follow the stable page
 

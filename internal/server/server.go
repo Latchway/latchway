@@ -378,21 +378,31 @@ func accessLog(logger *slog.Logger, metrics *telemetry.Registry) func(http.Handl
 				finish = complete
 			}
 			wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			completed := false
+			defer func() {
+				duration := time.Since(started)
+				outcome := requestOutcome(wrapped.Status())
+				if !completed {
+					outcome = "failed"
+				}
+				if finish != nil {
+					finish(outcome, duration)
+				}
+				logicalID, _ := requestidentity.FromContext(r.Context())
+				logger.InfoContext(r.Context(), "HTTP request",
+					"logical_request_id", logicalID.String(),
+					"request_id", middleware.GetReqID(r.Context()),
+					"method", r.Method,
+					"route", route,
+					"status", wrapped.Status(),
+					"outcome", outcome,
+					"response_aborted", !completed,
+					"bytes", wrapped.BytesWritten(),
+					"duration_ms", duration.Milliseconds(),
+				)
+			}()
 			next.ServeHTTP(wrapped, r)
-			duration := time.Since(started)
-			if finish != nil {
-				finish(requestOutcome(wrapped.Status()), duration)
-			}
-			logicalID, _ := requestidentity.FromContext(r.Context())
-			logger.InfoContext(r.Context(), "HTTP request",
-				"logical_request_id", logicalID.String(),
-				"request_id", middleware.GetReqID(r.Context()),
-				"method", r.Method,
-				"route", route,
-				"status", wrapped.Status(),
-				"bytes", wrapped.BytesWritten(),
-				"duration_ms", duration.Milliseconds(),
-			)
+			completed = true
 		})
 	}
 }
@@ -440,6 +450,9 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					if recovered == http.ErrAbortHandler {
+						panic(recovered)
+					}
 					logger.ErrorContext(r.Context(), "HTTP panic recovered", "stack", string(debug.Stack()))
 					problem.Write(w, middleware.GetReqID(r.Context()), problem.Error{
 						Code: "internal_error", Detail: "The request could not be completed.",

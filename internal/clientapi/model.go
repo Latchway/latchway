@@ -436,6 +436,8 @@ type DependencyError struct {
 	Code              string
 	RetryAfterSeconds int
 	DPoPNonce         string
+	// AttestationReason is a closed diagnostic selector; raw detail is forbidden.
+	AttestationReason string
 }
 
 func (failure *DependencyError) Error() string {

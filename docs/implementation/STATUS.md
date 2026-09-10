@@ -2,6 +2,26 @@
 
 Status date: 2026-09-10
 
+## Error-diagnostics patch: server 1.1.4 release candidate
+
+The server preserves audited adapter validation details, exposes closed safe
+attestation recovery guidance through existing Problem fields, distinguishes
+impossible request bounds from replenishable quotas, and retains bounded
+provider retry hints. Infrastructure lookup failures no longer become false
+session revocation. Failed/partial streams abort after settlement; provider
+failure terminal events are not success, and validated terminal usage survives
+failure accounting. No new wire fields/codes, migration, policy change or
+attestation relaxation is introduced. Existing registered error tuples remain
+stable for published clients.
+
+The full isolated-PostgreSQL Go suite and static analysis pass; targeted tests cover retry
+classification, redaction, attestation reasons, stream failure detection over
+real localhost HTTP, terminal usage, bounded retry dates and finalized failure
+metrics. Eight affected-package race suites and canonical contract validation
+pass. The rebuilt contract archive remains byte-identical to published 1.1.2.
+Physical-device/provider verification
+has not been rerun for this patch. Publication is pending; VPS is unchanged.
+
 ## Server 1.1.3 published and deployed: provider-specific development attestation
 
 App Attest policy accepts `development`, `production` or `any`, while stored key

@@ -280,10 +280,12 @@ func (verifier *PlayIntegrityVerifier) validatePayload(
 		return validatedPlayIntegrityVerdict{}, invalid("play integrity request or app binding")
 	}
 	if payload.timestampMillis < 0 || payload.timestampMillis > 253402300799999 ||
-		payload.timestampMillis < now.Add(-verifier.maximumAge).UnixMilli() ||
 		payload.timestampMillis > now.Add(verifier.clockSkew).UnixMilli() ||
 		binding.IssuedAt > (payload.timestampMillis+verifier.clockSkew.Milliseconds())/1000 {
 		return validatedPlayIntegrityVerdict{}, invalid("play integrity request freshness")
+	}
+	if payload.timestampMillis < now.Add(-verifier.maximumAge).UnixMilli() {
+		return validatedPlayIntegrityVerdict{}, ErrStale
 	}
 	if len(payload.certificateDigests) == 0 || len(payload.certificateDigests) > maxPlayIntegrityCertificates {
 		return validatedPlayIntegrityVerdict{}, invalid("play integrity application certificate")

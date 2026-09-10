@@ -150,6 +150,7 @@ func TestPrepareRequestClassifiesImpossibleTrustedTokenBoundsAsQuotaDenials(t *t
 			}
 			denial := requestBoundExceededError(input.LogicalRequestID.String(), exceeded)
 			if denial.LogicalRequestID() != input.LogicalRequestID.String() ||
+				!denial.RequestBound() || denial.Metric() != test.metric ||
 				denial.Maximum() != test.maximum || denial.Used() != 0 ||
 				denial.Reserved() != 0 || !denial.RetryAt().IsZero() {
 				t.Fatalf("request-bound denial = %#v", denial)

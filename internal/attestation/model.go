@@ -23,6 +23,7 @@ const maxEvidenceBytes = 64 << 10
 
 var (
 	ErrInvalid       = errors.New("attestation evidence is invalid")
+	ErrStale         = fmt.Errorf("%w: evidence is stale", ErrInvalid)
 	ErrUnsupported   = errors.New("attestation provider is unsupported")
 	ErrConfiguration = errors.New("attestation verifier configuration is invalid")
 )
@@ -185,5 +186,5 @@ func invalid(reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return ErrInvalid
 	}
-	return fmt.Errorf("%w: %s", ErrInvalid, reason)
+	return &invalidEvidenceError{reason: reason}
 }

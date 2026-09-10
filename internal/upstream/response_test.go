@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -68,6 +69,20 @@ func TestRelayResponseStreamsChunksAndReturnsNormalizedOutcome(t *testing.T) {
 	}
 	if hookCalls != 1 || observer.finalizeCalls != 1 || body.closeCalls.Load() != 1 {
 		t.Fatalf("calls: hook=%d finalize=%d close=%d", hookCalls, observer.finalizeCalls, body.closeCalls.Load())
+	}
+}
+
+func TestFailedTerminalRetainsValidReportedUsage(t *testing.T) {
+	observer := &recordingResponseObserver{
+		usage:       protocol.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5, Known: true, Provenance: "provider_reported"},
+		finalizeErr: &protocol.Error{Code: "upstream_protocol_error", Detail: "upstream response did not complete successfully"},
+	}
+	outcome, err := RelayResponse(context.Background(), newRelayResponseWriter(), testDispatchedResponse(&http.Response{
+		StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{"status":"failed"}`)),
+	}, func() {}), observer, validRelayConfig())
+	if !protocol.IsCode(err, "upstream_protocol_error") || outcome.Usage != observer.usage {
+		t.Fatalf("failure usage = %+v, %v", outcome, err)
 	}
 }
 

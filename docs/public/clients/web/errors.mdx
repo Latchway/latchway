@@ -4,9 +4,9 @@ description: "Map protected HTTP failures to stable Latchway codes and route use
 icon: "circle-alert"
 audience: "client-web"
 pageType: "reference"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.4"
+sdkVersion: "1.1.1"
+lastVerified: "2026-09-10"
 owner: "javascript-sdk"
 ---
 
@@ -15,16 +15,23 @@ requests retain normal Fetch semantics and return final non-2xx responses. Map
 one explicitly when application code needs the stable problem:
 
 ```typescript
-import { errorFromResponse, LatchwayError } from "@latchway/client";
+import { errorFromResponse } from "@latchway/client";
 
 if (!response.ok) {
-  const error = await errorFromResponse(response.clone());
-  if (error instanceof LatchwayError) {
-    report({ code: error.code, requestID: error.requestID });
-  }
-  throw error;
+  throw await errorFromResponse(response);
 }
 ```
+
+Catch `LatchwayError` and display its safe `message` with `requestID`, instead of
+only its generic error name. It preserves `code`, `title`, `status`,
+`documentationURL`, `retryable`, optional RFC 3339 `retryAfter`, `feature`,
+`validationErrors` (`path`/`message`), `supportedProtocolVersions`, `operationID`,
+and `instance`. Treat the instance as an opaque reference, not a URL to follow.
+
+Version 1.1.1 ignores unknown optional extensions while validating required and
+known optional fields. A malformed body becomes `protocol_response_invalid`
+with safe HTTP status and header correlation; raw HTML/provider text is not used
+as the fallback message.
 
 | Browser symptom | Stable code | Direct action |
 | --- | --- | --- |
@@ -39,8 +46,26 @@ Never branch on the human `detail` string. Use `code`, status, retryability,
 request ID, and documented safe fields. A `retryable: true` value does not
 authorize replay after ambiguous upstream dispatch.
 
-See the [complete generated error registry](/reference/errors). It is generated
-from `api/error-codes.yaml`; CI rejects stale codes or missing deep-link anchors.
+## Fixed limits and incomplete streams
+
+Server 1.1.4 distinguishes a request that cannot fit a fixed limit
+(`request_invalid`, not retryable) from an exhausted replenishable allowance
+(`quota_exceeded`). Reduce the first request; honor a supplied `retryAfter` for
+the second. `validationErrors` can identify `quota.<metric>` and its configured
+maximum. The server remains authoritative for usage.
+
+The gateway aborts failed partial responses. Custom SSE parsers must reject
+failed/incomplete events and require their provider's completion marker; HTTP
+200 or partial text alone is insufficient. Keep the request ID and do not
+automatically replay after output starts or dispatch becomes uncertain.
+
+Native App Attest and Play Integrity reasons are not Web trust. Browser App
+Check or Turnstile errors still require their own challenge/evidence recovery;
+never infer hardware attestation from WebCrypto key possession.
+
+See the [complete generated error registry](/reference/errors), generated from
+`api/error-codes.yaml`. Include the code, request ID and version tuple for support;
+never log identity/session tokens, DPoP proofs or application response bodies.
 
 ## Browser-local diagnostic links
 
