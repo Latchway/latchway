@@ -71,13 +71,23 @@ private-Keychain checks and deny-only extension safety guards remain. Android
   CocoaPods now resolves in an isolated React Native 0.74 host.
 - Android 1.2.1: `d9832626ee08b1a873aaae4f00714cf573219d49`; 214 tests passed,
   one live-only skip, assemble/lint, two API-34 consumers, all five publication
-  modules, docs checks and 24 public artifact signatures verified. GitHub release
-  is public; Central upload accepted, public Maven downloads pending.
+  modules, docs checks and public Maven artifacts verified. All 24 primary files,
+  24 detached signatures and 96 checksum files match the approved GitHub bundle.
+  The GitHub release and ordinary Maven downloads are public.
 - React Native 2.0.0: `155d26203e3db33099974387c2b9369f30b40c0d`; 259 unit,
   13 runtime, 10 iOS bridge and 15 Android bridge tests pass against the pinned
   native commits. Types, lint, codegen, native boundaries, Metro, deterministic
-  package/consumer checks and minimum RN 0.74 / React 18.2 checks pass. npm
-  dispatch is held until normal native registry resolution works.
+  package/consumer checks and minimum RN 0.74 / React 18.2 checks pass. A normal
+  CocoaPods 2.0.0 install and unsigned iOS simulator consumer build pass for that
+  minimum host. npm 2.0.0 is public; npm/GitHub bytes match the tested package
+  contents, native source pins are exact, and Sigstore provenance verification
+  confirms the release workflow, main ref, commit and run.
+
+Registry receipt: public npm archive SHA-256
+`2a210f0e480a7391d9f3fde1b88505a80ac5e8088f76f4f1f52aadb4cfe32316`.
+Android became normally downloadable about 31 minutes after the accepted upload.
+The CocoaPods version index also propagated after its exact spec was available.
+No repeat upload, diagnostic workflow, new credential or release gate was needed.
 
 Canonical docs import clean commit-bound bundles from iOS/RN release commits
 and Android docs-only follow-up `71636399b0993b2045a4d278f9ceb1de18662487`.

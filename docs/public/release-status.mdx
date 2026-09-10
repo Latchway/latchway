@@ -19,8 +19,8 @@ The current distributions are:
 | --- | --- | --- |
 | Server and Console | 1.1.3 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.3), GHCR `ghcr.io/latchway/latchway:1.1.3` |
 | iOS SDK | 2.0.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v2.0.0), CocoaPods `Latchway` |
-| Android SDK | 1.2.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.0), Maven Central `dev.latchway` |
-| React Native SDK | 1.3.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.3.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.3.0) |
+| Android SDK | 1.2.1 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.1), Maven Central `dev.latchway` |
+| React Native SDK | 2.0.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/2.0.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v2.0.0) |
 | JavaScript client | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.1.0) |
 | LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
 | OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
@@ -28,20 +28,6 @@ The current distributions are:
 The server image includes Linux amd64 and arm64. Pin the published image digest
 for repeatable deployments. Moving minor/major aliases and `latest` are not
 immutable version locks. Use the same image for server and migrator.
-
-### Registry propagation in progress
-
-Android [1.2.1 release assets](https://github.com/Latchway/latchway-android/releases/tag/v1.2.1)
-are public and the Central upload was accepted, but normal Maven downloads still
-return 404. An accepted upload is not confirmation of final Central publication.
-The [React Native 2.0.0 source](https://github.com/Latchway/latchway-react-native-sdk/tree/155d26203e3db33099974387c2b9369f30b40c0d)
-is prepared and tested with iOS 2.0.0 / Android 1.2.1; npm publication is held
-until those pinned native dependencies are installable. iOS 2.0.0 now resolves
-through normal CocoaPods installation. The table above retains the earlier
-installable Android and React Native versions until publication is confirmed.
-
-The refreshed React Native guides describe the prepared 2.0 integration.
-Do not attempt that npm upgrade until this status confirms its publication.
 
 ## What changed
 
@@ -163,6 +149,21 @@ the reproducible local build; anonymous GHCR downloads and Linux amd64/arm64
 manifests were verified. A digest-pinned private VPS rollout passed all readiness
 checks without changing either environment's active policy. These are release
 and operational receipts, not a new Apple/Google physical-device proof.
+
+iOS 2.0.0 passes 246 tests with one live-only skip, release and separate consumer
+builds, CocoaPods `Latchway/AppAttest` validation, and 10 React Native bridge tests.
+Its public CocoaPods spec, tag and source archive were verified. Android 1.2.1
+passes 214 tests with one live-only skip, build/lint and independent API-34
+consumers; all five Maven modules and their 24 primary artifacts, 24 signatures
+and 96 checksum files match the signed release bundle.
+
+React Native 2.0.0 passes 259 unit, 13 runtime, 10 iOS bridge and
+15 Android bridge tests, types, lint, codegen, both Metro bundles and package
+consumer checks. An RN 0.74 / React 18.2 New Architecture iOS simulator host
+build also passes using normal CocoaPods 2.0.0 dependencies. npm and GitHub
+archives are byte-identical and match the tested package contents; exact native
+dependency pins and cryptographic npm provenance were verified. These are local
+and registry receipts, not fresh physical-device evidence.
 
 Server 1.1.1 passes the complete isolated-PostgreSQL Go suite, targeted race
 tests, static analysis, advancing-clock identity-renewal regression and
