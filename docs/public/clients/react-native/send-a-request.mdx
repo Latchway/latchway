@@ -4,9 +4,9 @@ description: "Use the bounded native-backed fetch surface, bind one feature, pre
 icon: "send"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.1.1"
-sdkVersion: "1.2.0"
-lastVerified: "2026-09-08"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "react-native-sdk"
 ---
 
@@ -56,8 +56,8 @@ the server-selected route and physical model remain authoritative.
 ## Verify
 
 Confirm the response request ID matches one Console row with the expected
-`react_native_ios` or `react_native_android` platform, normalized user, family,
-component, feature, native trust, DPoP result, route, and usage. JavaScript
+native host platform (`ios` or `android`), caller SDK `react-native`, normalized
+user, family, component, feature, native trust, DPoP result, route and usage. JavaScript
 diagnostics must contain none of the native credentials or raw evidence.
 
 Continue with [Streaming](/clients/react-native/streaming) for backpressure and

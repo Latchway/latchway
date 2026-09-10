@@ -4,9 +4,9 @@ description: "Wire CocoaPods, App Attest, bundle identity, Keychain groups, and 
 icon: "apple"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.1.1"
-sdkVersion: "1.2.0"
-lastVerified: "2026-09-08"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "react-native-sdk"
 ---
 
@@ -25,10 +25,11 @@ DPoP, and refresh state behind the native bridge.
 3. put the fully resolved private root app-ID Keychain group first in the
    signed entitlement;
 4. add only explicit extension-shared groups after it;
-5. set `apple.rootKeychainAccessGroup` to the resolved private group; and
-6. list extension-shared groups as
-   `apple.legacySharedKeychainAccessGroups` only when they contain a known
-   legacy root record coordinate.
+5. set `apple.rootKeychainAccessGroup` to the resolved private group.
+
+Version 2 has no legacy shared-group migration option. Native delegated
+extensions use explicit current component groups; never put root credentials
+in an extension-shared group.
 
 Never pass `$(AppIdentifierPrefix)` at runtime. Inspect the built `.app`
 entitlements rather than inferring expansion from the Xcode project.
@@ -45,7 +46,7 @@ No Firebase package, application-delegate authentication code or native
 Latchway bootstrap is required for the supplied-identity API. React Native
 calls `Latchway.configure` with the signed group and public identity metadata.
 Native can configure before or after it with equivalent settings. If the host
-uses Latchway natively, resolve the same iOS 1.2.0 SDK copy instead of linking
+uses Latchway natively, resolve the same iOS 2.0.0 SDK copy instead of linking
 another version through Swift Package Manager and CocoaPods simultaneously.
 
 ## Keep the bridge narrow
@@ -56,7 +57,7 @@ evidence, DPoP private key, access token, refresh token, or provider credential.
 
 Native and React Native share the same process-wide account and security scope.
 Conflicting explicit gateway, app name, application, environment, identity,
-Keychain or trust configuration fails closed. Use the shared account's logout
+Keychain or trust configuration fails closed. Use `app.signOut()`
 for sign-out; disposing a screen client does not log out native callers.
 
 ## Verify
@@ -64,12 +65,16 @@ for sign-out; disposing a screen client does not log out native callers.
 Build the example workspace and run on the exact intended device. Confirm:
 
 ```text
-Platform: react_native_ios
+Server host platform: ios
+Caller SDK: react-native
 Native key storage: reported
 Trust provider: app_attest
 DPoP: verified
 JavaScript credential fields: absent
 ```
+
+SDK diagnostics may report `react_native_ios`; shared server sessions use the
+native host platform and record caller SDK separately.
 
 A development-signed result is useful device evidence but remains distinct
 from a protected Apple distribution receipt. Continue with the

@@ -1,7 +1,7 @@
 # Development attestation: implementation and verification
 
-Source checkpoint: 2026-09-10. Prepared for server 1.1.3; publication and VPS
-activation are separate steps and are not claimed by this source checkpoint.
+Updated: 2026-09-10. Server 1.1.3 is published and deployed; the new attestation
+policy controls have not been activated in existing Habitify environments.
 
 ## Implemented behavior
 
@@ -84,16 +84,32 @@ The full formatting check also reports pre-existing indentation in untouched
 `internal/adminapi/credential_selftest.go`; all changed Go files are formatted.
 
 Automated Apple/Google fixtures are not live provider or physical-device
-verification. No real Google testing token, TestFlight build or VPS configuration
-was exercised or changed by this implementation task.
+verification. No real Google testing token or TestFlight build was exercised.
 The disposable PostgreSQL test container was stopped and removed after the final
-checks; existing local and VPS deployments were left untouched.
+checks. The separate rollout updated the VPS image without changing active app
+configuration, as recorded below.
 
-## Deployment preparation (publication and activation pending)
+## Publication and VPS receipt
 
-1. Publish server 1.1.3 with the newly assigned contract-bundle edition 1.1.2.
-   Do not rewrite a frozen existing bundle or an SDK's released lock.
-2. Deploy the server before activating `environment: any` or Play testing.
+- Public release: [server v1.1.3](https://github.com/Latchway/latchway/releases/tag/v1.1.3),
+  commit `90c8ca7f4837e27e939e84fa75b41392529bf301`.
+- Public GHCR index:
+  `sha256:df52bda8112467f42864ee4fa9769b5d95227f5a2f45aa3fc3f5b427e6a4072d`.
+  Anonymous pulls and Linux amd64/arm64 manifests verified.
+- Downloaded contract 1.1.2 archive matches the deterministic checksum above.
+- Same-schema deployment succeeded with a private database/configuration backup
+  and tested image rollback. Schema remains 33; no migration was dispatched.
+- Public verification at 2026-09-10 04:36:28 UTC confirms the exact version/commit,
+  all seven readiness checks, and an HTTP-200 Console. Both active environment
+  revisions and full configuration documents are unchanged; Caddy is unchanged.
+- The old image and private backup remain available. No user data was deleted.
+
+## Policy activation and device verification (not performed)
+
+1. Server 1.1.3 and contract bundle 1.1.2 are published. Frozen earlier bundles
+   and SDK client-contract locks remain unchanged.
+2. The VPS is upgraded. Activation of `environment: any` or Play testing is
+   still an explicit operator choice; deployment did not activate either.
 3. For Habitify Development, the intended Apple setting is `any`, categories
    `[2, 3]`, and existing unrestricted build versions `["*"]`. Apply consistently
    to native and React Native iOS selections. Production remains unchanged.

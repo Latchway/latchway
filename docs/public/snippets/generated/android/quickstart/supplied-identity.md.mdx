@@ -1,9 +1,9 @@
 <Info>
-  Generated from [docs/supplied-identity.md](https://github.com/Latchway/latchway-android/blob/22602393d215eee9f08927bd079171acaba98d47/docs/supplied-identity.md#L1-L76) at documentation source commit `22602393d215eee9f08927bd079171acaba98d47` for SDK `v1.1.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `13392ca4fe96f0ff75346010e4e26a03fa87b95bced56a2642740737f0a4f288`.
+  Generated from [docs/supplied-identity.md](https://github.com/Latchway/latchway-android/blob/71636399b0993b2045a4d278f9ceb1de18662487/docs/supplied-identity.md#L1-L109) at documentation source commit `71636399b0993b2045a4d278f9ceb1de18662487` for SDK `v1.2.1`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `e39b25a35b851660c35173d2ba1b3eed8a3ec06bd6fa3ca728b862ffcf4d417d`.
 </Info>
 
 ````text
-# Shared supplied identity (Android 1.1.0)
+# Shared supplied identity (Android 1.2.1)
 
 Configure public metadata once, supply a token, and use the native account. No
 Firebase SDK, auth listener, identity-owner bootstrap or RN/native ordering switch
@@ -11,18 +11,18 @@ is required by Latchway. The existing app owns login and token refresh.
 
 ```kotlin
 val app = LatchwayAppRegistry.configure(applicationContext, LatchwayAppOptions(
-    baseUrl = "https://latchway.habitify.me/".toHttpUrl(),
-    applicationId = "app_01M1RF27R52YQDHCTH2EZY6DHZ",
+    baseUrl = "https://gateway.example.com/".toHttpUrl(),
+    applicationId = "app_00000000000000000000000000", // Your Latchway application ID.
     environment = "development",
-    identity = firebaseProject("habitify-dev"),
-    playIntegrityCloudProjectNumber = 51819855588L,
+    identity = firebaseProject("your-firebase-project"),
+    playIntegrityCloudProjectNumber = 123456789012L, // This environment's Cloud project number.
 ))
 val account = app.signIn { yourAuth.getIdToken() }
 val client = account.makeClient()
 val http = client.buildOkHttpClient()
 // Set the configured feature on each gateway request:
-val request = Request.Builder().url("https://latchway.habitify.me/v1/chat/completions")
-    .latchwayFeature("habi-assistant")
+val request = Request.Builder().url("https://gateway.example.com/v1/chat/completions")
+    .latchwayFeature("assistant")
     // Set the ordinary JSON body and POST method as required by your integration.
     .build()
 ```
@@ -32,6 +32,10 @@ val request = Request.Builder().url("https://latchway.habitify.me/v1/chat/comple
 The gateway—not decoded JWT hints—validates identity. Supply the Latchway app
 resource ID, not a Firebase app ID or Android package name. Play project numbers
 remain explicit and independent of Firebase metadata.
+
+Replace every example value with the exact configuration for the selected
+environment. Development and Production may use different Cloud project
+numbers; do not copy a Production project number into a Development setup.
 
 ## Sharing and authentication lifetime
 
@@ -49,6 +53,11 @@ remain explicit and independent of Firebase metadata.
 - `account.logout()` retires the captured account across native and RN, including
   cached clients and components. A stale A handle cannot retire B. It is offline
   capable and does not reset user quota or sign out your external auth provider.
+- `app.signOut()` is the simplest app-wide logout, even when no account handle
+  exists. It finds persisted and retiring accounts, cancels pending identity
+  work and coalesces simultaneous calls. On cleanup failure it throws
+  `CLEANUP_REQUIRED` and keeps new protected work blocked; call the same
+  `app.signOut()` again after storage/resources become available.
 - `app.restore { ... }` is for initial auth restoration. It cannot undo recorded
   logout; an accepted new login calls `signIn` explicitly.
 - Closing a client/RN surface does not log out the app. Fresh supplied ID tokens
@@ -60,6 +69,30 @@ before invoking them and fences cancellation before late results may commit.
 Already available tokens also use `signIn(idToken)` and `updateIdToken(idToken)`;
 auth races that occurred before these calls are the application's responsibility.
 Serialize your external auth mutations and report every logout/account change.
+
+## App-level sign-out
+
+```kotlin
+// In your serialized application authentication flow:
+app.signOut()
+yourAuth.signOut()
+// After a new login has been explicitly accepted:
+val nextAccount = app.signIn { yourAuth.getIdToken() }
+```
+
+Do not swallow cleanup failures or start the next sign-in before sign-out
+completes. Aborting chat/tool/UI work and clearing the old user's in-memory
+screen state remain application responsibilities. A delayed callback belonging
+to an old account should retain and call that account's `logout()` instead of
+app-wide `signOut()`, which intentionally targets the app's current intent.
+
+Sign-out is offline local retirement, not remote token revocation or an
+installation reset. It clears supplied identity, session credentials and
+delegated component state while retaining stable account-scoped installation
+keys and non-secret logout fences. It does not clear unrelated application
+storage, sign out Firebase/another auth provider, reset quotas or affect other
+devices. An empty-app sign-out also records logout intent, so process restart
+and automatic auth restoration cannot silently re-enable Latchway.
 
 ## Requirements and migration
 

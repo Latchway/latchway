@@ -1,6 +1,6 @@
 ---
 title: "React Native SDK source bundle"
-description: "Generated, version-bound examples and compatibility metadata for React Native SDK 1.2.0."
+description: "Generated, version-bound examples and compatibility metadata for React Native SDK 2.0.0."
 ---
 
 <Warning>
@@ -13,38 +13,38 @@ description: "Generated, version-bound examples and compatibility metadata for R
 | Field | Value |
 | --- | --- |
 | Package | `@latchway/react-native` |
-| Documented SDK release | `v1.2.0` |
-| Documentation source commit | `6e00e1ae34bdb69f418bd7ee5460c510649423ac` |
+| Documented SDK release | `v2.0.0` |
+| Documentation source commit | `155d26203e3db33099974387c2b9369f30b40c0d` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `6b65b13d1c38f0a87b68e66636206161b406065ffba78623e1951c42683c2878` |
+| Bundle SHA-256 | `0e0c280f4c29567565f96f41f9e54dcd003b5e9aca8257b362bb8b7723ffc0a5` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| `@latchway/react-native` | `1.2.0` | `package.json:L1-L16` |
-| `@latchway/react-native/testing` | `1.2.0` | `package.json:L1-L70` |
-| `@latchway/react-native/package.json` | `1.2.0` | `package.json:L1-L70` |
+| `@latchway/react-native` | `2.0.0` | `package.json:L1-L16` |
+| `@latchway/react-native/testing` | `2.0.0` | `package.json:L1-L70` |
+| `@latchway/react-native/package.json` | `2.0.0` | `package.json:L1-L70` |
 | Node.js | `>=24.19.0` | `package.json:L12-L16` |
 | pnpm | `10.15.0` | `package.json:L12-L16` |
 | `@latchway/client` | `1.1.0` | `package.json:L99-L102` |
 | web-streams-polyfill | `4.3.0` | `package.json:L99-L102` |
 | React peer | `^18.2.0 \|\| ^19.0.0` | `package.json:L103-L110` |
 | React Native peer | `>=0.74.0 <1.0.0` | `package.json:L103-L110` |
-| React Native minimum | `0.74.0` | `docs/react-native-compatibility.md:L8-L11` |
-| React Native latest | `0.82.0` | `docs/react-native-compatibility.md:L8-L11` |
+| React Native minimum | `0.74.0` | `docs/react-native-compatibility.md:L1-L204` |
+| React Native latest | `0.82.0` | `docs/react-native-compatibility.md:L1-L204` |
 | iOS | `15.0` | `LatchwayReactNative.podspec:L5-L21` |
 | Swift language | `6.0` | `LatchwayReactNative.podspec:L20-L24` |
 | C++ language standard | `20` | `LatchwayReactNative.podspec:L21-L25` |
-| Latchway iOS App Attest | `1.2.0` | `LatchwayReactNative.podspec:L27-L27` |
+| Latchway iOS App Attest | `2.0.0` | `LatchwayReactNative.podspec:L27-L27` |
 | Android API | `24` | `android/build.gradle.kts:L49-L53` |
 | Android compile SDK | `34` | `android/build.gradle.kts:L43-L53` |
 | Java bytecode | `17` | `android/build.gradle.kts:L55-L58` |
 | Android Gradle Plugin | `8.12.0` | `android/settings.gradle.kts:L1-L7` |
 | Gradle | `8.13` | `android/gradle/wrapper/gradle-wrapper.properties:L3-L3` |
 | Kotlin | `2.3.21` | `android/settings.gradle.kts:L1-L7` |
-| Latchway Android OkHttp | `1.1.0` | `android/build.gradle.kts:L77-L78` |
-| Latchway Android Play Integrity | `1.1.0` | `android/build.gradle.kts:L77-L78` |
+| Latchway Android OkHttp | `1.2.1` | `android/build.gradle.kts:L77-L78` |
+| Latchway Android Play Integrity | `1.2.1` | `android/build.gradle.kts:L77-L78` |
 | OpenAI JavaScript | `7.8.0` | `Conformance/framework/react-native-fetch.json:L12-L20` |
 | Vercel AI SDK | `7.0.85` | `Conformance/framework/react-native-fetch.json:L12-L20` |
 | Vercel AI OpenAI | `4.0.52` | `package.json:L117-L123` |
@@ -57,7 +57,7 @@ description: "Generated, version-bound examples and compatibility metadata for R
 
 ### `frameworks/react-native-consumers.ts`
 
-Source: [example/src/framework-consumers.ts](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/example/src/framework-consumers.ts#L1-L153)
+Source: [example/src/framework-consumers.ts](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/example/src/framework-consumers.ts#L1-L153)
 
 ```typescript
 import { createAnthropic, type AnthropicProvider } from "@ai-sdk/anthropic";
@@ -217,36 +217,127 @@ export async function streamOpenAIChat(
 
 ### `quickstart/create-client.tsx`
 
-Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/example/src/App.tsx#L57-L78)
+Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/example/src/App.tsx#L58-L81)
 
 ```tsx
-function makeClient(): LatchwayClient {
-  return createLatchwayClient({
+async function makeClient(): Promise<LatchwayClient> {
+  await ensureFirebaseApp();
+  const projectID = firebaseApp.app().options.projectId;
+  if (!projectID) throw new Error("The application must configure its Firebase project ID.");
+  const app = await Latchway.configure({
     baseURL: deployment.baseURL,
     applicationID: deployment.applicationID,
     environment: deployment.environment,
-    identityProvider: "firebase",
-    getIdentityToken: physicalConformanceEnabled()
-      ? physicalIdentityToken
-      : developmentDeviceBootstrapEnabled()
-        ? developmentIdentityToken
-        : ordinaryIdentityToken,
+    identity: firebaseProject({projectID}),
     ...(deployment.googleCloudProjectNumber === undefined ? {} : {
       android: { playIntegrityCloudProjectNumber: deployment.googleCloudProjectNumber },
     }),
     ...(deployment.rootKeychainAccessGroup === undefined ? {} : {
       apple: {
         rootKeychainAccessGroup: deployment.rootKeychainAccessGroup,
-        legacySharedKeychainAccessGroups: deployment.legacySharedKeychainAccessGroups,
+        sharedKeychainAccessGroups: deployment.sharedKeychainAccessGroups,
       },
     }),
   });
+  const account = await app.signIn({getIdToken: physicalConformanceEnabled()
+    ? physicalIdentityToken : developmentDeviceBootstrapEnabled()
+      ? developmentIdentityToken : ordinaryIdentityToken});
+  return account.makeClient();
 }
+```
+
+### `quickstart/development-attestation.md`
+
+Source: [docs/development-attestation.md](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/docs/development-attestation.md#L1-L82)
+
+```text
+# Development attestation
+
+These instructions require gateway 1.1.3 or later, supporting
+`appAttest.environment: any` and the Development-only Play
+testing exception. Deploy it before enabling these policies; environments are not changed
+automatically by installing this SDK.
+Keep ordinary `Latchway.configure`, application-supplied identity and shared
+native accounts. No new Firebase dependency, native bootstrap or JS attestation
+flag is required. Never send raw Apple evidence or Google tokens from JavaScript.
+
+## Local iOS builds and TestFlight
+
+The gateway's `appAttest.environment` accepts `development`, `production`, or
+`any`. These describe accepted Apple evidence, not the Latchway environment
+name. Typically use `any` for Latchway Development and `production` for
+Production, with the intended distribution categories and bundle versions
+separately allowed for native iOS and RN iOS.
+
+Distribution and build checks use Apple's signed metadata when present. Older
+proofs can omit it and do not establish cryptographic proof of distribution or
+build. Accepting `any` changes only Apple-environment acceptance.
+
+Apple's signed entitlement only accepts `development` or `production`, never
+`any`. Local development normally uses the sandbox; TestFlight uses production
+regardless of the entitlement. Keep `apple.rootKeychainAccessGroup` and normal
+signing configured. Do not infer Apple evidence from `__DEV__` or disable App
+Attest. See [Apple's entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.devicecheck.appattest-environment).
+
+The native SDK owns persisted App Attest state. If Apple reports `invalidKey`
+after replacing a build with a different App Attest environment, it attempts
+one replacement key and fresh attestation. A server policy rejection does not
+itself rotate an accepted key. Fix policy/signing rather than clearing Keychain
+or adding JS retries. Sandbox and production keys are not interchangeable.
+[Apple's preparation guide](https://developer.apple.com/documentation/devicecheck/preparing-to-use-the-app-attest-service)
+
+## Google Play testing
+
+Configure the public decimal project number for the selected Latchway
+environment in `android.playIntegrityCloudProjectNumber`. Use explicit app
+environment configuration rather than assuming `__DEV__` selects the right
+backend: a release build may intentionally use Development. Embedded native and
+RN callers must agree, and changes require a full native process restart.
+
+In Play Console, configure dedicated developer Google accounts under **Protected
+with Play → Play Integrity API → Manage → Testing**, with access to the app's
+testing release and suitable recognized/licensed/device verdicts. These are
+device Google Play accounts, not the Firebase users supplied to Latchway.
+Google marks the token as a testing response; only the server reads that flag.
+[Google's testing instructions](https://developer.android.com/google/play/integrity/additional-tools)
+
+The development gateway must explicitly enable the Play Integrity policy's
+`allowTestingResponses`. Keep the normal `device_verified` or
+`strong_device_verified` minimum: the server permits a provider-scoped exception
+only in the opted-in Development environment and retains actual `debug` trust.
+Real device responses still work there. Custom feature/CEL rules explicitly
+requiring `installation.trust_level == 'device_verified'` still reject `debug`;
+review them deliberately rather than lowering global trust requirements.
+Production keeps rejecting testing responses. Actual package, certificate and
+request bindings, authentication and quota remain enforced. A debug certificate may need
+explicit development allowlisting; a locally installed APK is not guaranteed
+to pass. Test accounts/overrides are not isolated merely by selecting a separate
+Cloud project. Firebase App Check debug tokens are not a substitute.
+
+Activating a configuration revision requires fresh mobile attestation evidence
+before an existing session can refresh. Expect a brief re-attestation through
+the native SDK; an older accepted proof does not preserve access under a newly
+changed policy.
+
+## What to verify
+
+- On a physical Apple device, exercise both a local build and TestFlight against
+  Development, including subsequent assertions and a build-channel transition.
+- On Android, obtain a real Google-issued testing token through the native SDK
+  and confirm the server reports `debug`; also exercise a rejected verdict.
+- Check production-only policies reject development Apple proofs and Google
+  testing responses, including refresh of previously accepted evidence.
+- Repeat with native-first and RN-first configure using the same app/account.
+
+Development Apple attestation is genuine Apple evidence. Google testing
+responses simulate verdicts and are never upgraded to genuine device trust.
+Neither fixture tests nor this workflow substitutes for the separately scoped
+[production physical-device evidence](physical-device-evidence.md).
 ```
 
 ### `quickstart/streaming-fetch.tsx`
 
-Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/example/src/App.tsx#L92-L118)
+Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/example/src/App.tsx#L112-L138)
 
 ```tsx
   const send = async (): Promise<void> => {
@@ -280,13 +371,14 @@ Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-
 
 ### `quickstart/supplied-identity.md`
 
-Source: [docs/supplied-identity.md](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/docs/supplied-identity.md#L1-L145)
+Source: [docs/supplied-identity.md](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/docs/supplied-identity.md#L1-L197)
 
 ````text
 # Shared accounts with developer-supplied identity
 
-Release line: React Native 1.2.0, iOS 1.2.0, Android 1.1.0, JavaScript client
-1.1.0 and server 1.1.1 or later (contract 1.1.0).
+This guide describes React Native 2.0.0's fresh supplied-identity account model,
+with iOS 2.0.0 and Android 1.2.1. The gateway requirement is server
+1.1.1 or later, contract 1.1.0 / wire 3 with `supplied_identity_v1`.
 
 The same integration works in a standalone RN app or an RN screen embedded in
 a native app. Either side can configure first. Matching public configuration
@@ -296,9 +388,9 @@ or embedded-mode switch in this integration.
 
 ## Configure
 
-Install `@latchway/react-native@1.2.0`, install Pods, and rebuild both native apps.
-The native dependencies are pinned to compatible releases. Keep one native SDK
-copy if the host already uses Latchway directly.
+Install `@latchway/react-native@2.0.0`, update Pods and rebuild both native apps.
+JavaScript and native bridge ABI 3 must be upgraded together; no JS-only update.
+Keep one native SDK copy if the host already uses Latchway directly.
 
 ```ts
 import {Latchway, firebaseProject} from '@latchway/react-native';
@@ -347,7 +439,7 @@ An already-configured native/RN caller can attach without another login:
 
 ```ts
 const client = await app.makeClient();
-// Or capture the shared account for later token updates/logout:
+// Or capture the shared account for later token updates:
 const account = await app.currentAccount();
 ```
 
@@ -361,14 +453,61 @@ Latchway logout; an accepted new login or explicit user resume action can sign i
 // Same account only. The gateway verifies the replacement before accepting it.
 await account.updateIdToken({getIdToken: () => yourAuth.getIdToken()});
 
-// Logout affects native and RN for this account; no online provider call needed.
-await account.logout();
-// Your serialized application auth flow then signs out its external provider.
+// In the serialized application auth flow, stop UI/tool work first.
+await app.signOut();
+await yourAuth.signOut(); // Your provider is not signed out by Latchway.
 
 // Screen teardown only:
 abortController.abort();
 await client.dispose();
 ```
+
+`app.signOut(): Promise<void>` is the recommended application sign-out API.
+It delegates to the shared native app and works without a current account or
+generation ID: before sign-in returns, after process restart with persisted
+state, or while an earlier cleanup is unfinished. Configure the app after
+process startup first; `getApp()` retrieves only an already-configured app.
+It fences pending identity
+acquisition/refresh and retires the selected app's account across native and RN
+callers. Repeating it after successful cleanup is safe; repeating it after a
+cleanup failure retries that cleanup. A physical Keychain/Keystore or storage
+failure still rejects. Keep protected UI disabled, make storage accessible and
+retry `app.signOut()` before accepting another login. Do not swallow that error
+or fall back to a different account/legacy client.
+
+Sign-out is scoped to this named app on this installation, not every configured
+app or every device. It does not need an identity-token callback or an online
+provider logout. It does not reset quotas or undo already dispatched requests;
+those requests may still be billed. `account.logout()`, generation-targeted
+`app.logout(generationID)` and `client.logout()` remain available for operations
+that deliberately target a captured account generation.
+
+### Native-owned authentication
+
+If the native host owns authentication, its auth controller must notify Latchway
+on every sign-out/account replacement—even if no AI feature has been opened or
+React Native has never mounted. Use the same named app configured by either
+side, serialize the auth transition, and await its native sign-out:
+
+```swift
+// Swift: the shared LatchwayApp, not a newly constructed legacy client.
+try await app.signOut()
+// Then perform the application's external provider sign-out.
+```
+
+```kotlin
+// Kotlin: call the shared LatchwayApp's suspend function from the auth coroutine.
+app.signOut()
+// Then perform the application's external provider sign-out.
+```
+
+Do not depend on a React Native auth listener being alive to perform native
+sign-out. A provider's own sign-out never notifies Latchway automatically. For
+an app with several independent named Latchway apps, its auth owner must sign out
+each app affected by the external account change. See
+[shared native apps](shared-native-apps.md) for attachment and ownership details.
+
+### Cancellation and token freshness
 
 All acquisition operations accept `signal`. Aborting also fences the native
 ticket, including when first sign-in has not returned an account. The native
@@ -406,6 +545,9 @@ rejects a competing subscription, including through another RN wrapper/runtime.
 Dispose the binding when its auth owner ends, not on every screen unmount.
 `await binding.dispose()` cancels pending work and releases the subscription;
 it does not log out the shared account. Other teams need only attach to the app.
+The `signOut` event uses app-level sign-out, including when no account handle
+was returned. `onError` must surface cleanup failures; an event listener does
+not replace awaiting sign-out in the auth owner's serialized transition.
 
 ## LangChain
 
@@ -415,15 +557,16 @@ See [the LangChain guide](https://docs.latchway.dev/clients/react-native/framewo
 tool execution and UI updates and clear in-memory chat history. The SDK handles
 native account isolation; it does not own your screen's state.
 
-## Migration and limits
+## Fresh storage and limits
 
 - Shared mode requires an explicit `sharedNativeCallers` policy with the same
   required host attestation. Upgrading the server does not widen app policies.
-- `createLatchwayClient` and explicit authority APIs remain compatibility paths.
-  Do not silently change an active legacy authority into supplied identity.
-- SDK-owned legacy storage uses the native migration journal. Applications with
-  custom stores or delegated extensions must inventory their actual storage and
-  groups; an invented empty list is not a migration strategy.
+- The current public entry point is `Latchway.configure`, followed by
+  `signIn`/`restore` and opaque account handles. There is no direct root-client
+  constructor, identity-owner transfer or old-session adoption path.
+- Storage is account-scoped from first use. No old-store inventory or cleanup
+  callback is required. Current component allowlists, root-private Keychain
+  isolation, persistent logout and cleanup-retry journals remain enforced.
 - Logout never resets server-side per-user quotas or logs out other devices.
 - Android libraries compile against API 34; the host's target SDK and other
   dependencies can require a newer compile SDK. React Native 0.74+/React 18.2+

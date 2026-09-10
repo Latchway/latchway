@@ -4,17 +4,18 @@ description: "Understand the root-authorized flow that binds a component public 
 icon: "puzzle"
 audience: "client-ios"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "ios-sdk"
 ---
 
 <Warning>
-  This flow is defined by released contract `1.0.0` and wire protocol `2`.
+  Current shared accounts use client contract `1.1.0` and wire protocol `3`.
   Implementations must follow the OpenAPI and generated SDK reference rather
-  than infer a wire format from this page; the product remains pre-release and
-  publication is gated.
+  than infer a wire format from this page. Published packages are not physical
+  extension-execution evidence; include it in your application's pre-release
+  verification.
 </Warning>
 
 ## Delegated component provisioning
@@ -59,6 +60,24 @@ The provisioning authorization ends after successful consumption or when its
 short lifetime expires. An established component trust relationship and its
 sessions end on any invalidating root, family, component, environment,
 application, user, or policy state.
+
+## Pass the current account explicitly
+
+After configuring current component groups and signing in, prepare the approved
+component and export only its non-secret account descriptor:
+
+```swift
+try await client.prepareComponents([component])
+let handoff = try await client.componentAccount()
+let handoffData = try JSONEncoder().encode(handoff)
+```
+
+The extension decodes `LatchwayComponentAccount` and supplies it as `account`
+to `LatchwayExtensionClient`, together with the same gateway, application,
+environment and component configuration. It does not configure a root identity
+provider or receive the private root group. The persistent generation fence
+rejects a retired handoff, including after the same user signs in again.
+See the versioned [iOS shared-app guide](https://github.com/Latchway/latchway-ios-sdk/blob/v2.0.0/Documentation/SharedNativeApps.md).
 
 ## Failure behavior
 

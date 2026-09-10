@@ -1,12 +1,12 @@
 ---
 title: "Send a protected request from iOS"
-description: "Build the Swift source candidate, authorize URLSession with a component key, and verify an App Attest-aware request."
+description: "Configure a shared Swift account with your application's ID token and send an App Attest-protected request."
 icon: "apple"
 audience: "client-ios"
 pageType: "tutorial"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-01"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "ios-sdk"
 ---
 
@@ -14,15 +14,15 @@ import IOSURLSessionQuickstart from "/snippets/generated/ios/quickstart/url-sess
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 import { SetupCoordinates } from "/components/SetupPath.jsx";
 
-<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">iOS 15+</Badge>
+<Badge color="blue">Swift SDK 2.0.0</Badge> <Badge color="blue">iOS 15+</Badge>
 
 **Expected time:** 15 minutes after the mandatory gateway, identity, signing,
 and App Attest prerequisites below are available.
 
-**Mode:** Source evaluation with production App Attest inputs; prerequisite
-provisioning and protected distribution evidence are not included.
+**Mode:** Developer-supplied identity with native App Attest. Physical-device
+and distribution verification remain separate from package installation.
 
-**Coordinates:** server contract `1.0.0`; Swift SDK source `1.0.0`.
+**Coordinates:** server `1.1.3`; client contract `1.1.0`; Swift SDK `2.0.0`.
 
 ## Outcome
 
@@ -37,13 +37,14 @@ component, feature, and metered usage.
   Attest policy configured in Latchway
 - an iOS application with the App Attest entitlement and resolved Keychain
   access group
-- Xcode and an authorized checkout of `latchway-ios-sdk`
+- Xcode with Swift 6.2 support and an iOS 15 or newer deployment target
+- an existing authentication flow that supplies a current ID token
 
 <Warning>
-  The Swift 1.0.0 package is not published yet. The production SDK does not
-  accept an application-supplied debug attestation token. Local unit and
-  contract tests are deterministic; an end-to-end App Attest request requires
-  a correctly signed application on a supported physical device.
+  Version 2.0.0 is a source-breaking fresh-account release. It does not adopt
+  older SDK storage or expose the removed root-constructor and identity-authority
+  APIs. App Attest still requires a correctly signed supported physical device;
+  a simulator or application-supplied debug token is not a substitute.
 </Warning>
 
 ### Use the operator-provided coordinates
@@ -65,26 +66,54 @@ iOS app -> Latchway Swift SDK -> configured Latchway -> selected upstream
 ## Procedure
 
 <Steps>
-  <Step title="Add the local Swift package">
-    In Xcode, add the `latchway-ios-sdk` checkout as a local package and link
+  <Step title="Add the versioned Swift package">
+    In Xcode, add the GitHub package at version `2.0.0` and link
     `Latchway` plus `LatchwayAppAttest` to the application target.
 
 ```swift
-.package(path: "../latchway-ios-sdk")
+.package(url: "https://github.com/Latchway/latchway-ios-sdk.git", exact: "2.0.0")
 ```
 
-    Expected result: the app compiles against version-matched source.
-    Diagnostic: run `swift test` in the SDK checkout for a source or toolchain
-    mismatch.
+    Expected result: Xcode resolves the versioned package. Core and App Attest
+    do not depend on Firebase. Add optional framework or extension products only
+    when your application uses them.
+    Diagnostic: inspect Xcode's resolved package version and Swift toolchain if
+    package resolution or compilation fails.
   </Step>
   <Step title="Configure identity and App Attest">
-    In `LatchwayClientFactory.swift`, provide the existing application identity
-    token and the exact `app_...` resource ID, environment, HTTPS gateway, app
-    version, and fully resolved private Keychain access group.
+    Provide the exact `app_...` resource ID, environment, HTTPS gateway, public
+    identity metadata, and fully resolved private Keychain access group:
+
+```swift
+import Foundation
+import Latchway
+import LatchwayAppAttest
+
+let app = try await LatchwayApp.configure(.init(
+    baseURL: URL(string: "https://gateway.example.com")!,
+    applicationID: "app_01J00000000000000000000000",
+    environment: "development",
+    rootKeychainAccessGroup: "YOURTEAM.com.example.assistant",
+    suppliedIdentity: try .firebaseProject(projectID: "your-project-id")
+))
+
+// Your existing authentication code obtains the token; Latchway imports no Auth SDK.
+let account = try await app.signIn { try await yourAuth.currentIDToken() }
+let client = try await account.makeClient()
+```
+
+    `yourAuth` represents your application's authentication integration.
+    `firebaseProject` derives public issuer/audience metadata; it does not fetch
+    or authenticate tokens. For another supported issuer, use
+    `LatchwaySuppliedIdentityConfiguration(providerID:issuer:audience:tenantID:)`.
+    The gateway verifies identity. Equivalent native and React Native
+    configuration joins the same app; conflicting explicit settings fail.
 
     Never pass `$(AppIdentifierPrefix)` as a runtime value. The SDK and server
-    configuration must agree on the bundle ID, App ID prefix, environment, and
-    exact build number used by App Attest policy.
+    configuration must agree on the bundle ID, App ID prefix, and allowed signing
+    and App Attest environments. Build allowlists apply only when configured.
+    Server `1.1.3` accepts `development`, `production`, or `any` as its Apple
+    environment policy; `any` is not a client flag and does not bypass attestation.
 
     Expected result: the application builds with the exact bundle identifier,
     App Attest entitlement, and private root Keychain group expected by policy.
@@ -92,9 +121,37 @@ iOS app -> Latchway Swift SDK -> configured Latchway -> selected upstream
     `codesign -d --entitlements :- <path-to-built-app>`; do not infer the
     runtime group from the unexpanded project file.
   </Step>
-  <Step title="Authorize and send the request">
-    Put this complete source candidate in `HabitAssistant.swift` and replace
-    only the documented deployment values and identity provider.
+  <Step title="Send and manage the account">
+    Use `client.transport(feature: "habit-assistant")` for your URLSession-style
+    requests. Keep request cancellation and incremental stream consumption in
+    your application. The client never receives the upstream provider key.
+
+    Supply refreshed tokens for the same user and forward logout from your
+    application authentication flow:
+
+```swift
+try await account.updateIdToken { try await yourAuth.currentIDToken() }
+// Await cleanup before accepting another login.
+try await app.signOut()
+```
+
+    `signOut()` retires the current shared native/React Native account locally;
+    it does not sign out your external provider, reset per-user quota, or revoke
+    the installation. Retry the same operation after storage becomes available
+    if it reports `cleanupRequired`. For a delayed callback tied to an older
+    login, use that captured account's `logout()` instead.
+
+    Expected result: protected requests use the current shared account, and
+    successful sign-out blocks further work until an explicit new sign-in.
+    Diagnostic: correlate the stable error code and request ID; for missing or
+    expired identity, supply a refreshed token for the same account.
+  </Step>
+  <Step title="Optionally run the disposable verification journey">
+    The generated example below is a complete, compiled one-shot harness.
+    Replace its documented deployment values and supply your authentication
+    callbacks. It intentionally revokes the test installation and invokes the
+    external sign-out callback when finished. Do not put those destructive
+    conformance actions in an ordinary chat request or logout path.
 
     <IOSURLSessionQuickstart />
 
@@ -154,14 +211,16 @@ Input and output usage: present
 
 <AccordionGroup>
   <Accordion title="App Attest is unavailable">
-    Confirm a supported physical device, the production entitlement, the exact
-    bundle and team identifiers, and the configured environment. A simulator
-    cannot provide production App Attest evidence.
+    Confirm a supported physical device, the signed App Attest entitlement,
+    exact bundle and team identifiers, and matching server environment policy.
+    Development signing and TestFlight can use different Apple environments.
+    A simulator cannot provide App Attest evidence.
   </Accordion>
   <Accordion title="The root Keychain group is rejected">
     Pass the fully resolved private application group that appears first in the
-    signed entitlement. List extension-shared groups only as explicit legacy
-    migration coordinates.
+    signed entitlement. Keep root storage private; extension-shared groups are
+    separate, explicitly provisioned component groups. Version 2.0.0 needs no
+    legacy-group inventory or storage-adoption callback.
   </Accordion>
   <Accordion title="The request is denied before upstream dispatch">
     Follow the stable error code to [Errors](/reference/errors), then compare
@@ -169,8 +228,9 @@ Input and output usage: present
   </Accordion>
 </AccordionGroup>
 
-<Prompt title="Integrate Latchway iOS source candidate 1.0.0">
-Use Latchway iOS SDK 1.0.0 from a local checkout with server 1.0.0. Preserve
+<Prompt title="Integrate Latchway iOS 2.0.0">
+Use Latchway iOS SDK 2.0.0 with server 1.1.3. Configure the shared app and supply
+the existing application's ID token without adding a Firebase dependency. Preserve
 the existing identity provider, use the exact application resource ID and
 feature ID, keep App Attest and DPoP keys in native code, never add an upstream
 provider credential, and preserve URLSession cancellation and streaming.

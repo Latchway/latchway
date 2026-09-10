@@ -1,0 +1,67 @@
+<Info>
+  Generated from [docs/play-integrity-testing.md](https://github.com/Latchway/latchway-android/blob/71636399b0993b2045a4d278f9ceb1de18662487/docs/play-integrity-testing.md#L1-L61) at documentation source commit `71636399b0993b2045a4d278f9ceb1de18662487` for SDK `v1.2.1`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `e39b25a35b851660c35173d2ba1b3eed8a3ec06bd6fa3ca728b862ffcf4d417d`.
+</Info>
+
+```text
+# Play Integrity testing during development
+
+This workflow requires gateway 1.1.3 or later. Installing the SDK does not enable
+test responses on an existing deployment; an administrator must explicitly
+enable the Development-only gateway policy.
+
+Obtaining a Play Integrity token and passing gateway policy are different. The
+SDK always requests Google's standard token with the exact server-supplied
+request hash. Only the server decodes the token and assigns trust. There is no
+client `debug`, `isTestingResponse`, or attestation-bypass configuration.
+
+## Set up a development workflow
+
+1. Configure the development environment's Cloud project and verification
+   service-account secret on the gateway. Use the matching numeric
+   `playIntegrityCloudProjectNumber` in native configuration. Native and RN
+   callers sharing an app must agree; restart the full application after
+   changing immutable configuration.
+2. In Play Console, open **Protected with Play → Play Integrity API → Manage →
+   Testing**, and add dedicated developer Google accounts. These are the
+   accounts signed into Google Play on the device, not necessarily the app's
+   authentication accounts. Give testers access to the app's testing release.
+3. For an accepted-path test, configure recognized, licensed and required
+   device-integrity verdicts. Google places `isTestingResponse: true` inside the
+   decoded token. See [Google's testing tools](https://developer.android.com/google/play/integrity/additional-tools).
+4. Explicitly enable `allowTestingResponses` in the gateway's development
+   Play Integrity policy. Keep its minimum trust at `device_verified` or
+   `strong_device_verified`: the gateway permits the Google-verified testing
+   exception only for this opted-in development provider and keeps the actual
+   trust labeled `debug`. Apply the opt-in to native Android and RN Android if
+   both are enabled. Production continues rejecting testing responses.
+5. Keep the actual application ID and signing certificate allowed by the gateway,
+   including a deliberately approved debug certificate when required. Preserve
+   request binding, user authentication and quotas.
+
+Real and simulated responses can coexist in Development. A custom feature/CEL
+rule explicitly requiring `installation.trust_level == 'device_verified'`
+still rejects `debug`; review such a rule deliberately when testing that feature.
+Do not weaken the global trust ordering or relabel testing evidence as genuine.
+
+A separate development Cloud project does not necessarily isolate Play Console
+test-account overrides. Use dedicated test accounts rather than an account
+whose production behavior you need to measure. Firebase App Check debug tokens
+are a different mechanism and cannot replace a Play Integrity token here.
+
+## Limits and verification
+
+This is not a universal sideloaded-debug-APK bypass. Google can still fail token
+issuance or return app identity/certificate fields that do not satisfy gateway
+policy. Verify the actual developer build and server denial before changing
+allowlists; never remove package, signing, hash or licensing checks blindly.
+
+Record a development session and authorized request, confirm server diagnostics
+label the evidence as testing/`debug`, and confirm the same testing evidence
+cannot establish or refresh a Production session. Also exercise a negative
+Google verdict and show it is rejected. Never log the raw token.
+
+For genuine device and distribution verification, install a signed build from a
+Google Play testing track with no test override and follow the separate
+[physical Play Integrity evidence](real-device-conformance.md) runbook. Mocked
+provider tests and Google's simulated responses are not that evidence.
+```

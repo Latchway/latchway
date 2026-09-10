@@ -4,18 +4,19 @@ description: "Separate component private material while using narrowly scoped Ke
 icon: "puzzle"
 audience: "client-ios"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "ios-sdk"
 ---
 
 import IOSAppExtensionComponent from "/snippets/generated/ios/quickstart/app-extension-component.swift.mdx";
 
 <Warning>
-  These identifiers and APIs describe the pre-release source candidate. No
-  released SDK package or protected physical-device proof exists yet; bind the
-  final values to the exact signed profiles instead of copying placeholders.
+  Bind these identifiers to the exact signed profiles instead of copying
+  placeholders. SDK publication and compilation do not establish protected
+  physical extension execution. Include that proof in your application's
+  pre-release verification.
 </Warning>
 
 Give the containing application a private root access group, then give each
@@ -42,27 +43,22 @@ settings fail closed.
 
 The following non-executable configuration sketch names the fields that must
 agree. Use the generated host example below for version-bound Swift source.
-Pass the private root group and the complete explicit shared-group list to both
-the root client and App Attest provider:
+Configure the private root group and current component-group allowlist once.
+The App Attest module supplies an account-scoped provider:
 
 ```text
 let rootGroup = "ABCDE12345.com.example.myapp"
-let sharedGroups = ["ABCDE12345.com.example.myapp.intent"]
-
-let appAttest = LatchwayAppAttestProvider(
-    applicationID: applicationID,
-    environment: "production",
-    rootKeychainAccessGroup: rootGroup,
-    legacySharedKeychainAccessGroups: sharedGroups
-)
-let configuration = LatchwayConfiguration(
+let componentGroups = ["ABCDE12345.com.example.myapp.intent"]
+let app = try await LatchwayApp.configure(.init(
     baseURL: gateway,
     applicationID: applicationID,
     environment: "production",
     rootKeychainAccessGroup: rootGroup,
-    legacySharedKeychainAccessGroups: sharedGroups,
-    attestationProvider: appAttest
-)
+    suppliedIdentity: try .firebaseProject(projectID: projectID),
+    componentKeychainAccessGroups: componentGroups
+))
+let account = try await app.signIn { try await yourAuth.currentIDToken() }
+let client = try await account.makeClient()
 ```
 
 Pass the component's exact resolved group to its component configuration:
@@ -86,13 +82,14 @@ key and session. Give every sibling extension a different group, include only
 its own group in that sibling, and keep the containing app's private root group
 and App Attest entitlement out of all extension targets.
 
-The SDK proves that the configured private root group is the signed default. It
-then scans the explicit shared groups only at known Latchway root-record
-coordinates. A stale root record created under an earlier shared-first
-entitlement fails with `rootKeychainMigrationRequired`; version 1 does not
-silently read, move, or delete it.
+The SDK checks that the configured private root group is the signed default.
+Current component groups must be separate, explicitly allowlisted and present
+in the signed entitlements. Version 2 has no prior-store inventory or automatic
+legacy credential adoption. It retains current persistent retirement fences and
+deny-only safety markers; neither reinstall nor a new group name bypasses
+account cleanup requirements.
 
-Use an App Group only for non-secret provisioning data that the final SDK
+Use an App Group only for non-secret provisioning data that the SDK
 explicitly documents. Server challenges, public-key identifiers, bounded
 delegation envelopes, and status hints may be shareable if the final protocol
 permits them. Private keys, identity tokens, access tokens, refresh tokens, raw

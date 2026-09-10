@@ -72,6 +72,9 @@ ADDITIONAL_DOCUMENTS = {
     ("android", "1.1.0"): {"quickstart/supplied-identity.md", "quickstart/supplied-identity.kt"},
     ("js", "1.1.0"): {"frameworks/native-lifecycle.md", "frameworks/usage.md"},
     ("react-native", "1.2.0"): {"quickstart/supplied-identity.md"},
+    ("ios", "2.0.0"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md", "frameworks/foundation-models-request.swift", "frameworks/foundation-models-stream.swift"},
+    ("android", "1.2.1"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md", "quickstart/supplied-identity.kt"},
+    ("react-native", "2.0.0"): {"quickstart/development-attestation.md", "quickstart/supplied-identity.md"},
 }
 
 
@@ -238,6 +241,8 @@ def main() -> int:
             )
             expected_generated = f"snippets/generated/{sdk}/{payload_path}"
             expected_snippet = expected_generated + ".mdx"
+            if Path(payload_path).suffix == ".md":
+                expected_generated += ".txt"
             if (
                 payload_path not in documents
                 or record["kind"]
@@ -303,8 +308,7 @@ def main() -> int:
                 != rendered_snippet(payload_path, payload, source, bundle)
             ):
                 fail(f"rendered snippet digest differs: {record['snippet_path']}")
-            paths.append(record["generated_path"])
-            paths.append(record["snippet_path"])
+            paths.extend(sorted((record["generated_path"], record["snippet_path"])))
             payload_paths.append(payload_path)
             documented.add(record["generated_path"])
             documented.add(record["snippet_path"])

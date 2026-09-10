@@ -4,9 +4,9 @@ description: "Share native and React Native accounts with application-supplied I
 icon: "user-round-check"
 audience: "client-react-native"
 pageType: "how-to"
-serverVersion: "1.1.1"
-sdkVersion: "1.2.0"
-lastVerified: "2026-09-08"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "react-native-sdk"
 ---
 
@@ -87,7 +87,7 @@ native intent, not only the JavaScript Promise.
 
 ```ts
 // In the application's serialized auth flow:
-await account.logout();
+await app.signOut();
 await yourAuth.signOut();
 
 // A screen unmount is different:
@@ -97,8 +97,11 @@ await client.dispose();
 
 Logout is offline-capable account retirement shared by native and RN. It does not
 require online installation revocation, sign out the external provider, reset
-server-side user quota, or log out other devices. A's old handle cannot retire B.
-On cleanup failure keep AI disabled and retry the captured account.
+server-side user quota, or log out other devices. `app.signOut()` also cancels
+pending sign-in and retries interrupted cleanup; calling it when already signed
+out is safe. On cleanup failure keep AI disabled and retry before another login.
+For deliberately delayed work tied to an old account, use that captured
+`account.logout()` instead: A's old handle cannot retire B.
 
 Serialize external auth changes so delayed A cleanup cannot sign out B. Optional
 `bindLatchwayAuth` accepts a developer-supplied typed event subscription; use one
@@ -113,9 +116,10 @@ Native refresh credentials, private keys and raw attestation evidence stay nativ
 The new supplied-identity API does not return ID tokens in account handles,
 diagnostics or events. Upstream provider credentials never belong in the client.
 
-The legacy `createLatchwayClient({getIdentityToken})` callback remains a separate
-compatibility path; do not combine it with migrated shared-account state or
-silently replace a legacy authority during configure.
+Version 2 removes legacy direct-client, callback-authority and migration/adoption
+APIs. Use `Latchway.configure` and supplied identity. It does not automatically
+migrate older SDK storage. Upgrade the native binary and JavaScript together;
+see [release upgrade boundaries](/release-status#upgrade-and-rollback).
 
 ## Verify
 

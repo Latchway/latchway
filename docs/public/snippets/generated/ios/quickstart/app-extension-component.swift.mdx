@@ -1,13 +1,50 @@
 <Info>
-  Generated from [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/37f46733d95e659230f460f44f3ecbd7c7d03a14/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L37-L89) at documentation source commit `37f46733d95e659230f460f44f3ecbd7c7d03a14` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `a7a1b4b8512bb2e23b0a6874dc733ac74032d7857b6bff364e054d833bab6274`.
+  Generated from [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/4cb90278597f4cf6881b08c8521cf37dc398c7cf/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L1-L121) at documentation source commit `4cb90278597f4cf6881b08c8521cf37dc398c7cf` for SDK `v2.0.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `bc0f804c821a1b97b63570e54820aaa8eb2865b954f0dd08bc056b51fe3ed9a8`.
 </Info>
 
 ```swift
+import Foundation
+import Latchway
+import LatchwayAppAttest
+import SwiftUI
+
+@main
+struct ComponentHostApp: App {
+    @StateObject private var model = ComponentHostModel()
+
+    var body: some Scene {
+        WindowGroup {
+            VStack(spacing: 16) {
+                Text("Latchway component boundary")
+                    .font(.headline)
+                Text(model.status)
+                    .multilineTextAlignment(.center)
+                Button("Prepare widget") {
+                    Task { await model.prepareWidget() }
+                }
+                Button("Replace widget key") {
+                    Task { await model.replaceWidget() }
+                }
+                Button("Revoke family and erase keys", role: .destructive) {
+                    Task { await model.revokeFamily() }
+                }
+            }
+            .padding()
+        }
+    }
+}
+
+@MainActor
+private final class ComponentHostModel: ObservableObject {
+    @Published var status = "The containing app has not provisioned the widget."
+    private var client: LatchwayClient?
+
     func prepareWidget() async {
         do {
-            let client = try makeClient()
+            let client = try await makeClient()
             let component = try ComponentExampleConfiguration.widget()
             let result = try await client.prepareComponents([component])
+            try ComponentExampleConfiguration.saveAccount(try await client.componentAccount(), for: component)
             let prepared = result.first?.containingAppActionRequired == false
             status = prepared ? "Widget key and one-time grant are prepared." : "Preparation needs attention."
             self.client = client
@@ -18,9 +55,10 @@
 
     func replaceWidget() async {
         do {
-            let client = try makeClient()
+            let client = try await makeClient()
             let component = try ComponentExampleConfiguration.widget()
             _ = try await client.replaceComponent(component)
+            try ComponentExampleConfiguration.saveAccount(try await client.componentAccount(), for: component)
             status = "The old component session is revoked and a new key is prepared."
             self.client = client
         } catch {
@@ -30,9 +68,10 @@
 
     func revokeFamily() async {
         do {
-            let client = try client ?? makeClient()
-            let component = try ComponentExampleConfiguration.widget()
-            try await client.revokeCurrentInstallationFamily(retiring: [component])
+            let client: LatchwayClient
+            if let existing = self.client { client = existing }
+            else { client = try await makeClient() }
+            try await client.revokeCurrentInstallationFamily()
             status = "The family is revoked and root/component Keychain material was erased."
             self.client = nil
         } catch {
@@ -40,20 +79,49 @@
         }
     }
 
-    private func makeClient() throws -> LatchwayClient {
+    private func makeClient() async throws -> LatchwayClient {
         let applicationID = try requiredInfo("LatchwayApplicationID")
         let environment = try requiredInfo("LatchwayEnvironment")
-        let attestation = LatchwayAppAttestProvider(
-            applicationID: applicationID,
-            environment: environment,
-            rootKeychainAccessGroup: try ComponentExampleConfiguration.rootKeychainAccessGroup(),
-            legacySharedKeychainAccessGroups: ComponentExampleConfiguration.legacySharedKeychainAccessGroups()
-        )
-        return LatchwayClient(
-            configuration: try ComponentExampleConfiguration.latchway(
-                attestationProvider: attestation
-            ),
-            identityTokenProvider: LaunchEnvironmentIdentityProvider()
-        )
+        let configuration = try ComponentExampleConfiguration.latchway()
+        let app = try await LatchwayApp.configure(.init(
+            baseURL: configuration.baseURL, applicationID: applicationID,
+            environment: environment, rootKeychainAccessGroup: configuration.rootKeychainAccessGroup,
+            suppliedIdentity: try .firebaseProject(projectID: ComponentExampleConfiguration.firebaseProjectID()),
+            componentKeychainAccessGroups: ComponentExampleConfiguration.componentKeychainAccessGroups()
+        ))
+        let account = try await app.signIn { try await LaunchEnvironmentIdentityProvider().identityToken() }
+        return try await account.makeClient()
     }
+
+    private func requiredInfo(_ key: String) throws -> String {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              !value.isEmpty
+        else { throw ExampleConfigurationError.missing(key) }
+        return value
+    }
+
+    private func safeDescription(_ error: Error) -> String {
+        if let component = error as? LatchwayComponentError {
+            return component.recovery.action
+        }
+        return (error as? LocalizedError)?.errorDescription ?? "Latchway setup failed."
+    }
+}
+
+private struct LaunchEnvironmentIdentityProvider {
+    func identityToken() async throws -> String {
+        guard let token = ProcessInfo.processInfo.environment["LATCHWAY_IDENTITY_TOKEN"],
+              (16 ... 65_536).contains(token.utf8.count)
+        else { throw HostIdentityError.missingIdentityToken }
+        return token
+    }
+}
+
+private enum HostIdentityError: Error, LocalizedError {
+    case missingIdentityToken
+
+    var errorDescription: String? {
+        "Provide LATCHWAY_IDENTITY_TOKEN in the host app's launch environment."
+    }
+}
 ```

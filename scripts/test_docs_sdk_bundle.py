@@ -175,6 +175,30 @@ class SDKDocumentationBundleTests(unittest.TestCase):
                 self.assertEqual(set(MODULE.required_documents(sdk, version)), MIRROR.SDK_SPECS[sdk]["documents"] | set(additions))
                 self.assertEqual(MODULE.required_documents(sdk, "1.0.0"), MODULE.SDK_SPECS[sdk]["required_documents"])
 
+    def test_development_attestation_documents_are_exact_release_scoped(self) -> None:
+        for sdk, version in (("ios", "2.0.0"), ("android", "1.2.1"), ("react-native", "2.0.0")):
+            with self.subTest(sdk=sdk):
+                documents = MODULE.required_documents(sdk, version)
+                self.assertEqual(documents["quickstart/development-attestation.md"], "quickstart")
+                self.assertNotIn("quickstart/development-attestation.md", MODULE.required_documents(sdk, "9.9.9"))
+                self.assertNotIn("quickstart/development-attestation.md", MODULE.required_documents(sdk, "1.0.0"))
+
+    def test_raw_markdown_is_downloadable_not_rendered_as_a_site_page(self) -> None:
+        locked = MODULE.load_locked_bundles(True)
+        outputs = MODULE.render_outputs(locked)
+        generated = json.loads(outputs[MODULE.GENERATED_MANIFEST])
+        count = 0
+        for bundle in generated["bundles"]:
+            for record in bundle["files"]:
+                if not record["payload_path"].endswith(".md"):
+                    continue
+                count += 1
+                self.assertTrue(record["generated_path"].endswith(".md.txt"))
+                self.assertTrue(record["snippet_path"].endswith(".md.mdx"))
+                payload = outputs[MODULE.PUBLIC_ROOT / record["generated_path"]].split(b"\n\n", 1)[1]
+                self.assertEqual(hashlib.sha256(payload).hexdigest(), record["payload_sha256"])
+        self.assertGreater(count, 0)
+
     def test_traversal_links_checksum_tampering_duplicate_json_and_trailing_gzip_are_rejected(self) -> None:
         raw = self.archive()
         members, epoch = MODULE.archive_members(raw, TEST_VERSION)

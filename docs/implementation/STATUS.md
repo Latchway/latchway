@@ -2,7 +2,7 @@
 
 Status date: 2026-09-10
 
-## Server 1.1.3 release preparation: provider-specific development attestation
+## Server 1.1.3 published and deployed: provider-specific development attestation
 
 App Attest policy accepts `development`, `production` or `any`, while stored key
 identity remains the actual Apple-verified environment. Console setup separates
@@ -21,9 +21,10 @@ dependency, identity or quota change is introduced.
 SDK work strengthens existing key-recovery/opaque-token regression coverage and
 developer instructions; current native runtime behavior already supports the
 flow. The PostgreSQL-backed Go suite, affected-package race checks, executable
-build and static analysis pass. Console passes 307 unit and 43 browser tests;
-iOS passes 234 tests, Android 189, and RN 188 unit/13 runtime/24 native-bridge
-tests. One live-conformance test is skipped in each native SDK. The historical
+build and static analysis pass. Console passes 307 unit and 43 browser tests.
+The initial SDK implementation checkpoint passed iOS 234, Android 189, and RN
+188 unit/13 runtime/24 native-bridge tests; final release results follow below.
+One live-conformance test is skipped in each native SDK. The historical
 Python assertion about removed release CI remains failing and was not disabled.
 The renamed `any` release candidate repeats the full PostgreSQL-backed Go suite,
 seven affected-package race suites, static/build/module checks, 18 focused
@@ -34,12 +35,63 @@ browser test stays skipped. The pinned vulnerability scan finds zero reachable
 vulnerabilities; non-reachable dependency advisories remain recorded follow-ups.
 An unrelated pre-existing formatting issue remains in untouched
 `internal/adminapi/credential_selftest.go`; changed Go files are formatted.
-Live Apple/Google/device proof, publication and VPS activation remain
-separate work, not inferred from fixture tests. See the
+Live Apple/Google/device proof remains separate from publication and deployment,
+not inferred from fixture tests. See the
 [implementation and verification report](DEVELOPMENT_ATTESTATION.md) and
 [provider-specific acceptance decision](../adr/0039-provider-specific-development-attestation.md).
 
-## Security library reuse: included in server 1.1.3 release preparation
+Publication receipt: [server v1.1.3](https://github.com/Latchway/latchway/releases/tag/v1.1.3)
+was published from `90c8ca7f4837e27e939e84fa75b41392529bf301` on 2026-09-10.
+The public GHCR index digest is
+`sha256:df52bda8112467f42864ee4fa9769b5d95227f5a2f45aa3fc3f5b427e6a4072d`;
+anonymous pulls and both Linux architectures were verified. The downloaded
+contract 1.1.2 archive matches SHA-256
+`9f8bba706dc0f66a7285352bafbdc1698dda1851dc4827d31ff55dfe6c175b58`.
+
+VPS receipt: the exact image was deployed with a private, verified database and
+configuration backup. Read-only checks at 04:36:28 UTC confirm public health,
+all seven readiness checks, schema 33, and an HTTP-200 Console. Development and
+Production active revisions and complete policy documents are byte-equivalent
+to the pre-deployment snapshots. Caddy, credentials, identity, attestation
+settings, routes and quotas were preserved. No SQL migration or policy activation
+ran; Apple `any` and Google testing are available controls, not automatic opt-ins.
+
+## SDK release verification: fresh-start iOS/React Native 2.0
+
+The explicitly approved major-version cleanup removes legacy migration,
+credential-adoption and callback-authority APIs from iOS and React Native.
+Published app-level sign-out, current account/session fences, required attestation,
+private-Keychain checks and deny-only extension safety guards remain. Android
+1.2.1 keeps its existing compatibility APIs and uses platform Base64/JSON codecs.
+
+- iOS 2.0.0: `4cb90278597f4cf6881b08c8521cf37dc398c7cf`; 246 tests passed,
+  one live-only skip, release and separate consumer builds, CocoaPods AppAttest
+  validation, four docs and six collector tests passed. GitHub tag/source and
+  actual CocoaPods spec verified; normal AppAttest/Core 2.0.0 installation from
+  CocoaPods now resolves in an isolated React Native 0.74 host.
+- Android 1.2.1: `d9832626ee08b1a873aaae4f00714cf573219d49`; 214 tests passed,
+  one live-only skip, assemble/lint, two API-34 consumers, all five publication
+  modules, docs checks and 24 public artifact signatures verified. GitHub release
+  is public; Central upload accepted, public Maven downloads pending.
+- React Native 2.0.0: `155d26203e3db33099974387c2b9369f30b40c0d`; 259 unit,
+  13 runtime, 10 iOS bridge and 15 Android bridge tests pass against the pinned
+  native commits. Types, lint, codegen, native boundaries, Metro, deterministic
+  package/consumer checks and minimum RN 0.74 / React 18.2 checks pass. npm
+  dispatch is held until normal native registry resolution works.
+
+Canonical docs import clean commit-bound bundles from iOS/RN release commits
+and Android docs-only follow-up `71636399b0993b2045a4d278f9ceb1de18662487`.
+The immutable Android release asset remains unchanged. The importer preserves
+raw Markdown payload bytes as `.md.txt` downloads and renders fenced MDX wrappers,
+so source-relative SDK links are not incorrectly treated as site routes. All 13
+importer tests and the full canonical docs suite pass. Existing accessibility
+contrast advisories remain non-blocking. No verification CI gates were restored.
+
+No fresh physical App Attest, TestFlight, Play testing or extension evidence is
+claimed for this release combination. Legacy removed-CI test assumptions are
+documented in SDK release notes rather than relabeled as passing checks.
+
+## Security library reuse: included in published server 1.1.3
 
 The high-priority dependency audit batch delegates Google assertion/token exchange
 and metadata requests to official Google Go libraries, replaces handwritten JSON

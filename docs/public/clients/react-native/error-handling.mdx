@@ -4,9 +4,9 @@ description: "Map TypeScript, bridge, native key, attestation, session, transpor
 icon: "triangle-alert"
 audience: "client-react-native"
 pageType: "troubleshooting"
-serverVersion: "1.1.1"
-sdkVersion: "1.2.0"
-lastVerified: "2026-09-08"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "react-native-sdk"
 ---
 
@@ -28,6 +28,7 @@ cookies, provider secrets, or application request/response content.
 | Shared configuration | `configuration_conflict` | Match explicit native/RN app name, identity metadata and signed security coordinates |
 | Supplied identity | `identity_refresh_required` | Supply a fresh ID token through the captured account; expiry suspends rather than logs out |
 | Retired account | `client_logged_out` or `account_changed` | Cancel stale work; do not let a retired account update or log out its replacement |
+| Interrupted cleanup | `cleanup_required` | Keep AI disabled and retry `app.signOut()` before another login; do not ignore secure-storage errors |
 | Bridge/runtime | native module unavailable or protocol response invalid | Rebuild New Architecture codegen and exact native dependencies |
 | Native storage | `storage_unavailable` or `crypto_unavailable` | Inspect platform policy and signed capabilities; never add a JS fallback key |
 | Attestation | `attestation_required`, invalid, stale, or unsupported | Fix the corresponding native App Attest or Play Integrity path |

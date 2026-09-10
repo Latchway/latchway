@@ -4,9 +4,9 @@ description: "Published server and SDK versions, upgrade boundaries, and verific
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.1.1"
-sdkVersion: "1.2.0"
-lastVerified: "2026-09-08"
+serverVersion: "1.1.3"
+sdkVersion: "2.0.0"
+lastVerified: "2026-09-10"
 owner: "release-engineering"
 ---
 
@@ -17,10 +17,10 @@ The current distributions are:
 
 | Component | Version | Distribution |
 | --- | --- | --- |
-| Server and Console | 1.1.1 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.1), GHCR `ghcr.io/latchway/latchway:1.1.1` |
-| iOS SDK | 1.2.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v1.2.0), CocoaPods `Latchway` |
-| Android SDK | 1.1.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.1.0), Maven Central `dev.latchway` |
-| React Native SDK | 1.2.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.2.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.2.0) |
+| Server and Console | 1.1.3 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.3), GHCR `ghcr.io/latchway/latchway:1.1.3` |
+| iOS SDK | 2.0.0 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v2.0.0), CocoaPods `Latchway` |
+| Android SDK | 1.2.0 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.0), Maven Central `dev.latchway` |
+| React Native SDK | 1.3.0 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/1.3.0), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v1.3.0) |
 | JavaScript client | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/client/v/1.1.0) |
 | LangChain adapter | 1.1.0 | [npm](https://www.npmjs.com/package/@latchway/langchain/v/1.1.0) |
 | OpenAI and Vercel AI adapters | 1.0.0 | [OpenAI adapter](https://www.npmjs.com/package/@latchway/openai/v/1.0.0), [Vercel AI adapter](https://www.npmjs.com/package/@latchway/vercel-ai/v/1.0.0) |
@@ -29,19 +29,50 @@ The server image includes Linux amd64 and arm64. Pin the published image digest
 for repeatable deployments. Moving minor/major aliases and `latest` are not
 immutable version locks. Use the same image for server and migrator.
 
+### Registry propagation in progress
+
+Android [1.2.1 release assets](https://github.com/Latchway/latchway-android/releases/tag/v1.2.1)
+are public and the Central upload was accepted, but normal Maven downloads still
+return 404. An accepted upload is not confirmation of final Central publication.
+The [React Native 2.0.0 source](https://github.com/Latchway/latchway-react-native-sdk/tree/155d26203e3db33099974387c2b9369f30b40c0d)
+is prepared and tested with iOS 2.0.0 / Android 1.2.1; npm publication is held
+until those pinned native dependencies are installable. iOS 2.0.0 now resolves
+through normal CocoaPods installation. The table above retains the earlier
+installable Android and React Native versions until publication is confirmed.
+
+The refreshed React Native guides describe the prepared 2.0 integration.
+Do not attempt that npm upgrade until this status confirms its publication.
+
 ## What changed
 
-Server 1.1.1 fixes identity renewal after session issuance with schema 31.
-The same-account verifier keeps credentials, original issuance/expiry,
-attestation and quotas unchanged. The 1.1.0 contract and wire 3 are unchanged;
-use 1.1.1 for supplied identity rather than the first 1.1.0 image.
+Server 1.1.3 adds `appAttest.environment: any` for accepting either verified
+Apple environment and a Development-only opt-in for Google Play testing
+responses. Google testing evidence stays `debug`; Production rejects it.
+Distribution categories, identity, request binding and quotas remain separate.
+Every configuration revision change requires fresh mobile evidence before
+session renewal. Publishing or installing this release does not change existing
+application policy. See [App Attest](/clients/ios/app-attest) and
+[Play Integrity](/clients/android/play-integrity).
+
+This release also delegates standard Google authentication and cryptographic
+operations to maintained libraries while retaining the gateway's strict input,
+endpoint and trust checks. Schema 33, client contract 1.1.0 and wire 3 are
+unchanged; the additive Admin/configuration bundle is 1.1.2.
+
+Server 1.1.2 introduced schema 33 and evidence-based accounting for confirmed
+pre-generation provider rejection. Unknown consumption stays conservative;
+historical usage is not refunded or reclassified by upgrading. Server 1.1.1
+fixed same-account identity renewal after session issuance. Use the current
+server for supplied identity rather than the first 1.1.0 image.
 
 iOS 1.2.0 and Android 1.1.0 add shared native accounts, application-supplied
 tokens, same-account refresh and offline logout. React Native 1.2.0 is the
 published matching integration release. Neither
 native nor React Native needs a Firebase dependency or native authentication
-bootstrap for the new API. Applications still own token refresh, provider
-logout notification and account-specific UI/tool cleanup.
+bootstrap for the new API. iOS/RN 1.3.0 and Android 1.2.0 add app-level
+`signOut()` to handle current-account logout, pending identity work and interrupted
+cleanup. Applications still own token refresh, provider logout notification and
+account-specific UI/tool cleanup.
 
 Shared native/RN mode requires an explicit `sharedNativeCallers` policy on the
 native host. Upgrading does not widen an application's enabled platforms or
@@ -82,17 +113,35 @@ every-model support. See the
 
 ## Upgrade and rollback
 
+iOS 2.0.0 and its paired React Native 2.0.0 integration remove legacy root
+constructors, callback authorities, credential adoption and migration APIs.
+Use shared `configure` and application-supplied identity. They do not migrate
+older SDK storage automatically; reinstalling does not guarantee Keychain
+erasure. Current private-Keychain, account/generation, attestation and retirement
+checks remain enforced, including deny-only extension safety guards.
+
+Rebuild and distribute the native app together with the new JavaScript bridge;
+an OTA-only JavaScript update cannot upgrade its ABI or native libraries.
+Use one iOS SDK copy when native and React Native share a host. App-level
+`signOut()` remains available, including pending sign-in and interrupted cleanup.
+Captured-account `logout()` is still the safe choice for delayed old-account
+work. Neither operation signs out the external identity provider or resets quota.
+
 Contract 1.1.0 and wire 3 are current; compatible legacy wire-1/2 routes remain
-supported. Server 1.1.1 requires schema 31. Back up PostgreSQL and preserve the
+supported. Server 1.1.3 requires schema 33. Back up PostgreSQL and preserve the
 database URL, public origin, encryption/signing configuration and image digest.
 Stop the old gateway, run the matching new image's migration, then start that
-image and confirm readiness reports schema 31.
+image and confirm readiness reports schema 33. Existing 1.1.2/schema-33
+deployments need no additional SQL migration for 1.1.3.
 
 Migrations are forward-only and readiness requires an exact schema match.
-Server 1.1.0/schema 30 is not an application-only rollback after migration 31.
+Do not start a schema-30/31 binary against a schema-33 database.
 Roll forward or restore the pre-migration database backup with its compatible
 image. Do not edit the migration ledger or identity timestamps to force an old
-binary to start.
+binary to start. A 1.1.3-to-1.1.2 image rollback is schema-compatible, but first
+restore singular Apple acceptance and disable Google testing if those new
+policies have been activated. Never relax Production to work around a failed
+development test.
 
 Upgrade the gateway before activating shared native/RN identities. Before
 rolling back to an older server, activate compatible revisions without those
@@ -106,6 +155,14 @@ The React Native podspec comes with npm; it does not need its own CocoaPods
 Trunk publication.
 
 ## Evidence and limits
+
+Server 1.1.3 passes the full isolated-PostgreSQL Go suite, affected-package race
+checks, static analysis, 307 Console unit tests and 43 browser tests. One optional
+live-stack browser test remains skipped. The published contract archive matches
+the reproducible local build; anonymous GHCR downloads and Linux amd64/arm64
+manifests were verified. A digest-pinned private VPS rollout passed all readiness
+checks without changing either environment's active policy. These are release
+and operational receipts, not a new Apple/Google physical-device proof.
 
 Server 1.1.1 passes the complete isolated-PostgreSQL Go suite, targeted race
 tests, static analysis, advancing-clock identity-renewal regression and

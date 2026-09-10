@@ -1,7 +1,7 @@
 # Security library reuse
 
-Source implementation, 8 September 2026; included in server 1.1.3 release
-preparation on 10 September 2026. This batch implements the
+Source implementation, 8 September 2026; included in published server 1.1.3
+on 10 September 2026. This batch implements the
 high-priority maintenance audit without changing wire/schema versions, identity
 derivation, persisted keys, ciphertext, quota settlement, or replay transactions.
 Publication and deployment receipts are separate from this implementation report.

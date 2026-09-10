@@ -116,6 +116,21 @@ ADDITIONAL_DOCUMENTS = {
         "frameworks/usage.md": "framework",
     },
     ("react-native", "1.2.0"): {"quickstart/supplied-identity.md": "quickstart"},
+    ("ios", "2.0.0"): {
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+        "frameworks/foundation-models-request.swift": "framework",
+        "frameworks/foundation-models-stream.swift": "framework",
+    },
+    ("android", "1.2.1"): {
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+        "quickstart/supplied-identity.kt": "quickstart",
+    },
+    ("react-native", "2.0.0"): {
+        "quickstart/development-attestation.md": "quickstart",
+        "quickstart/supplied-identity.md": "quickstart",
+    },
 }
 
 
@@ -852,9 +867,14 @@ def render_outputs(locked: list[tuple[dict[str, Any], dict[str, Any]]]) -> dict[
             if record["kind"] in {"quickstart", "framework"}:
                 source = record["provenance"][0]
                 destination = PUBLIC_ROOT / "snippets" / "generated" / sdk / path
+                snippet_destination = destination.with_name(destination.name + ".mdx")
+                # Raw Markdown is an exact audit payload, not a site page. Its
+                # relative links belong to the SDK source tree; rendering it
+                # here would incorrectly resolve them against the docs site.
+                if destination.suffix == ".md":
+                    destination = destination.with_name(destination.name + ".txt")
                 data = provenance_header(source, entry["archive_sha256"]) + members[path]
                 outputs[destination] = data
-                snippet_destination = destination.with_name(destination.name + ".mdx")
                 snippet_data = render_mdx_snippet(path, members[path], source, entry)
                 outputs[snippet_destination] = snippet_data
                 files.append({

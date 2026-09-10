@@ -1,12 +1,12 @@
 ---
 title: "Send a protected request from Android"
-description: "Compile the Android source candidate, stream a Firebase-authenticated request through OkHttp, and verify Play Integrity-aware policy."
+description: "Configure shared Android accounts with your application's ID token and protect OkHttp requests with Play Integrity."
 icon: "smartphone"
 audience: "client-android"
 pageType: "tutorial"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-09-01"
+serverVersion: "1.1.3"
+sdkVersion: "1.2.1"
+lastVerified: "2026-09-10"
 owner: "android-sdk"
 ---
 
@@ -14,15 +14,15 @@ import AndroidFirebaseGoldenJourney from "/snippets/generated/android/quickstart
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 import { SetupCoordinates } from "/components/SetupPath.jsx";
 
-<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Android API 23+</Badge>
+<Badge color="blue">Android SDK 1.2.1</Badge> <Badge color="blue">Android API 23+</Badge>
 
-**Expected time:** 15 minutes after the mandatory gateway, Firebase, Android
+**Expected time:** 15 minutes after the mandatory gateway, identity, Android
 application, and Play prerequisites below are available.
 
-**Mode:** Source evaluation; a real integrity verdict requires a Play-installed
-signed application and remains separate from local compilation.
+**Mode:** Developer-supplied identity with native Play Integrity. Production
+distribution verification remains separate from compilation and testing verdicts.
 
-**Coordinates:** server contract `1.0.0`; Android SDK source `1.0.0`.
+**Coordinates:** server `1.1.3`; client contract `1.1.0`; Android SDK `1.2.1`.
 
 ## Outcome
 
@@ -36,16 +36,15 @@ Integrity result and metered usage.
   [operator quickstart](/operate/quickstart)
 - an Android application resource ID, environment, feature, identity policy,
   Play cloud project, package, and certificate digest configured in Latchway
-- Firebase initialized in the application and an existing Firebase user signed
-  in before the example runs
-- Android Studio and authorized `latchway-android` source
+- an existing authentication flow that supplies a current ID token
+- Android Studio, minimum runtime API 23, and compile SDK 34 or newer
 - for a real verdict, the exact signed application installed from a configured
   Google Play internal or production track
 
 <Warning>
-  Version 1.0.0 is not published to Maven Central. A fixture, emulator, or
-  sideloaded APK can test source behavior but is not production Play Integrity
-  evidence.
+  A fixture, emulator, or sideloaded APK does not prove production Play
+  distribution. Development-only testing responses require explicit server
+  policy and remain debug trust; they are not device-verification evidence.
 </Warning>
 
 ### Use the operator-provided coordinates
@@ -69,9 +68,104 @@ Android app -> Latchway OkHttp -> configured Latchway -> selected upstream
 ## Procedure
 
 <Steps>
-  <Step title="Resolve the version-locked source modules">
-    In `settings.gradle.kts`, use an included build for the authorized SDK
-    checkout:
+  <Step title="Install the shared-account modules">
+    Add `google()` and `mavenCentral()` to your dependency repositories, then
+    add these dependencies to the application:
+
+```kotlin
+dependencies {
+    implementation(platform("dev.latchway:latchway-bom:1.2.1"))
+    implementation("dev.latchway:latchway-okhttp")
+}
+```
+
+    This path includes the native Play Integrity integration without Firebase.
+    The libraries support runtime API 23 and compile SDK 34; other host
+    dependencies may require a higher compile SDK.
+    Expected result: all Latchway modules resolve to `1.2.1`.
+    Diagnostic: inspect `./gradlew :app:dependencies --configuration debugRuntimeClasspath`
+    for mismatched module versions or missing repositories.
+  </Step>
+  <Step title="Configure and supply your existing user's token">
+    Run the sign-in operation from your serialized application authentication
+    flow, not from an independent listener in each screen:
+
+```kotlin
+import dev.latchway.core.firebaseProject
+import dev.latchway.okhttp.LatchwayAppOptions
+import dev.latchway.okhttp.LatchwayAppRegistry
+import okhttp3.HttpUrl.Companion.toHttpUrl
+
+val app = LatchwayAppRegistry.configure(applicationContext, LatchwayAppOptions(
+    baseUrl = "https://gateway.example.com/".toHttpUrl(),
+    applicationId = "app_01J00000000000000000000000",
+    environment = "development",
+    identity = firebaseProject("your-project-id"),
+    playIntegrityCloudProjectNumber = 123456789012L,
+))
+val account = app.signIn { yourAuth.getIdToken() }
+val client = account.makeClient()
+val http = client.buildOkHttpClient()
+```
+
+    `yourAuth` is your existing token-producing application code. The
+    `firebaseProject` helper only derives public issuer/audience metadata; it
+    does not fetch or authenticate tokens and adds no Firebase dependency.
+    Other supported issuers use `LatchwayIdentityConfiguration` directly.
+    The gateway authenticates the token. The Play project number is independent
+    of your Firebase project and must match this environment's server policy.
+
+    Equivalent native and React Native configuration joins the same app;
+    conflicting explicit settings fail. A second caller can use
+    `app.makeClient()` to attach without signing in again.
+
+    Expected result: sign-in returns an account after identity and configured
+    Play Integrity policy pass. Diagnostic: compare the gateway, application,
+    environment, issuer, package, signing certificate, and Play project before
+    retrying a stable configuration or attestation error.
+  </Step>
+  <Step title="Use the protected OkHttp transport">
+    Use `http` for your gateway requests and bind each request to the configured
+    feature with `Request.Builder().latchwayFeature("habit-assistant")`.
+    Add the ordinary JSON body and method required by the endpoint. Keep the
+    returned OkHttp `Call`, cancel it when its owner is cancelled, and consume
+    streaming responses incrementally. Do not replace the protected transport
+    with a separate bare OkHttp client or enable cross-origin redirects.
+
+    Supply refreshed tokens for the same account and await sign-out before a
+    new login:
+
+```kotlin
+account.updateIdToken { yourAuth.getIdToken() }
+app.signOut()
+// Your application signs out its external authentication provider separately.
+```
+
+    `signOut()` retires the shared native/React Native account locally; it does
+    not revoke the installation or reset per-user quota. If cleanup reports
+    `CLEANUP_REQUIRED`, retry the same operation after storage becomes available.
+    For delayed callbacks tied to an old login, use the captured account's
+    `logout()` rather than signing out whichever account is current.
+
+    Expected result: requests carry the configured feature and successful
+    sign-out retires the shared account. Diagnostic: correlate the stable error
+    code and response request ID; supply a same-account token update when the
+    SDK reports that identity refresh is required.
+  </Step>
+</Steps>
+
+## Optional disposable verification harness
+
+The following generated Firebase example is a separate compatibility/conformance
+harness. It still uses the supported direct constructor and optional
+`latchway-firebase-auth` adapter, not the shared-account path above. Firebase is
+required by this harness only. Do not add it to a new supplied-identity
+integration. Its successful journey revokes the test installation and signs out
+Firebase; those are deliberate test teardown actions, not ordinary logout.
+
+<Steps>
+  <Step title="Prepare the version-matched harness">
+    Use the example source from tag `v1.2.1`. Configure its dependency repositories:
 
 ```kotlin
 pluginManagement {
@@ -91,16 +185,14 @@ dependencyResolutionManagement {
 
 rootProject.name = "habit-assistant-android"
 include(":app")
-includeBuild("../latchway-android")
 ```
 
-    In `app/build.gradle.kts`, keep the intended Maven coordinates even though
-    the included build supplies them locally. Add Firebase and coroutines
-    because the complete example uses both directly:
+    In `app/build.gradle.kts`, add the optional Firebase adapter and dependencies
+    because this complete harness uses them directly:
 
 ```kotlin
 dependencies {
-    implementation(platform("dev.latchway:latchway-bom:1.0.0"))
+    implementation(platform("dev.latchway:latchway-bom:1.2.1"))
     implementation("dev.latchway:latchway-okhttp")
     implementation("dev.latchway:latchway-play-integrity")
     implementation("dev.latchway:latchway-firebase-auth")
@@ -111,8 +203,9 @@ dependencies {
 }
 ```
 
-    Expected result: Gradle resolves `dev.latchway` 1.0.0 from the local
-    checkout and compiles against Android API 23 or newer. Diagnostic: run
+    Expected result: Gradle resolves `dev.latchway` 1.2.1 from Maven Central.
+    Set the app's minimum API to 23 and compile SDK to at least 34; the Firebase
+    dependencies may impose their own higher requirements. Diagnostic: run
     `./gradlew :app:dependencies --configuration debugRuntimeClasspath` and
     confirm that all Latchway modules resolve to one version.
   </Step>
@@ -317,10 +410,11 @@ Input and output usage: present
   </Accordion>
 </AccordionGroup>
 
-<Prompt title="Integrate Latchway Android source candidate 1.0.0">
-Use Latchway Android SDK 1.0.0 from an included build with server 1.0.0. Keep
-identity in the existing provider, keys in Android Keystore, and Play Integrity
-inside the native adapter. Install the OkHttp interceptor, network origin guard,
-and authenticator; preserve cancellation and incremental streaming; bind
-requests to a feature ID; and never add provider secrets.
+<Prompt title="Integrate Latchway Android 1.2.1">
+Use Latchway Android SDK 1.2.1 from Maven Central with server 1.1.3. Configure
+the shared app and supply the existing application's ID token without adding a
+Firebase dependency. Keep keys in Android Keystore and Play Integrity inside
+the native adapter. Use the client's protected OkHttp transport, preserve
+cancellation and incremental streaming, bind requests to a feature ID, await
+app.signOut before account switching, and never add provider secrets.
 </Prompt>

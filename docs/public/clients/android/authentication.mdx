@@ -4,9 +4,9 @@ description: "Provide a current application identity token to the Kotlin SDK whi
 icon: "user-round-check"
 audience: "client-android"
 pageType: "how-to"
-serverVersion: "1.0.0"
-sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+serverVersion: "1.1.3"
+sdkVersion: "1.2.1"
+lastVerified: "2026-09-10"
 owner: "android-sdk"
 ---
 
@@ -14,9 +14,9 @@ owner: "android-sdk"
 
 ## Outcome
 
-The Android client obtains a current token from the application's existing
-identity system only when Latchway session establishment or reauthentication
-requires it.
+The application supplies tokens from its existing identity system to a shared
+native/RN account. Either side may configure first. Matching settings reuse the
+same native app; no Firebase dependency or native auth bootstrap is required.
 
 ## Keep each trust input independent
 
@@ -26,8 +26,24 @@ of the Android Keystore-backed component key. Active feature policy authorizes
 the request.
 
 Configure Firebase, Supabase, Clerk, or a custom JWT issuer through
-[Authentication providers](/clients/authentication-providers), then implement
-the Kotlin identity token provider. The callback must:
+[Authentication providers](/clients/authentication-providers), then configure
+the app and supply identity through an application-owned suspending callback:
+
+```kotlin
+val app = LatchwayAppRegistry.configure(applicationContext, LatchwayAppOptions(
+    baseUrl = "https://gateway.example.com/".toHttpUrl(),
+    applicationId = "app_01J00000000000000000000000",
+    environment = "development",
+    identity = firebaseProject("your-project-id"),
+    playIntegrityCloudProjectNumber = 123456789012L,
+))
+val account = app.signIn { yourAuth.getIdToken() }
+val client = account.makeClient()
+```
+
+The registry/options are in `dev.latchway.okhttp`; identity helpers are in
+`dev.latchway.core`. `firebaseProject` only formats public issuer/audience
+metadata. Play project numbers are separate from identity metadata. The callback must:
 
 - require a signed-in application user;
 - obtain a current token without blocking the main thread;
@@ -35,19 +51,34 @@ the Kotlin identity token provider. The callback must:
 - return the token only to the Latchway native operation; and
 - never log or persist the raw token in SDK diagnostics.
 
-The optional Firebase adapter implements this callback and remains separate
-from `latchway-core`.
+New supplied-identity integrations do not need the optional legacy Firebase
+adapter. The gateway validates token signatures and claims; local decoding does
+not establish authentication.
 
 ## Reauthentication and account changes
 
-When the server returns `identity_reauthentication_required`, the SDK clears
-the obsolete session path and requests current identity as part of a fresh
-exchange. Do not retry the AI request unless the native transport has exact
-pre-dispatch proof and the body is replayable.
+```kotlin
+// Same-account refresh:
+account.updateIdToken { yourAuth.getIdToken() }
 
-On sign-out, revoke or retire the current installation according to product
-policy, sign out the identity provider, close application-owned network
-resources, and discard any application copy of the token.
+// Current-account sign-out in your serialized application auth flow:
+app.signOut()
+yourAuth.signOut()
+```
+
+Supplied tokens stay in native memory. Expiry suspends protected work until a
+verified same-account update; supply identity again after process restart.
+Latchway cannot fetch provider tokens or observe unreported provider logout.
+
+App sign-out cancels pending sign-in, retires the current native/RN account and
+retries interrupted cleanup, including without a captured account handle. It
+works offline; it does not reset quotas, erase every installation key or sign
+out another device. On `CLEANUP_REQUIRED`, keep AI disabled and retry before the
+next login. Stop application-owned tools/streams and clear old-account UI.
+
+For delayed work tied to an old account, use its captured `account.logout()`;
+it cannot retire a newer login. Closing a client alone does not log out the app.
+`app.restore` is for initial auth restoration and cannot undo recorded logout.
 
 ## Verify
 

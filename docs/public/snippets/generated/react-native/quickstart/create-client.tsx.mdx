@@ -1,28 +1,30 @@
 <Info>
-  Generated from [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/6e00e1ae34bdb69f418bd7ee5460c510649423ac/example/src/App.tsx#L57-L78) at documentation source commit `6e00e1ae34bdb69f418bd7ee5460c510649423ac` for SDK `v1.2.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `6b65b13d1c38f0a87b68e66636206161b406065ffba78623e1951c42683c2878`.
+  Generated from [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/155d26203e3db33099974387c2b9369f30b40c0d/example/src/App.tsx#L58-L81) at documentation source commit `155d26203e3db33099974387c2b9369f30b40c0d` for SDK `v2.0.0`. The source commit may be a documentation-only follow-up to the immutable release tag. Bundle SHA-256: `0e0c280f4c29567565f96f41f9e54dcd003b5e9aca8257b362bb8b7723ffc0a5`.
 </Info>
 
 ```tsx
-function makeClient(): LatchwayClient {
-  return createLatchwayClient({
+async function makeClient(): Promise<LatchwayClient> {
+  await ensureFirebaseApp();
+  const projectID = firebaseApp.app().options.projectId;
+  if (!projectID) throw new Error("The application must configure its Firebase project ID.");
+  const app = await Latchway.configure({
     baseURL: deployment.baseURL,
     applicationID: deployment.applicationID,
     environment: deployment.environment,
-    identityProvider: "firebase",
-    getIdentityToken: physicalConformanceEnabled()
-      ? physicalIdentityToken
-      : developmentDeviceBootstrapEnabled()
-        ? developmentIdentityToken
-        : ordinaryIdentityToken,
+    identity: firebaseProject({projectID}),
     ...(deployment.googleCloudProjectNumber === undefined ? {} : {
       android: { playIntegrityCloudProjectNumber: deployment.googleCloudProjectNumber },
     }),
     ...(deployment.rootKeychainAccessGroup === undefined ? {} : {
       apple: {
         rootKeychainAccessGroup: deployment.rootKeychainAccessGroup,
-        legacySharedKeychainAccessGroups: deployment.legacySharedKeychainAccessGroups,
+        sharedKeychainAccessGroups: deployment.sharedKeychainAccessGroups,
       },
     }),
   });
+  const account = await app.signIn({getIdToken: physicalConformanceEnabled()
+    ? physicalIdentityToken : developmentDeviceBootstrapEnabled()
+      ? developmentIdentityToken : ordinaryIdentityToken});
+  return account.makeClient();
 }
 ```
