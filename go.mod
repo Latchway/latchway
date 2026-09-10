@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/auth v0.23.2
 	cloud.google.com/go/compute/metadata v0.9.0
 	github.com/fxamacker/cbor/v2 v2.9.2
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.24.1
