@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.9@sha256:fe40cf4e92cd0c467be2cfc30657a680ae2398318afd50b0c80585784c604f28
 
-FROM --platform=$BUILDPLATFORM node:24.19.0-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS console-build
+FROM --platform=$BUILDPLATFORM node:26.8-alpine3.24@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868 AS console-build
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 WORKDIR /src/web/console
 COPY web/console/package.json web/console/pnpm-lock.yaml web/console/.npmrc ./
