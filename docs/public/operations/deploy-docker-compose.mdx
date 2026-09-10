@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-01"
+lastVerified: "2026-09-10"
 owner: "core-operations"
 ---
 
@@ -17,9 +17,10 @@ installations that already provide TLS, monitoring, backups, and host
 operations.
 
 <Warning>
-  The stable `1.0.0` image has not been published yet. Keep the digest
-  placeholder until the release page supplies a signed GHCR index. Do not add a
-  source-build fallback to the release template.
+  Replace the digest placeholder with a published GHCR image index from
+  [Release status](/release-status). Keep the server and migration job pinned
+  to the same image. Do not deploy the placeholder or substitute a source-build
+  fallback for the release template.
 </Warning>
 
 ## Prerequisites

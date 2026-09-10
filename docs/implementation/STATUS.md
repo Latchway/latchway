@@ -2,7 +2,7 @@
 
 Status date: 2026-09-10
 
-## Operator attestation failure logs: server 1.1.5 candidate
+## Operator attestation failure logs: server 1.1.5 published
 
 The user requested deployment of 1.1.4 plus inspectable App Attest/Play Integrity
 failures. Because 1.1.4 was already published, this additive follow-up uses 1.1.5
@@ -15,8 +15,23 @@ The full isolated-PostgreSQL Go suite, static analysis, affected-package race
 tests and canonical documentation checks pass. Decoder-to-coordinator tests
 cover native/RN Google HTTP failures, configuration preflight and sensitive-data
 redaction; App Attest phase and component correlation regressions pass. The
-contract 1.1.2 archive remains byte-identical. Publication and the authorized
-VPS rollout are pending.
+contract 1.1.2 archive remains byte-identical.
+
+Publication receipt: [server v1.1.5](https://github.com/Latchway/latchway/releases/tag/v1.1.5)
+was published from `955a2e911b879aadba9f0ec300ff375bf7e3bd74`; release run
+`34453415372` succeeded. The public Linux amd64/arm64 GHCR index is
+`sha256:068371f7e69a469f467390f4942671f46969553c0ea27c1b693e5e4b03c9cac5`.
+Both architecture labels match the release revision and version.
+
+The authorized private VPS rollout completed on 2026-09-10 at 08:11 UTC using
+that immutable image and revision. Schema 33 is unchanged, all seven readiness
+checks pass, and the HTTPS Console returns 200. Development and Production
+active revision IDs and complete document hashes are identical before/after.
+Local configuration, quotas and Docker `json-file` rotation (10 MB x 3) are
+unchanged. The old gateway logs, configuration and database backup were retained
+privately with restricted permissions. Logging is enabled at `info`; no new
+attestation attempt had arrived at the immediate post-deployment check, so this
+is not fresh physical-device/provider proof or a diagnosis of a past rejection.
 
 ## Error-diagnostics patch: server 1.1.4 published
 
@@ -36,7 +51,8 @@ real localhost HTTP, terminal usage, bounded retry dates and finalized failure
 metrics. Eight affected-package race suites and canonical contract validation
 pass. The rebuilt contract archive remains byte-identical to published 1.1.2.
 Physical-device/provider verification has not been rerun for this patch.
-VPS is unchanged.
+No VPS rollout accompanied 1.1.4 publication; the later 1.1.5 rollout above
+includes these fixes.
 
 Publication receipt: [server v1.1.4](https://github.com/Latchway/latchway/releases/tag/v1.1.4)
 was published from `55766102b767ef3066715af9c812d2732c9e1d19`.
