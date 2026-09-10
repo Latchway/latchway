@@ -196,10 +196,7 @@ func (decoder *GooglePlayIntegrityDecoder) DecodeIntegrityToken(
 		return nil, ErrPlayIntegrityService
 	}
 	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusBadRequest {
-			return nil, ErrPlayIntegrityTokenRejected
-		}
-		return nil, ErrPlayIntegrityService
+		return nil, playIntegrityDecodeHTTPFailure(response.StatusCode)
 	}
 	mediaType, _, contentTypeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if contentTypeErr != nil || mediaType != "application/json" {

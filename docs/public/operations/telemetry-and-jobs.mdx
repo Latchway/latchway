@@ -4,9 +4,9 @@ description: "Operate redaction-safe metrics, optional OTLP traces, structured l
 icon: "server-cog"
 audience: "operator"
 pageType: "runbook"
-serverVersion: "1.0.0"
+serverVersion: "1.1.5"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-04"
+lastVerified: "2026-09-10"
 owner: "core-operations"
 ---
 
@@ -54,6 +54,36 @@ a second pool; it is not a measurement of the serving process's allocation.
 private network, service mesh, load balancer, or scrape identity boundary; its
 bounded labels can still reveal deployment topology such as application,
 environment, feature, route, model alias, and plan.
+
+## Attestation failure logs
+
+Server 1.1.5 adds structured `Attestation verification failed` warnings for
+App Attest and Google Play Integrity. Keep the server log level at `warn`, `info`
+or `debug` to retain these events; `error` suppresses warnings.
+
+Use `request_id` to match the client's error and `logical_request_id` for the
+independently generated server request. The record includes `provider`,
+`platform`, `stage`, `reason`, `error_code`, `outcome` and validated application,
+environment and configuration revision IDs. App Attest adds a verifier `phase`;
+Google decode HTTP failures add `provider_http_status` when known.
+
+Reasons are closed categories, not raw provider error text. For example,
+an unrecognized Google app and a certificate mismatch are distinct from a
+temporary Google decode-service failure. Testing-response acceptance does not
+bypass application, certificate, licensing, request-binding or device checks.
+Unknown failures retain a generic reason rather than exposing private text.
+
+These logs never include identity tokens, raw integrity tokens, App Attest
+objects, assertions, certificates, private keys, identity claims or provider
+response bodies. They are operator telemetry, not client responses, a durable
+audit ledger, or proof that a device passed attestation. Rejected attempts do not
+create accepted-attestation records in the database.
+
+Configure bounded log rotation and access control in your deployment. Export
+logs before replacing containers, or use a log collector for longer retention;
+the SDK/server release does not itself install a collector. Existing failed
+verdict details cannot be reconstructed retroactively: reproduce the request
+after upgrading to obtain its diagnostic event.
 
 ## Metrics
 

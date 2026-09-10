@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ type ClientCoordinatorConfig struct {
 	AttestationTransport http.RoundTripper
 	AppAttestKeys        attestation.AppAttestKeyStore
 	Telemetry            *telemetry.Registry
+	Logger               *slog.Logger
 	Now                  func() time.Time
 }
 
@@ -58,6 +60,7 @@ type clientCoordinator struct {
 	attestationTransport http.RoundTripper
 	appAttestKeys        attestation.AppAttestKeyStore
 	telemetry            *telemetry.Registry
+	logger               *slog.Logger
 	now                  func() time.Time
 
 	identityMu       sync.Mutex
@@ -87,7 +90,7 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 		challenges: challenges, secrets: config.Secrets,
 		identityHTTP: config.IdentityHTTPClient, identityKeyCache: config.IdentityKeyCache,
 		attestationTransport: config.AttestationTransport,
-		appAttestKeys:        config.AppAttestKeys, telemetry: config.Telemetry, now: config.Now,
+		appAttestKeys:        config.AppAttestKeys, telemetry: config.Telemetry, logger: config.Logger, now: config.Now,
 		identityCache:    make(map[string]identity.IdentityVerifier),
 		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}, nil
@@ -203,6 +206,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure(mapExchangeChallengeError(err))
 	}
 	if input.Attestation.Provider != challenge.Attestation.Provider {
+		coordinator.logChallengeAttestationFailure(ctx, challenge, "provider_binding", attestation.ErrInvalid)
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
@@ -240,20 +244,24 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
 	if !platformOriginAllowed(selection, challenge.Binding.Platform, input.Metadata.Origin) {
+		coordinator.logChallengeAttestationFailure(ctx, challenge, "origin_binding", attestation.ErrInvalid)
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	if input.Metadata.Origin != challenge.Origin {
+		coordinator.logChallengeAttestationFailure(ctx, challenge, "origin_binding", attestation.ErrInvalid)
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	payload, err := input.Attestation.Payload.Object()
 	if err != nil {
+		coordinator.logChallengeAttestationFailure(ctx, challenge, "payload", attestation.ErrInvalid)
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	evidence, err := attestation.NewEvidence(input.Attestation.Provider, payload)
 	if err != nil {
+		coordinator.logChallengeAttestationFailure(ctx, challenge, "payload", err)
 		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
@@ -485,9 +493,11 @@ func (coordinator *clientCoordinator) ExchangeComponentAttestation(
 		challenge.Binding.ApplicationID != principal.ApplicationID ||
 		challenge.OrganizationID != principal.OrganizationID ||
 		challenge.EnvironmentID != principal.EnvironmentID {
+		coordinator.logComponentAttestationFailure(ctx, challenge, "component_binding", attestation.ErrInvalid)
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	if input.Attestation.Provider != challenge.Attestation.Provider {
+		coordinator.logComponentAttestationFailure(ctx, challenge, "provider_binding", attestation.ErrInvalid)
 		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
@@ -523,16 +533,19 @@ func (coordinator *clientCoordinator) ExchangeComponentAttestation(
 		return clientapi.GrantResult{}, clientFailure(mapDPoPError(err))
 	}
 	if !platformOriginAllowed(selection, challenge.Binding.Platform, input.Metadata.Origin) {
+		coordinator.logComponentAttestationFailure(ctx, challenge, "origin_binding", attestation.ErrInvalid)
 		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	payload, err := input.Attestation.Payload.Object()
 	if err != nil {
+		coordinator.logComponentAttestationFailure(ctx, challenge, "payload", attestation.ErrInvalid)
 		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	evidence, err := attestation.NewEvidence(input.Attestation.Provider, payload)
 	if err != nil {
+		coordinator.logComponentAttestationFailure(ctx, challenge, "payload", err)
 		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}

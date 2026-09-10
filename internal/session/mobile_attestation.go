@@ -64,9 +64,12 @@ func (coordinator *clientCoordinator) preflightAttestationVerifier(
 	}
 	verifier, err := coordinator.mobileAttestationVerifier(environment, snapshot, policy, selection, platform)
 	if err != nil {
+		coordinator.logMobileAttestationFailure(ctx, environment, snapshot.RevisionID, selection.Provider, platform, "verifier_configuration", err)
 		return err
 	}
-	return verifier.Preflight(ctx)
+	err = verifier.Preflight(ctx)
+	coordinator.logMobileAttestationFailure(ctx, environment, snapshot.RevisionID, selection.Provider, platform, "preflight", err)
+	return err
 }
 
 func (coordinator *clientCoordinator) verifyAttestationEvidence(
@@ -85,9 +88,11 @@ func (coordinator *clientCoordinator) verifyAttestationEvidence(
 		environment, snapshot, policy, selection, binding.Platform,
 	)
 	if err != nil {
+		coordinator.logMobileAttestationFailure(ctx, environment, snapshot.RevisionID, selection.Provider, binding.Platform, "verifier_configuration", err)
 		return attestation.Result{}, err
 	}
 	result, verifyErr := verifier.Verify(ctx, evidence, binding)
+	coordinator.logMobileAttestationFailure(ctx, environment, snapshot.RevisionID, selection.Provider, binding.Platform, "verification", verifyErr)
 	if verifyErr != nil && coordinator.telemetry != nil {
 		if phase, ok := attestation.AppAttestFailurePhaseOf(verifyErr); ok {
 			coordinator.telemetry.RecordAppAttestVerifierFailure(ctx, telemetry.Labels{

@@ -6,6 +6,14 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.5 operator attestation diagnostics
+
+Closed, structured App Attest and Google Play Integrity failure logs add operator
+visibility without a client wire, error-registry, SDK, configuration or database
+change. Existing error classification and provider policy remain enforced.
+Unknown/private error text is never used as a log reason. No rejected evidence
+is persisted in the accepted-attestation ledger. See [release notes](../release/v1.1.5.md).
+
 ### Server 1.1.4 error diagnostics
 
 Client contract 1.1.0, wire versions 1/2/3, bundle edition 1.1.2 and schema 33

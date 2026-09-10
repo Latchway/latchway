@@ -267,7 +267,7 @@ func newAPIRuntime(
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
 		IdentityKeyCache: identityKeyCache, AppAttestKeys: appAttestKeys,
-		Telemetry: observability,
+		Telemetry: observability, Logger: logger,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session coordinator: %w", err)

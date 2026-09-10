@@ -131,8 +131,10 @@ func TestCoordinatorRecordsClosedAppAttestFailurePhaseAndKeepsGenericError(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	var failureLogs bytes.Buffer
 	coordinator := &clientCoordinator{
 		now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{}, telemetry: metrics,
+		logger:           slog.New(slog.NewJSONHandler(&failureLogs, nil)),
 		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}
 	_, verifyErr := coordinator.verifyAttestationEvidence(
@@ -147,6 +149,19 @@ func TestCoordinatorRecordsClosedAppAttestFailurePhaseAndKeepsGenericError(t *te
 	phase, ok := attestation.AppAttestFailurePhaseOf(verifyErr)
 	if !ok || phase != attestation.AppAttestFailurePhaseAssertionObject {
 		t.Fatalf("App Attest failure phase=%q present=%t", phase, ok)
+	}
+	var failureLog map[string]any
+	if err := json.Unmarshal(failureLogs.Bytes(), &failureLog); err != nil {
+		t.Fatal(err)
+	}
+	if failureLog["provider"] != "app_attest" || failureLog["phase"] != "assertion_object" ||
+		failureLog["stage"] != "verification" || failureLog["error_code"] != "attestation_invalid" {
+		t.Fatalf("wrong App Attest operator diagnostic: %v", failureLog)
+	}
+	for _, private := range []string{binding.ChallengeNonce, binding.DPoPJKT, binding.PrincipalID, base64.StdEncoding.EncodeToString(keyID)} {
+		if strings.Contains(failureLogs.String(), private) {
+			t.Fatal("App Attest operator diagnostic disclosed evidence")
+		}
 	}
 
 	recorder := httptest.NewRecorder()

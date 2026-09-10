@@ -194,9 +194,9 @@ func (verifier *PlayIntegrityVerifier) Verify(
 			return Result{}, ctxErr
 		}
 		if errors.Is(err, ErrPlayIntegrityTokenRejected) {
-			return Result{}, invalid("play integrity token rejection")
+			return Result{}, retainPlayIntegrityHTTPDiagnostic(invalid("play integrity token rejection"), err)
 		}
-		return Result{}, ErrPlayIntegrityService
+		return Result{}, retainPlayIntegrityHTTPDiagnostic(ErrPlayIntegrityService, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -277,7 +277,9 @@ func (verifier *PlayIntegrityVerifier) validatePayload(
 		len(payload.requestHash) != len(expectedHash) ||
 		subtle.ConstantTimeCompare([]byte(payload.requestHash), []byte(expectedHash)) != 1 ||
 		payload.appVerdict != "PLAY_RECOGNIZED" {
-		return validatedPlayIntegrityVerdict{}, invalid("play integrity request or app binding")
+		return validatedPlayIntegrityVerdict{}, playIntegrityAppRecognitionDiagnostic(
+			invalid("play integrity request or app binding"), payload.appVerdict,
+		)
 	}
 	if payload.timestampMillis < 0 || payload.timestampMillis > 253402300799999 ||
 		payload.timestampMillis > now.Add(verifier.clockSkew).UnixMilli() ||
@@ -391,25 +393,25 @@ func parsePlayIntegrityDecodeResponse(encoded []byte) (playIntegrityPayload, err
 	}
 	appPackageName, ok := stringMember(app, "packageName", 1, 255)
 	if !ok {
-		return playIntegrityPayload{}, invalid("play integrity app package")
+		return playIntegrityPayload{}, playIntegrityAppRecognitionDiagnostic(invalid("play integrity app package"), appVerdict)
 	}
 	versionText, ok := stringMember(app, "versionCode", 1, 19)
 	if !ok {
-		return playIntegrityPayload{}, invalid("play integrity app version")
+		return playIntegrityPayload{}, playIntegrityAppRecognitionDiagnostic(invalid("play integrity app version"), appVerdict)
 	}
 	versionCode, err := parseUnsignedDecimal(versionText, int64(^uint64(0)>>1))
 	if err != nil {
-		return playIntegrityPayload{}, invalid("play integrity app version")
+		return playIntegrityPayload{}, playIntegrityAppRecognitionDiagnostic(invalid("play integrity app version"), appVerdict)
 	}
 	certificateTexts, ok := stringArrayMember(app, "certificateSha256Digest", maxPlayIntegrityCertificates, 128)
 	if !ok || len(certificateTexts) == 0 {
-		return playIntegrityPayload{}, invalid("play integrity app certificate")
+		return playIntegrityPayload{}, playIntegrityAppRecognitionDiagnostic(invalid("play integrity app certificate"), appVerdict)
 	}
 	certificateDigests := make([][sha256.Size]byte, 0, len(certificateTexts))
 	for _, encodedDigest := range certificateTexts {
 		digest, decodeErr := decodePlayIntegrityCertificateDigest(encodedDigest)
 		if decodeErr != nil {
-			return playIntegrityPayload{}, invalid("play integrity app certificate")
+			return playIntegrityPayload{}, playIntegrityAppRecognitionDiagnostic(invalid("play integrity app certificate"), appVerdict)
 		}
 		certificateDigests = append(certificateDigests, digest)
 	}

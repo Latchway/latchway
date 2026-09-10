@@ -2,6 +2,22 @@
 
 Status date: 2026-09-10
 
+## Operator attestation failure logs: server 1.1.5 candidate
+
+The user requested deployment of 1.1.4 plus inspectable App Attest/Play Integrity
+failures. Because 1.1.4 was already published, this additive follow-up uses 1.1.5
+rather than mutating its image/tag. Structured warnings use closed reason/phase
+categories, validated resource IDs and separate client/server correlation IDs.
+Provider payloads, credentials, evidence and arbitrary error strings are not
+logged. Preflight, verification and selected payload/binding failures are covered.
+No verifier check, client error tuple, policy, quota or schema is changed.
+The full isolated-PostgreSQL Go suite, static analysis, affected-package race
+tests and canonical documentation checks pass. Decoder-to-coordinator tests
+cover native/RN Google HTTP failures, configuration preflight and sensitive-data
+redaction; App Attest phase and component correlation regressions pass. The
+contract 1.1.2 archive remains byte-identical. Publication and the authorized
+VPS rollout are pending.
+
 ## Error-diagnostics patch: server 1.1.4 published
 
 The server preserves audited adapter validation details, exposes closed safe
