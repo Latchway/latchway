@@ -16,9 +16,25 @@ transport, conditional HTTP caching, PostgreSQL multi-replica cache, stale grace
 key-size validation and algorithm restrictions are unchanged.
 
 The complete Go suite, static analysis and affected identity race suite pass,
-including a regression containing simultaneously active, future and expired
-Firebase rotation certificates. This source fix is not yet published or
-deployed.
+including lower-level and full Firebase-preset regressions containing
+simultaneously active, future and expired rotation certificates. The contract
+1.1.2 archive remains byte-identical.
+
+Publication receipt: [server v1.1.6](https://github.com/Latchway/latchway/releases/tag/v1.1.6)
+was published from `b5ecf3c632a97a3654a07ca5669070ed824ba746`; release run
+`34818009784` succeeded. The public Linux amd64/arm64 GHCR index is
+`sha256:1b93eee189481edf8f5892f64154d528b89ed510a1c1ff9f4541366e8f83ad4b`.
+The release contract asset matches the canonical SHA-256
+`9f8bba706dc0f66a7285352bafbdc1698dda1851dc4827d31ff55dfe6c175b58`.
+
+The authorized VPS rollout completed on 2026-09-14 using that immutable image.
+A root-only configuration, gateway-log and PostgreSQL 18 custom-format backup
+was created and validated first. The migration reported schema current; all
+seven readiness checks, public HTTPS Console and discovery pass on server 1.1.6.
+The first post-deployment `refresh_jwks` job succeeded at 07:45:14 UTC; all
+three shared key-cache records are fresh and none are unusable. Existing client
+session and data-plane requests succeeded after replacement. No database schema,
+identity provider, application policy, quota, credential or SDK changed.
 
 ## Operator attestation failure logs: server 1.1.5 published
 

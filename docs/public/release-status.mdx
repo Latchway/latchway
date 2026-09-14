@@ -4,9 +4,9 @@ description: "Published server and SDK versions, upgrade boundaries, and verific
 icon: "badge-check"
 audience: "mixed"
 pageType: "reference"
-serverVersion: "1.1.5"
+serverVersion: "1.1.6"
 sdkVersion: "2.0.1"
-lastVerified: "2026-09-10"
+lastVerified: "2026-09-14"
 owner: "release-engineering"
 ---
 
@@ -17,7 +17,7 @@ The current distributions are:
 
 | Component | Version | Distribution |
 | --- | --- | --- |
-| Server and Console | 1.1.5 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.5), GHCR `ghcr.io/latchway/latchway:1.1.5` |
+| Server and Console | 1.1.6 | [GitHub release](https://github.com/Latchway/latchway/releases/tag/v1.1.6), GHCR `ghcr.io/latchway/latchway:1.1.6` |
 | iOS SDK | 2.0.1 | [SwiftPM tag and source](https://github.com/Latchway/latchway-ios-sdk/releases/tag/v2.0.1), CocoaPods `Latchway` |
 | Android SDK | 1.2.2 | [GitHub release](https://github.com/Latchway/latchway-android/releases/tag/v1.2.2), Maven Central `dev.latchway` |
 | React Native SDK | 2.0.1 | [npm](https://www.npmjs.com/package/@latchway/react-native/v/2.0.1), [GitHub release](https://github.com/Latchway/latchway-react-native-sdk/releases/tag/v2.0.1) |
@@ -31,20 +31,26 @@ immutable version locks. Use the same image for server and migrator.
 
 ## What changed
 
-Server 1.1.5 adds structured operator warnings for failed App Attest and
-Google Play Integrity verification. Closed reasons, processing stages and
-safe request correlation help distinguish configuration, binding, evidence
-and provider-service failures. App Attest phases and known Google decode
-HTTP status categories are retained without exposing raw errors, credentials,
-evidence, identity claims or provider bodies.
+Server 1.1.6 prevents Firebase Authentication certificate rotation from making
+identity verification temporarily unavailable. Google's public X.509 map can
+contain overlapping certificates whose validity windows have not started or
+have recently ended. Latchway now follows the official Firebase Admin semantics:
+parse the public certificates, select the RSA key by JWT `kid`, and validate the
+Firebase token's own issuer, audience, subject and timestamps separately.
 
-The warnings cover native/RN verification and direct App Attest component
-step-up. They do not change client responses, verifier policy, quotas or the
-accepted-attestation ledger. Logs follow the deployment's retention policy;
-old failed verdicts cannot be reconstructed retroactively. See
-[attestation failure logs](/operations/telemetry-and-jobs#attestation-failure-logs).
+No Firebase service account is required. Protected key fetching, bounded
+documents, PostgreSQL multi-replica caching, RS256 and key-safety validation
+remain enforced. The client contract, wire versions, schema, policies, quotas
+and SDKs are unchanged.
 
 ### Previous releases
+
+Server 1.1.5 added structured operator warnings for failed App Attest and
+Google Play Integrity verification. Closed reasons, processing stages and safe
+request correlation cover native/RN verification and direct App Attest component
+step-up without exposing raw errors, credentials, evidence, identity claims or
+provider bodies. See
+[attestation failure logs](/operations/telemetry-and-jobs#attestation-failure-logs).
 
 Server 1.1.4 preserves safe request validation and selected attestation guidance,
 distinguishes impossible request bounds from replenishable quotas, and retains
@@ -147,11 +153,11 @@ Captured-account `logout()` is still the safe choice for delayed old-account
 work. Neither operation signs out the external identity provider or resets quota.
 
 Contract 1.1.0 and wire 3 are current; compatible legacy wire-1/2 routes remain
-supported. Server 1.1.5 requires schema 33. Back up PostgreSQL and preserve the
+supported. Server 1.1.6 requires schema 33. Back up PostgreSQL and preserve the
 database URL, public origin, encryption/signing configuration and image digest.
 Stop the old gateway, run the matching new image's migration, then start that
 image and confirm readiness reports schema 33. Existing schema-33 deployments
-need no additional SQL migration or application-policy activation for 1.1.5.
+need no additional SQL migration or application-policy activation for 1.1.6.
 
 Migrations are forward-only and readiness requires an exact schema match.
 Do not start a schema-30/31 binary against a schema-33 database.
@@ -175,15 +181,14 @@ Trunk publication.
 
 ## Evidence and limits
 
-Server 1.1.5 passes the complete isolated-PostgreSQL Go suite, static analysis,
-affected-package race tests and canonical documentation checks. Tests exercise
-Google HTTP 400/403 classification, preflight/configuration failures, native/RN
-request correlation, App Attest phases and sensitive-data redaction. The
-published GHCR image includes Linux amd64 and arm64, and its contract bundle
-remains byte-identical to 1.1.2. A digest-pinned private VPS rollout passed all
-seven readiness checks without changing either environment's policy, schema
-or log rotation. These are release and operational receipts, not fresh
-physical-device or live-provider proof.
+Server 1.1.6 passes the complete Go suite, static analysis and affected identity
+race tests. Lower-level and full Firebase-preset regressions cover simultaneous
+active, future and expired rotation certificates. The public GHCR image includes
+Linux amd64 and arm64, and its contract bundle remains byte-identical to 1.1.2.
+A digest-pinned private VPS rollout passed all seven readiness checks; its first
+post-deployment JWKS refresh succeeded with all three cache records fresh and no
+unusable records. Existing sessions and data-plane requests also succeeded.
+These are release and operational receipts, not new physical-device proof.
 
 Server 1.1.4 passes the complete isolated-PostgreSQL Go suite, static analysis,
 targeted race checks and real-HTTP partial-stream regression tests. Its contract
