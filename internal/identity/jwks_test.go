@@ -259,6 +259,63 @@ func TestRemoteKeySourceParsesES256AndFirebaseCertificateMap(t *testing.T) {
 	}
 }
 
+func TestFirebaseCertificateMapAcceptsRotationOverlap(t *testing.T) {
+	now := verifierTestNow
+	activeKey := mustRSAKey(t)
+	futureKey := mustRSAKey(t)
+	expiredKey := mustRSAKey(t)
+
+	certificate := func(serial int64, key *rsa.PrivateKey, notBefore, notAfter time.Time) string {
+		t.Helper()
+		template := &x509.Certificate{
+			SerialNumber: big.NewInt(serial),
+			Subject:      pkix.Name{CommonName: "firebase rotation fixture"},
+			NotBefore:    notBefore,
+			NotAfter:     notAfter,
+			KeyUsage:     x509.KeyUsageDigitalSignature,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		if err != nil {
+			t.Fatalf("create certificate: %v", err)
+		}
+		return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	}
+
+	document, err := json.Marshal(map[string]string{
+		"active":  certificate(1, activeKey, now.Add(-time.Hour), now.Add(time.Hour)),
+		"future":  certificate(2, futureKey, now.Add(time.Minute), now.Add(25*time.Hour)),
+		"expired": certificate(3, expiredKey, now.Add(-25*time.Hour), now.Add(-time.Minute)),
+	})
+	if err != nil {
+		t.Fatalf("marshal certificate map: %v", err)
+	}
+	handler := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, string(document), map[string]string{"Cache-Control": "public, max-age=3600"}), nil
+	})
+	source := mustRemoteKeys(t, RemoteKeySourceConfig{
+		URL:    "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+		Format: RemoteKeyFormatX509Certificate, Client: &http.Client{Transport: handler},
+		Now: func() time.Time { return now },
+	})
+
+	for _, test := range []struct {
+		kid string
+		key *rsa.PrivateKey
+	}{
+		{kid: "active", key: activeKey},
+		{kid: "future", key: futureKey},
+		{kid: "expired", key: expiredKey},
+	} {
+		resolved, err := source.Key(context.Background(), test.kid, "RS256")
+		if err != nil {
+			t.Fatalf("resolve %s overlapping Firebase key: %v", test.kid, err)
+		}
+		if resolved.(*rsa.PublicKey).N.Cmp(test.key.N) != 0 {
+			t.Fatalf("resolved the wrong %s Firebase key", test.kid)
+		}
+	}
+}
+
 func TestCacheLifetimeHonorsMetadataAndBounds(t *testing.T) {
 	now := verifierTestNow
 	tests := []struct {

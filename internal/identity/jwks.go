@@ -433,7 +433,7 @@ func (source *RemoteKeySource) parseCachedDocument(record cachedRemoteKeyDocumen
 	case RemoteKeyFormatJWKS:
 		return parseJWKSet(value)
 	case RemoteKeyFormatX509Certificate:
-		return parseX509CertificateMap(value, now)
+		return parseX509CertificateMap(value)
 	default:
 		return nil, ErrConfiguration
 	}
@@ -552,7 +552,7 @@ func (source *RemoteKeySource) fetch(
 	case RemoteKeyFormatJWKS:
 		keys, err = parseJWKSet(value)
 	case RemoteKeyFormatX509Certificate:
-		keys, err = parseX509CertificateMap(value, now)
+		keys, err = parseX509CertificateMap(value)
 	default:
 		err = ErrConfiguration
 	}
@@ -684,7 +684,7 @@ func publicRemoteKeyDocument(format RemoteKeyFormat, value any, keys map[string]
 		return json.Marshal(map[string]any{"keys": entries})
 	case RemoteKeyFormatX509Certificate:
 		// parseX509CertificateMap has already proven every value is a bounded
-		// public certificate and rejects all other document members.
+		// RSA public certificate and rejects all other document members.
 		return json.Marshal(value)
 	default:
 		return nil, ErrConfiguration
@@ -759,7 +759,7 @@ func parseJWKPublicKey(jwk map[string]any) (any, error) {
 	}
 }
 
-func parseX509CertificateMap(value any, now time.Time) (map[string]staticKey, error) {
+func parseX509CertificateMap(value any) (map[string]staticKey, error) {
 	document, ok := value.(map[string]any)
 	if !ok || len(document) == 0 || len(document) > maxRemoteKeys {
 		return nil, errors.New("certificate map shape is invalid")
@@ -775,13 +775,23 @@ func parseX509CertificateMap(value any, now time.Time) (map[string]staticKey, er
 			return nil, errors.New("certificate map PEM is invalid")
 		}
 		certificate, err := x509.ParseCertificate(block.Bytes)
-		if err != nil || now.Before(certificate.NotBefore) || !now.Before(certificate.NotAfter) {
+		if err != nil {
 			return nil, errors.New("certificate map certificate is invalid")
 		}
-		if err := validateAsymmetricKey(certificate.PublicKey); err != nil {
+		// Firebase's certificate endpoint is a signed-key distribution
+		// mechanism, not a TLS certificate chain. Google deliberately publishes
+		// certificates with overlapping validity windows during rotation. Match
+		// the Firebase Admin verifier: parse the certificate structurally, select
+		// the key by JWT kid, and validate the JWT's own time claims separately.
+		// Reject non-RSA material because Firebase ID tokens are RS256.
+		publicKey, ok := certificate.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return nil, errors.New("certificate map public key is not RSA")
+		}
+		if err := validateAsymmetricKey(publicKey); err != nil {
 			return nil, errors.New("certificate map public key is unsafe")
 		}
-		keys[kid] = staticKey{key: certificate.PublicKey}
+		keys[kid] = staticKey{key: publicKey}
 	}
 	return keys, nil
 }

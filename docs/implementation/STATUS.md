@@ -1,6 +1,24 @@
 # Implementation status
 
-Status date: 2026-09-10
+Status date: 2026-09-14
+
+## Firebase signing-certificate rotation remediation
+
+The Firebase X.509-map adapter now follows the official Firebase Admin verifier
+semantics: each bounded PEM certificate is parsed with Go's standard
+`crypto/x509`, its RSA public key is selected by the JWT `kid`, and Firebase ID
+token time claims remain authoritative. The adapter no longer rejects Google's
+entire published key document merely because a rotation-overlap certificate is
+not active yet or has recently expired. This requires only the configured
+Firebase project ID and public Google certificates; no service-account secret or
+privileged Firebase API access was introduced. Latchway's protected outbound
+transport, conditional HTTP caching, PostgreSQL multi-replica cache, stale grace,
+key-size validation and algorithm restrictions are unchanged.
+
+The complete Go suite, static analysis and affected identity race suite pass,
+including a regression containing simultaneously active, future and expired
+Firebase rotation certificates. This source fix is not yet published or
+deployed.
 
 ## Operator attestation failure logs: server 1.1.5 published
 

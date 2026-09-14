@@ -6,6 +6,19 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.6 Firebase certificate rotation
+
+Firebase Authentication verification follows the official Firebase Admin
+certificate semantics: the public X.509 map is a signing-key distribution
+document, certificates are selected by the JWT `kid`, and the JWT's own time
+claims remain authoritative. Google's planned overlap may include a certificate
+whose X.509 validity window has not started or has recently ended; either entry
+no longer rejects the complete published key set. PEM structure, RSA key safety,
+algorithm, issuer, audience, subject and token-time validation remain strict.
+Only the Firebase project ID is required; no service account, client wire,
+configuration, database, contract or SDK change is introduced. See
+[release notes](../release/v1.1.6.md).
+
 ### Server 1.1.5 operator attestation diagnostics
 
 Closed, structured App Attest and Google Play Integrity failure logs add operator

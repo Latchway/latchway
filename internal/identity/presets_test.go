@@ -22,7 +22,17 @@ import (
 func TestFirebasePresetDerivesOfficialVerificationParameters(t *testing.T) {
 	key := mustRSAKey(t)
 	certificatePEM := certificatePEMForKey(t, key, verifierTestNow)
-	document, err := json.Marshal(map[string]string{"google-key": certificatePEM})
+	futureKey := mustRSAKey(t)
+	expiredKey := mustRSAKey(t)
+	document, err := json.Marshal(map[string]string{
+		"google-key": certificatePEM,
+		"future-overlap": certificatePEMForKeyValidity(
+			t, futureKey, verifierTestNow.Add(time.Minute), verifierTestNow.Add(25*time.Hour),
+		),
+		"expired-overlap": certificatePEMForKeyValidity(
+			t, expiredKey, verifierTestNow.Add(-25*time.Hour), verifierTestNow.Add(-time.Minute),
+		),
+	})
 	if err != nil {
 		t.Fatalf("marshal Firebase certificate map: %v", err)
 	}
@@ -219,9 +229,14 @@ func TestParsePublicKeyPEMAcceptsPublicFormatsAndRejectsPrivateMaterial(t *testi
 
 func certificatePEMForKey(t *testing.T, key *rsa.PrivateKey, now time.Time) string {
 	t.Helper()
+	return certificatePEMForKeyValidity(t, key, now.Add(-time.Hour), now.Add(time.Hour))
+}
+
+func certificatePEMForKeyValidity(t *testing.T, key *rsa.PrivateKey, notBefore, notAfter time.Time) string {
+	t.Helper()
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(42), Subject: pkix.Name{CommonName: "identity fixture"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature,
+		NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
