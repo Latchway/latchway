@@ -1,6 +1,26 @@
 # Implementation status
 
-Status date: 2026-09-14
+Status date: 2026-09-15
+
+## Habitify Development accepts local and TestFlight App Attest builds
+
+Habitify Development active configuration revision
+`rev_01M2J170WS0CQKCW57YMJ3KW1G` now keeps App Attest environment `any` and
+accepts validation categories 2 and 3 for both native iOS and React Native iOS.
+Wildcard bundle versions, bundle ID `co.vuvo.habitify`, Apple team/app prefix,
+required attestation, shared callers, Android testing responses, the weekly
+one-million-token user/feature quota, identity, routing and upstream settings are
+unchanged. Production was not targeted.
+
+Production revision `rev_01M22TWX4C20W3GQ9ACSTC1ZZW` remained active at
+version 5 with App Attest environment `production` and validation categories 2
+and 4 for both native iOS and React Native iOS.
+
+The authoritative validation and structural plan passed with no issues or
+warnings and exactly the two intended category-list replacements. The activation
+audit receipt is `aud_01M2J171YWKGEYCGXK75MKEZ81`; all seven public readiness
+checks passed after activation. This is configuration verification, not fresh
+physical-device App Attest proof.
 
 ## Firebase signing-certificate rotation remediation
 
