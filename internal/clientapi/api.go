@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -48,6 +49,7 @@ type Config struct {
 	FeatureQuotas FeatureQuotaProvider
 	JWKS          JWKSProvider
 	PublicOrigin  string
+	Logger        *slog.Logger
 }
 
 type API struct {
@@ -56,6 +58,7 @@ type API struct {
 	jwks          JWKSProvider
 	origin        url.URL
 	targets       map[string]url.URL
+	logger        *slog.Logger
 }
 
 func New(config Config) (*API, error) {
@@ -66,6 +69,10 @@ func New(config Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	targets := make(map[string]url.URL, 9)
 	for _, path := range []string{
 		challengePath, exchangePath, refreshPath, verifyIdentityPath, revokePath, diagnosticsPath,
@@ -75,7 +82,7 @@ func New(config Config) (*API, error) {
 	}
 	return &API{
 		coordinator: config.Coordinator, featureQuotas: config.FeatureQuotas,
-		jwks: config.JWKS, origin: origin, targets: targets,
+		jwks: config.JWKS, origin: origin, targets: targets, logger: logger,
 	}, nil
 }
 
@@ -120,6 +127,7 @@ func (api *API) Handler() http.Handler { return api }
 
 func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	correlationID := selectCorrelationID(r)
+	w = newClientFailureResponseWriter(w, r, api.logger, correlationID)
 	w.Header().Set("X-Latchway-Request-ID", correlationID)
 	browserOrigin, originErr := weborigin.Read(r.Header)
 	if originErr != nil {
@@ -135,7 +143,7 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	logicalID, ok := requestidentity.FromContext(r.Context())
 	if !ok {
-		api.writeProblem(w, correlationID, problem.Error{
+		api.writeProblemAt(w, correlationID, "request_context", problem.Error{
 			Code: "server_not_ready", Detail: "The server could not initialize request processing.",
 		})
 		return
@@ -143,7 +151,7 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.EscapedPath()
 	if path != r.URL.Path {
-		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
+		api.writeProblemAt(w, correlationID, "routing", problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
@@ -248,7 +256,7 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		api.publicDiscovery(w, r, correlationID)
 	default:
-		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
+		api.writeProblemAt(w, correlationID, "routing", problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 	}
 }
 
@@ -314,7 +322,7 @@ func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestI
 	}
 	document, err := challengeDocumentFor(result)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -344,7 +352,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 	}
 	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion != "1")
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -374,7 +382,7 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 	}
 	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion != "1")
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
@@ -414,7 +422,7 @@ func (api *API) provisionComponent(w http.ResponseWriter, r *http.Request, reque
 	}
 	document, err := provisionComponentDocumentFor(result)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -448,7 +456,7 @@ func (api *API) createComponentSession(w http.ResponseWriter, r *http.Request, r
 	}
 	document, err := componentSessionDocumentFor(result, declaration.sdk)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -488,7 +496,7 @@ func (api *API) createComponentAttestationChallenge(w http.ResponseWriter, r *ht
 	}
 	document, err := challengeDocumentFor(result)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -529,7 +537,7 @@ func (api *API) exchangeComponentAttestation(w http.ResponseWriter, r *http.Requ
 	}
 	document, err := grantDocumentFor(result, declaration.sdk, true)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
@@ -667,7 +675,7 @@ func (api *API) getDiagnostics(w http.ResponseWriter, r *http.Request, requestID
 	}
 	document, err := diagnosticsDocumentFor(result, declaration.sdk, requestID)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	if declaration.protocolVersion != "3" {
@@ -717,7 +725,7 @@ func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestI
 	}
 	document, err := featureQuotaDocumentFor(result, feature)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
@@ -730,11 +738,11 @@ func (api *API) publicJWKS(w http.ResponseWriter, r *http.Request, requestID str
 	}
 	keys, err := api.jwks.PublicJWKS(r.Context())
 	if err != nil {
-		api.writeProblem(w, requestID, problem.Error{Code: "server_not_ready", Detail: "Public session-signing keys are temporarily unavailable."})
+		api.writeProblemAt(w, requestID, "dependency", problem.Error{Code: "server_not_ready", Detail: "Public session-signing keys are temporarily unavailable."})
 		return
 	}
 	if err := validateJWKS(keys); err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusOK, "public, max-age=300", keys)
@@ -854,15 +862,15 @@ func allowedClientPreflightHeaders(headers []string) bool {
 }
 
 func (api *API) methodNotAllowed(w http.ResponseWriter, requestID string) {
-	api.writeProblem(w, requestID, problem.Error{Code: "request_invalid", Detail: "The HTTP method is not supported by this client endpoint."})
+	api.writeProblemAt(w, requestID, "routing", problem.Error{Code: "request_invalid", Detail: "The HTTP method is not supported by this client endpoint."})
 }
 
 func (api *API) writeViolation(w http.ResponseWriter, requestID string, violation *requestViolation) {
 	if violation == nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "transport_contract")
 		return
 	}
-	api.writeProblem(w, requestID, problem.Error{
+	api.writeProblemAt(w, requestID, "request_validation", problem.Error{
 		Code: violation.code, Detail: violation.detail, Fields: violation.fields,
 		SupportedProtocolVersions: violation.supportedProtocolVersions,
 	})
@@ -879,22 +887,22 @@ func (api *API) writeFeatureDependencyFailure(w http.ResponseWriter, requestID, 
 func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestID, feature string, err error) {
 	var failure *DependencyError
 	if !errors.As(err, &failure) || failure == nil || !allowedDependencyCodeForOperation(failure.Code, feature != "") || failure.RetryAfterSeconds < 0 || failure.RetryAfterSeconds > 86400 {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "dependency_contract")
 		return
 	}
 	definition := problem.Registry[failure.Code]
 	if failure.RetryAfterSeconds > 0 && !definition.Retryable {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "dependency_contract")
 		return
 	}
 	if failure.Code == "dpop_nonce_required" {
 		if len(failure.DPoPNonce) < 16 || len(failure.DPoPNonce) > 512 || strings.ContainsAny(failure.DPoPNonce, "\r\n\x00") {
-			api.internal(w, requestID)
+			api.internalAt(w, requestID, "dependency_contract")
 			return
 		}
 		w.Header().Set("DPoP-Nonce", failure.DPoPNonce)
 	} else if failure.DPoPNonce != "" {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "dependency_contract")
 		return
 	}
 	value := problem.Error{
@@ -904,7 +912,7 @@ func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestI
 	if failure.AttestationReason != "" {
 		detail, ok := attestationFailureDetail(failure.Code, failure.AttestationReason)
 		if !ok {
-			api.internal(w, requestID)
+			api.internalAt(w, requestID, "dependency_contract")
 			return
 		}
 		value.Detail = detail
@@ -916,7 +924,7 @@ func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestI
 	if failure.Code == "protocol_version_unsupported" {
 		value.SupportedProtocolVersions = buildinfo.SupportedProtocolVersions()
 	}
-	api.writeProblem(w, requestID, value)
+	api.writeProblemAt(w, requestID, "dependency", value)
 }
 
 func allowedDependencyCodeForOperation(code string, featureOperation bool) bool {
@@ -1054,17 +1062,30 @@ func safeFailureDetail(code string) string {
 }
 
 func (api *API) internal(w http.ResponseWriter, requestID string) {
-	api.writeProblem(w, requestID, problem.Error{Code: "internal_error", Detail: "The client operation could not be completed."})
+	api.internalAt(w, requestID, "handler")
 }
 
 func (api *API) writeProblem(w http.ResponseWriter, requestID string, value problem.Error) {
+	api.writeProblemAt(w, requestID, "handler", value)
+}
+
+func (api *API) internalAt(w http.ResponseWriter, requestID, stage string) {
+	api.writeProblemAt(w, requestID, stage, problem.Error{Code: "internal_error", Detail: "The client operation could not be completed."})
+}
+
+func (api *API) writeProblemAt(w http.ResponseWriter, requestID, stage string, value problem.Error) {
+	if observer, ok := w.(interface {
+		observeClientProblem(problem.Error, string)
+	}); ok {
+		observer.observeClientProblem(value, stage)
+	}
 	problem.Write(w, requestID, value)
 }
 
 func (api *API) writeSuccess(w http.ResponseWriter, requestID string, status int, cacheControl string, value any) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_encoding")
 		return
 	}
 	w.Header().Set("Cache-Control", cacheControl)

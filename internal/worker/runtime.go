@@ -351,11 +351,17 @@ func (runtime *Runtime) executeDurableJob(ctx context.Context, job Job) {
 		}
 	}
 	code := "job_failed"
+	stage := ""
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		code = "run_timeout"
+	} else if job.Type == "enforce_retention" {
+		stage = maintenanceFailureStageOf(err)
+		if stage != "" {
+			code = "retention_" + stage
+		}
 	}
 	_ = runtime.queue.Fail(finalizeCtx, job, code)
-	runtime.logFailure(ctx, job.Type, processed, job.AttemptCount, code)
+	runtime.logFailureWithStage(ctx, job.Type, processed, job.AttemptCount, code, stage)
 	if runtime.telemetry != nil {
 		runtime.telemetry.RecordWorkerJob(ctx, job.Type, "failed", duration)
 	}
@@ -513,14 +519,40 @@ func (runtime *Runtime) runBatches(
 }
 
 func (runtime *Runtime) logFailure(ctx context.Context, name string, processed int64, batches int, code string) {
+	runtime.logFailureWithStage(ctx, name, processed, batches, code, "")
+}
+
+func (runtime *Runtime) logFailureWithStage(ctx context.Context, name string, processed int64, batches int, code, stage string) {
 	// Do not log the underlying error: database and dependency errors are not a
 	// safe channel for tenant identifiers, credentials, or provider material.
-	runtime.logger.ErrorContext(ctx, "maintenance job failed",
-		"job", name,
-		"processed", processed,
-		"batches", batches,
-		"error_code", code,
-	)
+	attributes := []slog.Attr{
+		slog.String("job", name),
+		slog.Int64("processed", processed),
+		slog.Int("batches", batches),
+		slog.String("error_code", code),
+	}
+	if stage != "" {
+		attributes = append(attributes, slog.String("failure_stage", stage))
+	}
+	runtime.logger.LogAttrs(ctx, slog.LevelError, "maintenance job failed", attributes...)
+}
+
+func maintenanceFailureStageOf(err error) string {
+	var staged interface{ maintenanceFailureStage() string }
+	if !errors.As(err, &staged) {
+		return ""
+	}
+	switch stage := staged.maintenanceFailureStage(); stage {
+	case "invalid_input", "begin_transaction", "delete_admin_sessions", "delete_job_history",
+		"delete_runtime_instances", "delete_jwks_cache", "expire_refresh_tokens", "commit_operational",
+		"expire_component_refresh_tokens", "delete_component_rotation_results", "begin_component_families",
+		"select_component_families", "scan_component_families", "iterate_component_families",
+		"generate_component_audit_ids", "expire_component_families", "record_component_audit_events",
+		"record_component_audit_changes", "commit_component_families":
+		return stage
+	default:
+		return ""
+	}
 }
 
 type realTicker struct {

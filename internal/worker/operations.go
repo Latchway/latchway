@@ -141,17 +141,18 @@ func (operations *PostgreSQLOperations) AggregateDailyUsage(ctx context.Context,
 // are never silently shortened by this job.
 func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, scheduledAt time.Time, limit int) (int64, error) {
 	if operations == nil || ctx == nil || scheduledAt.IsZero() || limit < 1 || limit > 10_000 {
-		return 0, errors.New("operational retention input is invalid")
+		return 0, newMaintenanceStageFailure(ctx, "invalid_input")
 	}
 	tx, err := operations.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return 0, errors.New("begin operational retention")
+		return 0, newMaintenanceStageFailure(ctx, "begin_transaction")
 	}
 	defer rollbackQueue(tx)
 	var processed int64
 	for _, statement := range []struct {
 		query  string
 		cutoff time.Time
+		stage  string
 	}{
 		{query: `
 			WITH doomed AS (
@@ -161,7 +162,7 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 			)
 			DELETE FROM admin_sessions AS session USING doomed
 			WHERE session.admin_session_id = doomed.admin_session_id
-		`, cutoff: cutoff(scheduledAt, defaultAdminSessionRetention)},
+		`, cutoff: cutoff(scheduledAt, defaultAdminSessionRetention), stage: "delete_admin_sessions"},
 		{query: `
 			WITH doomed AS (
 				SELECT job_id FROM jobs
@@ -169,7 +170,7 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 				ORDER BY completed_at, job_id LIMIT $2 FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM jobs AS job USING doomed WHERE job.job_id = doomed.job_id
-		`, cutoff: cutoff(scheduledAt, defaultJobHistoryRetention)},
+		`, cutoff: cutoff(scheduledAt, defaultJobHistoryRetention), stage: "delete_job_history"},
 		{query: `
 			WITH doomed AS (
 				SELECT instance.instance_id FROM runtime_instances AS instance
@@ -182,7 +183,7 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 			)
 			DELETE FROM runtime_instances AS instance USING doomed
 			WHERE instance.instance_id = doomed.instance_id
-		`, cutoff: cutoff(scheduledAt, defaultRuntimeRetention)},
+		`, cutoff: cutoff(scheduledAt, defaultRuntimeRetention), stage: "delete_runtime_instances"},
 		{query: `
 			WITH doomed AS (
 				SELECT issuer_sha256, source_sha256
@@ -196,11 +197,11 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 			DELETE FROM identity_jwks_cache AS cache USING doomed
 			WHERE cache.issuer_sha256 = doomed.issuer_sha256
 			  AND cache.source_sha256 = doomed.source_sha256
-		`, cutoff: scheduledAt.UTC()},
+		`, cutoff: scheduledAt.UTC(), stage: "delete_jwks_cache"},
 	} {
 		result, execErr := tx.Exec(ctx, statement.query, statement.cutoff, limit)
 		if execErr != nil {
-			return processed, errors.New("delete expired operational records")
+			return processed, newMaintenanceStageFailure(ctx, statement.stage)
 		}
 		processed += result.RowsAffected()
 	}
@@ -214,11 +215,11 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 		FROM expired WHERE token.refresh_token_id = expired.refresh_token_id
 	`, scheduledAt.UTC(), limit)
 	if err != nil {
-		return processed, errors.New("expire refresh-token state")
+		return processed, newMaintenanceStageFailure(ctx, "expire_refresh_tokens")
 	}
 	processed += result.RowsAffected()
 	if err := tx.Commit(ctx); err != nil {
-		return 0, errors.New("commit operational retention")
+		return 0, newMaintenanceStageFailure(ctx, "commit_operational")
 	}
 	componentProcessed, err := operations.enforceComponentRetention(ctx, scheduledAt.UTC(), limit)
 	processed += componentProcessed
@@ -240,8 +241,8 @@ func (operations *PostgreSQLOperations) enforceComponentRetention(
 ) (int64, error) {
 	var processed int64
 	statements := []struct {
-		query   string
-		failure string
+		query string
+		stage string
 	}{
 		{
 			query: `
@@ -258,7 +259,7 @@ func (operations *PostgreSQLOperations) enforceComponentRetention(
 				FROM expired
 				WHERE token.component_refresh_token_id = expired.component_refresh_token_id
 			`,
-			failure: "expire component refresh-token state",
+			stage: "expire_component_refresh_tokens",
 		},
 		{
 			query: `
@@ -273,13 +274,13 @@ func (operations *PostgreSQLOperations) enforceComponentRetention(
 				USING doomed
 				WHERE result.refresh_rotation_result_id = doomed.refresh_rotation_result_id
 			`,
-			failure: "delete expired component refresh rotation results",
+			stage: "delete_component_rotation_results",
 		},
 	}
 	for _, statement := range statements {
 		result, err := operations.pool.Exec(ctx, statement.query, retentionAt, limit)
 		if err != nil {
-			return processed, errors.New(statement.failure)
+			return processed, newMaintenanceStageFailure(ctx, statement.stage)
 		}
 		processed += result.RowsAffected()
 	}
@@ -314,7 +315,7 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 ) (int64, error) {
 	tx, err := operations.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return 0, errors.New("begin component session-family retention")
+		return 0, newMaintenanceStageFailure(ctx, "begin_component_families")
 	}
 	defer rollbackQueue(tx)
 	rows, err := tx.Query(ctx, `
@@ -340,7 +341,7 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 		LIMIT $2 FOR UPDATE OF family SKIP LOCKED
 	`, retentionAt, limit)
 	if err != nil {
-		return 0, errors.New("select expired component session families")
+		return 0, newMaintenanceStageFailure(ctx, "select_component_families")
 	}
 	families := make([]expiredComponentSessionFamily, 0, limit)
 	for rows.Next() {
@@ -349,18 +350,18 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 			&family.id, &family.organizationID, &family.environmentID, &family.componentID,
 		); err != nil {
 			rows.Close()
-			return 0, errors.New("scan expired component session family")
+			return 0, newMaintenanceStageFailure(ctx, "scan_component_families")
 		}
 		families = append(families, family)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return 0, errors.New("iterate expired component session families")
+		return 0, newMaintenanceStageFailure(ctx, "iterate_component_families")
 	}
 	rows.Close()
 	if len(families) == 0 {
 		if err := tx.Commit(ctx); err != nil {
-			return 0, errors.New("commit empty component session-family retention")
+			return 0, newMaintenanceStageFailure(ctx, "commit_component_families")
 		}
 		return 0, nil
 	}
@@ -372,7 +373,7 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 	for index, family := range families {
 		eventID, err := id.New(id.AuditEvent)
 		if err != nil {
-			return 0, errors.New("generate component session-family audit event ID")
+			return 0, newMaintenanceStageFailure(ctx, "generate_component_audit_ids")
 		}
 		familyIDs[index] = family.id
 		eventIDs[index] = eventID
@@ -387,7 +388,7 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 		  AND status = 'active'
 	`, retentionAt, familyIDs)
 	if err != nil || result.RowsAffected() != int64(len(families)) {
-		return 0, errors.New("expire component session-family state")
+		return 0, newMaintenanceStageFailure(ctx, "expire_component_families")
 	}
 	result, err = tx.Exec(ctx, `
 		INSERT INTO audit_events (
@@ -403,7 +404,7 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 	`, componentSessionFamilyExpiredAction, retentionAt,
 		componentSessionFamilyExpiredReason, eventIDs, organizationIDs, environmentIDs, componentIDs)
 	if err != nil || result.RowsAffected() != int64(len(families)) {
-		return 0, errors.New("record component session-family audit events")
+		return 0, newMaintenanceStageFailure(ctx, "record_component_audit_events")
 	}
 	result, err = tx.Exec(ctx, `
 		INSERT INTO audit_event_changes (
@@ -419,12 +420,30 @@ func (operations *PostgreSQLOperations) expireComponentSessionFamilies(
 		) AS change(ordinal, field_name, operation, classification)
 	`, eventIDs)
 	if err != nil || result.RowsAffected() != int64(3*len(families)) {
-		return 0, errors.New("record component session-family audit changes")
+		return 0, newMaintenanceStageFailure(ctx, "record_component_audit_changes")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, errors.New("commit component session-family retention")
+		return 0, newMaintenanceStageFailure(ctx, "commit_component_families")
 	}
 	return int64(len(families)), nil
+}
+
+// maintenanceStageFailure carries only a closed operational stage. The
+// underlying PostgreSQL error is intentionally discarded so it cannot reach
+// logs or the durable job row through ordinary formatting.
+type maintenanceStageFailure struct{ stage string }
+
+func (maintenanceStageFailure) Error() string { return "maintenance operation failed" }
+
+func (failure maintenanceStageFailure) maintenanceFailureStage() string { return failure.stage }
+
+func newMaintenanceStageFailure(ctx context.Context, stage string) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	return maintenanceStageFailure{stage: stage}
 }
 
 func cutoff(scheduledAt time.Time, retention time.Duration) time.Time {

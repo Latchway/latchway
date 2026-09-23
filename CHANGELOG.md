@@ -4,6 +4,22 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Emit one redaction-safe `Client API problem` event for every Client API
+  problem response, including closed endpoint, SDK/caller, failure stage,
+  canonical error code, status and correlation identifiers. Raw paths, headers,
+  tokens, proofs, bodies, user/install identifiers and dependency text remain
+  excluded.
+- Persist and log closed operational-retention failure stages so intermittent
+  cleanup failures identify the affected relation or transaction boundary
+  without retaining PostgreSQL error text.
+
+### Security
+
+- Document a Caddy runtime-log filter that deletes the entire request-header
+  map and masks client addresses while preserving streaming diagnostics.
+
 ## [1.1.3] - 2026-09-10
 
 ### Added

@@ -1,6 +1,32 @@
 # Implementation status
 
-Status date: 2026-09-15
+Status date: 2026-09-23
+
+## Redaction-safe production failure visibility
+
+The Client API now emits one structured `Client API problem` event at the exact
+RFC 9457 response boundary. It records only closed endpoint/method/runtime,
+failure-stage and canonical error-code fields plus bounded request correlation;
+raw paths, request/response bodies, headers, credentials, identity or
+attestation material, user/install identifiers and dependency error text are
+excluded. This makes session challenge, exchange, refresh, identity,
+installation/component lifecycle, diagnostics, quota, JWKS and discovery 4xx/
+5xx outcomes distinguishable without weakening the privacy boundary.
+
+Operational retention now returns closed stage failures and persists/logs a
+stage-specific code while discarding raw PostgreSQL errors. Existing historical
+generic `job_failed` rows remain unchanged; new executions identify the exact
+transaction, relation or component/audit phase.
+
+The live DigitalOcean Caddy 2.11.4 configuration was validated and gracefully
+reloaded with a default runtime-log filter that deletes the complete request
+header map and masks remote/client IP addresses. The previous configuration is
+retained at `/opt/latchway/Caddyfile.bak-20260923-redaction`. The exact active
+Caddy Docker JSON log containing earlier unredacted DPoP proofs was resolved,
+verified against the container and irreversibly truncated; Latchway application
+logs and PostgreSQL records were not removed. All seven readiness checks passed
+after the reload. The server-side Client API and retention visibility changes
+remain pending image publication and VPS deployment at this point in the phase.
 
 ## Habitify Development accepts local and TestFlight App Attest builds
 

@@ -104,6 +104,39 @@ func TestRuntimeRetriesErrorsWithoutLoggingDependencyDetails(t *testing.T) {
 	}
 }
 
+func TestRetentionFailureStagesAreClosedAndRedactionSafe(t *testing.T) {
+	t.Parallel()
+
+	failure := newMaintenanceStageFailure(context.Background(), "delete_job_history")
+	if got := failure.Error(); got != "maintenance operation failed" {
+		t.Fatalf("failure.Error() = %q", got)
+	}
+	stage := maintenanceFailureStageOf(failure)
+	if stage != "delete_job_history" {
+		t.Fatalf("maintenanceFailureStageOf() = %q", stage)
+	}
+	if got := maintenanceFailureStageOf(maintenanceStageFailure{stage: "attacker_controlled"}); got != "" {
+		t.Fatalf("unknown stage escaped closed vocabulary: %q", got)
+	}
+
+	var logs bytes.Buffer
+	runtime := &Runtime{logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+	runtime.logFailureWithStage(
+		context.Background(), "enforce_retention", 3, 2,
+		"retention_delete_job_history", stage,
+	)
+	got := logs.String()
+	for _, want := range []string{
+		`"job":"enforce_retention"`,
+		`"error_code":"retention_delete_job_history"`,
+		`"failure_stage":"delete_job_history"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("retention failure log missing %s: %s", want, got)
+		}
+	}
+}
+
 func TestRuntimeCancellationStopsAnActiveJobAndSkipsRemainingWork(t *testing.T) {
 	t.Parallel()
 

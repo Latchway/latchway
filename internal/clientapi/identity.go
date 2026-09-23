@@ -54,7 +54,7 @@ func (api *API) verifySessionIdentity(w http.ResponseWriter, r *http.Request, re
 	}
 	coordinator, ok := api.coordinator.(IdentityVerificationCoordinator)
 	if !ok {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "dependency_contract")
 		return
 	}
 	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, verifyIdentityPath, proof)
@@ -67,12 +67,12 @@ func (api *API) verifySessionIdentity(w http.ResponseWriter, r *http.Request, re
 	if !installationPattern.MatchString(result.InstallationID) || !identifierPattern.MatchString(identity.Provider) || identity.Provider != input.IdentityProvider ||
 		identity.Issuer == "" || len(identity.Issuer) > 2048 || identity.Subject == "" || len(identity.Subject) > 2048 || strings.ContainsAny(identity.Issuer+identity.Subject, "\x00\r\n") ||
 		len(identity.Audience) == 0 || len(identity.Audience) > 64 || identity.VerifiedAt.IsZero() || !identity.ExpiresAt.After(identity.VerifiedAt) {
-		api.internal(w, requestID)
+		api.internalAt(w, requestID, "response_validation")
 		return
 	}
 	for _, audience := range identity.Audience {
 		if audience == "" || len(audience) > 2048 || strings.ContainsAny(audience, "\x00\r\n") {
-			api.internal(w, requestID)
+			api.internalAt(w, requestID, "response_validation")
 			return
 		}
 	}

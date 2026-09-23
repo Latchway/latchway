@@ -6,6 +6,18 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.1.7 redaction-safe failure visibility
+
+Every Client API problem response now has a matching structured diagnostic with
+closed endpoint, runtime, failure-stage and canonical error-code fields. Raw
+paths, headers, bodies, proofs, credentials, identity/provider material,
+user/install identifiers and dependency messages remain excluded. Operational
+retention failures use closed stage-specific durable codes while continuing to
+discard PostgreSQL error text. Reverse-proxy header deletion is an operator
+configuration boundary rather than a client contract change. Contract 1.1.0,
+wire versions 1/2/3, bundle edition 1.1.2 and schema 33 are unchanged. See
+[release notes](../release/v1.1.7.md).
+
 ### Server 1.1.6 Firebase certificate rotation
 
 Firebase Authentication verification follows the official Firebase Admin

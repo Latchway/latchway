@@ -294,7 +294,7 @@ func newAPIRuntime(
 	}
 	clientAPI, err := clientapi.New(clientapi.Config{
 		Coordinator: coordinator, FeatureQuotas: featureQuotas,
-		JWKS: jwks, PublicOrigin: cfg.PublicOrigin,
+		JWKS: jwks, PublicOrigin: cfg.PublicOrigin, Logger: logger,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client API: %w", err)
