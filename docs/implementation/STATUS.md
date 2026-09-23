@@ -25,8 +25,17 @@ retained at `/opt/latchway/Caddyfile.bak-20260923-redaction`. The exact active
 Caddy Docker JSON log containing earlier unredacted DPoP proofs was resolved,
 verified against the container and irreversibly truncated; Latchway application
 logs and PostgreSQL records were not removed. All seven readiness checks passed
-after the reload. The server-side Client API and retention visibility changes
-remain pending image publication and VPS deployment at this point in the phase.
+after the reload.
+
+Server 1.1.7 was published from commit
+`3fe107748d8fec1a333416993c622c6466a62666` as immutable release `v1.1.7` and
+multi-architecture GHCR index
+`sha256:6b0761d8fb55affe07050dbccbdfda0efa334ad670230fc8fb7417d259f208aa`.
+The VPS Compose override pins that digest for both migrator and gateway. The
+matching migration completed, the external readiness endpoint passed all seven
+checks, and a controlled Android-shaped invalid request produced the expected
+`session_challenge` / `request_validation` / `request_invalid` event with no
+request content.
 
 ## Habitify Development accepts local and TestFlight App Attest builds
 

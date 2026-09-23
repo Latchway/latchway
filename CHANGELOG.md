@@ -4,6 +4,8 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-09-23
+
 ### Added
 
 - Emit one redaction-safe `Client API problem` event for every Client API
