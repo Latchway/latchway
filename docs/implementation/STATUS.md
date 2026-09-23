@@ -37,6 +37,11 @@ checks, and a controlled Android-shaped invalid request produced the expected
 `session_challenge` / `request_validation` / `request_invalid` event with no
 request content.
 
+The disabled first-owner bootstrap token was removed from the VPS `.env` rather
+than remaining in the gateway environment. The gateway was recreated without
+changing database, owner login, Admin API keys or application configuration;
+readiness passed and the replacement process emitted no warnings or errors.
+
 ## Habitify Development accepts local and TestFlight App Attest builds
 
 Habitify Development active configuration revision
