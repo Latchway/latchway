@@ -1,6 +1,19 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+/** Follows the console's two-level navigation: a sidebar area, then (optionally) one of its section tabs. */
+async function goTo(page: Page, area: string, tab?: string): Promise<void> {
+  const toggle = page.getByRole("button", { name: "Open navigation" });
+  if (await toggle.isVisible()) await toggle.click();
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: area, exact: true }).click();
+  if (tab) await page.getByRole("navigation", { name: `${area} pages` }).getByRole("link", { name: tab, exact: true }).click();
+}
+
+async function signOut(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^Your account/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+}
+
 const ids = {
   admin: "adm_0123456789abcdef",
   administrator: "adm_1123456789abcdef",
@@ -506,8 +519,11 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
 
   const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(primaryNavigation).toBeHidden();
+  await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(primaryNavigation).toBeVisible();
-  await primaryNavigation.getByRole("link", { name: /^Requests/ }).click();
+  await primaryNavigation.getByRole("link", { name: "Requests", exact: true }).click();
+  await expect(primaryNavigation).toBeHidden();
   await expect(page.getByRole("heading", { name: "Understand what happened." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh requests" })).toBeVisible();
   const viewport = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
@@ -520,7 +536,7 @@ test("first-run exposes only the evidence fields for each selected platform scop
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await goTo(page, "Setup wizard");
 
   const scopes = [
     { android: false, apple: true, value: "ios", web: false },
@@ -544,7 +560,7 @@ test("first-run separates Apple acceptance from distribution and confines Play t
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await goTo(page, "Setup wizard");
   await page.getByLabel("Environment kind").selectOption("development");
   await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("any");
   await expect(page.getByLabel("Development signing", { exact: true })).toBeChecked();
@@ -572,7 +588,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await goTo(page, "Setup wizard");
   await page.getByLabel("Organization slug").fill("example");
   await page.getByLabel("Application name").fill("Mobile App");
   await page.getByLabel("Application slug").fill("mobile-app");
@@ -683,7 +699,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     ]) })
   }));
 
-  await page.getByRole("link", { name: /^Users/ }).click();
+  await goTo(page, "Users & Installs");
   await page.getByLabel("Environment ID").fill(ids.environment);
   await page.getByRole("button", { name: "List users" }).click();
   await page.getByRole("button", { name: ids.user }).click();
@@ -693,14 +709,14 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Type the exact user ID to confirm").fill(ids.user);
   await page.getByLabel(/acknowledge the immediate application-wide effect/i).check();
   await page.getByRole("button", { name: "Confirm Block user" }).click();
-  await expect(page.getByRole("status")).toContainText("Block user completed");
+  await expect(page.locator(".main-content").getByRole("status")).toContainText("Block user completed");
   await expect(page.getByRole("button", { name: "Review unblock" })).toBeVisible();
 
   expect(fixture.mutations.length).toBeGreaterThanOrEqual(8);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Your account/ })).toHaveCount(0);
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
@@ -712,7 +728,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
 
-  await page.getByRole("link", { name: /^Applications/ }).click();
+  await goTo(page, "Settings", "Applications");
   await page.getByRole("button", { name: "Load applications" }).click();
   await expect(page.getByText(ids.application)).toBeVisible();
   await page.getByLabel("Display name").fill("Resource App");
@@ -720,7 +736,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await page.getByRole("button", { name: "Create application" }).click();
   expect(fixture.applicationBodies.at(-1)).toEqual({ display_name: "Resource App", organization_id: ids.organization, slug: "resource-app" });
 
-  await page.getByRole("link", { name: /^Environments/ }).click();
+  await goTo(page, "Settings", "Environments");
   await page.getByLabel("Application ID").fill(ids.application);
   await page.getByRole("button", { name: "Load environments" }).click();
   await expect(page.getByText(ids.environment)).toBeVisible();
@@ -730,7 +746,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await page.getByRole("button", { name: "Create environment" }).click();
   expect(fixture.environmentBodies.at(-1)).toEqual({ display_name: "Staging", kind: "staging", slug: "staging" });
 
-  await page.getByRole("link", { name: /^Secrets/ }).click();
+  await goTo(page, "AI Connections", "Secrets");
   await page.getByLabel("Environment ID").fill(ids.environment);
   await page.getByRole("button", { name: "Load secret metadata" }).click();
   await expect(page.getByText(ids.secret)).toBeVisible();
@@ -760,7 +776,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   expect(fixture.secretBodies.at(-1)).toEqual({ action: "delete", secret_id: ids.unusedSecret });
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 
-  await page.getByRole("link", { name: /^User overrides/ }).click();
+  await goTo(page, "Policies & Limits", "Overrides");
   await page.getByLabel("Environment ID").fill(ids.environment);
   await page.getByLabel("User ID").fill(ids.user);
   await page.getByRole("button", { name: "Inspect override" }).click();
@@ -776,7 +792,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
     { action: "clear", user_id: ids.user }
   ]);
 
-  await page.getByRole("link", { name: /^Configuration revisions/ }).click();
+  await goTo(page, "Changes");
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
   await page.getByRole("button", { name: "Review rollback" }).click();
   await page.getByLabel("Operator reason").fill("restore known-good revision");
@@ -795,7 +811,7 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
 
-  await page.getByRole("link", { name: /^Upstreams/ }).click();
+  await goTo(page, "AI Connections");
   await expect(page.getByRole("heading", { name: "Connect a provider without exposing its credential." })).toBeVisible();
   await page.getByLabel("Connection ID").fill("gateway");
   await page.getByLabel("Base URL").fill("https://gateway.example.test/v1");
@@ -820,20 +836,20 @@ test("owner activates a targeted configuration merge and uses focused observabil
     { etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` }
   ]);
 
-  await page.getByRole("link", { name: /^Cost/ }).click();
+  await goTo(page, "Analytics", "Cost");
   await page.getByLabel("Environment ID").fill(ids.environment);
   await page.getByRole("button", { name: "Load cost" }).click();
   await expect(page.getByRole("heading", { name: "Cost provenance" })).toBeVisible();
   await expect(page.getByText("openrouter_usage_cost")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Latency distributions" })).toHaveCount(0);
 
-  await page.getByRole("link", { name: /^Attestation failures/ }).click();
+  await goTo(page, "Analytics", "Attestation failures");
   await page.getByLabel("Environment ID").fill(ids.environment);
   await page.getByRole("button", { name: "Load attestation failures" }).click();
   await expect(page.getByRole("heading", { name: "Attestation rejection aggregate" })).toBeVisible();
   await expect(page.getByText(/contains no raw App Attest assertion/)).toBeVisible();
 
-  await page.getByRole("link", { name: /^Route simulator/ }).click();
+  await goTo(page, "Simulator");
   await page.getByLabel("Environment context ID").fill(ids.environment);
   await page.getByRole("button", { name: "Load active route context" }).click();
   await expect(page.getByText(/Selected active revision/)).toContainText("1 feature");
@@ -842,7 +858,7 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await page.getByRole("button", { name: "Simulate route" }).click();
   await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
 
-  await page.getByRole("link", { name: /^Requests/ }).click();
+  await goTo(page, "Requests");
   await expect(page.locator(".production-context code")).toHaveText(ids.environment);
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
@@ -893,7 +909,7 @@ test("request usage distinguishes unknown quota charges, missing billing and rep
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
-  await page.getByRole("link", { name: /^Requests/ }).click();
+  await goTo(page, "Requests");
   await expect(page.locator(".production-context code")).toHaveText(ids.environment);
   await page.getByRole("button", { name: ids.request }).click();
   await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
@@ -913,7 +929,7 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Audit log/ }).click();
+  await goTo(page, "Audit Log");
 
   const filteredAudit = page.waitForRequest((request) => {
     const url = new URL(request.url());
@@ -954,7 +970,7 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Self-tests/ }).click();
+  await goTo(page, "Self-tests");
   const immediateSelfTest = page.locator("form.control-form").filter({
     has: page.getByRole("button", { name: "Run self-test" }),
   });
@@ -985,13 +1001,13 @@ test("self-test schedules bind durable token metadata and support list, detail, 
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^API tokens/ }).click();
+  await goTo(page, "Team & Access", "API tokens");
   await page.getByLabel("Token name").fill("self-test-scheduler");
   await page.getByLabel("Run self-tests").check();
   await page.getByRole("button", { name: "Create API token" }).click();
   await page.getByRole("button", { name: "Dismiss token" }).click();
 
-  await page.getByRole("link", { name: /^Self-tests/ }).click();
+  await goTo(page, "Self-tests");
   await page.getByLabel("Scheduled environment ID").fill(ids.environment);
   await page.getByRole("button", { name: "Load schedules" }).click();
   await page.getByLabel("Durable Admin API token").fill(oneTimeAPIToken);
@@ -1021,7 +1037,7 @@ test("owner manages administrators without persisting password material", async 
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Administrators/ }).click();
+  await goTo(page, "Team & Access");
   await page.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
   await page.getByLabel("Display name").fill("Second Owner");
   await page.locator('select[name="role"]').selectOption("viewer");
@@ -1059,7 +1075,7 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^API tokens/ }).click();
+  await goTo(page, "Team & Access", "API tokens");
   await page.getByRole("button", { name: "Load API tokens" }).click();
   await expect(page.getByText("No scoped automation credentials have been created for this administrator.")).toBeVisible();
   await page.getByLabel("Token name").fill("mobile-ci");

@@ -2,6 +2,29 @@
 
 Status date: 2026-10-02
 
+## Console redesign phase 1: shell and information architecture (branch `console-redesign`, unreleased)
+
+The console shell is rebuilt on the phase 0 components: Organization /
+Application / Environment crumbs (native selects, dimmed on organization pages),
+a two-scope sidebar (Environment areas: Overview, Traffic, Build, Users &
+Limits, Operate; Organization areas: Team & Access, Audit Log, Settings),
+shell-rendered section tabs that group related existing pages, a status rail
+for read-only safe mode, an unpublished draft revision and an environment with
+no active configuration, an account menu holding Sign out, a light/dark theme
+toggle (stored per browser, storage failures tolerated) and a phone drawer. The
+command palette lists every destination and still only navigates. URL paths are
+unchanged in this phase, so no redirects are needed; paths move, with redirects,
+only when a later phase rebuilds a page. The disabled-scope notice stays on
+`EnvironmentRequired` pages. Unit and Playwright tests were updated for the new
+navigation (Sign out is now inside the account menu).
+
+Validation for phases 0 and 1: `pnpm lint`, `pnpm typecheck`, `pnpm check:api`,
+`pnpm test` (330 passed), Playwright across Chromium, Firefox, WebKit and mobile
+WebKit (43 passed; live-stack skipped without its base URL), `pnpm build`,
+`pnpm verify:reproducible` (identical checksums) and
+`go test ./web/console/ ./internal/server/` passed. The entry bundle is 1.02 MB
+(954 kB before), still over Vite's 500 kB advisory as it was before this work.
+
 ## Console redesign phase 0: design-system foundation (branch `console-redesign`, unreleased)
 
 The console palette is replaced with the Latchway Console design-system tokens

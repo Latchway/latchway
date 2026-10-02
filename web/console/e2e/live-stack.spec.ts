@@ -33,7 +33,7 @@ test.describe("real first-run control plane", () => {
     await expect(
       page.getByRole("heading", { name: "The gateway is ready for control-plane work." })
     ).toBeVisible();
-    await page.getByRole("link", { name: /Setup wizard/ }).click();
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Setup wizard" }).click();
     await expect(
       page.getByRole("heading", { name: "Configure your first client platform end to end." })
     ).toBeVisible();
@@ -69,7 +69,8 @@ test.describe("real first-run control plane", () => {
     await page.getByRole("button", { name: "Validate and activate with ETag" }).click();
     await expect(page.getByText(/is active/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
     await expect(
       page.getByRole("heading", { name: "Sign in to continue setup." })
     ).toBeVisible();
