@@ -524,8 +524,9 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   await expect(primaryNavigation).toBeVisible();
   await primaryNavigation.getByRole("link", { name: "Requests", exact: true }).click();
   await expect(primaryNavigation).toBeHidden();
-  await expect(page.getByRole("heading", { name: "Understand what happened." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh requests" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /assistant/ })).toBeVisible();
   const viewport = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
   expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1);
 });
@@ -859,22 +860,28 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
 
   await goTo(page, "Requests");
-  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/admin/v1/requests" &&
+      url.searchParams.get("environment_id") === ids.environment &&
       url.searchParams.get("status") === "succeeded" &&
       url.searchParams.get("feature") === "assistant" &&
       url.searchParams.get("platform") === "react_native_ios" &&
       url.searchParams.get("tokens_min") === "1" &&
       url.searchParams.get("sort") === "started_at_asc";
   });
-  await page.getByLabel("Status").selectOption("succeeded");
-  await page.getByLabel("Feature").fill("assistant");
-  await page.getByLabel("Platform").selectOption("react_native_ios");
-  await page.getByLabel("Token minimum").fill("1");
-  await page.getByLabel("Sort").selectOption("started_at_asc");
-  await page.getByRole("button", { name: "Apply filters" }).click();
+  await page.getByRole("button", { name: /^Outcome:/ }).click();
+  await page.getByRole("menuitem", { name: "Succeeded" }).click();
+  await page.getByRole("button", { name: /^Feature:/ }).click();
+  await page.getByLabel("Feature", { exact: true }).fill("assistant");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await page.getByRole("button", { name: /^Platform:/ }).click();
+  await page.getByRole("menuitem", { name: "React Native iOS" }).click();
+  await page.getByRole("button", { name: /^More filters/ }).click();
+  await page.getByLabel("Tokens at least").fill("1");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await page.getByRole("group", { name: "Sort" }).getByRole("button", { name: "Oldest" }).click();
   await filteredRequest;
   await expect(page).toHaveURL(/feature=assistant/);
   await expect(page).toHaveURL(/platform=react_native_ios/);
@@ -884,19 +891,22 @@ test("owner activates a targeted configuration merge and uses focused observabil
   });
   await page.reload();
   await restoredRequest;
-  await expect(page.getByLabel("Status")).toHaveValue("succeeded");
-  await expect(page.getByLabel("Feature")).toHaveValue("assistant");
-  await expect(page.getByLabel("Platform")).toHaveValue("react_native_ios");
-  await expect(page.getByLabel("Token minimum")).toHaveValue("1");
-  await expect(page.getByLabel("Sort")).toHaveValue("started_at_asc");
-  await page.getByRole("button", { name: ids.request }).click();
-  await expect(page.getByRole("heading", { name: "Durable execution timeline" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "2.5 s" })).toBeVisible();
-  await expect(page.getByRole("cell", { exact: true, name: "primary" })).toBeVisible();
-  await expect(page.getByText("750 ms")).toBeVisible();
-  await expect(page.getByText(/closed, sanitized vocabulary/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Outcome:\s*Succeeded/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Feature:\s*assistant/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Platform:\s*React Native iOS/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^More filters:\s*1/ })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Sort" }).getByRole("button", { name: "Oldest" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("row", { name: /assistant/ }).click();
+  const drawer = page.getByRole("complementary", { name: ids.request });
+  await expect(drawer.getByRole("heading", { name: "Decision stages" })).toBeVisible();
+  await expect(drawer.getByText("Limit checked")).toBeVisible();
+  await expect(drawer.getByRole("img", { name: /decision stages/ })).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: /^Attempts/ })).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(drawer.getByText(/closed, sanitized vocabulary/)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`request=${ids.request}`));
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
@@ -910,15 +920,22 @@ test("request usage distinguishes unknown quota charges, missing billing and rep
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
   await goTo(page, "Requests");
-  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
-  await page.getByRole("button", { name: ids.request }).click();
-  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "92,444 recorded · 92,444 unknown quota charge", exact: true })).toHaveCount(3);
-  await expect(page.getByRole("cell", { name: "Not recorded", exact: true })).toHaveCount(5);
-  await expect(page.getByRole("cell", { name: "0 reported", exact: true })).toHaveCount(2);
-  await expect(page.getByText("0 nUSD", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/missing cost is not a zero bill/)).toBeVisible();
-  await page.getByRole("heading", { name: "Usage and quota accounting" }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
+  const row = page.getByRole("row", { name: /assistant/ });
+  await expect(row.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(row.getByText("~92,444", { exact: true })).toBeVisible();
+  await row.click();
+  const drawer = page.getByRole("complementary", { name: ids.request });
+  await expect(drawer.getByRole("heading", { name: "Usage" })).toBeVisible();
+  const usage = drawer.locator("section", { has: page.getByRole("heading", { name: "Usage" }) });
+  await expect(usage.getByText("92,444 recorded · 92,444 unknown quota charge", { exact: true })).toHaveCount(1);
+  await expect(usage.getByText("Not recorded", { exact: true })).toHaveCount(2);
+  await expect(usage.getByText("0 reported", { exact: true })).toHaveCount(1);
+  await expect(drawer.locator(".lw-attempt")).toContainText("92,444 recorded · 92,444 unknown quota charge");
+  await expect(drawer.locator(".lw-attempt")).toContainText("Not recorded · provenance unknown");
+  await expect(drawer.getByText("0 nUSD", { exact: true })).toHaveCount(0);
+  await expect(drawer.getByText(/missing cost is not a zero bill/)).toBeVisible();
+  await drawer.getByRole("heading", { name: "Usage" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("usage-accounting.png"), fullPage: true });
   expectOnlyAdminMutations(fixture.mutations);
 });

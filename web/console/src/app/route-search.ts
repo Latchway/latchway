@@ -80,7 +80,9 @@ export const RequestRouteSearchSchema = z.object({
   latency_max_ms: optional(NonnegativeIntegerText),
   latency_min_ms: optional(NonnegativeIntegerText),
   model: optional(SearchModel),
+  page_size: optional(z.enum(["50", "100", "200"])),
   platform: optional(z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"])),
+  range: optional(z.enum(["15m", "1h", "24h", "7d"])),
   request: optional(OpaqueID("req")),
   request_id: optional(OpaqueID("req")),
   route: optional(Identifier),
@@ -94,6 +96,9 @@ export const RequestRouteSearchSchema = z.object({
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
+  if (search.range && (search.start || search.end)) {
+    context.addIssue({ code: "custom", message: "Use either a relative range or a start and end, not both.", path: ["range"] });
+  }
   validateOrderedRange(context, search.latency_min_ms, search.latency_max_ms, "latency_max_ms");
   validateOrderedRange(context, search.tokens_min, search.tokens_max, "tokens_max");
   validateOrderedRange(context, search.cost_min_nano_usd, search.cost_max_nano_usd, "cost_max_nano_usd");

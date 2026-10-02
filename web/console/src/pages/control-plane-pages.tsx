@@ -6,14 +6,11 @@ import {
   AuditPageSchema,
   InstallationPageSchema,
   InstallationSchema,
-  getRequestEffectiveConfiguration,
   getUserEffectiveConfiguration,
   getUserOperationImpact,
   queryPath,
   requireApplicationUserAppReverification,
   requireApplicationUserReauthentication,
-  RequestPageSchema,
-  RequestSchema,
   RevisionSchema,
   RouteSimulationSchema,
   SelfTestSchema,
@@ -31,8 +28,6 @@ import {
   type EffectiveConfiguration,
   type Installation,
   type InstallationPage,
-  type LogicalRequest,
-  type LogicalRequestPage,
   type RouteSimulation,
   type SelfTestRun,
   type SelfTestSchedule,
@@ -52,8 +47,6 @@ import {
   type AuditRouteSearch,
   InstallationRouteSearchSchema,
   type InstallationRouteSearch,
-  RequestRouteSearchSchema,
-  type RequestRouteSearch,
   RouteSimulatorRouteSearchSchema,
   type RouteSimulatorRouteSearch,
   SelfTestRouteSearchSchema,
@@ -61,7 +54,6 @@ import {
   UserRouteSearchSchema,
   type UserRouteSearch
 } from "../app/route-search";
-import { EnvironmentRequired } from "../app/workspace-context";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import { useAdminRefreshTopic } from "../app/use-admin-refresh";
 import { ImmediateOperationConfirmation } from "../components/immediate-operation-confirmation";
@@ -72,14 +64,6 @@ const revisionPattern = "rev_[A-Za-z0-9_-]{16,128}";
 const revisionInputPattern = revisionPattern;
 const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
 const identifierInputPattern = identifierPattern.source;
-
-type RequestFilterDraft = Record<
-  "component_kind" | "cost_max_nano_usd" | "cost_min_nano_usd" | "end" | "error_code" |
-  "feature" | "latency_max_ms" | "latency_min_ms" | "model" | "platform" | "request_id" |
-  "route" | "sort" | "start" | "status" | "tokens_max" | "tokens_min" | "trust_source" |
-  "upstream" | "user_id",
-  string
->;
 
 type AuditFilterDraft = Record<
   "action" | "actor_id" | "actor_kind" | "end" | "environment_id" | "reason" |
@@ -99,31 +83,6 @@ function canonicalInstant(value: string): string | undefined {
   if (!value) return undefined;
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
-}
-
-function requestFilterDraft(search: RequestRouteSearch = {}): RequestFilterDraft {
-  return {
-    component_kind: search.component_kind ?? "",
-    cost_max_nano_usd: search.cost_max_nano_usd ?? "",
-    cost_min_nano_usd: search.cost_min_nano_usd ?? "",
-    end: localDateTime(search.end),
-    error_code: search.error_code ?? "",
-    feature: search.feature ?? "",
-    latency_max_ms: search.latency_max_ms ?? "",
-    latency_min_ms: search.latency_min_ms ?? "",
-    model: search.model ?? "",
-    platform: search.platform ?? "",
-    request_id: search.request_id ?? "",
-    route: search.route ?? "",
-    sort: search.sort ?? "",
-    start: localDateTime(search.start),
-    status: search.status ?? "",
-    tokens_max: search.tokens_max ?? "",
-    tokens_min: search.tokens_min ?? "",
-    trust_source: search.trust_source ?? "",
-    upstream: search.upstream ?? "",
-    user_id: search.user_id ?? ""
-  };
 }
 
 function auditFilterDraft(search: AuditRouteSearch = {}): AuditFilterDraft {
@@ -148,65 +107,6 @@ function invalidFilterProblem(detail: string): AdminProblem {
 
 function present(value: string): string | undefined {
   return value || undefined;
-}
-
-function requestSearchCandidate(base: RequestRouteSearch, draft: RequestFilterDraft) {
-  return RequestRouteSearchSchema.safeParse({
-    ...base,
-    component_kind: present(draft.component_kind),
-    cost_max_nano_usd: present(draft.cost_max_nano_usd),
-    cost_min_nano_usd: present(draft.cost_min_nano_usd),
-    cursor: undefined,
-    end: canonicalInstant(draft.end),
-    error_code: present(draft.error_code),
-    feature: present(draft.feature),
-    latency_max_ms: present(draft.latency_max_ms),
-    latency_min_ms: present(draft.latency_min_ms),
-    model: present(draft.model),
-    platform: present(draft.platform),
-    request: undefined,
-    request_id: present(draft.request_id),
-    route: present(draft.route),
-    sort: present(draft.sort),
-    start: canonicalInstant(draft.start),
-    status: present(draft.status),
-    tokens_max: present(draft.tokens_max),
-    tokens_min: present(draft.tokens_min),
-    trust_source: present(draft.trust_source),
-    upstream: present(draft.upstream),
-    user_id: present(draft.user_id)
-  });
-}
-
-function requestSearchPatch(search: RequestRouteSearch): Partial<RequestRouteSearch> {
-  return {
-    component_kind: search.component_kind,
-    cost_max_nano_usd: search.cost_max_nano_usd,
-    cost_min_nano_usd: search.cost_min_nano_usd,
-    cursor: search.cursor,
-    end: search.end,
-    error_code: search.error_code,
-    feature: search.feature,
-    latency_max_ms: search.latency_max_ms,
-    latency_min_ms: search.latency_min_ms,
-    model: search.model,
-    platform: search.platform,
-    request: search.request,
-    request_id: search.request_id,
-    route: search.route,
-    sort: search.sort,
-    start: search.start,
-    status: search.status,
-    tokens_max: search.tokens_max,
-    tokens_min: search.tokens_min,
-    trust_source: search.trust_source,
-    upstream: search.upstream,
-    user_id: search.user_id
-  };
-}
-
-function requestListKey(search: RequestRouteSearch): string {
-  return JSON.stringify({ ...requestSearchPatch(search), request: undefined });
 }
 
 function auditSearchCandidate(base: AuditRouteSearch, draft: AuditFilterDraft) {
@@ -261,7 +161,7 @@ function PageHeading({ eyebrow, title, children }: { eyebrow: string; title: str
   );
 }
 
-function ProblemNotice({ problem }: { problem?: AdminProblem }) {
+export function ProblemNotice({ problem }: { problem?: AdminProblem }) {
   return problem ? (
     <div className="control-notice control-notice--error" role="alert">
       <strong>{problem.title}</strong>
@@ -272,12 +172,7 @@ function ProblemNotice({ problem }: { problem?: AdminProblem }) {
   ) : null;
 }
 
-function FailureCodeLink({ code }: { code: string }) {
-  const documentationURL = `https://docs.latchway.dev/errors/${code.replaceAll("_", "-")}`;
-  return <a href={documentationURL} rel="noreferrer" target="_blank">{code}</a>;
-}
-
-function AccessRequired() {
+export function AccessRequired() {
   return (
     <section className="empty-state">
       <p className="eyebrow">Administrator session</p>
@@ -308,14 +203,6 @@ function time(value?: string): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
-function duration(startedAt: string, completedAt?: string): string {
-  if (!completedAt) return "In progress";
-  const milliseconds = Date.parse(completedAt) - Date.parse(startedAt);
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
-  if (milliseconds < 1_000) return `${milliseconds.toLocaleString()} ms`;
-  return `${(milliseconds / 1_000).toLocaleString(undefined, { maximumFractionDigits: 3 })} s`;
-}
-
 function ratio(value: { numerator: number; denominator: number }, suffix = ""): string {
   if (value.denominator === 0) return "—";
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value.numerator / value.denominator)}${suffix}`;
@@ -340,7 +227,7 @@ function effectiveLimitValue(limit: EffectiveConfiguration["limits"][number]): s
   return `${limit.maximum?.toLocaleString()} concurrent`;
 }
 
-function EffectiveConfigurationPanel({ configuration }: { configuration: EffectiveConfiguration }) {
+export function EffectiveConfigurationPanel({ configuration }: { configuration: EffectiveConfiguration }) {
   const selectedRoute = configuration.selected_route;
   return <section className="request-explanation" aria-labelledby={`effective-${configuration.subject.id}`}>
     <div className="detail-card__heading"><div><p className="eyebrow">Effective configuration</p><h3 id={`effective-${configuration.subject.id}`}>{configuration.evaluation_mode === "recorded_request" ? "Recorded decision inputs" : "Current-state projection"}</h3></div><span className={`state-badge ${configuration.policy_outcome === "allowed" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{configuration.policy_outcome}</span></div>
@@ -606,235 +493,6 @@ export function InstallationsPage() {
     {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this installation's trust and credential boundary." affectedScope={<><code>{revocationTarget.id}</code>, its sessions, refresh tokens, and attestation keys</>} busy={busy} confirmLabel="Revoke installation credentials" credentialRestoration="Never. Revoked sessions, refresh tokens, and attestation keys stay revoked; the client must establish a new installation identity." disabled={!canRevoke} heading="Revoke this installation?" key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={(reason) => { if (reason) void revoke(revocationTarget, reason); }} requiresReason reversibility="No. Installation revocation is terminal." summary="The server revokes this installation together with its active sessions, refresh tokens, and attestation keys in one operation." timing="Immediately after the server accepts the revocation" /> : null}
     {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>Installation detail</h2><button className="small-action" onClick={() => { setRevocationTarget(undefined); if (workspace) workspace.updateSearch({ installation_id: undefined }); else setSelected(undefined); }} type="button">Close</button></div><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
   </div>;
-}
-
-function RequestTimeline({ request }: { request: LogicalRequest }) {
-  const fallbackUsed = request.attempts.length > 1;
-  return <section className="request-explanation" aria-labelledby="execution-timeline-heading"><div className="detail-card__heading"><div><p className="eyebrow">Explain this request</p><h3 id="execution-timeline-heading">Durable execution timeline</h3></div><span className={`state-badge ${request.status === "succeeded" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{request.status}</span></div>
-    {request.decision_stages.length === 0 ? <p className="control-notice">This legacy request has no durable decision stages. The console does not reconstruct them from current state.</p> : <ol className="execution-timeline">{request.decision_stages.map((stage) => <li className={stage.outcome === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={stage.number}><span aria-hidden="true">{stage.outcome === "succeeded" ? "✓" : "!"}</span><div><strong>{stage.stage.replaceAll("_", " ")} {stage.outcome}</strong><small>{stage.duration_ms.toLocaleString()} ms · revision {stage.config_revision_id}{stage.limit_plan_key ? ` · plan ${stage.limit_plan_key}` : ""}{stage.limit_metric ? ` · ${stage.limit_metric} ${stage.limit_algorithm} ${stage.limit_maximum}` : ""}{stage.route ? ` · ${stage.route} → ${stage.upstream} / ${stage.model}` : ""}{stage.failure_code ? <> · <FailureCodeLink code={stage.failure_code} /></> : null}</small></div></li>)}</ol>}
-    {request.attempts.length ? <><h4>Upstream attempts</h4><ol className="execution-timeline">{request.attempts.map((attempt) => <li className={attempt.status === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={attempt.id}><span aria-hidden="true">{attempt.status === "succeeded" ? "✓" : "!"}</span><div><strong>{attempt.attempt_number === 1 ? "Primary" : "Fallback"} upstream {attempt.status}</strong><small>{attempt.route} → {attempt.upstream} / {attempt.model} · {duration(attempt.started_at, attempt.completed_at)}{attempt.failure_code ? <> · <FailureCodeLink code={attempt.failure_code} /></> : null}</small></div></li>)}</ol></> : null}
-    <div className="why-grid"><article><strong>Why this outcome?</strong><p>{request.decision_stages.length ? <>The durable lifecycle ended {request.status}{request.failure_code ? <> with <FailureCodeLink code={request.failure_code} /></> : null}. Each stage above is recorded, not inferred.</> : "Exact historical policy and quota inputs are unavailable for this legacy request."}</p></article><article><strong>Why this route?</strong><p>{request.selected_route ? `Pre-dispatch selection recorded ${request.selected_route} → ${request.selected_upstream} / ${request.selected_model}.` : "No durable pre-dispatch route selection was recorded."}{fallbackUsed ? ` The observed fallback sequence ended on ${request.attempts.at(-1)?.route}.` : ""}</p></article><article><strong>Cost confidence</strong><p>{request.attempts.some((attempt) => attempt.cost_provenance === "estimated") ? "At least one attempt uses estimated cost; do not treat the total as provider-reported." : "Attempt rows preserve independent usage and cost provenance."}</p></article></div>
-  </section>;
-}
-
-function RequestsWorkspacePage() {
-  const session = useConsoleSession();
-  const workspace = useOptionalWorkspace();
-  const [environment, setEnvironment] = useState("");
-  const routeSearch = RequestRouteSearchSchema.parse(workspace?.search ?? {});
-  const [standaloneSearch, setStandaloneSearch] = useState<RequestRouteSearch>({});
-  const activeSearch = workspace ? routeSearch : standaloneSearch;
-  const [filters, setFilters] = useState<RequestFilterDraft>(() => requestFilterDraft(routeSearch));
-  const [page, setPage] = useState<LogicalRequestPage>();
-  const [selected, setSelected] = useState<LogicalRequest>();
-  const [effective, setEffective] = useState<EffectiveConfiguration>();
-  const [problem, setProblem] = useState<AdminProblem>();
-  const [busy, setBusy] = useState(false);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const effectiveEnvironment = workspace?.environment?.id ?? environment;
-  const canonicalListKey = requestListKey(routeSearch);
-  const canonicalFilterKey = JSON.stringify(requestFilterDraft(routeSearch));
-
-  async function load(search: RequestRouteSearch, selectedEnvironment = effectiveEnvironment): Promise<void> {
-    if (!selectedEnvironment) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const result = await adminRequest(queryPath("/admin/v1/requests", {
-        component_kind: search.component_kind,
-        cost_max_nano_usd: search.cost_max_nano_usd,
-        cost_min_nano_usd: search.cost_min_nano_usd,
-        cursor: search.cursor,
-        end: search.end,
-        environment_id: selectedEnvironment,
-        error_code: search.error_code,
-        feature: search.feature,
-        latency_max_ms: search.latency_max_ms,
-        latency_min_ms: search.latency_min_ms,
-        model: search.model,
-        page_size: "50",
-        platform: search.platform,
-        request_id: search.request_id,
-        route: search.route,
-        sort: search.sort,
-        start: search.start,
-        status: search.status,
-        tokens_max: search.tokens_max,
-        tokens_min: search.tokens_min,
-        trust_source: search.trust_source,
-        upstream: search.upstream,
-        user_id: search.user_id
-      }), RequestPageSchema);
-      setPage(result.data);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
-  }
-
-  async function loadRequest(requestID: string, selectedEnvironment = effectiveEnvironment): Promise<void> {
-    if (!selectedEnvironment) return;
-    setDetailBusy(true); setProblem(undefined);
-    try {
-      const response = await adminRequest(`/admin/v1/requests/${requestID}`, RequestSchema);
-      if (response.data.id !== requestID || response.data.environment_id !== selectedEnvironment) throw new Error("request_context");
-      setSelected(response.data); setEffective(undefined);
-    }
-    catch (error) {
-      setSelected(undefined);
-      setProblem(error instanceof Error && error.message === "request_context" ? { code: "invalid_response", detail: "The request detail did not match the selected request and environment.", retryable: true, status: 0, title: "Request detail mismatch" } : problemFromError(error));
-    }
-    finally { setDetailBusy(false); }
-  }
-
-  async function explainRequest(request: LogicalRequest): Promise<void> {
-    setDetailBusy(true); setProblem(undefined);
-    try {
-      const response = await getRequestEffectiveConfiguration(request.id);
-      if (response.data.subject.id !== request.id || response.data.environment_id !== request.environment_id || response.data.revision_id !== request.config_revision_id) throw new Error("request_context");
-      setEffective(response.data);
-    } catch (error) {
-      setEffective(undefined);
-      setProblem(error instanceof Error && error.message === "request_context" ? { code: "invalid_response", detail: "The recorded explanation did not match the selected request, environment, and revision.", retryable: true, status: 0, title: "Request explanation mismatch" } : problemFromError(error));
-    } finally { setDetailBusy(false); }
-  }
-
-  function updateFilter(name: keyof RequestFilterDraft, value: string): void {
-    setFilters((current) => ({ ...current, [name]: value }));
-  }
-
-  function applyFilters(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const candidate = requestSearchCandidate(activeSearch, filters);
-    if (!candidate.success) {
-      setProblem(invalidFilterProblem("Review the filter formats and ensure every maximum is at least its corresponding minimum."));
-      return;
-    }
-    setProblem(undefined);
-    if (workspace) {
-      const changed = requestListKey(candidate.data) !== canonicalListKey || routeSearch.request !== undefined;
-      workspace.updateSearch(requestSearchPatch(candidate.data));
-      if (!changed) void load(candidate.data, workspace.environment?.id);
-      return;
-    }
-    setStandaloneSearch(candidate.data);
-    void load(candidate.data);
-  }
-
-  function resetFilters(): void {
-    const cleared = RequestRouteSearchSchema.parse({
-      application: routeSearch.application,
-      environment: routeSearch.environment,
-      organization: routeSearch.organization
-    });
-    setFilters(requestFilterDraft());
-    setProblem(undefined);
-    if (workspace) {
-      workspace.updateSearch(requestSearchPatch(cleared));
-      return;
-    }
-    setStandaloneSearch(cleared);
-    void load(cleared);
-  }
-
-  function nextPage(cursor: string): void {
-    const next = RequestRouteSearchSchema.parse({ ...activeSearch, cursor, request: undefined });
-    if (workspace) workspace.updateSearch({ cursor: next.cursor, request: undefined });
-    else { setStandaloneSearch(next); void load(next); }
-  }
-
-  function selectRequest(requestID: string): void {
-    if (workspace) {
-      if (routeSearch.request === requestID) void loadRequest(requestID, workspace.environment?.id);
-      else workspace.updateSearch({ request: requestID });
-      return;
-    }
-    void loadRequest(requestID);
-  }
-
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace?.environment?.id) return;
-    // URL navigation is the external signal that starts the server-side query.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load(routeSearch, workspace.environment.id);
-    // The validated URL is the canonical list trigger, including cursor changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.environment?.id, canonicalListKey, session.data?.mode]);
-
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace?.environment?.id) return;
-    if (!routeSearch.request) {
-      // Browser history can independently close the shareable request detail.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelected(undefined); setEffective(undefined);
-      return;
-    }
-    // URL navigation is the external signal that starts the detail query.
-    void loadRequest(routeSearch.request, workspace.environment.id);
-    // Request selection is independently shareable and must not reload the list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.environment?.id, routeSearch.request, session.data?.mode]);
-
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace) return;
-    // Browser back/forward is an external state source for this editable draft.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilters(requestFilterDraft(routeSearch));
-    // Keep the editable form synchronized with browser back/forward and reload.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalFilterKey]);
-
-  useAdminRefreshTopic("requests", () => {
-    if (session.data?.mode !== "configured" || !effectiveEnvironment) return;
-    void load(activeSearch, effectiveEnvironment);
-    if (routeSearch.request) void loadRequest(routeSearch.request, effectiveEnvironment);
-  }, session.data?.mode === "configured" && Boolean(effectiveEnvironment));
-
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-
-  return <div className="control-page">
-    <PageHeading eyebrow="Requests" title="Understand what happened.">Inspect identity, client trust, the selected feature, upstream attempts, usage, and cost provenance. Prompt and response bodies remain excluded.</PageHeading>
-    {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Server-side filters and pagination · shareable URL state</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load(routeSearch, workspace.environment?.id)} type="button">Refresh requests</button></section> : null}
-    <form className="filter-bar filter-bar--wide" onSubmit={applyFilters}>
-      {!workspace ? <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label> : null}
-      <label>Status<select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}><option value="">All</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="denied">Denied</option><option value="canceled">Canceled</option><option value="unknown">Unknown</option></select></label>
-      <label>Feature<input pattern={identifierInputPattern} value={filters.feature} onChange={(event) => updateFilter("feature", event.target.value)} /></label>
-      <label>User ID<input pattern="usr_[A-Za-z0-9_-]{16,128}" value={filters.user_id} onChange={(event) => updateFilter("user_id", event.target.value)} /></label>
-      <label>Platform<select value={filters.platform} onChange={(event) => updateFilter("platform", event.target.value)}><option value="">All</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="node">Node.js</option></select></label>
-      <label>Component kind<input pattern={identifierInputPattern} value={filters.component_kind} onChange={(event) => updateFilter("component_kind", event.target.value)} /></label>
-      <label>Trust source<input pattern={identifierInputPattern} value={filters.trust_source} onChange={(event) => updateFilter("trust_source", event.target.value)} /></label>
-      <label>Route<input pattern={identifierInputPattern} value={filters.route} onChange={(event) => updateFilter("route", event.target.value)} /></label>
-      <label>AI connection<input pattern={identifierInputPattern} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} /></label>
-      <label>Model<input maxLength={512} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} /></label>
-      <label>Error code<input pattern="[a-z][a-z0-9_]{0,99}" value={filters.error_code} onChange={(event) => updateFilter("error_code", event.target.value)} /></label>
-      <label>Request ID<input pattern="req_[A-Za-z0-9_-]{16,128}" value={filters.request_id} onChange={(event) => updateFilter("request_id", event.target.value)} /></label>
-      <label>Start<input step="1" type="datetime-local" value={filters.start} onChange={(event) => updateFilter("start", event.target.value)} /></label>
-      <label>End<input step="1" type="datetime-local" value={filters.end} onChange={(event) => updateFilter("end", event.target.value)} /></label>
-      <label>Latency minimum (ms)<input inputMode="numeric" min="0" type="number" value={filters.latency_min_ms} onChange={(event) => updateFilter("latency_min_ms", event.target.value)} /></label>
-      <label>Latency maximum (ms)<input inputMode="numeric" min="0" type="number" value={filters.latency_max_ms} onChange={(event) => updateFilter("latency_max_ms", event.target.value)} /></label>
-      <label>Token minimum<input inputMode="numeric" min="0" type="number" value={filters.tokens_min} onChange={(event) => updateFilter("tokens_min", event.target.value)} /></label>
-      <label>Token maximum<input inputMode="numeric" min="0" type="number" value={filters.tokens_max} onChange={(event) => updateFilter("tokens_max", event.target.value)} /></label>
-      <label>Cost minimum (nano-USD)<input inputMode="numeric" min="0" type="number" value={filters.cost_min_nano_usd} onChange={(event) => updateFilter("cost_min_nano_usd", event.target.value)} /></label>
-      <label>Cost maximum (nano-USD)<input inputMode="numeric" min="0" type="number" value={filters.cost_max_nano_usd} onChange={(event) => updateFilter("cost_max_nano_usd", event.target.value)} /></label>
-      <label>Sort<select value={filters.sort} onChange={(event) => updateFilter("sort", event.target.value)}><option value="">Newest first (default)</option><option value="started_at_desc">Newest first</option><option value="started_at_asc">Oldest first</option></select></label>
-      <FormActions busy={busy}>{workspace ? "Apply filters" : "List requests"}</FormActions><button className="secondary-action" disabled={busy} onClick={resetFilters} type="button">Reset filters</button>
-    </form>
-    <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Time", "Status", "Feature", "User", "Component / trust", "Selected route / model", "Latency", "Tokens", "Cost"]} rows={page.items.map((request) => { const attempt = request.attempts.at(-1); return [time(request.started_at), <button aria-label={request.id} className="link-button" disabled={detailBusy} onClick={() => selectRequest(request.id)} type="button">{request.status}<br /><small>{request.id}</small></button>, request.feature, request.user_id, `${request.component_kind ?? "legacy"} · ${request.trust_source ?? "legacy trust"}`, request.selected_route ? `${request.selected_route} → ${request.selected_model}` : attempt ? `${attempt.route} → ${attempt.model} (observed)` : "Unavailable", duration(request.started_at, request.completed_at), displayUsageMetric(request.usage, "total_tokens"), displayUsageMetric(request.usage, "cost_nano_usd")]; })} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => nextPage(page.page.next_cursor ?? "")} type="button">Next page</button> : null}</> : null}
-    {detailBusy ? <p role="status">Loading exact request detail…</p> : null}
-    {selected ? <aside className="detail-card request-detail"><div className="detail-card__heading"><h2>Request detail</h2><button className="small-action" onClick={() => { setSelected(undefined); setEffective(undefined); workspace?.updateSearch({ request: undefined }); }} type="button">Close detail</button></div>
-      <dl><div><dt>Request</dt><dd>{selected.id}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id}</dd></div><div><dt>Configuration revision</dt><dd>{selected.config_revision_id}</dd></div><div><dt>Selected limit plan</dt><dd>{selected.selected_limit_plan}</dd></div><div><dt>Pre-dispatch route</dt><dd>{selected.selected_route ? `${selected.selected_route} → ${selected.selected_upstream} / ${selected.selected_model} (${selected.selected_physical_model})` : "Unavailable"}</dd></div><div><dt>Feature</dt><dd>{selected.feature}</dd></div><div><dt>Protocol</dt><dd>{selected.protocol}</dd></div><div><dt>Status</dt><dd>{selected.status}{selected.failure_code ? <> · <FailureCodeLink code={selected.failure_code} /></> : null}</dd></div><div><dt>Started</dt><dd>{time(selected.started_at)}</dd></div><div><dt>Completed</dt><dd>{time(selected.completed_at)}</dd></div><div><dt>Duration</dt><dd>{duration(selected.started_at, selected.completed_at)}</dd></div></dl>
-      <RequestTimeline request={selected} />
-      <p><button className="secondary-action" disabled={detailBusy} onClick={() => void explainRequest(selected)} type="button">Explain recorded configuration</button></p>
-      {effective ? <EffectiveConfigurationPanel configuration={effective} /> : null}
-      <h3>Client attribution</h3><dl><div><dt>Caller SDK</dt><dd>{selected.caller_sdk ?? "historical request"}</dd></div><div><dt>Installation</dt><dd>{selected.installation_id}</dd></div><div><dt>Installation Family</dt><dd>{selected.installation_family_id ?? "legacy request"}</dd></div><div><dt>Client component</dt><dd>{selected.client_component_id ?? "legacy request"}</dd></div><div><dt>Component definition</dt><dd>{selected.component_definition_id ?? "legacy request"}</dd></div><div><dt>Component kind</dt><dd>{selected.component_kind ?? "legacy request"}</dd></div><div><dt>Trust source</dt><dd>{selected.trust_source ?? "legacy request"}</dd></div><div><dt>Framework</dt><dd>{selected.framework ? `${selected.framework}${selected.framework_version ? ` ${selected.framework_version}` : ""}` : "raw transport"}</dd></div><div><dt>Framework version</dt><dd>{selected.framework_version ?? "—"}</dd></div></dl>
-      <h3>Usage and quota accounting</h3><p>Recorded ledger units are not necessarily generated tokens or a provider bill. Unknown usage can carry conservative quota charges; missing cost is not a zero bill.</p><Table headers={["Logical requests", "Input tokens", "Output tokens", "Total tokens", "Cost nano-USD"]} rows={selected.usage ? [[selected.usage.logical_requests, displayUsageMetric(selected.usage, "input_tokens"), displayUsageMetric(selected.usage, "output_tokens"), displayUsageMetric(selected.usage, "total_tokens"), displayUsageMetric(selected.usage, "cost_nano_usd")]] : []} />
-      <h3>Ordered upstream attempts</h3><Table headers={["#", "Attempt", "Route", "Started", "First byte", "First token", "TTFT", "Completed", "Duration", "Upstream", "Model", "Status", "HTTP", "Failure", "Input", "Output", "Total", "Cost nUSD", "Usage provenance", "Cost provenance", "Cost source"]} rows={selected.attempts.map((attempt) => [attempt.attempt_number, attempt.id, attempt.route, time(attempt.started_at), time(attempt.first_byte_at), time(attempt.first_token_at), duration(attempt.started_at, attempt.first_token_at), time(attempt.completed_at), duration(attempt.started_at, attempt.completed_at), attempt.upstream, attempt.model, attempt.status, attempt.http_status ?? "—", attempt.failure_code ? <FailureCodeLink code={attempt.failure_code} /> : "—", displayUsageMetric(attempt.usage, "input_tokens"), displayUsageMetric(attempt.usage, "output_tokens"), displayUsageMetric(attempt.usage, "total_tokens"), displayUsageMetric(attempt.usage, "cost_nano_usd"), attempt.usage_provenance, attempt.cost_provenance, attempt.cost_source ?? "—"])} />
-      <h3>Safe provider diagnostics</h3><Table headers={["Attempt", "Accounting policy", "Category", "Parameter", "Provider code", "Generation ID", "Request ID"]} rows={selected.attempts.filter((attempt) => attempt.provider_error || attempt.accounting_policy).map((attempt) => [attempt.attempt_number, attempt.accounting_policy || "Diagnostics only", attempt.provider_error?.category ?? "—", attempt.provider_error?.parameter ?? "—", attempt.provider_error?.provider_code ?? "—", attempt.provider_error?.generation_id ?? "—", attempt.provider_error?.request_id ?? "—"])} />
-      <h3>Conservative input-bound breakdown</h3><p>These aggregate sizes explain the reservation bound, not the provider's measured token count. Historical requests may not have this breakdown.</p><Table headers={["Attempt", "Rewritten bytes", "Framing units", "Per-request allowance", "Per-unit allowance", "Expanded schema bytes"]} rows={selected.attempts.flatMap((attempt) => attempt.input_accounting_breakdown ? [[attempt.attempt_number, attempt.input_accounting_breakdown.rewritten_request_bytes, attempt.input_accounting_breakdown.framing_unit_count, attempt.input_accounting_breakdown.maximum_framing_tokens_per_request, attempt.input_accounting_breakdown.maximum_framing_tokens_per_unit, attempt.input_accounting_breakdown.expanded_schema_bytes]] : [])} />
-      <p><small>Failure categories are a closed, sanitized vocabulary; unrecognized durable values appear as unknown. Prompt/response bodies, provider error text, raw internal errors, and identity subjects remain excluded.</small></p>
-    </aside> : null}
-  </div>;
-}
-
-export function RequestsPage() {
-  return <EnvironmentRequired><RequestsWorkspacePage /></EnvironmentRequired>;
 }
 
 type AnalyticsFocus = "attestation" | "cost" | "errors" | "latency" | "usage";

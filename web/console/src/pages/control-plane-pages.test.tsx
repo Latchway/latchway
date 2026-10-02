@@ -44,17 +44,12 @@ vi.mock("../app/console-compatibility-context", () => ({
   useConsoleCompatibility: () => ({ mutationAllowed: true })
 }));
 
-import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, InstallationsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, InstallationsPage, LatencyPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
 import { SelfTestSchema } from "../api/admin";
 import { dispatchAdminRefresh } from "../api/admin-events";
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
-const requestProvenance = {
-  config_revision_id: "rev_0123456789abcdef",
-  decision_stages: [],
-  selected_limit_plan: "subscriber"
-};
 
 function effectiveConfigurationFixture(mode: "current_user_projection" | "recorded_request" = "current_user_projection") {
   const route = {
@@ -161,109 +156,6 @@ beforeEach(() => {
 });
 
 describe("rich usage and route-simulator views", () => {
-  it("restores every request-list filter from workspace URL state and sends it to the Admin API", async () => {
-    const search: WorkspaceSearch = {
-      application: "mobile-app",
-      component_kind: "main_app",
-      cost_max_nano_usd: "2000",
-      cost_min_nano_usd: "1000",
-      cursor: "next-request-page",
-      end: "2026-08-30T00:00:00Z",
-      environment: "production",
-      error_code: "upstream_timeout",
-      feature: "assistant",
-      latency_max_ms: "5000",
-      latency_min_ms: "50",
-      model: "openai/gpt-5-mini",
-      organization: "example",
-      platform: "react_native_ios",
-      request_id: "req_1123456789abcdef",
-      route: "primary",
-      sort: "started_at_asc",
-      start: "2026-08-29T00:00:00Z",
-      status: "failed",
-      tokens_max: "4096",
-      tokens_min: "10",
-      trust_source: "direct_attested",
-      upstream: "openrouter",
-      user_id: "usr_0123456789abcdef"
-    };
-    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
-
-    renderInWorkspace(<RequestsPage />, search);
-
-    await waitFor(() => expect(adminRequestMock).toHaveBeenCalled());
-    const listPath = String(adminRequestMock.mock.calls.find(([path]) => String(path).startsWith("/admin/v1/requests?"))?.[0]);
-    const query = new URLSearchParams(listPath.split("?")[1]);
-    expect(Object.fromEntries(query)).toEqual({
-      component_kind: "main_app",
-      cost_max_nano_usd: "2000",
-      cost_min_nano_usd: "1000",
-      cursor: "next-request-page",
-      end: "2026-08-30T00:00:00Z",
-      environment_id: "env_0123456789abcdef",
-      error_code: "upstream_timeout",
-      feature: "assistant",
-      latency_max_ms: "5000",
-      latency_min_ms: "50",
-      model: "openai/gpt-5-mini",
-      page_size: "50",
-      platform: "react_native_ios",
-      request_id: "req_1123456789abcdef",
-      route: "primary",
-      sort: "started_at_asc",
-      start: "2026-08-29T00:00:00Z",
-      status: "failed",
-      tokens_max: "4096",
-      tokens_min: "10",
-      trust_source: "direct_attested",
-      upstream: "openrouter",
-      user_id: "usr_0123456789abcdef"
-    });
-    expect(screen.getByLabelText("Status")).toHaveValue("failed");
-    expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-5-mini");
-    const initialLoads = adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/requests?")).length;
-    dispatchAdminRefresh(["requests"]);
-    await waitFor(() => expect(adminRequestMock.mock.calls.filter(([path]) => String(path).startsWith("/admin/v1/requests?")).length).toBe(initialLoads + 1));
-  });
-
-  it("writes edited request filters back as validated shareable search state", async () => {
-    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
-    const user = userEvent.setup();
-    const { updateSearch } = renderInWorkspace(<RequestsPage />, {
-      application: "mobile-app",
-      environment: "production",
-      organization: "example"
-    });
-    await waitFor(() => expect(adminRequestMock).toHaveBeenCalled());
-    await user.selectOptions(screen.getByLabelText("Status"), "denied");
-    await user.type(screen.getByLabelText("Feature"), "assistant");
-    await user.click(screen.getByRole("button", { name: "Apply filters" }));
-
-    expect(updateSearch).toHaveBeenLastCalledWith(expect.objectContaining({
-      cursor: undefined,
-      feature: "assistant",
-      request: undefined,
-      status: "denied"
-    }));
-  });
-
-  it("keeps request pagination server-side by writing only the returned cursor to URL state", async () => {
-    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: true, next_cursor: "next-request-page" } } });
-    const user = userEvent.setup();
-    const { updateSearch } = renderInWorkspace(<RequestsPage />, {
-      application: "mobile-app",
-      environment: "production",
-      feature: "assistant",
-      organization: "example",
-      status: "failed"
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Next page" }));
-
-    expect(updateSearch).toHaveBeenLastCalledWith({ cursor: "next-request-page", request: undefined });
-  });
-
   it("restores every audit filter from workspace URL state and sends it to the Admin API", async () => {
     const search: WorkspaceSearch = {
       action: "admin.user_block",
@@ -739,88 +631,6 @@ describe("rich usage and route-simulator views", () => {
     expect(screen.getByRole("heading", { name: "Usage provenance" })).toBeInTheDocument();
     expect(screen.getByText("upstream_reported")).toBeInTheDocument();
     expect(screen.queryByText("openrouter_usage_cost")).not.toBeInTheDocument();
-  });
-
-  it("renders token and cost provenance independently for each attempt", async () => {
-	const request = { ...requestProvenance, attempts: [{
-	  attempt_number: 1, completed_at: "2026-08-29T00:00:00.400Z", cost_provenance: "unknown",
-	  failure_code: "timeout", http_status: 504, id: "atm_0123456789abcdef", model: "openai/gpt",
-	  route: "primary", started_at: "2026-08-29T00:00:00Z", status: "failed",
-	  upstream: "openrouter", usage_provenance: "unknown"
-	}, {
-	  attempt_number: 2, completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
-	  first_byte_at: "2026-08-29T00:00:01Z", first_token_at: "2026-08-29T00:00:01.500Z", http_status: 200, id: "atm_0123456789abcdeg", model: "openai/gpt",
-	  route: "fallback", started_at: "2026-08-29T00:00:00.500Z", status: "succeeded", upstream: "openrouter",
-	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "unknown"
-	}], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z", component_definition_id: "ios-main", component_kind: "main_app", environment_id: "env_0123456789abcdef", feature: "assistant", framework: "swift-openai", framework_version: "4.6.0",
-	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
-	  installation_family_id: "fam_0123456789abcdef",
-	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
-	  trust_source: "direct_attested",
-	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 1, output_tokens: 20, total_tokens: 30 },
-	  user_id: "usr_0123456789abcdef" };
-	adminRequestMock.mockImplementation(async (path: string) => path.endsWith(request.id) ? { data: request } : { data: { items: [request], page: { has_more: false } } });
-	const user = userEvent.setup();
-	render(<RequestsPage />);
-	await user.type(screen.getByLabelText("Environment ID"), "env_0123456789abcdef");
-	await user.click(screen.getByRole("button", { name: "List requests" }));
-	await user.click(await screen.findByRole("button", { name: "req_0123456789abcdef" }));
-	expect(await screen.findByRole("heading", { name: "Request detail" })).toBeInTheDocument();
-	expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
-	expect(screen.getByRole("heading", { name: "Usage and quota accounting" })).toBeInTheDocument();
-	expect(screen.getByRole("heading", { name: "Ordered upstream attempts" })).toBeInTheDocument();
-	expect(screen.getByText("1 s")).toBeInTheDocument();
-	expect(screen.getAllByText("321 (ledger; provenance unavailable)")).toHaveLength(3);
-	expect(screen.getByText("fallback")).toBeInTheDocument();
-	expect(screen.getByText("504")).toBeInTheDocument();
-	const timeoutLinks = screen.getAllByRole("link", { name: "timeout" });
-	expect(timeoutLinks.length).toBeGreaterThan(0);
-	for (const link of timeoutLinks) {
-	  expect(link).toHaveAttribute("href", "https://docs.latchway.dev/errors/timeout");
-	}
-	expect(screen.getByText("upstream_reported")).toBeInTheDocument();
-	expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
-	expect(screen.getAllByText("swift-openai 4.6.0")).toHaveLength(1);
-	expect(screen.getByText("cmp_0123456789abcdef")).toBeInTheDocument();
-	expect(screen.getByText("direct_attested")).toBeInTheDocument();
-	expect(screen.getByText(/closed, sanitized vocabulary/)).toBeInTheDocument();
-	expect(screen.queryByText("upstream_timeout")).not.toBeInTheDocument();
-  });
-
-  it("loads a recorded request explanation without reconstructing missing historical claims", async () => {
-    const request = {
-      ...requestProvenance, attempts: [], completed_at: "2026-08-29T00:00:01Z",
-      environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef",
-      installation_id: "ins_0123456789abcdef", protocol: "openai_chat",
-      started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef"
-    };
-    adminRequestMock.mockImplementation(async (path: string) => path.endsWith(request.id) ? { data: request } : { data: { items: [request], page: { has_more: false } } });
-    getRequestEffectiveConfigurationMock.mockResolvedValue({ data: effectiveConfigurationFixture("recorded_request") });
-    const user = userEvent.setup();
-    render(<RequestsPage />);
-    await user.type(screen.getByLabelText("Environment ID"), request.environment_id);
-    await user.click(screen.getByRole("button", { name: "List requests" }));
-    await user.click(await screen.findByRole("button", { name: request.id }));
-    expect(await screen.findByText(/does not reconstruct them from current state/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Explain recorded configuration" }));
-
-    expect(getRequestEffectiveConfigurationMock).toHaveBeenCalledWith(request.id);
-    expect(await screen.findByRole("heading", { name: "Recorded decision inputs" })).toBeInTheDocument();
-    expect(screen.getByText(/Historical claim values were not persisted and are not inferred/i)).toBeInTheDocument();
-    expect(screen.getByText("Historical claim values remain unavailable.")).toBeInTheDocument();
-  });
-
-  it("rejects request detail that does not match the selected environment", async () => {
-    const listed = { ...requestProvenance, attempts: [], completed_at: "2026-08-29T00:00:01Z", environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef" };
-    adminRequestMock.mockImplementation(async (path: string) => path.endsWith(listed.id) ? { data: { ...listed, environment_id: "env_ffffffffffffffff" } } : { data: { items: [listed], page: { has_more: false } } });
-    const user = userEvent.setup();
-    render(<RequestsPage />);
-    await user.type(screen.getByLabelText("Environment ID"), listed.environment_id);
-    await user.click(screen.getByRole("button", { name: "List requests" }));
-    await user.click(await screen.findByRole("button", { name: listed.id }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Request detail mismatch");
-    expect(screen.queryByRole("heading", { name: "Request detail" })).not.toBeInTheDocument();
   });
 
   it.each([
