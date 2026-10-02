@@ -1,0 +1,217 @@
+import type { IconName } from "../ui";
+
+export type ConsoleRoute =
+  | "/"
+  | "/applications"
+  | "/environments"
+  | "/setup"
+  | "/administrators"
+  | "/api-tokens"
+  | "/authentication-providers"
+  | "/attestation"
+  | "/users"
+  | "/installation-families"
+  | "/installations"
+  | "/component-definitions"
+  | "/features"
+  | "/routes"
+  | "/upstreams"
+  | "/models-pricing"
+  | "/secrets"
+  | "/configuration"
+  | "/access-policies"
+  | "/limit-plans"
+  | "/user-overrides"
+  | "/abuse-controls"
+  | "/requests"
+  | "/usage"
+  | "/cost"
+  | "/latency"
+  | "/errors"
+  | "/attestation-failures"
+  | "/configuration-revisions"
+  | "/route-simulator"
+  | "/self-tests"
+  | "/audit"
+  | "/system-health"
+  | "/settings";
+
+export interface SectionTab {
+  description: string;
+  label: string;
+  to: ConsoleRoute;
+}
+
+/** One sidebar destination. Areas with tabs group related pages; the first tab is where the sidebar link goes. */
+export interface NavArea {
+  description: string;
+  icon: IconName;
+  label: string;
+  tabs?: readonly SectionTab[];
+  to: ConsoleRoute;
+}
+
+export interface NavGroup {
+  areas: readonly NavArea[];
+  collapsible?: boolean;
+  title?: string;
+}
+
+/** Environment scope: everything here reads or changes the selected application environment. */
+export const environmentNavigation: readonly NavGroup[] = [
+  { areas: [{ description: "Gateway operating posture and setup progress", icon: "overview", label: "Overview", to: "/" }] },
+  {
+    areas: [
+      { description: "Request outcomes, attempts and metadata", icon: "requests", label: "Requests", to: "/requests" },
+      {
+        description: "Usage, cost, latency and error trends",
+        icon: "analytics",
+        label: "Analytics",
+        tabs: [
+          { description: "Trusted token accounting", label: "Usage", to: "/usage" },
+          { description: "Nano-USD cost and provenance", label: "Cost", to: "/cost" },
+          { description: "Request and first-token timing", label: "Latency", to: "/latency" },
+          { description: "Failure and denial rates", label: "Errors", to: "/errors" },
+          { description: "Rejected platform proofs", label: "Attestation failures", to: "/attestation-failures" }
+        ],
+        to: "/usage"
+      }
+    ],
+    title: "Traffic"
+  },
+  {
+    areas: [
+      { description: "Client-visible AI capabilities", icon: "features", label: "Features", to: "/features" },
+      { description: "Ordered conditional resolution", icon: "split", label: "Routing", to: "/routes" },
+      {
+        description: "Provider connections, models and credentials",
+        icon: "connections",
+        label: "AI Connections",
+        tabs: [
+          { description: "Provider and gateway destinations", label: "Connections", to: "/upstreams" },
+          { description: "Physical models and rates", label: "Models & pricing", to: "/models-pricing" },
+          { description: "Write-only credentials", label: "Secrets", to: "/secrets" }
+        ],
+        to: "/upstreams"
+      },
+      {
+        description: "Who may call the gateway and from which apps",
+        icon: "trust",
+        label: "Client Trust",
+        tabs: [
+          { description: "Issuer and claim trust", label: "User sign-in", to: "/authentication-providers" },
+          { description: "Platform app verification", label: "App verification", to: "/attestation" },
+          { description: "Allowed roots, children and feature grants", label: "Components", to: "/component-definitions" }
+        ],
+        to: "/authentication-providers"
+      },
+      { description: "Guided first-run checklist", icon: "rocket", label: "Setup wizard", to: "/setup" }
+    ],
+    title: "Build"
+  },
+  {
+    areas: [
+      {
+        description: "Pseudonymous users and their installations",
+        icon: "users",
+        label: "Users & Installs",
+        tabs: [
+          { description: "Pseudonymous identities and controls", label: "Users", to: "/users" },
+          { description: "Component trust and revocation", label: "Installations", to: "/installation-families" },
+          { description: "Legacy root installation records", label: "Older installs", to: "/installations" }
+        ],
+        to: "/users"
+      },
+      {
+        description: "Quotas, authorization and protective controls",
+        icon: "policies",
+        label: "Policies & Limits",
+        tabs: [
+          { description: "Durable quota policies", label: "Limit plans", to: "/limit-plans" },
+          { description: "Per-feature authorization", label: "Access policies", to: "/access-policies" },
+          { description: "Per-user plan selection", label: "Overrides", to: "/user-overrides" },
+          { description: "Composed protective controls", label: "Abuse controls", to: "/abuse-controls" }
+        ],
+        to: "/limit-plans"
+      }
+    ],
+    collapsible: true,
+    title: "Users & Limits"
+  },
+  {
+    areas: [
+      {
+        description: "Configuration history, review and rollback",
+        icon: "changes",
+        label: "Changes",
+        tabs: [
+          { description: "History and safe rollback", label: "History", to: "/configuration-revisions" },
+          { description: "Validate, diff and activate", label: "Full configuration", to: "/configuration" }
+        ],
+        to: "/configuration-revisions"
+      },
+      { description: "Exact production policy resolver", icon: "simulator", label: "Simulator", to: "/route-simulator" },
+      { description: "Bounded installation diagnostics", icon: "selftest", label: "Self-tests", to: "/self-tests" },
+      { description: "Gateway liveness and readiness", icon: "health", label: "System Health", to: "/system-health" }
+    ],
+    collapsible: true,
+    title: "Operate"
+  }
+];
+
+/** Organization scope: the application and environment selection does not apply here. */
+export const organizationNavigation: readonly NavGroup[] = [
+  {
+    areas: [
+      {
+        description: "Administrators, roles and automation credentials",
+        icon: "team",
+        label: "Team & Access",
+        tabs: [
+          { description: "Accounts and roles", label: "Members", to: "/administrators" },
+          { description: "Scoped automation credentials", label: "API tokens", to: "/api-tokens" }
+        ],
+        to: "/administrators"
+      },
+      { description: "Redacted change history", icon: "audit", label: "Audit Log", to: "/audit" },
+      {
+        description: "Organization settings, applications and environments",
+        icon: "settings",
+        label: "Settings",
+        tabs: [
+          { description: "Compatibility, privacy, transfer and sessions", label: "General", to: "/settings" },
+          { description: "Tenant application resources", label: "Applications", to: "/applications" },
+          { description: "Application deployment scopes", label: "Environments", to: "/environments" }
+        ],
+        to: "/settings"
+      }
+    ]
+  }
+];
+
+const allAreas = [...environmentNavigation, ...organizationNavigation].flatMap((group) => group.areas);
+
+/** The sidebar area that owns a path, if any. */
+export function areaForPath(pathname: string): NavArea | undefined {
+  return allAreas.find((area) => area.to === pathname || area.tabs?.some((tab) => tab.to === pathname));
+}
+
+/** Pages where the application and environment crumbs are not used, so the header dims them. */
+export function isOrganizationPath(pathname: string): boolean {
+  return organizationNavigation.some((group) => group.areas.some((area) => area.to === pathname || area.tabs?.some((tab) => tab.to === pathname && tab.to !== "/environments")));
+}
+
+export interface Command {
+  description: string;
+  label: string;
+  /** Where the destination lives, e.g. "Analytics". */
+  section?: string;
+  to: ConsoleRoute;
+}
+
+/** Every navigable destination, for the command palette. Commands only navigate; they never perform actions. */
+export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =>
+  area.tabs
+    ? area.tabs.map((tab) => ({ description: tab.description, label: tab.label, section: area.label, to: tab.to }))
+    : [{ description: area.description, label: area.label, to: area.to }]
+);

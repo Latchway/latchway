@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { commands } from "./navigation";
 import { createAppRouter } from "./router";
 
 const adminSession = {
@@ -315,23 +316,46 @@ describe("AppShell", () => {
     expect(urls).toContain("/admin/v1/auth/session");
   });
 
-  it("maps every named v1 dashboard area to literal authenticated navigation", async () => {
+  it("reaches every console page from the sidebar or a section tab", async () => {
     installConfiguredFetch();
     renderConsole("/applications");
 
     expect(await screen.findByRole("heading", { name: "Applications" })).toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
-    const labels = [
-      "Applications", "Environments", "Authentication providers", "Attestation",
-      "Users", "Installation families", "Installations", "Component definitions", "Features", "Routes", "Upstreams", "Models & pricing",
-      "Secrets", "Access policies", "Limit plans", "User overrides", "Abuse controls",
-      "Requests", "Usage", "Cost", "Latency", "Errors", "Attestation failures",
-      "Configuration revisions", "Route simulator", "Self-tests", "Audit log", "System health", "Settings"
+    const areas = [
+      "Overview", "Requests", "Analytics", "Features", "Routing", "AI Connections", "Client Trust", "Setup wizard",
+      "Users & Installs", "Policies & Limits", "Changes", "Simulator", "Self-tests", "System Health",
+      "Team & Access", "Audit Log", "Settings"
     ];
-    for (const label of labels) {
-      expect(within(navigation).getByText(label, { exact: true }).closest("a")).toBeTruthy();
+    for (const label of areas) {
+      expect(within(navigation).getByRole("link", { name: label })).toBeInTheDocument();
     }
-    expect(within(navigation).getByText("Applications", { exact: true }).closest("a")).toHaveAttribute("aria-current", "page");
+    expect(within(navigation).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+    const sectionTabs = screen.getByRole("navigation", { name: "Settings pages" });
+    expect(within(sectionTabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["General", "Applications", "Environments"]);
+    expect(within(sectionTabs).getByRole("link", { name: "Applications" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByLabelText("Current environment").closest(".lw-crumb-select")).toHaveClass("lw-crumb-btn--dim");
+
+    const destinations = commands.map((command) => command.to);
+    expect(new Set(destinations).size).toBe(destinations.length);
+    expect([...destinations].sort()).toEqual(Object.keys(createAppRouter({ history: createMemoryHistory() }).routesByPath).sort());
+  });
+
+  it("opens the command palette with every destination and returns focus when it closes", async () => {
+    const user = userEvent.setup();
+    installConfiguredFetch();
+    renderConsole("/requests");
+
+    const trigger = await screen.findByRole("button", { name: "Search or jump" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Go to an operator task" });
+    expect(within(dialog).getByPlaceholderText("Feature, request, setup, health…")).toHaveFocus();
+    expect(within(dialog).getAllByRole("link")).toHaveLength(commands.length);
+    await user.type(within(dialog).getByPlaceholderText("Feature, request, setup, health…"), "secrets");
+    expect(within(dialog).getAllByRole("link")).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it("resolves an explicit application environment and preserves it in task URLs", async () => {
@@ -356,12 +380,17 @@ describe("AppShell", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Current application")).toHaveValue("habitify"));
     await waitFor(() => expect(screen.getByLabelText("Current environment")).toHaveValue("production"));
-    expect(screen.getByText("Production", { selector: ".environment-badge" })).toBeVisible();
-    expect(await screen.findByRole("link", { name: "Draft valid" })).toHaveAttribute("href", expect.stringContaining("/configuration-revisions"));
+    expect(within(screen.getByRole("banner")).getByText("Production", { selector: ".lw-badge span" })).toBeVisible();
+    const statusRail = await screen.findByRole("region", { name: "Console state" });
+    // Without a compatibility response the console is in read-only safe mode, which outranks the draft in the rail.
+    expect(within(statusRail).getByRole("status")).toHaveTextContent("Read-only safe mode.");
+    await user.click(await within(statusRail).findByRole("button", { name: "Draft valid" }));
+    expect(within(statusRail).getByText("Unpublished configuration.")).toBeVisible();
+    expect(within(statusRail).getByRole("link", { name: "Draft valid" })).toHaveAttribute("href", expect.stringContaining("/configuration-revisions"));
     await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=production"));
 
     await user.selectOptions(screen.getByLabelText("Current environment"), "staging");
     await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=staging"));
-    expect(screen.getByText("staging", { selector: ".environment-badge" })).toBeVisible();
+    expect(within(screen.getByRole("banner")).getByText("Staging", { selector: ".lw-badge span" })).toBeVisible();
   });
 });
