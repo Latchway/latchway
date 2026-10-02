@@ -1,6 +1,23 @@
 # Implementation status
 
-Status date: 2026-09-23
+Status date: 2026-10-02
+
+## Console redesign phase 0: design-system foundation (branch `console-redesign`, unreleased)
+
+The console palette is replaced with the Latchway Console design-system tokens
+(light, plus dark following the operating system). Geist and Geist Mono
+(OFL-1.1, `@fontsource-variable` 5.3.0) are bundled and served same-origin, so
+the `style-src 'self'` / `default-src 'self'` CSP is unchanged. `src/ui/` holds
+typed React ports of the design-system components (Icon from generated SVG data
+with no `innerHTML`, Button, badges, Card, PageHeader, Tabs, Segmented,
+FilterChip, Notice, EmptyState, Toast, Properties, DataTable, DetailPanel,
+ConfirmDialog/ImpactDialog with focus trap and focus return, Menu, StatusRail,
+AttentionList, RangePicker with whole-UTC-day validation, VolumeChart and
+ProportionBar) with unit tests. Legacy page and shell styles are remapped onto
+the tokens; no page behavior or navigation changed. The design system's light
+secondary-text and accent colors are darkened slightly (`#6b6970`, `#2a69e2`)
+in a hand-maintained override block because the generated values fell just
+short of WCAG AA at small sizes.
 
 ## Redaction-safe production failure visibility
 
