@@ -2,6 +2,44 @@
 
 Status date: 2026-10-02
 
+## Console redesign phase 2: Requests (branch `console-redesign`, unreleased)
+
+Traffic → Requests is rebuilt on `GET /admin/v1/requests` and
+`GET /admin/v1/requests/{id}` only (`src/pages/requests/`). The header has a
+range picker (15m · 1h · 24h · 7d · All · custom whole UTC days up to 90),
+Export (CSV of the loaded rows, without user IDs unless chosen, with
+spreadsheet formula prefixes neutralized; and a `curl` for the current query
+that reads `$LATCHWAY_TOKEN`) and a Live toggle. Quick views (All, Failed,
+Denied, Slow over 2 s, Expensive over $0.02) and filter chips are plain API
+filters kept in the URL; More filters converts seconds and dollars to integer
+milliseconds and nano-USD without floating-point steps. Go to ID replaces
+search, which the API doesn't offer: a `req_` ID opens the record (or names it
+as not found in this application and environment) and a `usr_` ID filters.
+Paging appends server cursor pages ("N shown · more available", Load More) with
+no total, since the API has none; page size 50/100/200 and sort are in the URL.
+Admin event hints no longer reload the list under the reader: they show a
+"new requests may have arrived" notice.
+
+The request drawer follows `?request=` and ↑/↓ (j/k) and Escape: an outcome
+sentence from registered codes with documentation links, shortcuts that set
+filters, a summary, one waterfall of decision stages and attempts with
+first-byte and first-token marks, numbered decision stages with limit
+sentences, attempt cards with provider error categories in words and copyable
+provider request and generation IDs, the collapsed input-reservation breakdown,
+usage through the existing provenance-aware display, and the recorded
+configuration explanation. Older requests without stages say so. Detail from
+another environment is still rejected. Not built because the API has no
+source: a Platform column (request records don't carry platform), filter value
+lists for features, connections, models and routes (chips take exact values;
+Error suggests registered codes), per-connection pages to link to, and request
+data in the event stream. The design system's 30%-opacity faint text is
+replaced with secondary text color to pass WCAG AA.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (345 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.06 MB.
+
 ## Console redesign phase 1: shell and information architecture (branch `console-redesign`, unreleased)
 
 The console shell is rebuilt on the phase 0 components: Organization /

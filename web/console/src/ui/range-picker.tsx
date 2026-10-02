@@ -16,7 +16,8 @@ interface RangePickerProps {
   maxDays?: number;
   now?: number;
   onChange: (value: RangeValue) => void;
-  presets: readonly string[];
+  /** Preset ids, shown as-is, or `{ id, label }` when the id isn't readable on its own. */
+  presets: ReadonlyArray<string | { id: string; label: string }>;
   retainedFrom?: number;
   value: RangeValue;
 }
@@ -28,7 +29,7 @@ export function RangePicker({ className, keptDays, label = "Time range", maxDays
   const open = openedAt != null;
   const setOpen = (next: boolean) => setOpenedAt(next ? (now ?? Date.now()) : null);
   const root = useRef<HTMLDivElement>(null);
-  const items = presets.map((id) => ({ id, label: id }));
+  const items = presets.map((preset) => (typeof preset === "string" ? { id: preset, label: preset } : preset));
   if (maxDays) items.push({ id: "custom", label: isCustomRange(value) ? rangeText(value) : "Custom…" });
 
   useEffect(() => {

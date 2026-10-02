@@ -20,12 +20,12 @@ import {
   ErrorsPage,
   InstallationsPage,
   LatencyPage,
-  RequestsPage,
   RouteSimulatorPage,
   SelfTestsPage,
   UsagePage,
   UsersPage
 } from "../pages/control-plane-pages";
+import { RequestsPage } from "../pages/requests/requests-page";
 import {
   ConfigurationEditorPage,
   SetupWizardPage
