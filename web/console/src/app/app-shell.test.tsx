@@ -383,6 +383,9 @@ describe("AppShell", () => {
       ] }), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === "/admin/v1/environments/env_0123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:01:00Z", created_by: "adm_0123456789abcdef", document: { apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig", metadata: {}, spec: {} }, environment_id: "env_0123456789abcdef", id: "rev_2123456789abcdef", state: "valid", version: 2 }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
       if (url === "/admin/v1/environments/env_1123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      const document = { apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig", metadata: {}, spec: {} };
+      if (url === "/admin/v1/environments/env_0123456789abcdef/config") return new Response(JSON.stringify({ activated_at: "2026-08-29T00:00:00Z", created_at: "2026-08-29T00:00:00Z", created_by: "adm_0123456789abcdef", document, environment_id: "env_0123456789abcdef", id: "rev_0123456789abcdef", state: "active", version: 1 }), { headers: { "Content-Type": "application/json", ETag: '"active-etag"' }, status: 200 });
+      if (url === "/admin/v1/config-revisions/rev_2123456789abcdef") return new Response(JSON.stringify({ created_at: "2026-08-29T00:01:00Z", created_by: "adm_0123456789abcdef", document, environment_id: "env_0123456789abcdef", id: "rev_2123456789abcdef", state: "valid", version: 2 }), { headers: { "Content-Type": "application/json", ETag: '"draft-etag"' }, status: 200 });
       return healthResponse(url) ?? new Response("not found", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -394,9 +397,10 @@ describe("AppShell", () => {
     const statusRail = await screen.findByRole("region", { name: "Console state" });
     // Without a compatibility response the console is in read-only safe mode, which outranks the draft in the rail.
     expect(within(statusRail).getByRole("status")).toHaveTextContent("Read-only safe mode.");
-    await user.click(await within(statusRail).findByRole("button", { name: "Draft valid" }));
-    expect(within(statusRail).getByText("Unpublished configuration.")).toBeVisible();
-    expect(within(statusRail).getByRole("link", { name: "Draft valid" })).toHaveAttribute("href", expect.stringContaining("/configuration-revisions"));
+    await user.click(await within(statusRail).findByRole("button", { name: "Draft ready" }));
+    expect(within(statusRail).getByText("Unpublished changes.")).toBeVisible();
+    expect(within(statusRail).getByRole("link", { name: "Review Changes" })).toHaveAttribute("href", expect.stringContaining("/configuration-revisions"));
+    expect(within(statusRail).getByRole("button", { name: "Publish to Production" })).toBeInTheDocument();
     await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=production"));
 
     await user.selectOptions(screen.getByLabelText("Current environment"), "staging");

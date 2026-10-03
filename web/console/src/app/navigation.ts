@@ -8,6 +8,7 @@ export type ConsoleRoute =
   | "/administrators"
   | "/api-tokens"
   | "/authentication-providers"
+  | "/client-sessions"
   | "/attestation"
   | "/users"
   | "/installation-families"
@@ -99,7 +100,8 @@ export const environmentNavigation: readonly NavGroup[] = [
         tabs: [
           { description: "Issuer and claim trust", label: "User sign-in", to: "/authentication-providers" },
           { description: "Platform app verification", label: "App verification", to: "/attestation" },
-          { description: "Allowed roots, children and feature grants", label: "Components", to: "/component-definitions" }
+          { description: "Allowed roots, children and feature grants", label: "Components", to: "/component-definitions" },
+          { description: "How long app users' sessions last", label: "Sessions", to: "/client-sessions" }
         ],
         to: "/authentication-providers"
       },
@@ -216,3 +218,12 @@ export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =
 
 /** Paths kept only to redirect pre-redesign links to their new home. */
 export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures"];
+
+/**
+ * The search a shell link carries to another page: only the workspace scope. Page selections such as a feature, a
+ * tab or request filters belong to the page that set them and must not reopen something on the next page.
+ */
+export function scopeSearch(previous: Readonly<Record<string, unknown>>): { application?: string; environment?: string; organization?: string } {
+  const pick = (key: "application" | "environment" | "organization") => (typeof previous[key] === "string" && previous[key] ? { [key]: previous[key] } : {});
+  return { ...pick("organization"), ...pick("application"), ...pick("environment") };
+}

@@ -1047,6 +1047,7 @@ button.lw-trigger:hover { color: var(--accent-primary); }
 .lw-hsection { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: var(--space-2) 0 0; font-size: 16px; font-weight: 600; }
 .lw-hsection span { font-size: 13px; font-weight: 400; color: var(--foreground-secondary); }
 .lw-hgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--space-4); align-items: start; }
+.lw-hgrid > * { min-width: 0; }
 /* Gateway groups flow as columns so one-line (passed) groups don't leave holes beside tall open ones. */
 .lw-hgrid:has(.lw-hsum) { display: block; columns: 2 420px; column-gap: var(--space-4); }
 .lw-hgrid:has(.lw-hsum) > .lw-hcard-wrap { break-inside: avoid; margin-bottom: var(--space-4); }
@@ -1551,7 +1552,8 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 .lw-row--tight { gap: 4px 6px; }
 .lw-text-danger { color: var(--destructive); }
 .lw-text-warning { color: var(--orange); }
-.lw-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); align-items: end; gap: 12px 16px; }
+.lw-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); align-items: start; gap: 12px 16px; }
+.lw-form-grid--end { align-items: end; }
 .lw-intents { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .lw-intents li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
 .lw-intents li:first-child { border-top: 0; }
@@ -1566,3 +1568,31 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 .lw-bulk-results li.is-unknown strong, .lw-bulk-results li.is-failed strong { color: var(--destructive); }
 .lw-bulk-results li.is-done strong { color: var(--success); }
 @media (max-width: 640px) { .lw-intents li { flex-direction: column; align-items: flex-start; } .lw-bulk-results li { grid-template-columns: 1fr; } }
+
+/* ---------- Console additions: Build pages and the shared draft ---------- */
+.lw-name-cell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lw-struck { text-decoration: line-through; color: var(--foreground-secondary); }
+.lw-json-editor { width: 100%; min-height: 240px; padding: 10px 12px; border: 0; border-radius: var(--radius-2_5); background: var(--input-background); box-shadow: 0 0 0 1px var(--border); color: var(--foreground-primary); font-family: var(--font-mono); font-size: 12px; line-height: 18px; resize: vertical; }
+.lw-json-editor:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-focus-glow); }
+.lw-json-editor--short { min-height: 0; }
+.lw-issue-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 18px; }
+.lw-plan-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.lw-plan-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; font-size: 13px; line-height: 18px; }
+.lw-plan-op { min-width: 60px; padding: 0 6px; border-radius: var(--radius-full); background: var(--background-l1); font-size: 11px; font-weight: 600; text-align: center; text-transform: uppercase; }
+.lw-plan-op.is-add { background: var(--badge-green-background); color: var(--badge-green-foreground); }
+.lw-plan-op.is-remove { background: var(--badge-red-background); color: var(--destructive); }
+.lw-plan-op.is-replace { background: var(--accent-subtle); color: var(--accent-primary); }
+.lw-page-foot { padding: 12px 24px; }
+.lw-route-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.lw-route-steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--border); }
+.lw-route-steps > li:first-child { border-top: 0; }
+.lw-route-steps__main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lw-fieldset { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; border: 0; }
+.lw-fieldset > legend { margin-bottom: 8px; padding: 0; font-size: 14px; font-weight: 500; }
+.lw-tags-list { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0; list-style: none; }
+.lw-select--inline { width: auto; min-width: 200px; height: 32px; }
+.lw-drawer-dock--wide { width: min(880px, 100vw); }
+/* Guided flows keep their established form markup inside the new pages. */
+.lw-legacy-block .task-card-list, .lw-legacy-block .development-path, .lw-guided .control-form { margin: 0; }
+.lw-guided .control-form { border: 0; padding: 0; background: none; box-shadow: none; }
+@media (max-width: 640px) { .lw-route-steps > li { grid-template-columns: 24px minmax(0, 1fr); } .lw-route-steps > li > .lw-row { grid-column: 2; } .lw-page-foot { padding: 12px 16px; } }

@@ -19,6 +19,7 @@ import {
   SelfTestsPage,
 } from "../pages/control-plane-pages";
 import { RequestsPage } from "../pages/requests/requests-page";
+import { SessionsPolicyPage } from "../pages/build/client-trust-pages";
 import { InstallationFamiliesPage } from "../pages/users/installations-page";
 import { InstallationsPage } from "../pages/users/older-installs-page";
 import { UsersPage } from "../pages/users/users-page";
@@ -94,6 +95,7 @@ const attestationRoute = createRoute({ component: AttestationConfigurationPage, 
 const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users", validateSearch: parseUserRouteSearch });
 const installationsRoute = createRoute({ component: InstallationsPage, getParentRoute: () => rootRoute, path: "/installations", validateSearch: parseInstallationRouteSearch });
 const installationFamiliesRoute = createRoute({ component: InstallationFamiliesPage, getParentRoute: () => rootRoute, path: "/installation-families", validateSearch: parseInstallationFamilyRouteSearch });
+const clientSessionsRoute = createRoute({ component: SessionsPolicyPage, getParentRoute: () => rootRoute, path: "/client-sessions" });
 const componentDefinitionsRoute = createRoute({ component: ComponentDefinitionsConfigurationPage, getParentRoute: () => rootRoute, path: "/component-definitions", validateSearch: parseConfigurationRouteSearch });
 const featuresRoute = createRoute({ component: FeaturesConfigurationPage, getParentRoute: () => rootRoute, path: "/features", validateSearch: parseFeatureRouteSearch });
 const routesRoute = createRoute({ component: RoutesConfigurationPage, getParentRoute: () => rootRoute, path: "/routes", validateSearch: parseConfigurationRouteSearch });
@@ -156,7 +158,7 @@ const auditRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute,
   authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
-  componentDefinitionsRoute,
+  componentDefinitionsRoute, clientSessionsRoute,
   featuresRoute, routesRoute, upstreamsRoute, modelsPricingRoute, secretsRoute, configurationRoute,
   accessPoliciesRoute, limitPlansRoute, userOverridesRoute, abuseControlsRoute,
   requestsRoute, usageRoute, costRoute, performanceRoute, reliabilityRoute, ...legacyAnalyticsRoutes,

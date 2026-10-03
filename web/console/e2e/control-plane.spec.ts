@@ -119,6 +119,7 @@ async function installAdminFixture(
   let activeConfigurationDocument: unknown = configurationDocument;
   let activeConfigurationRevisionID = ids.activeRevision;
   let activeConfigurationVersion = 2;
+  let workingDraft: { document: unknown; etag: string } | undefined;
   let userStatus: "active" | "blocked" = "active";
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
@@ -215,7 +216,9 @@ async function installAdminFixture(
       return route.fulfill({ status: 204 });
     }
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, {
-      items: [createdStandaloneRevision
+      items: [workingDraft
+        ? { created_at: instant, created_by: ids.admin, document: workingDraft.document, environment_id: ids.environment, id: ids.draftRevision, state: "valid", version: 3 }
+        : createdStandaloneRevision
         ? { created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "valid", validation: { checked_at: instant, issues: [], valid: true }, version: 1 }
         : { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }],
       page: { has_more: false }
@@ -224,6 +227,7 @@ async function installAdminFixture(
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       if (body.base_revision_id === activeConfigurationRevisionID) {
         revisionBodies.push(body);
+        workingDraft = { document: activeConfigurationDocument, etag: '"draft-etag-1"' };
         return json(route, 201, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-1"' });
       }
       const document = body.document as unknown;
@@ -246,16 +250,22 @@ async function installAdminFixture(
       activeConfigurationVersion = 1;
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
     }
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "GET" && workingDraft) return json(route, 200, { created_at: instant, created_by: ids.admin, document: workingDraft.document, environment_id: ids.environment, id: ids.draftRevision, state: "valid", version: 3 }, { ETag: workingDraft.etag });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "PATCH") {
-      activeConfigurationDocument = JSON.parse(request.postData() ?? "{}");
-      configurationPatchBodies.push(activeConfigurationDocument);
+      const document: unknown = JSON.parse(request.postData() ?? "{}");
+      configurationPatchBodies.push(document);
       configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
-      return json(route, 200, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-2"' });
+      if (request.headers()["if-match"] !== workingDraft?.etag) return problem(route, "etag_mismatch", 412, "The draft changed.");
+      workingDraft = { document, etag: '"draft-etag-2"' };
+      return json(route, 200, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: workingDraft.etag });
     }
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/plan`) return json(route, 200, { changes: [{ operation: "replace", path: "/spec/upstreams/0/baseUrl" }], from_revision_id: ids.activeRevision, to_revision_id: ids.draftRevision, warnings: [] });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/activate`) {
       configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
+      if (!workingDraft || request.headers()["if-match"] !== workingDraft.etag) return problem(route, "etag_mismatch", 412, "The draft changed.");
+      activeConfigurationDocument = workingDraft.document;
+      workingDraft = undefined;
       activeConfigurationRevisionID = ids.draftRevision;
       activeConfigurationVersion = 3;
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "active", version: 3 }, { ETag: '"targeted-active-etag"' });
@@ -819,7 +829,10 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await page.getByRole("button", { name: "Sign in securely" }).click();
 
   await goTo(page, "AI Connections");
-  await expect(page.getByRole("heading", { name: "Connect a provider without exposing its credential." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Connections" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /openai/ })).toBeVisible();
+  await page.getByRole("button", { name: "Add Connection" }).click();
+  await expect(page.getByRole("complementary", { name: "Add connection" }).getByRole("heading", { name: "Endpoint, credential, model, and price" })).toBeVisible();
   await page.getByLabel("Connection ID").fill("gateway");
   await page.getByLabel("Base URL").fill("https://gateway.example.test/v1");
   await page.getByLabel("Secret name").fill("gateway_api_key");
@@ -830,7 +843,8 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByRole("heading", { name: "Publish gateway to Production?" })).toBeVisible();
   await expect(page.getByLabel("Provider credential")).toHaveValue("");
   expect(fixture.secretBodies.at(-1)).toEqual({ environment_id: ids.environment, name: "gateway_api_key", value: "test-only-gateway-secret" });
-  await page.getByRole("button", { name: "Publish to Production" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Unpublished changes." })).toBeVisible();
+  await page.getByRole("complementary", { name: "Add connection" }).getByRole("button", { name: "Publish to Production" }).click();
   await expect(page.getByRole("heading", { name: "Test the published connection" })).toBeVisible();
 
   const patched = fixture.configurationPatchBodies[0] as { metadata: unknown; spec: { identityProviders: unknown; models: Array<Record<string, unknown>>; upstreams: Array<Record<string, unknown>> } };

@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -11,7 +11,6 @@ import {
 import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
-import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type StatusItem, StatusRail, useFocusTrap } from "../ui";
 import { useConsoleCompatibility } from "./console-compatibility-context";
 import { ConsoleCompatibilityProvider } from "./console-compatibility";
@@ -23,9 +22,13 @@ import {
   isOrganizationPath,
   type NavArea,
   type NavGroup,
-  organizationNavigation
+  organizationNavigation,
+  scopeSearch
 } from "./navigation";
 import { effectiveTheme, setTheme, type Theme } from "./theme";
+import { DraftActions } from "../pages/build/draft-actions";
+import { draftSummary } from "../pages/build/draft-summary";
+import { useEnvironmentDraft } from "../pages/build/environment-draft";
 import { WorkspaceProvider } from "./workspace-context";
 import { useWorkspace } from "./workspace-context-value";
 
@@ -51,7 +54,7 @@ function CommandPalette({ close }: { close: () => void }) {
       </div>
       <div className="lw-palette__list">
         {results.length ? results.map((command: Command) => (
-          <Link className="lw-menu__item" key={command.to} onClick={close} search={(previous) => previous} to={command.to}>
+          <Link className="lw-menu__item" key={command.to} onClick={close} search={scopeSearch} to={command.to}>
             <span className="lw-menu__item-label">{command.section ? <span className="lw-palette__section">{command.section} › </span> : null}{command.label}</span>
             <span className="lw-menu__item-hint">{command.description}</span>
           </Link>
@@ -65,7 +68,7 @@ function CommandPalette({ close }: { close: () => void }) {
 function SideLink({ area, pathname }: { area: NavArea; pathname: string }) {
   const active = area.to === pathname || Boolean(area.tabs?.some((tab) => tab.to === pathname));
   return (
-    <Link aria-current={active ? "page" : undefined} className="lw-side-item" search={(previous) => previous} to={area.to}>
+    <Link aria-current={active ? "page" : undefined} className="lw-side-item" search={scopeSearch} to={area.to}>
       <Icon name={area.icon} />
       <span className="lw-side-item__label">{area.label}</span>
     </Link>
@@ -97,7 +100,7 @@ function SectionTabs({ area, pathname }: { area: NavArea; pathname: string }) {
     <nav aria-label={`${area.label} pages`} className="lw-section-nav">
       <div className="lw-tabs">
         {area.tabs.map((tab) => (
-          <Link aria-current={tab.to === pathname ? "page" : undefined} className="lw-tab" key={tab.to} search={(previous) => previous} title={tab.description} to={tab.to}>{tab.label}</Link>
+          <Link aria-current={tab.to === pathname ? "page" : undefined} className="lw-tab" key={tab.to} search={scopeSearch} title={tab.description} to={tab.to}>{tab.label}</Link>
         ))}
       </div>
     </nav>
@@ -132,12 +135,8 @@ function AppShellContent() {
   const { liveness, readiness } = useSystemHealth();
   const mode = session.data?.mode ?? "unknown";
   const configured = mode === "configured";
-  const latestRevision = useQuery({
-    ...latestConfigurationRevisionQueryOptions(workspace.environment?.id ?? ""),
-    enabled: configured && Boolean(workspace.environment?.id)
-  });
-  const newestRevision = latestRevision.data?.items[0];
-  const newestIsDraft = newestRevision && ["draft", "valid", "invalid"].includes(newestRevision.state);
+  const sharedDraft = useEnvironmentDraft();
+  const draft = configured ? draftSummary(sharedDraft) : undefined;
   const overallState = overallHealthState(liveness.data, readiness.data);
   const healthLabel =
     overallState === "available"
@@ -235,19 +234,19 @@ function AppShellContent() {
       tone: "danger"
     });
   }
-  if (configured && workspace.environment && newestRevision && newestIsDraft) {
+  if (configured && workspace.environment && draft) {
     statusItems.push({
-      actions: <Link className={buttonClass({ size: "sm" })} search={(previous) => previous} to="/configuration-revisions">Draft {newestRevision.state}</Link>,
-      chip: `Draft ${newestRevision.state}`,
+      actions: <DraftActions draft={sharedDraft} />,
+      chip: draft.chip,
       icon: "changes",
       id: "draft",
-      text: `Newest revision ${newestRevision.id} in ${workspace.environment.display_name} is ${newestRevision.state} and not yet active.`,
-      title: "Unpublished configuration.",
+      text: draft.text,
+      title: draft.title,
       tone: "draft"
     });
-  } else if (configured && workspace.environment && latestRevision.isSuccess && !workspace.environment.active_revision_id) {
+  } else if (configured && workspace.environment && !sharedDraft.isPending && !workspace.environment.active_revision_id && !sharedDraft.active) {
     statusItems.push({
-      actions: <Link className={buttonClass({ size: "sm" })} search={(previous) => previous} to="/setup">Continue setup</Link>,
+      actions: <Link className={buttonClass({ size: "sm" })} search={scopeSearch} to="/setup">Continue setup</Link>,
       chip: "Setup required",
       icon: "rocket",
       id: "setup",
@@ -270,7 +269,7 @@ function AppShellContent() {
               <Icon name={navOpen ? "x" : "menu"} size={20} />
             </button>
           ) : null}
-          <Link aria-label="Latchway home" className="lw-console__home" search={(previous) => previous} to="/"><Logo /></Link>
+          <Link aria-label="Latchway home" className="lw-console__home" search={scopeSearch} to="/"><Logo /></Link>
         </div>
         <div className="lw-header__main">
           {configured ? <>
@@ -302,7 +301,7 @@ function AppShellContent() {
               <kbd className="lw-kbd">{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
             </button>
           ) : null}
-          <Link aria-label={`${healthLabel}. Open system health.`} className={cx("lw-health", overallState !== "available" && `lw-health--${overallState}`)} search={(previous) => previous} to="/system-health">
+          <Link aria-label={`${healthLabel}. Open system health.`} className={cx("lw-health", overallState !== "available" && `lw-health--${overallState}`)} search={scopeSearch} to="/system-health">
             <span aria-hidden="true" className="lw-badge__dot" />
             <span className="lw-health__text">{healthLabel}</span>
           </Link>

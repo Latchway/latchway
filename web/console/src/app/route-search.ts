@@ -270,7 +270,8 @@ export const parseSelfTestRouteSearch = (value: unknown): SelfTestRouteSearch =>
 
 export const FeatureRouteSearchSchema = z.object({
   ...workspaceSearchFields,
-  feature: optional(Identifier)
+  feature: optional(Identifier),
+  tab: optional(z.enum(["overview", "access", "routing", "setup"]))
 });
 
 export type FeatureRouteSearch = z.infer<typeof FeatureRouteSearchSchema>;

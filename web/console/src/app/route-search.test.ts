@@ -18,6 +18,7 @@ import {
   SelfTestRouteSearchSchema,
   UserRouteSearchSchema
 } from "./route-search";
+import { scopeSearch } from "./navigation";
 
 describe("request route search", () => {
   it("parses every request-list filter into bounded canonical URL state", () => {
@@ -248,5 +249,12 @@ describe("shareable operational route search", () => {
   it("keeps feature selection canonical and drops route-foreign sensitive values", () => {
     expect(FeatureRouteSearchSchema.parse({ feature: "assistant", reason: "never-share", secret: "never-share" })).toEqual({ feature: "assistant" });
     expect(FeatureRouteSearchSchema.safeParse({ feature: "Assistant display name" }).success).toBe(false);
+  });
+});
+
+describe("shell navigation search", () => {
+  it("carries only the workspace scope to another page", () => {
+    expect(scopeSearch({ application: "mobile", environment: "production", feature: "assistant", organization: "example", status: "failed", tab: "routing" })).toEqual({ application: "mobile", environment: "production", organization: "example" });
+    expect(scopeSearch({ application: "", feature: "assistant" })).toEqual({});
   });
 });
