@@ -16,8 +16,6 @@ import {
   SelfTestSchema,
   SelfTestSchedulePageSchema,
   SelfTestScheduleSchema,
-  UsageSummarySchema,
-  UsageTimeseriesSchema,
   setApplicationUserBlocked,
   UserSchema,
   UserPageSchema,
@@ -31,18 +29,13 @@ import {
   type RouteSimulation,
   type SelfTestRun,
   type SelfTestSchedule,
-  type UsageSummary,
-  type UsageTimeseries,
   type UserOperationAction,
   type UserOperationImpact
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
 import { useConsoleCompatibility } from "../app/console-compatibility-context";
-import { displayUsageMetric } from "./usage-display";
 import {
-  AnalyticsRouteSearchSchema,
-  type AnalyticsRouteSearch,
   AuditRouteSearchSchema,
   type AuditRouteSearch,
   InstallationRouteSearchSchema,
@@ -203,22 +196,12 @@ function time(value?: string): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
-function ratio(value: { numerator: number; denominator: number }, suffix = ""): string {
-  if (value.denominator === 0) return "—";
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value.numerator / value.denominator)}${suffix}`;
-}
 
-function rate(value: { parts_per_million: number }): string {
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value.parts_per_million / 10_000)}%`;
-}
 
 function FormActions({ busy, children = "Load" }: { busy: boolean; children?: ReactNode }) {
   return <button className="primary-action" disabled={busy} type="submit">{busy ? "Working…" : children}</button>;
 }
 
-function BreakdownLimitNotice({ label, limit, truncated }: { label: string; limit: number; truncated: boolean }) {
-  return truncated ? <p>Showing the first {limit.toLocaleString()} {label} rows.</p> : null;
-}
 
 function effectiveLimitValue(limit: EffectiveConfiguration["limits"][number]): string {
   if (limit.algorithm === "calendar") return `${limit.maximum?.toLocaleString()} / ${limit.window} (${limit.timezone})`;
@@ -494,126 +477,6 @@ export function InstallationsPage() {
     {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>Installation detail</h2><button className="small-action" onClick={() => { setRevocationTarget(undefined); if (workspace) workspace.updateSearch({ installation_id: undefined }); else setSelected(undefined); }} type="button">Close</button></div><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
   </div>;
 }
-
-type AnalyticsFocus = "attestation" | "cost" | "errors" | "latency" | "usage";
-
-const analyticsCopy: Record<AnalyticsFocus, { button: string; description: string; title: string }> = {
-  attestation: { button: "Load attestation failures", description: "Focused aggregate of rejected platform-proof evaluations. Raw attestation evidence remains excluded.", title: "Attestation failures" },
-  cost: { button: "Load cost", description: "Integer nano-USD totals, model and feature attribution, and fixed provenance without presenting estimates as observed provider cost.", title: "Cost" },
-  errors: { button: "Load errors", description: "Focused request failure, quota-denial, and fallback rates with exact bounded numerators and denominators.", title: "Errors" },
-  latency: { button: "Load latency", description: "Focused request and time-to-first-token distributions with sample counts and request-volume context.", title: "Latency" },
-  usage: { button: "Load usage", description: "Immutable logical request and token aggregates with explicit provenance and bounded breakdowns.", title: "Usage" }
-};
-
-function FocusedAnalytics({ focus, series, summary }: { focus: AnalyticsFocus; series?: UsageTimeseries; summary: UsageSummary }) {
-  if (focus === "cost") return <>
-    <section className="metric-grid"><article><span>Total cost</span><strong>{displayUsageMetric(summary.values, "cost_nano_usd")}</strong></article><article><span>Cost / active user</span><strong>{summary.values.details?.cost_nano_usd.recorded_units === null ? "Not recorded" : `${ratio(summary.analytics.cost_per_active_user_nano_usd, " nUSD")} (ledger)`}</strong></article><article><span>Requests</span><strong>{summary.analytics.request_count.toLocaleString()}</strong></article></section>
-    <section className="detail-card"><h2>Cost by feature</h2><Table headers={["Feature", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_feature.items.map((item) => [item.key, item.request_count, item.active_users, displayUsageMetric(item.values, "cost_nano_usd")])} /><BreakdownLimitNotice label="feature" limit={summary.analytics.by_feature.limit} truncated={summary.analytics.by_feature.truncated} /></section>
-    <section className="detail-card"><h2>Cost by model</h2><Table headers={["Model", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_model.items.map((item) => [item.key, item.request_count, item.active_users, displayUsageMetric(item.values, "cost_nano_usd")])} /><BreakdownLimitNotice label="model" limit={summary.analytics.by_model.limit} truncated={summary.analytics.by_model.truncated} /></section>
-    <section className="detail-card"><h2>Cost by selected plan</h2><Table headers={["Selected plan", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_selected_plan.items.map((item) => [item.key, item.request_count, item.active_users, displayUsageMetric(item.values, "cost_nano_usd")])} /><BreakdownLimitNotice label="selected-plan" limit={summary.analytics.by_selected_plan.limit} truncated={summary.analytics.by_selected_plan.truncated} /></section>
-    <section className="detail-card"><h2>Cost provenance</h2><Table headers={["Provenance", "Fixed source", "Cost nano-USD"]} rows={summary.analytics.usage_by_provenance.map((item) => [item.provenance, item.cost_source ?? "—", displayUsageMetric(item.values, "cost_nano_usd")])} /></section>
-    {series ? <Table headers={["Bucket", "Cost nano-USD"]} rows={series.points.map((point) => [time(point.timestamp), displayUsageMetric(point.values, "cost_nano_usd")])} /> : null}
-  </>;
-  if (focus === "latency") return <>
-    <section className="metric-grid"><article><span>Request p95</span><strong>{summary.analytics.request_latency.p95_ms.toLocaleString()} ms</strong></article><article><span>TTFT p95</span><strong>{summary.analytics.time_to_first_token.p95_ms.toLocaleString()} ms</strong></article><article><span>Request samples</span><strong>{summary.analytics.request_latency.samples.toLocaleString()}</strong></article><article><span>TTFT samples</span><strong>{summary.analytics.time_to_first_token.samples.toLocaleString()}</strong></article></section>
-    <section className="detail-card"><h2>Latency distributions</h2><Table headers={["Measure", "Samples", "p50 ms", "p95 ms", "p99 ms"]} rows={[["Request latency", summary.analytics.request_latency.samples, summary.analytics.request_latency.p50_ms, summary.analytics.request_latency.p95_ms, summary.analytics.request_latency.p99_ms], ["Time to first token", summary.analytics.time_to_first_token.samples, summary.analytics.time_to_first_token.p50_ms, summary.analytics.time_to_first_token.p95_ms, summary.analytics.time_to_first_token.p99_ms]]} /></section>
-    {series ? <section className="detail-card"><h2>Request-volume context</h2><Table headers={["Bucket", "Requests"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests])} /></section> : null}
-  </>;
-  if (focus === "errors") return <>
-    <section className="metric-grid"><article><span>Failure rate</span><strong>{rate(summary.analytics.failure_rate)}</strong></article><article><span>Quota-denial rate</span><strong>{rate(summary.analytics.quota_denial_rate)}</strong></article><article><span>Fallback rate</span><strong>{rate(summary.analytics.fallback_rate)}</strong></article><article><span>Requests</span><strong>{summary.analytics.request_count.toLocaleString()}</strong></article></section>
-    <section className="detail-card"><h2>Error and recovery rates</h2><Table headers={["Measure", "Rate", "Events", "Denominator"]} rows={[["Failures", rate(summary.analytics.failure_rate), summary.analytics.failure_rate.numerator, summary.analytics.failure_rate.denominator], ["Quota denials", rate(summary.analytics.quota_denial_rate), summary.analytics.quota_denial_rate.numerator, summary.analytics.quota_denial_rate.denominator], ["Fallbacks", rate(summary.analytics.fallback_rate), summary.analytics.fallback_rate.numerator, summary.analytics.fallback_rate.denominator]]} /></section>
-    {series ? <section className="detail-card"><h2>Request-volume context</h2><Table headers={["Bucket", "Requests"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests])} /></section> : null}
-  </>;
-  if (focus === "attestation") return <>
-    <section className="metric-grid"><article><span>Attestation-failure rate</span><strong>{rate(summary.analytics.attestation_failure_rate)}</strong></article><article><span>Rejected proofs</span><strong>{summary.analytics.attestation_failure_rate.numerator.toLocaleString()}</strong></article><article><span>Proof evaluations</span><strong>{summary.analytics.attestation_failure_rate.denominator.toLocaleString()}</strong></article></section>
-    <section className="detail-card"><h2>Attestation rejection aggregate</h2><p>This aggregate contains no raw App Attest assertion, Play Integrity token, App Check token, Turnstile token, DPoP proof, or external subject.</p><Table headers={["Measure", "Value"]} rows={[["Rate", rate(summary.analytics.attestation_failure_rate)], ["Rejected", summary.analytics.attestation_failure_rate.numerator], ["Evaluated", summary.analytics.attestation_failure_rate.denominator], ["Parts per million", summary.analytics.attestation_failure_rate.parts_per_million]]} /></section>
-  </>;
-  return <>
-    <section className="metric-grid"><article><span>Active AI users</span><strong>{summary.analytics.active_users.toLocaleString()}</strong></article><article><span>Requests / active user</span><strong>{ratio(summary.analytics.requests_per_active_user)}</strong></article><article><span>Logical requests</span><strong>{summary.values.logical_requests.toLocaleString()}</strong></article><article><span>Input tokens</span><strong>{displayUsageMetric(summary.values, "input_tokens")}</strong></article><article><span>Output tokens</span><strong>{displayUsageMetric(summary.values, "output_tokens")}</strong></article><article><span>Total tokens</span><strong>{displayUsageMetric(summary.values, "total_tokens")}</strong></article></section>
-    <section className="detail-card"><h2>Feature usage</h2><Table headers={["Feature", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_feature.items.map((item) => [item.key, item.active_users, item.request_count, displayUsageMetric(item.values, "input_tokens"), displayUsageMetric(item.values, "output_tokens"), displayUsageMetric(item.values, "total_tokens")])} /><BreakdownLimitNotice label="feature" limit={summary.analytics.by_feature.limit} truncated={summary.analytics.by_feature.truncated} /></section>
-    <section className="detail-card"><h2>Model usage</h2><Table headers={["Model", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_model.items.map((item) => [item.key, item.active_users, item.request_count, displayUsageMetric(item.values, "input_tokens"), displayUsageMetric(item.values, "output_tokens"), displayUsageMetric(item.values, "total_tokens")])} /><BreakdownLimitNotice label="model" limit={summary.analytics.by_model.limit} truncated={summary.analytics.by_model.truncated} /></section>
-    <section className="detail-card"><h2>Selected-plan usage</h2><Table headers={["Selected plan", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_selected_plan.items.map((item) => [item.key, item.active_users, item.request_count, displayUsageMetric(item.values, "input_tokens"), displayUsageMetric(item.values, "output_tokens"), displayUsageMetric(item.values, "total_tokens")])} /><BreakdownLimitNotice label="selected-plan" limit={summary.analytics.by_selected_plan.limit} truncated={summary.analytics.by_selected_plan.truncated} /></section>
-    <section className="detail-card"><h2>Usage provenance</h2><Table headers={["Provenance", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.usage_by_provenance.map((item) => [item.provenance, item.values.logical_requests, displayUsageMetric(item.values, "input_tokens"), displayUsageMetric(item.values, "output_tokens"), displayUsageMetric(item.values, "total_tokens")])} /></section>
-    {series ? <Table headers={["Bucket", "Requests", "Input", "Output", "Total"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests, displayUsageMetric(point.values, "input_tokens"), displayUsageMetric(point.values, "output_tokens"), displayUsageMetric(point.values, "total_tokens")])} /> : null}
-  </>;
-}
-
-function AnalyticsPage({ focus }: { focus: AnalyticsFocus }) {
-  const session = useConsoleSession();
-  const workspace = useOptionalWorkspace();
-  const routeSearch = AnalyticsRouteSearchSchema.parse(workspace?.search ?? {});
-  const now = new Date(); const yesterday = new Date(now.getTime() - 86_400_000);
-  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
-  const [start, setStart] = useState(localDateTime(routeSearch.start) || yesterday.toISOString().slice(0, 16));
-  const [end, setEnd] = useState(localDateTime(routeSearch.end) || now.toISOString().slice(0, 16));
-  const [interval, setInterval] = useState<"hour" | "day">(routeSearch.interval ?? "hour");
-  const [summary, setSummary] = useState<UsageSummary>(); const [series, setSeries] = useState<UsageTimeseries>();
-  const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
-  const canonicalSearchKey = JSON.stringify({ end: routeSearch.end, environment_id: routeSearch.environment_id, interval: routeSearch.interval, start: routeSearch.start });
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace) return;
-    // Browser navigation restores the complete bounded analytics window.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEnvironment(routeSearch.environment_id ?? "");
-    if (routeSearch.start) setStart(localDateTime(routeSearch.start));
-    if (routeSearch.end) setEnd(localDateTime(routeSearch.end));
-    setInterval(routeSearch.interval ?? "hour");
-    if (routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval) void load(routeSearch);
-    else { setSummary(undefined); setSeries(undefined); }
-    // The validated URL key is the canonical restore trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalSearchKey, session.data?.mode]);
-  useAdminRefreshTopic("usage", () => {
-    if (session.data?.mode === "configured" && routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval) void load(routeSearch);
-  }, session.data?.mode === "configured" && Boolean(routeSearch.environment_id && routeSearch.start && routeSearch.end && routeSearch.interval));
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function load(search: AnalyticsRouteSearch): Promise<void> {
-    if (!search.environment_id || !search.start || !search.end || !search.interval) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const query = { environment_id: search.environment_id, start: search.start, end: search.end };
-      const [summaryResult, seriesResult] = await Promise.all([
-        adminRequest(queryPath("/admin/v1/usage/summary", { ...query, breakdown_limit: "50" }), UsageSummarySchema),
-        adminRequest(queryPath("/admin/v1/usage/timeseries", { ...query, interval: search.interval }), UsageTimeseriesSchema)
-      ]);
-      if (seriesResult.data.interval !== search.interval) throw new Error("analytics_context");
-      setSummary(summaryResult.data); setSeries(seriesResult.data);
-    } catch (error) { setProblem(error instanceof Error && error.message === "analytics_context" ? { code: "invalid_response", detail: "The analytics time series did not match the selected interval.", retryable: true, status: 0, title: "Analytics context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
-  }
-  function applyAnalyticsFilters(): void {
-    const candidate = AnalyticsRouteSearchSchema.safeParse({
-      ...routeSearch,
-      end: canonicalInstant(end),
-      environment_id: environment || undefined,
-      interval,
-      start: canonicalInstant(start)
-    });
-    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment and ensure the end time is later than the start time.")); return; }
-    if (workspace) {
-      const changed = JSON.stringify({ end: candidate.data.end, environment_id: candidate.data.environment_id, interval: candidate.data.interval, start: candidate.data.start }) !== canonicalSearchKey;
-      workspace.updateSearch({ end: candidate.data.end, environment_id: candidate.data.environment_id, interval: candidate.data.interval, start: candidate.data.start });
-      if (!changed) void load(candidate.data);
-    } else void load(candidate.data);
-  }
-  const copy = analyticsCopy[focus];
-  return <div className="control-page">
-    <PageHeading eyebrow="Observability" title={copy.title}>{copy.description}</PageHeading>
-    <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); applyAnalyticsFilters(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setSummary(undefined); setSeries(undefined); }} /></label>
-      <label>Start<input required type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} /></label>
-      <label>End<input required type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
-      <label>Interval<select value={interval} onChange={(event) => setInterval(event.target.value as "hour" | "day")}><option value="hour">Hourly</option><option value="day">Daily</option></select></label>
-      <FormActions busy={busy}>{copy.button}</FormActions>
-    </form><ProblemNotice problem={problem} />
-    {summary ? <FocusedAnalytics focus={focus} series={series} summary={summary} /> : null}
-  </div>;
-}
-
-export function UsagePage() { return <AnalyticsPage focus="usage" />; }
-export function CostPage() { return <AnalyticsPage focus="cost" />; }
-export function LatencyPage() { return <AnalyticsPage focus="latency" />; }
-export function ErrorsPage() { return <AnalyticsPage focus="errors" />; }
-export function AttestationFailuresPage() { return <AnalyticsPage focus="attestation" />; }
 
 export function AuditPageView() {
   const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const organization = session.data?.session?.organization_id ?? "";

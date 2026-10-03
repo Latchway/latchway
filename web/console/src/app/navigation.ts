@@ -24,11 +24,10 @@ export type ConsoleRoute =
   | "/user-overrides"
   | "/abuse-controls"
   | "/requests"
-  | "/usage"
-  | "/cost"
-  | "/latency"
-  | "/errors"
-  | "/attestation-failures"
+  | "/analytics/usage"
+  | "/analytics/cost"
+  | "/analytics/performance"
+  | "/analytics/reliability"
   | "/configuration-revisions"
   | "/route-simulator"
   | "/self-tests"
@@ -64,17 +63,16 @@ export const environmentNavigation: readonly NavGroup[] = [
     areas: [
       { description: "Request outcomes, attempts and metadata", icon: "requests", label: "Requests", to: "/requests" },
       {
-        description: "Usage, cost, latency and error trends",
+        description: "Usage, cost, performance and reliability",
         icon: "analytics",
         label: "Analytics",
         tabs: [
-          { description: "Trusted token accounting", label: "Usage", to: "/usage" },
-          { description: "Nano-USD cost and provenance", label: "Cost", to: "/cost" },
-          { description: "Request and first-token timing", label: "Latency", to: "/latency" },
-          { description: "Failure and denial rates", label: "Errors", to: "/errors" },
-          { description: "Rejected platform proofs", label: "Attestation failures", to: "/attestation-failures" }
+          { description: "Requests, people and tokens", label: "Usage", to: "/analytics/usage" },
+          { description: "Cost at your configured prices", label: "Cost", to: "/analytics/cost" },
+          { description: "Latency and time to first token", label: "Performance", to: "/analytics/performance" },
+          { description: "Failures, quota denials, app verification and fallbacks", label: "Reliability", to: "/analytics/reliability" }
         ],
-        to: "/usage"
+        to: "/analytics/usage"
       }
     ],
     title: "Traffic"
@@ -215,3 +213,6 @@ export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =
     ? area.tabs.map((tab) => ({ description: tab.description, label: tab.label, section: area.label, to: tab.to }))
     : [{ description: area.description, label: area.label, to: area.to }]
 );
+
+/** Paths kept only to redirect pre-redesign links to their new home. */
+export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures"];

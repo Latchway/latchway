@@ -31,7 +31,7 @@ test.describe("real first-run control plane", () => {
     await page.getByRole("button", { name: "Create first owner" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "The gateway is ready for control-plane work." })
+      page.getByRole("heading", { level: 1, name: "Overview" })
     ).toBeVisible();
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Setup wizard" }).click();
     await expect(
@@ -81,7 +81,7 @@ test.describe("real first-run control plane", () => {
     await page.getByLabel("Password").fill(ownerPassword ?? "");
     await page.getByRole("button", { name: "Sign in securely" }).click();
     await expect(
-      page.getByRole("heading", { name: "The gateway is ready for control-plane work." })
+      page.getByRole("heading", { level: 1, name: "Overview" })
     ).toBeVisible();
   });
 });

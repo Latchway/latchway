@@ -108,7 +108,7 @@ export function curlCommand(origin: string, query: Record<string, string | undef
   for (const [key, value] of Object.entries(query).sort(([a], [b]) => a.localeCompare(b))) {
     if (value !== undefined && value !== "" && key !== "cursor") params.set(key, value);
   }
-  return `curl -s -H "Authorization: Bearer $LATCHWAY_TOKEN" \\\n  "${origin}/admin/v1/requests?${params.toString()}"`;
+  return `curl -s -H "Authorization: Bearer $LATCHWAY_ADMIN_API_TOKEN" \\\n  "${origin}/admin/v1/requests?${params.toString()}"`;
 }
 
 export type GoToTarget = { kind: "request"; id: string } | { kind: "user"; id: string } | { kind: "invalid" };

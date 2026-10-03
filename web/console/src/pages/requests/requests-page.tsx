@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   adminRequest,
@@ -36,6 +36,9 @@ import {
   StatusBadge,
   Toolbar
 } from "../../ui";
+import { downloadText } from "../../components/download";
+import { MenuButton } from "../../components/menu-button";
+import { useDismiss } from "../../components/use-dismiss";
 import { AccessRequired, EffectiveConfigurationPanel, ProblemNotice } from "../control-plane-pages";
 import { RequestDetail } from "./request-detail";
 import {
@@ -103,28 +106,6 @@ const clock = (): number => Date.now();
 const OUTCOMES = ["succeeded", "failed", "denied", "canceled", "unknown"] as const;
 const PLATFORMS = ["ios", "android", "web", "react_native_ios", "react_native_android", "node"] as const;
 const COMPONENT_KINDS = ["main_app", "widget", "share_extension", "app_intent_extension", "notification_service_extension", "action_extension", "sso_extension", "watch_extension", "android_app", "wear_app", "browser", "node_process"] as const;
-
-/** Closes a popover on Escape or a press outside its anchor. */
-function useDismiss(open: boolean, anchor: React.RefObject<HTMLElement | null>, close: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: MouseEvent): void {
-      if (event.target instanceof Node && !anchor.current?.contains(event.target)) close();
-    }
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        close();
-      }
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [anchor, close, open]);
-}
 
 interface ValueFilterProps {
   emptyLabel?: string;
@@ -256,31 +237,6 @@ function MoreFiltersPanel({ filters, onApply, onCancel }: { filters: RequestFilt
       </div>
     </form>
   );
-}
-
-function MenuButton({ children, entries, icon, label, size }: { children: ReactNode; entries: readonly MenuEntry[]; icon?: "upload" | "filter"; label: string; size?: "sm" }) {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLSpanElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(open, anchor, close);
-  return (
-    <span className="lw-anchor" ref={anchor}>
-      <button aria-expanded={open} aria-haspopup="menu" className={`lw-btn lw-btn--secondary${size ? ` lw-btn--${size}` : " lw-btn--lead"}`} onClick={() => setOpen(!open)} ref={button} type="button">
-        {icon ? <Icon name={icon} /> : null}{children}
-      </button>
-      {open ? <div className="lw-popover lw-popover--end"><Menu entries={entries} label={label} onClose={() => { setOpen(false); button.current?.focus(); }} /></div> : null}
-    </span>
-  );
-}
-
-function download(filename: string, contents: string): void {
-  const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function notFoundProblem(requestID: string, scope: string): AdminProblem {
@@ -495,8 +451,8 @@ function RequestsView() {
             />
             <MenuButton entries={[
               { heading: `${rows.length} loaded row${rows.length === 1 ? "" : "s"}`, kind: "heading" },
-              { label: "CSV without user IDs", onSelect: () => download(`requests-${environment?.slug ?? "environment"}.csv`, requestsCsv(rows, false)) },
-              { label: "CSV with user IDs", onSelect: () => download(`requests-${environment?.slug ?? "environment"}-with-users.csv`, requestsCsv(rows, true)) },
+              { label: "CSV without user IDs", onSelect: () => downloadText(`requests-${environment?.slug ?? "environment"}.csv`, requestsCsv(rows, false)) },
+              { label: "CSV with user IDs", onSelect: () => downloadText(`requests-${environment?.slug ?? "environment"}-with-users.csv`, requestsCsv(rows, true)) },
               { kind: "separator" },
               { icon: "code", label: "Copy API Query", onSelect: copyQuery }
             ]} icon="upload" label="Export">Export</MenuButton>
@@ -569,7 +525,7 @@ function RequestsView() {
         <span>{rows.length ? `${rows.length} shown${hasMore ? " · more available" : " · that's all"}` : ""}</span>
         {hasMore ? <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} size="sm">Load {pageSize} More</Button> : null}
         <span className="lw-spacer" />
-        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/usage">Analytics</Link></span>
+        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/analytics/usage">Analytics</Link></span>
         <Segmented items={PAGE_SIZES.map((size) => ({ id: size, label: size }))} label="Page size" onChange={(value) => update({ cursor: undefined, page_size: value === "50" ? undefined : value })} value={pageSize} />
       </div>
 

@@ -2,7 +2,8 @@ import {
   createMemoryHistory,
   createRootRoute,
   createRoute,
-  createRouter
+  createRouter,
+  redirect
 } from "@tanstack/react-router";
 
 import { AppShell } from "./app-shell";
@@ -14,18 +15,19 @@ import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
 import { InstallationFamiliesPage } from "../pages/installation-families-page";
 import {
-  AttestationFailuresPage,
   AuditPageView,
-  CostPage,
-  ErrorsPage,
   InstallationsPage,
-  LatencyPage,
   RouteSimulatorPage,
   SelfTestsPage,
-  UsagePage,
   UsersPage
 } from "../pages/control-plane-pages";
 import { RequestsPage } from "../pages/requests/requests-page";
+import {
+  CostAnalyticsPage,
+  PerformanceAnalyticsPage,
+  ReliabilityAnalyticsPage,
+  UsageAnalyticsPage
+} from "../pages/analytics/analytics-page";
 import {
   ConfigurationEditorPage,
   SetupWizardPage
@@ -50,6 +52,7 @@ import {
   UserOverridesPage
 } from "../pages/resource-management-pages";
 import {
+  AnalyticsRouteSearchSchema,
   parseAnalyticsRouteSearch,
   parseConfigurationRouteSearch,
   parseAuditRouteSearch,
@@ -107,11 +110,39 @@ const requestsRoute = createRoute({
   path: "/requests",
   validateSearch: parseRequestRouteSearch
 });
-const usageRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/usage", validateSearch: parseAnalyticsRouteSearch });
-const costRoute = createRoute({ component: CostPage, getParentRoute: () => rootRoute, path: "/cost", validateSearch: parseAnalyticsRouteSearch });
-const latencyRoute = createRoute({ component: LatencyPage, getParentRoute: () => rootRoute, path: "/latency", validateSearch: parseAnalyticsRouteSearch });
-const errorsRoute = createRoute({ component: ErrorsPage, getParentRoute: () => rootRoute, path: "/errors", validateSearch: parseAnalyticsRouteSearch });
-const attestationFailuresRoute = createRoute({ component: AttestationFailuresPage, getParentRoute: () => rootRoute, path: "/attestation-failures", validateSearch: parseAnalyticsRouteSearch });
+const usageRoute = createRoute({ component: UsageAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/usage", validateSearch: parseAnalyticsRouteSearch });
+const costRoute = createRoute({ component: CostAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/cost", validateSearch: parseAnalyticsRouteSearch });
+const performanceRoute = createRoute({ component: PerformanceAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/performance", validateSearch: parseAnalyticsRouteSearch });
+const reliabilityRoute = createRoute({ component: ReliabilityAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/reliability", validateSearch: parseAnalyticsRouteSearch });
+
+/**
+ * The five pre-redesign analytics pages became tabs of one Analytics page. Old links keep working: the workspace
+ * selection carries over, and a period carries over only when it was a whole-day range the new page can show.
+ */
+function legacyAnalyticsRoute(path: string, to: "/analytics/usage" | "/analytics/cost" | "/analytics/performance" | "/analytics/reliability") {
+  return createRoute({
+    beforeLoad: ({ search }) => {
+      const previous = search as Record<string, unknown>;
+      const carried = parseAnalyticsRouteSearch({
+        application: previous.application,
+        environment: previous.environment,
+        organization: previous.organization
+      });
+      const withPeriod = AnalyticsRouteSearchSchema.safeParse({ ...carried, end: previous.end, start: previous.start });
+      throw redirect({ replace: true, search: withPeriod.success ? withPeriod.data : carried, to });
+    },
+    getParentRoute: () => rootRoute,
+    path
+  });
+}
+
+const legacyAnalyticsRoutes = [
+  legacyAnalyticsRoute("/usage", "/analytics/usage"),
+  legacyAnalyticsRoute("/cost", "/analytics/cost"),
+  legacyAnalyticsRoute("/latency", "/analytics/performance"),
+  legacyAnalyticsRoute("/errors", "/analytics/reliability"),
+  legacyAnalyticsRoute("/attestation-failures", "/analytics/reliability")
+];
 const configurationRevisionsRoute = createRoute({ component: ConfigurationRevisionsPage, getParentRoute: () => rootRoute, path: "/configuration-revisions" });
 const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator", validateSearch: parseRouteSimulatorRouteSearch });
 const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests", validateSearch: parseSelfTestRouteSearch });
@@ -128,7 +159,7 @@ const routeTree = rootRoute.addChildren([
   componentDefinitionsRoute,
   featuresRoute, routesRoute, upstreamsRoute, modelsPricingRoute, secretsRoute, configurationRoute,
   accessPoliciesRoute, limitPlansRoute, userOverridesRoute, abuseControlsRoute,
-  requestsRoute, usageRoute, costRoute, latencyRoute, errorsRoute, attestationFailuresRoute,
+  requestsRoute, usageRoute, costRoute, performanceRoute, reliabilityRoute, ...legacyAnalyticsRoutes,
   configurationRevisionsRoute, routeSimulatorRoute, selfTestsRoute, auditRoute,
   systemHealthRoute, settingsRoute
 ]);

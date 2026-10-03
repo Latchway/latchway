@@ -49,7 +49,9 @@ export function VolumeChart({ bars, colors = {}, dashed = [], format = compactCo
   const padBottom = 32;
   const totals = points.map((point) => bars.reduce((sum, key) => sum + (point.values[key] ?? 0), 0));
   const lineMax = Math.max(0, ...points.flatMap((point) => [...lines, ...dashed].map((key) => point.values[key] ?? 0)));
-  const scale = niceScale(Math.max(0, lineMax, ...totals));
+  const maximum = Math.max(0, lineMax, ...totals);
+  // An empty range draws one zero baseline rather than a stack of identical "0" ticks.
+  const scale = maximum > 0 ? niceScale(maximum) : { step: 1, ticks: [0], top: 1 };
   const plotWidth = width - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const band = plotWidth / Math.max(points.length, 1);

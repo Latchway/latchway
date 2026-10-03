@@ -117,7 +117,7 @@ describe("request query state", () => {
 
   it("builds a curl command without the cursor or a token", () => {
     const command = curlCommand("https://console.example.test", { cursor: "abc", environment_id: "env_0123456789abcdef", status: "failed" });
-    expect(command).toContain("$LATCHWAY_TOKEN");
+    expect(command).toContain("$LATCHWAY_ADMIN_API_TOKEN");
     expect(command).toContain("https://console.example.test/admin/v1/requests?environment_id=env_0123456789abcdef&status=failed");
     expect(command).not.toContain("cursor");
   });

@@ -194,17 +194,36 @@ export const InstallationRouteSearchSchema = z.object({
 export type InstallationRouteSearch = z.infer<typeof InstallationRouteSearchSchema>;
 export const parseInstallationRouteSearch = (value: unknown): InstallationRouteSearch => InstallationRouteSearchSchema.parse(value);
 
+/**
+ * Analytics and Overview share one period. Presets are relative to now; a custom period is whole UTC days
+ * `[start, end)` of at most 366 days, which is the usage API's limit.
+ */
 export const AnalyticsRouteSearchSchema = z.object({
   ...workspaceSearchFields,
+  breakdown_limit: optional(z.enum(["5", "50", "200"])),
+  by: optional(z.enum(["feature", "model", "plan"])),
+  chart: optional(z.enum(["requests", "tokens"])),
+  compare: optional(z.enum(["off"])),
   end: optional(Instant),
-  environment_id: optional(OpaqueID("env")),
-  interval: optional(z.enum(["hour", "day"])),
+  period: optional(z.enum(["24h", "7d", "30d", "90d"])),
   start: optional(Instant)
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
-  const values = [search.environment_id, search.start, search.end, search.interval];
-  if (values.some((value) => value !== undefined) && values.some((value) => value === undefined)) {
-    context.addIssue({ code: "custom", message: "Environment, start, end, and interval must be supplied together." });
+  if ((search.start === undefined) !== (search.end === undefined)) {
+    context.addIssue({ code: "custom", message: "A custom period needs both a start and an end.", path: ["end"] });
+  }
+  if (search.period && search.start) {
+    context.addIssue({ code: "custom", message: "Use either a preset period or a start and end, not both.", path: ["period"] });
+  }
+  if (search.start && search.end) {
+    const start = Date.parse(search.start);
+    const end = Date.parse(search.end);
+    if (start % 86_400_000 !== 0 || end % 86_400_000 !== 0) {
+      context.addIssue({ code: "custom", message: "A custom period is whole UTC days.", path: ["start"] });
+    }
+    if (end - start > 366 * 86_400_000) {
+      context.addIssue({ code: "custom", message: "A custom period is at most 366 days.", path: ["end"] });
+    }
   }
 });
 
