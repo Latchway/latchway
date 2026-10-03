@@ -2,6 +2,62 @@
 
 Status date: 2026-10-03
 
+## Console redesign phase 5: Build pages on one shared draft (branch `console-redesign`, unreleased)
+
+Features, Routing, AI Connections and Client Trust are rebuilt around one
+working draft per environment (`src/pages/build/environment-draft.ts`). The
+working draft is the newest revision that is still a draft and has a higher
+version than the active one; revision versions only grow, so a draft started
+before the current active revision is no longer treated as working. Every save
+opens that draft (or creates one from the active revision with
+`base_revision_id`), applies the change to its current document, replaces it
+with the draft's strong ETag, then validates and, when valid, plans. A
+whole-document change computed from an older copy is refused before the PATCH
+if the draft moved underneath it, and a 412 or 409 is explained in plain words
+("The draft changed", "The draft is out of date"); nothing is merged
+automatically. Publishing re-reads the draft for a fresh ETag and activates it.
+The status rail shows the draft on every page with Review Changes and Publish
+(or Validate / Check Again while it has problems); Publish lists the plan's
+changes and warnings first. The existing guided flows (Add Connection, Add
+Platform, usage plans) keep their secret handling and now save into the same
+draft.
+
+Collections (connections, sign-in providers, app verification, components,
+models & pricing, access and abuse) use one list page: rows marked New, Edited
+or Removing against the live configuration, a drawer with settings, Edit as
+JSON and Save to Draft, per-resource undo, a typed-ID removal into the draft,
+and removal blocked with an explanation while something still references the
+resource (for example routes using a connection). Features is a list with a
+New Feature drawer and a page per feature with Overview, Access & limits,
+Routing and Client setup tabs held in the URL. Routes can be added, edited,
+removed (a feature keeps at least one) and reordered by swapping priorities
+with the neighbour; reordering is disabled while routes share a priority to
+split traffic, so weights are never renumbered. Routing lists every feature's
+routes with first choices per connection ("counts features, not traffic") and
+the features without a backup. A connection's drawer lists its models and
+routes and runs the existing bounded self-test against the active revision.
+Client Trust gains a Sessions tab editing `spec.session` lifetimes and clock
+skew. A deep-linked feature waits for the configuration instead of briefly
+reporting "Feature not found".
+
+Shell links (sidebar, tabs, command palette, home, health, Continue setup) now
+carry only the workspace scope (`organization`, `application`, `environment`);
+page selections such as `feature`, `tab` or request filters no longer follow
+the operator to the next page. "Setup required" is also suppressed whenever the
+active configuration loads.
+
+Not built because the API has no source: discarding a draft (there is no
+delete or discard endpoint, so a draft is replaced by publishing or by a newer
+draft), the draft's base revision (not exposed; the server's activation
+conflict is the authority), per-connection traffic, latency or health, and
+route traffic shares. Secrets, limit plans and policies keep their existing
+pages until Phase 6.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (372 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.13 MB.
+
 ## Console redesign phase 4: Users & Installs (branch `console-redesign`, unreleased)
 
 Users, Installations and Older installs are rebuilt on the existing Admin API

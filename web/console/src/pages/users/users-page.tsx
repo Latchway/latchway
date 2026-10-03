@@ -128,7 +128,7 @@ function CheckAccess({ environmentID, user }: { environmentID: string; user: App
 
   return (
     <div className="lw-stack lw-stack--tight">
-      <form className="lw-form-grid" onSubmit={(event) => void explain(event)}>
+      <form className="lw-form-grid lw-form-grid--end" onSubmit={(event) => void explain(event)}>
         <Field id="check-feature" label="Feature"><Input id="check-feature" onChange={(event) => setFeature(event.target.value)} pattern="[a-z][a-z0-9_\-]{0,62}" required value={feature} /></Field>
         <Field id="check-surface" label="Client surface">
           <select className="lw-select" id="check-surface" onChange={(event) => { setSurface(event.target.value as typeof surface); setSurfaceID(""); }} value={surface}>

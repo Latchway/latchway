@@ -81,8 +81,10 @@ function loopbackURL(value: unknown): boolean {
   }
 }
 
-function ConnectionWorkspace() {
-  const task = useConfigurationTask("connections");
+export type ConfigurationTask = ReturnType<typeof useConfigurationTask>;
+
+/** The guided Add Connection flow: endpoint, write-only credential, model and price, saved into the working draft. */
+export function ConnectionSetup({ task }: { task: ConfigurationTask }) {
   const [connectionType, setConnectionType] = useState<"anthropic" | "openai_compatible">("openai_compatible");
   const [authenticationMode, setAuthenticationMode] = useState<"bearer" | "none">("bearer");
   const [secretAction, setSecretAction] = useState<WriteOnlySecretAction>("create");
@@ -91,14 +93,7 @@ function ConnectionWorkspace() {
   const [connectionPublished, setConnectionPublished] = useState(false);
   const [secretCreated, setSecretCreated] = useState<string>();
   const [selfTest, setSelfTest] = useState<SelfTestRun>();
-  const [verifiedRequest, setVerifiedRequest] = useState<LogicalRequest>();
-  const [sampleBusy, setSampleBusy] = useState(false);
   const document = task.source?.document as JSONRecord | undefined;
-  const upstreams = useMemo(() => document ? specRecords(document, "upstreams") : [], [document]);
-  const models = useMemo(() => document ? specRecords(document, "models") : [], [document]);
-  const features = useMemo(() => document ? specRecords(document, "features") : [], [document]);
-  const localMock = task.environment?.kind === "development" && upstreams.some((upstream) => loopbackURL(upstream.baseUrl));
-  const sampleFeature = String(features.find((feature) => feature.id === "habit-assistant")?.id ?? features[0]?.id ?? "habit-assistant");
 
   async function stageConnection(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -171,14 +166,35 @@ function ConnectionWorkspace() {
   }
 
   async function runSelfTest(): Promise<void> {
-    if (!task.canRunSelfTests || !task.environment || !lastConnection || !task.source) return;
+    if (!task.canRunSelfTests || !task.environment || !lastConnection || !task.active) return;
     task.setProblem(undefined);
     try {
-      const result = (await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body: { config_revision_id: task.source.id, environment_id: task.environment.id, kind: "upstream", max_cost_nano_usd: 10_000_000, model: lastConnection.model, upstream: lastConnection.id } })).data;
-      if (result.environment_id !== task.environment.id || result.config_revision_id !== task.source.id) throw new Error("The self-test result did not match the published configuration revision and environment.");
+      const result = (await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body: { config_revision_id: task.active.id, environment_id: task.environment.id, kind: "upstream", max_cost_nano_usd: 10_000_000, model: lastConnection.model, upstream: lastConnection.id } })).data;
+      if (result.environment_id !== task.environment.id || result.config_revision_id !== task.active.id) throw new Error("The self-test result did not match the published configuration revision and environment.");
       setSelfTest(result);
     } catch (error) { task.setProblem(problemFromError(error)); }
   }
+
+  return <div className="task-workspace lw-guided">
+    {document ? <>
+      <form className="control-form task-builder" onSubmit={(event) => void stageConnection(event)}><div><p className="eyebrow">Add connection</p><h2>Endpoint, credential, model, and price</h2><p>A bearer value is sent once to the Secrets API and cleared before the request completes. The configuration references only its logical name.</p></div><fieldset><legend>1. Provider destination</legend><div className="form-field-grid"><label>Connection ID<input defaultValue="primary" name="connection_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Connection type<select name="provider_type" onChange={(event) => setConnectionType(event.target.value as "anthropic" | "openai_compatible")} value={connectionType}><option value="openai_compatible">OpenAI-compatible provider or gateway</option><option value="anthropic">Anthropic-compatible provider or gateway</option></select></label><label>Base URL<input defaultValue="https://api.openai.com/v1" name="base_url" required type="url" /></label></div><small>This guided flow accepts HTTPS only. The loopback fixture is gateway-owned and appears above when started with <code>latchway develop</code>.</small></fieldset><fieldset><legend>2. Server-held credential</legend><div className="form-field-grid"><label>Authentication<select name="authentication" onChange={(event) => setAuthenticationMode(event.target.value as "bearer" | "none")} value={authenticationMode}><option value="bearer">Bearer secret</option><option value="none">No authentication</option></select></label>{authenticationMode === "bearer" ? <label>Credential operation<select aria-label="Credential operation" name="secret_action" onChange={(event) => setSecretAction(event.target.value as WriteOnlySecretAction)} value={secretAction}><option value="create">Store new secret value</option><option value="use_existing">Use existing named secret</option></select></label> : null}<label>Secret name<input defaultValue="provider_api_key" disabled={authenticationMode === "none"} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" /></label><label>Provider credential<input autoComplete="new-password" disabled={authenticationMode !== "bearer" || secretAction === "use_existing" || !task.canManageSecrets} name="secret_value" required={authenticationMode === "bearer" && secretAction === "create"} type="password" /></label></div><small>No-auth is appropriate only for a deliberately controlled destination. Existing-secret mode confirms only exact environment/name metadata and never reads or infers the value.</small>{authenticationMode === "bearer" && !task.canManageSecrets ? <p className="control-notice"><strong>Secret management required</strong><span>Your session needs <code>manage_secrets</code> to inspect exact existing metadata or store a new provider credential. Select no authentication only for a controlled destination.</span></p> : null}</fieldset><fieldset><legend>3. Model and protocol</legend><div className="form-field-grid"><label>Logical model ID<input defaultValue="assistant_default" name="model_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Physical provider model<input defaultValue="gpt-5-mini" name="physical_model" required /></label><label>Protocol<select defaultValue={connectionType === "anthropic" ? "anthropic_messages" : "openai_responses"} key={connectionType} name="protocol">{protocols.filter((protocol) => connectionType === "anthropic" ? protocol === "anthropic_messages" : protocol !== "anthropic_messages").map((protocol) => <option key={protocol} value={protocol}>{protocol.replaceAll("_", " ")}</option>)}</select></label><label>Maximum context tokens<input defaultValue={128000} min={1} name="maximum_context_tokens" type="number" /></label><label>Framing tokens / request<input defaultValue={8} min={0} name="framing_per_request" type="number" /></label><label>Framing tokens / message<input defaultValue={4} min={0} name="framing_per_message" type="number" /></label></div></fieldset><fieldset><legend>4. Operator-reviewed USD pricing</legend><div className="form-field-grid"><label>Input USD / 1M tokens<input defaultValue="0.25" inputMode="decimal" name="input_price" /></label><label>Output USD / 1M tokens<input defaultValue="2" inputMode="decimal" name="output_price" /></label><label>USD / request<input defaultValue="0" inputMode="decimal" name="request_price" /></label></div><small>Decimal USD is converted exactly to integer nano-USD. Latchway does not fetch provider prices.</small></fieldset><button className="primary-action" disabled={!task.canConfigure || task.busy || (authenticationMode === "bearer" && !task.canManageSecrets)} type="submit">Review connection change</button></form>
+      {secretResolution?.outcome === "confirmation_required" ? <div className="control-notice"><strong>Credential metadata needs explicit confirmation</strong><span><code>secret/{secretResolution.metadata.name}</code> exists in this environment. The Console did not read or infer its value.</span><button className="secondary-action" onClick={() => setSecretAction("use_existing")} type="button">Use this existing named secret on next review</button></div> : null}
+      {secretCreated ? <p className="control-notice"><strong>Credential stored</strong><span><code>secret/{secretCreated}</code> exists server-side and is not part of the draft document.</span></p> : null}
+      <DraftReview busy={task.busy} canPublish={task.canConfigure} clear={() => task.setDraft(undefined)} draft={task.activeDraft} environmentName={task.environment?.display_name} production={task.environment?.kind === "production"} publish={async () => { const revision = await task.publish(); if (revision) setConnectionPublished(true); return revision; }} title={lastConnection?.id ?? "connection change"} />
+      {lastConnection && connectionPublished ? <section className="detail-card"><h2>Test the published connection</h2><p>The bounded self-test uses the selected upstream and model with a 10,000,000 nano-USD ceiling. Generative protocols exercise non-streaming and streaming; Embeddings sends one non-streaming request and records non-applicable checks as skipped. It does not impersonate an application user.</p>{lastConnection.selfTestSupported ? <button className="primary-action" disabled={!task.canRunSelfTests} onClick={() => void runSelfTest()} type="button">Run bounded connection test</button> : <p className="control-notice"><strong>Self-test unavailable for this protocol</strong><span>Connection self-tests support OpenAI Responses, Chat, Embeddings, and Anthropic Messages. Verify another protocol through a real client request.</span></p>}{selfTest ? <p className="resource-result">Self-test <code>{selfTest.id}</code>: <strong>{selfTest.state}</strong></p> : null}</section> : null}
+    </> : null}
+  </div>;
+}
+
+/** Development environments can run the gateway-owned synthetic client and read back its exact durable request. */
+export function DevelopmentPath({ task }: { task: ConfigurationTask }) {
+  const [verifiedRequest, setVerifiedRequest] = useState<LogicalRequest>();
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const document = task.source?.document as JSONRecord | undefined;
+  const upstreams = useMemo(() => document ? specRecords(document, "upstreams") : [], [document]);
+  const features = useMemo(() => document ? specRecords(document, "features") : [], [document]);
+  const localMock = task.environment?.kind === "development" && upstreams.some((upstream) => loopbackURL(upstream.baseUrl));
+  const sampleFeature = String(features.find((feature) => feature.id === "habit-assistant")?.id ?? features[0]?.id ?? "habit-assistant");
 
   async function verifySample(): Promise<void> {
     if (!task.environment) return;
@@ -216,25 +232,11 @@ function ConnectionWorkspace() {
     }
   }
 
-  return <div className="control-page task-workspace">
-    <section className="page-heading"><div><p className="eyebrow">AI connections</p><h1>Connect a provider without exposing its credential.</h1><p>Add the endpoint, one physical model, trusted input-accounting bounds, and operator-reviewed pricing as one preserved configuration change.</p></div><button className="secondary-action" disabled={task.busy || task.configuration.isFetching} onClick={() => void task.configuration.refetch()} type="button">Refresh connections</button></section>
-    <TaskScope application={task.application} environment={task.environment} purpose="AI connection change scope" />
-    <ProblemNotice problem={task.problem ?? (task.configuration.error ? problemFromError(task.configuration.error) : undefined)} />
-    <LoadingConfiguration pending={task.configuration.isPending} />
-    {document ? <>
-      <section className="task-card-list"><div className="detail-card__heading"><div><p className="eyebrow">Active revision {task.source?.version}</p><h2>Connections</h2></div><code>{task.sourceETag}</code></div>{upstreams.length ? upstreams.map((upstream) => { const related = models.filter((model) => model.upstream === upstream.id); return <article className="task-summary-card" key={String(upstream.id)}><div><strong>{String(upstream.id)}</strong><span className="state-badge state-badge--available"><span aria-hidden="true" className="state-badge__dot" />Configured</span></div><p>{String(upstream.type).replaceAll("_", " ")} · {String(upstream.baseUrl)}</p><dl><div><dt>Credential</dt><dd>{isJSONRecord(upstream.authentication) ? String(upstream.authentication.type) : "unknown"}</dd></div><div><dt>Models</dt><dd>{related.map((model) => String(model.id)).join(", ") || "None"}</dd></div></dl></article>; }) : <p>No AI connections are active.</p>}</section>
-      {task.environment?.kind === "development" ? <section className={`development-path ${localMock ? "development-path--ready" : ""}`}><div><p className="eyebrow">Development-first path</p><h2>{localMock ? "Local mock connection is ready." : "Start the isolated local development stack."}</h2><p>{localMock ? "This Development revision points to a loopback mock upstream. Provider cost is deterministic and no live provider account is required." : "The Admin API cannot create a mock server. Start the gateway-owned fixture, then reopen its Console."}</p></div>{!localMock ? <pre>latchway develop --browser-origin {typeof window === "undefined" ? "http://localhost:5173" : window.location.origin}</pre> : <><ol><li>Run the gateway-owned synthetic development client.</li><li>Exercise mock identity, challenge-bound debug attestation, DPoP, policy, quota, routing, and settlement.</li><li>Read back the exact durable request before reporting success.</li></ol><p>This loopback-only helper is a development-path verification, not production attestation or physical-device proof.</p><div className="button-row"><button className="primary-action" disabled={sampleBusy || !task.mutationAllowed} onClick={() => void runAndVerifyDevelopmentSample()} type="button">{sampleBusy ? "Running development sample…" : "Run and verify development sample"}</button><button className="secondary-action" disabled={sampleBusy} onClick={() => void verifySample()} type="button">Check for another client request</button><Link className="secondary-action" search={(previous) => previous} to="/requests">Open request explorer</Link></div>{verifiedRequest ? <p className="resource-result">Observed <code>{verifiedRequest.id}</code>: <strong>{verifiedRequest.status}</strong> via {verifiedRequest.selected_physical_model ?? verifiedRequest.attempts.at(-1)?.model ?? "recorded model"}.</p> : null}</>}</section> : null}
-      <form className="control-form task-builder" onSubmit={(event) => void stageConnection(event)}><div><p className="eyebrow">Add connection</p><h2>Endpoint, credential, model, and price</h2><p>A bearer value is sent once to the Secrets API and cleared before the request completes. The configuration references only its logical name.</p></div><fieldset><legend>1. Provider destination</legend><div className="form-field-grid"><label>Connection ID<input defaultValue="primary" name="connection_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Connection type<select name="provider_type" onChange={(event) => setConnectionType(event.target.value as "anthropic" | "openai_compatible")} value={connectionType}><option value="openai_compatible">OpenAI-compatible provider or gateway</option><option value="anthropic">Anthropic-compatible provider or gateway</option></select></label><label>Base URL<input defaultValue="https://api.openai.com/v1" name="base_url" required type="url" /></label></div><small>This guided flow accepts HTTPS only. The loopback fixture is gateway-owned and appears above when started with <code>latchway develop</code>.</small></fieldset><fieldset><legend>2. Server-held credential</legend><div className="form-field-grid"><label>Authentication<select name="authentication" onChange={(event) => setAuthenticationMode(event.target.value as "bearer" | "none")} value={authenticationMode}><option value="bearer">Bearer secret</option><option value="none">No authentication</option></select></label>{authenticationMode === "bearer" ? <label>Credential operation<select aria-label="Credential operation" name="secret_action" onChange={(event) => setSecretAction(event.target.value as WriteOnlySecretAction)} value={secretAction}><option value="create">Store new secret value</option><option value="use_existing">Use existing named secret</option></select></label> : null}<label>Secret name<input defaultValue="provider_api_key" disabled={authenticationMode === "none"} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" /></label><label>Provider credential<input autoComplete="new-password" disabled={authenticationMode !== "bearer" || secretAction === "use_existing" || !task.canManageSecrets} name="secret_value" required={authenticationMode === "bearer" && secretAction === "create"} type="password" /></label></div><small>No-auth is appropriate only for a deliberately controlled destination. Existing-secret mode confirms only exact environment/name metadata and never reads or infers the value.</small>{authenticationMode === "bearer" && !task.canManageSecrets ? <p className="control-notice"><strong>Secret management required</strong><span>Your session needs <code>manage_secrets</code> to inspect exact existing metadata or store a new provider credential. Select no authentication only for a controlled destination.</span></p> : null}</fieldset><fieldset><legend>3. Model and protocol</legend><div className="form-field-grid"><label>Logical model ID<input defaultValue="assistant_default" name="model_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Physical provider model<input defaultValue="gpt-5-mini" name="physical_model" required /></label><label>Protocol<select defaultValue={connectionType === "anthropic" ? "anthropic_messages" : "openai_responses"} key={connectionType} name="protocol">{protocols.filter((protocol) => connectionType === "anthropic" ? protocol === "anthropic_messages" : protocol !== "anthropic_messages").map((protocol) => <option key={protocol} value={protocol}>{protocol.replaceAll("_", " ")}</option>)}</select></label><label>Maximum context tokens<input defaultValue={128000} min={1} name="maximum_context_tokens" type="number" /></label><label>Framing tokens / request<input defaultValue={8} min={0} name="framing_per_request" type="number" /></label><label>Framing tokens / message<input defaultValue={4} min={0} name="framing_per_message" type="number" /></label></div></fieldset><fieldset><legend>4. Operator-reviewed USD pricing</legend><div className="form-field-grid"><label>Input USD / 1M tokens<input defaultValue="0.25" inputMode="decimal" name="input_price" /></label><label>Output USD / 1M tokens<input defaultValue="2" inputMode="decimal" name="output_price" /></label><label>USD / request<input defaultValue="0" inputMode="decimal" name="request_price" /></label></div><small>Decimal USD is converted exactly to integer nano-USD. Latchway does not fetch provider prices.</small></fieldset><button className="primary-action" disabled={!task.canConfigure || task.busy || (authenticationMode === "bearer" && !task.canManageSecrets)} type="submit">Review connection change</button></form>
-      {secretResolution?.outcome === "confirmation_required" ? <div className="control-notice"><strong>Credential metadata needs explicit confirmation</strong><span><code>secret/{secretResolution.metadata.name}</code> exists in this environment. The Console did not read or infer its value.</span><button className="secondary-action" onClick={() => setSecretAction("use_existing")} type="button">Use this existing named secret on next review</button></div> : null}
-      {secretCreated ? <p className="control-notice"><strong>Credential stored</strong><span><code>secret/{secretCreated}</code> exists server-side and is not part of the draft document.</span></p> : null}
-      <DraftReview busy={task.busy} canPublish={task.canConfigure} clear={() => task.setDraft(undefined)} draft={task.activeDraft} environmentName={task.environment?.display_name} production={task.environment?.kind === "production"} publish={async () => { const revision = await task.publish(); if (revision) setConnectionPublished(true); return revision; }} title={lastConnection?.id ?? "connection change"} />
-      {lastConnection && connectionPublished ? <section className="detail-card"><h2>Test the published connection</h2><p>The bounded self-test uses the selected upstream and model with a 10,000,000 nano-USD ceiling. Generative protocols exercise non-streaming and streaming; Embeddings sends one non-streaming request and records non-applicable checks as skipped. It does not impersonate an application user.</p>{lastConnection.selfTestSupported ? <button className="primary-action" disabled={!task.canRunSelfTests} onClick={() => void runSelfTest()} type="button">Run bounded connection test</button> : <p className="control-notice"><strong>Self-test unavailable for this protocol</strong><span>Connection self-tests support OpenAI Responses, Chat, Embeddings, and Anthropic Messages. Verify another protocol through a real client request.</span></p>}{selfTest ? <p className="resource-result">Self-test <code>{selfTest.id}</code>: <strong>{selfTest.state}</strong></p> : null}</section> : null}
-    </> : null}
-  </div>;
+  return <>{task.environment?.kind === "development" ? <section className={`development-path ${localMock ? "development-path--ready" : ""}`}><div><p className="eyebrow">Development-first path</p><h2>{localMock ? "Local mock connection is ready." : "Start the isolated local development stack."}</h2><p>{localMock ? "This Development revision points to a loopback mock upstream. Provider cost is deterministic and no live provider account is required." : "The Admin API cannot create a mock server. Start the gateway-owned fixture, then reopen its Console."}</p></div>{!localMock ? <pre>latchway develop --browser-origin {typeof window === "undefined" ? "http://localhost:5173" : window.location.origin}</pre> : <><ol><li>Run the gateway-owned synthetic development client.</li><li>Exercise mock identity, challenge-bound debug attestation, DPoP, policy, quota, routing, and settlement.</li><li>Read back the exact durable request before reporting success.</li></ol><p>This loopback-only helper is a development-path verification, not production attestation or physical-device proof.</p><div className="button-row"><button className="primary-action" disabled={sampleBusy || !task.mutationAllowed} onClick={() => void runAndVerifyDevelopmentSample()} type="button">{sampleBusy ? "Running development sample…" : "Run and verify development sample"}</button><button className="secondary-action" disabled={sampleBusy} onClick={() => void verifySample()} type="button">Check for another client request</button><Link className="secondary-action" search={(previous) => previous} to="/requests">Open request explorer</Link></div>{verifiedRequest ? <p className="resource-result">Observed <code>{verifiedRequest.id}</code>: <strong>{verifiedRequest.status}</strong> via {verifiedRequest.selected_physical_model ?? verifiedRequest.attempts.at(-1)?.model ?? "recorded model"}.</p> : null}</>}</section> : null}</>;
 }
 
-function ClientAccessWorkspace() {
-  const task = useConfigurationTask("client-access");
+/** The guided Add Platform flow: identity, platform proof, root component and feature grant, saved into the working draft. */
+export function ClientAccessSetup({ task }: { task: ConfigurationTask }) {
   const [platform, setPlatform] = useState<ClientPlatform>("ios");
   const [webProvider, setWebProvider] = useState<WebVerificationProvider>("firebase_app_check");
   const [playCredentialSource, setPlayCredentialSource] = useState<"metadata" | "service_account">("metadata");
@@ -248,7 +250,6 @@ function ClientAccessWorkspace() {
   const document = task.source?.document as JSONRecord | undefined;
   const identities = useMemo(() => document ? specRecords(document, "identityProviders") : [], [document]);
   const features = useMemo(() => document ? specRecords(document, "features") : [], [document]);
-  const platformCards = useMemo(() => document ? clientPlatformReadiness(document) : [], [document]);
   const effectiveFeatureID = features.some((feature) => feature.id === selectedFeatureID) ? selectedFeatureID : String(features[0]?.id ?? "");
   const suggestedPolicyID = String(features.find((feature) => feature.id === effectiveFeatureID)?.attestationPolicy ?? `${platform}_clients`);
   const appleSurface = platform === "ios" || platform === "react_native_ios";
@@ -352,26 +353,8 @@ function ClientAccessWorkspace() {
     }
   }
 
-  return <div className="control-page task-workspace">
-    <section className="page-heading"><div><p className="eyebrow">Client access</p><h1>Trust an application surface.</h1><p>Connect user authentication, platform verification, a root component identity, and its feature grant without exposing the underlying schema.</p></div><button className="secondary-action" disabled={task.busy || task.configuration.isFetching} onClick={() => void task.configuration.refetch()} type="button">Refresh client access</button></section>
-    <TaskScope application={task.application} environment={task.environment} purpose="Client access change scope" />
-    <ProblemNotice problem={task.problem ?? (task.configuration.error ? problemFromError(task.configuration.error) : undefined)} />
-    <LoadingConfiguration pending={task.configuration.isPending} />
+  return <div className="task-workspace lw-guided">
     {document ? <>
-      <section aria-labelledby="platform-readiness-heading" className="task-card-list">
-        <div><p className="eyebrow">Active revision {task.source?.version}</p><h2 id="platform-readiness-heading">Platform readiness</h2><p>Each card follows an exact server platform. “Configuration ready” confirms only the active document structure: policy, root component, user authentication, and feature binding. It does not confirm environment status, secret usability, or physical-device/browser execution.</p></div>
-        <div className="client-access-overview">
-          {platformCards.map((card) => <article data-platform={card.key} key={card.key}>
-            <div className="feature-card__heading"><strong>{card.label}</strong><span className={`state-badge ${card.ready ? "state-badge--available" : "state-badge--warning"}`}><span aria-hidden="true" className="state-badge__dot" />{card.ready ? "Configuration ready" : "Needs setup"}</span></div>
-            <p><code>{card.key}</code></p>
-            <p><strong>Configured</strong><br />{card.configured}</p>
-            <p><strong>Still missing</strong><br />{card.missing.length ? card.missing.join("; ") : "No server-side prerequisite."}</p>
-            <p><strong>Production requires</strong><br />{card.productionRequirement}</p>
-            <p><strong>How to test</strong><br />{card.test}</p>
-            <div className="button-row"><Link className="small-action" search={(previous) => ({ ...previous, platform: card.key })} to="/requests">Inspect requests</Link><a className="small-action" href={card.documentationURL} rel="noreferrer" target="_blank">Client documentation</a></div>
-          </article>)}
-        </div>
-      </section>
       <form className="control-form task-builder" onSubmit={(event) => void stageClient(event)}>
         <div><p className="eyebrow">Add application surface</p><h2>Identity, proof, component, and feature grant</h2><p>Production defaults require real platform evidence. Debug signing remains confined to the isolated <code>latchway develop</code> fixture.</p></div>
         <fieldset><legend>1. Choose the exact client surface</legend><div className="segmented-control" role="group" aria-label="Client platform">{(["ios", "android", "web", "react_native_ios", "react_native_android"] as const).map((value) => <button aria-pressed={platform === value} className={platform === value ? "segmented-control__active" : ""} key={value} onClick={() => setPlatform(value)} type="button">{platformLabels[value]}</button>)}</div><p>React Native uses the schema-backed <code>react_native_ios</code> and <code>react_native_android</code> runtimes; it is not a separate generic server platform.</p><div className="form-field-grid"><label>Component ID<input defaultValue={`${platform}_main`} key={`component-${platform}`} name="component_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Verification policy ID<input defaultValue={suggestedPolicyID} key={`policy-${platform}-${effectiveFeatureID}-${suggestedPolicyID}`} name="policy_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Allowed feature<select name="feature_id" onChange={(event) => setSelectedFeatureID(event.target.value)} required value={effectiveFeatureID}><option value="">Choose a feature</option>{features.map((feature) => <option key={String(feature.id)} value={String(feature.id)}>{String(feature.id)}</option>)}</select></label></div></fieldset>
@@ -386,8 +369,29 @@ function ClientAccessWorkspace() {
   </div>;
 }
 
+/** What each client platform has configured and still needs, read from the working configuration. */
+export function PlatformReadiness({ task }: { task: ConfigurationTask }) {
+  const document = task.source?.document as JSONRecord | undefined;
+  const platformCards = useMemo(() => document ? clientPlatformReadiness(document) : [], [document]);
+  if (!document) return null;
+  return <section aria-labelledby="platform-readiness-heading" className="task-card-list">
+        <div><p className="eyebrow">Active revision {task.source?.version}</p><h2 id="platform-readiness-heading">Platform readiness</h2><p>Each card follows an exact server platform. “Configuration ready” confirms only the active document structure: policy, root component, user authentication, and feature binding. It does not confirm environment status, secret usability, or physical-device/browser execution.</p></div>
+        <div className="client-access-overview">
+          {platformCards.map((card) => <article data-platform={card.key} key={card.key}>
+            <div className="feature-card__heading"><strong>{card.label}</strong><span className={`state-badge ${card.ready ? "state-badge--available" : "state-badge--warning"}`}><span aria-hidden="true" className="state-badge__dot" />{card.ready ? "Configuration ready" : "Needs setup"}</span></div>
+            <p><code>{card.key}</code></p>
+            <p><strong>Configured</strong><br />{card.configured}</p>
+            <p><strong>Still missing</strong><br />{card.missing.length ? card.missing.join("; ") : "No server-side prerequisite."}</p>
+            <p><strong>Production requires</strong><br />{card.productionRequirement}</p>
+            <p><strong>How to test</strong><br />{card.test}</p>
+            <div className="button-row"><Link className="small-action" search={(previous) => ({ ...previous, platform: card.key })} to="/requests">Inspect requests</Link><a className="small-action" href={card.documentationURL} rel="noreferrer" target="_blank">Client documentation</a></div>
+          </article>)}
+        </div>
+      </section>;
+}
+
 function UsagePlanWorkspace() {
-  const task = useConfigurationTask("usage-plans");
+  const task = useConfigurationTask();
   const [changeLabel, setChangeLabel] = useState("usage plan");
   const document = task.source?.document as JSONRecord | undefined;
   const plans = useMemo(() => document ? specRecords(document, "limitPlans") : [], [document]);
@@ -424,6 +428,4 @@ function useTaskWorkspaceKey(): string {
   return `${workspace?.application?.id ?? "none"}:${workspace?.environment?.id ?? "none"}`;
 }
 
-export function ConnectionWorkspacePage() { const key = useTaskWorkspaceKey(); return <EnvironmentRequired><ConnectionWorkspace key={key} /></EnvironmentRequired>; }
-export function ClientAccessWorkspacePage() { const key = useTaskWorkspaceKey(); return <EnvironmentRequired><ClientAccessWorkspace key={key} /></EnvironmentRequired>; }
 export function UsagePlanWorkspacePage() { const key = useTaskWorkspaceKey(); return <EnvironmentRequired><UsagePlanWorkspace key={key} /></EnvironmentRequired>; }

@@ -12,7 +12,10 @@ const { adminRequestMock, capabilities, compatibility, runDevelopmentSampleMock 
 
 vi.mock("../api/admin", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/admin")>()),
-  adminRequest: adminRequestMock,
+  // The shared draft first looks for a working draft; these tests start with none.
+  adminRequest: (...args: [string, unknown, { method?: string }?]) => args[0].includes("/config-revisions?") && !args[2]?.method
+    ? Promise.resolve({ data: { items: [], page: { has_more: false } } })
+    : adminRequestMock(...args),
   runDevelopmentSample: runDevelopmentSampleMock
 }));
 
@@ -39,7 +42,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>
 }));
 
-import { ClientAccessWorkspacePage, ConnectionWorkspacePage, UsagePlanWorkspacePage } from "./task-configuration-pages";
+import { ClientAccessWorkspacePage } from "./build/client-trust-pages";
+import { ConnectionWorkspacePage } from "./build/connections-page";
+import { UsagePlanWorkspacePage } from "./task-configuration-pages";
 
 const instant = "2026-08-29T00:00:00Z";
 const providerSecretMetadata = {
@@ -97,6 +102,7 @@ describe("development-first connection path", () => {
 
     expect(await screen.findByRole("heading", { name: "Local mock connection is ready." })).toBeInTheDocument();
     expect(screen.getByText(/not production attestation or physical-device proof/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add Connection" }));
     expect(screen.getByLabelText("Provider credential")).toBeDisabled();
     expect(screen.getByText("Secret management required")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Run and verify development sample" }));
@@ -115,10 +121,9 @@ describe("development-first connection path", () => {
     render(<QueryClientProvider client={queryClient}><ConnectionWorkspacePage /></QueryClientProvider>);
 
     expect(await screen.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run and verify development sample" })).toBeDisabled();
-    const review = screen.getByRole("button", { name: "Review connection change" });
-    expect(review).toBeDisabled();
-    fireEvent.submit(review.closest("form") as HTMLFormElement);
+    expect(await screen.findByRole("button", { name: "Run and verify development sample" })).toBeDisabled();
+    // Safe mode keeps the guided flow closed: its entry point is disabled.
+    expect(screen.getByRole("button", { name: "Add Connection" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Run and verify development sample" }));
     expect(runDevelopmentSampleMock).not.toHaveBeenCalled();
     expect(adminRequestMock.mock.calls.some(([, , options]) => options?.method)).toBe(false);
@@ -146,6 +151,7 @@ describe("development-first connection path", () => {
     render(<QueryClientProvider client={queryClient}><ConnectionWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Connections" });
+    await user.click(screen.getByRole("button", { name: "Add Connection" }));
     const credential = screen.getByLabelText("Provider credential");
     await user.type(credential, "one-time-provider-value");
     await user.click(screen.getByRole("button", { name: "Review connection change" }));
@@ -178,6 +184,7 @@ describe("development-first connection path", () => {
     render(<QueryClientProvider client={queryClient}><ConnectionWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Connections" });
+    await user.click(screen.getByRole("button", { name: "Add Connection" }));
     const credential = screen.getByLabelText("Provider credential");
     await user.type(credential, "indeterminate-provider-value");
     await user.click(screen.getByRole("button", { name: "Review connection change" }));
@@ -192,6 +199,7 @@ describe("development-first connection path", () => {
   });
 
   it("clears credential plaintext before early local validation rejects the connection", async () => {
+    const user = userEvent.setup();
     capabilities.push("manage_secrets");
     adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { method?: string }) => {
       if (path.endsWith("/config") && !options?.method) return Promise.resolve({ data: { activated_at: instant, created_at: instant, created_by: "adm_0123456789abcdef", document: activeDocument, environment_id: workspace.environment.id, id: "rev_0123456789abcdef", state: "active", version: 1 }, etag: '"active-etag"' });
@@ -201,6 +209,7 @@ describe("development-first connection path", () => {
     render(<QueryClientProvider client={queryClient}><ConnectionWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Connections" });
+    await user.click(screen.getByRole("button", { name: "Add Connection" }));
     const credential = screen.getByLabelText("Provider credential");
     fireEvent.change(credential, { target: { value: "must-not-survive-validation" } });
     fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "http://provider.example.test/v1" } });
@@ -303,6 +312,7 @@ describe("platform-oriented client access", () => {
       expect(within(card as HTMLElement).getByRole("link", { name: "Client documentation" })).toHaveAttribute("href", expect.stringMatching(/^https:\/\/docs\.latchway\.dev\/clients\//));
     }
 
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     await user.click(screen.getByRole("button", { name: "React Native iOS" }));
     expect(screen.getByRole("group", { name: "Client platform" })).toHaveTextContent("React Native Android");
     expect(screen.getAllByText("react_native_ios").length).toBeGreaterThan(0);
@@ -333,6 +343,7 @@ describe("platform-oriented client access", () => {
     render(<QueryClientProvider client={queryClient}><ClientAccessWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Platform readiness" });
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     const credential = await chooseTurnstile(user);
     await user.type(credential, "one-time-turnstile-value");
     await user.click(screen.getByRole("button", { name: "Review client-access change" }));
@@ -364,6 +375,7 @@ describe("platform-oriented client access", () => {
     render(<QueryClientProvider client={queryClient}><ClientAccessWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Platform readiness" });
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     const credential = await choosePlayServiceAccount(user);
     await user.type(credential, "indeterminate-play-value");
     await user.click(screen.getByRole("button", { name: "Review client-access change" }));
@@ -388,6 +400,7 @@ describe("platform-oriented client access", () => {
     const { rerender } = render(page);
 
     await screen.findByRole("heading", { name: "Platform readiness" });
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     const credential = await chooseTurnstile(user);
     await user.type(credential, "must-not-survive-safe-mode");
     compatibility.mutationAllowed = false;
@@ -413,6 +426,7 @@ describe("platform-oriented client access", () => {
     const { rerender } = render(page);
 
     await screen.findByRole("heading", { name: "Platform readiness" });
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     await user.click(screen.getByRole("button", { name: "Web" }));
     expect(screen.getByRole("button", { name: "Web" })).toHaveAttribute("aria-pressed", "true");
 
@@ -422,6 +436,7 @@ describe("platform-oriented client access", () => {
     rerender(<QueryClientProvider client={queryClient}><ClientAccessWorkspacePage /></QueryClientProvider>);
 
     await screen.findByRole("heading", { name: "Platform readiness" });
+    await user.click(screen.getByRole("button", { name: "Add Platform" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "iOS" })).toHaveAttribute("aria-pressed", "true"));
     expect(screen.getByRole("button", { name: "Web" })).toHaveAttribute("aria-pressed", "false");
   });
