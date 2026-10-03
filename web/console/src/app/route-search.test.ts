@@ -193,15 +193,14 @@ describe("shareable operational route search", () => {
     expect(SelfTestRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", schedule_id: "sts_0123456789abcdef", self_test_id: "tst_0123456789abcdef" }).success).toBe(true);
   });
 
-  it("accepts only complete ordered analytics windows", () => {
-    expect(parseAnalyticsRouteSearch({
-      end: "2026-08-30T00:00:00Z",
-      environment_id: "env_0123456789abcdef",
-      interval: "hour",
-      start: "2026-08-29T00:00:00Z"
-    })).toMatchObject({ interval: "hour" });
-    expect(AnalyticsRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef" }).success).toBe(false);
-    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-29T00:00:00Z", environment_id: "env_0123456789abcdef", interval: "day", start: "2026-08-30T00:00:00Z" }).success).toBe(false);
+  it("accepts a preset or a whole-UTC-day custom period of at most 366 days", () => {
+    expect(parseAnalyticsRouteSearch({ by: "model", period: "30d" })).toMatchObject({ by: "model", period: "30d" });
+    expect(parseAnalyticsRouteSearch({ end: "2026-09-01T00:00:00Z", start: "2026-08-01T00:00:00Z" })).toMatchObject({ start: "2026-08-01T00:00:00Z" });
+    expect(AnalyticsRouteSearchSchema.safeParse({ start: "2026-08-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-02T00:00:00Z", period: "7d", start: "2026-08-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-02T00:00:00Z", start: "2026-08-01T06:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-01T00:00:00Z", start: "2025-07-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-01T00:00:00Z", start: "2026-08-02T00:00:00Z" }).success).toBe(false);
   });
 
   it("keeps only non-PII simulator request shape and strips sensitive local state", () => {

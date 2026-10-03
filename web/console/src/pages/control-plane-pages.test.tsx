@@ -44,12 +44,11 @@ vi.mock("../app/console-compatibility-context", () => ({
   useConsoleCompatibility: () => ({ mutationAllowed: true })
 }));
 
-import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, InstallationsPage, LatencyPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { AuditPageView, InstallationsPage, RouteSimulatorPage, SelfTestsPage, UsersPage } from "./control-plane-pages";
 import { SelfTestSchema } from "../api/admin";
 import { dispatchAdminRefresh } from "../api/admin-events";
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
 
-const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 
 function effectiveConfigurationFixture(mode: "current_user_projection" | "recorded_request" = "current_user_projection") {
   const route = {
@@ -73,39 +72,7 @@ function effectiveConfigurationFixture(mode: "current_user_projection" | "record
   };
 }
 
-function analyticsFixture() {
-  return {
-    analytics: {
-      active_users: 2,
-      attestation_failure_rate: { denominator: 4, numerator: 1, parts_per_million: 250_000 },
-      by_feature: { items: [{ active_users: 2, key: "assistant", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-      by_model: { items: [{ active_users: 2, key: "gpt_mobile", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-      by_selected_plan: { items: [{ active_users: 2, key: "subscriber", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-      cost_per_active_user_nano_usd: { denominator: 2, numerator: 900 },
-      failure_rate: { denominator: 3, numerator: 1, parts_per_million: 333_333 },
-      fallback_rate: { denominator: 3, numerator: 1, parts_per_million: 333_333 },
-      quota_denial_rate: { denominator: 3, numerator: 0, parts_per_million: 0 },
-      request_count: 3,
-      request_latency: { p50_ms: 100, p95_ms: 300, p99_ms: 500, samples: 3 },
-      requests_per_active_user: { denominator: 2, numerator: 3 },
-      time_to_first_token: { p50_ms: 20, p95_ms: 40, p99_ms: 60, samples: 3 },
-      usage_by_provenance: [
-        { cost_source: "openrouter_usage_cost", provenance: "upstream_reported", values: { ...zeroValues, input_tokens: 10, output_tokens: 20, total_tokens: 30 } },
-        { provenance: "calculated", values: { ...zeroValues, cost_nano_usd: 900 } },
-        { provenance: "estimated", values: zeroValues },
-        { provenance: "unknown", values: zeroValues }
-      ]
-    },
-    end: "2026-08-29T01:00:00Z", provenance: ["calculated", "upstream_reported"],
-    start: "2026-08-29T00:00:00Z", values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 }
-  };
-}
 
-function localDateTime(value: string): string {
-  const parsed = new Date(value);
-  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
 
 function routeSimulationFixture() {
   return {
@@ -355,36 +322,6 @@ describe("rich usage and route-simulator views", () => {
     expect(updateSearch).toHaveBeenLastCalledWith({ installation_id: undefined });
   });
 
-  it("restores a complete analytics window and writes filter edits as replacement URL state", async () => {
-    const search: WorkspaceSearch = {
-      end: "2026-08-29T01:00:00Z",
-      environment_id: "env_0123456789abcdef",
-      interval: "hour",
-      start: "2026-08-29T00:00:00Z"
-    };
-    adminRequestMock.mockImplementation(async (path: string) => path.includes("/summary")
-      ? { data: analyticsFixture() }
-      : { data: { interval: path.includes("interval=day") ? "day" : "hour", points: [] } });
-    const user = userEvent.setup();
-    const { updateSearch } = renderInWorkspace(<UsagePage />, search);
-
-    expect(await screen.findByRole("heading", { name: "Feature usage" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Environment ID")).toHaveValue(search.environment_id);
-    expect(screen.getByLabelText("Start")).toHaveValue(localDateTime(search.start!));
-    expect(screen.getByLabelText("End")).toHaveValue(localDateTime(search.end!));
-    const initialLoads = adminRequestMock.mock.calls.length;
-    dispatchAdminRefresh(["usage"]);
-    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledTimes(initialLoads + 2));
-    await user.selectOptions(screen.getByLabelText("Interval"), "day");
-    await user.click(screen.getByRole("button", { name: "Load usage" }));
-    expect(updateSearch).toHaveBeenLastCalledWith({
-      end: new Date(search.end!).toISOString(),
-      environment_id: search.environment_id,
-      interval: "day",
-      start: new Date(search.start!).toISOString()
-    });
-  });
-
   it("restores only non-PII route-simulator shape and never writes claims to URL state", async () => {
     const search: WorkspaceSearch = {
       app_version: "1.2.3",
@@ -590,64 +527,6 @@ describe("rich usage and route-simulator views", () => {
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/installations/${installation.id}/revoke`, expect.anything(), { body: { reason: "confirmed compromised device" }, method: "POST" });
     expect(await screen.findByText("revoked")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Revoke this installation?" })).not.toBeInTheDocument();
-  });
-
-  it("renders bounded per-user, latency, rate, dimension, and provenance analytics", async () => {
-    adminRequestMock.mockImplementation(async (path: string) => path.includes("/summary") ? { data: {
-      analytics: {
-        active_users: 2,
-        attestation_failure_rate: { denominator: 4, numerator: 1, parts_per_million: 250_000 },
-        by_feature: { items: [{ active_users: 2, key: "assistant", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-        by_model: { items: [{ active_users: 2, key: "gpt_mobile", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-        by_selected_plan: { items: [{ active_users: 2, key: "subscriber", request_count: 3, values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 } }], limit: 50, truncated: false },
-        cost_per_active_user_nano_usd: { denominator: 2, numerator: 900 },
-        failure_rate: { denominator: 3, numerator: 1, parts_per_million: 333_333 },
-        fallback_rate: { denominator: 3, numerator: 1, parts_per_million: 333_333 },
-        quota_denial_rate: { denominator: 3, numerator: 0, parts_per_million: 0 },
-        request_count: 3,
-        request_latency: { p50_ms: 100, p95_ms: 300, p99_ms: 500, samples: 3 },
-        requests_per_active_user: { denominator: 2, numerator: 3 },
-        time_to_first_token: { p50_ms: 20, p95_ms: 40, p99_ms: 60, samples: 3 },
-        usage_by_provenance: [
-          { cost_source: "openrouter_usage_cost", provenance: "upstream_reported", values: { ...zeroValues, input_tokens: 10, output_tokens: 20, total_tokens: 30 } },
-          { provenance: "calculated", values: { ...zeroValues, cost_nano_usd: 900 } },
-          { provenance: "estimated", values: zeroValues },
-          { provenance: "unknown", values: zeroValues }
-        ]
-      },
-      end: "2026-08-29T01:00:00Z", provenance: ["calculated", "upstream_reported"],
-      start: "2026-08-29T00:00:00Z", values: { ...zeroValues, cost_nano_usd: 900, total_tokens: 30 }
-    } } : { data: { interval: "hour", points: [] } });
-    const user = userEvent.setup();
-    render(<UsagePage />);
-    await user.type(screen.getByLabelText("Environment ID"), "env_0123456789abcdef");
-    await user.click(screen.getByRole("button", { name: "Load usage" }));
-
-    expect(await screen.findByText("Requests / active user")).toBeInTheDocument();
-    expect(screen.getByText("1.5")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Feature usage" })).toBeInTheDocument();
-    expect(screen.getByText("gpt_mobile")).toBeInTheDocument();
-    expect(screen.getByText("subscriber")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Usage provenance" })).toBeInTheDocument();
-    expect(screen.getByText("upstream_reported")).toBeInTheDocument();
-    expect(screen.queryByText("openrouter_usage_cost")).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ["Cost", CostPage, "Load cost", "Cost provenance", "Latency distributions"],
-    ["Latency", LatencyPage, "Load latency", "Latency distributions", "Cost provenance"],
-    ["Errors", ErrorsPage, "Load errors", "Error and recovery rates", "Cost provenance"],
-    ["Attestation failures", AttestationFailuresPage, "Load attestation failures", "Attestation rejection aggregate", "Cost provenance"]
-  ] as const)("renders %s as a focused analytics page", async (title, Page, loadLabel, expectedHeading, excludedHeading) => {
-    adminRequestMock.mockImplementation(async (path: string) => path.includes("/summary") ? { data: analyticsFixture() } : { data: { interval: "hour", points: [] } });
-    const user = userEvent.setup();
-    render(<Page />);
-    await user.type(screen.getByLabelText("Environment ID"), "env_0123456789abcdef");
-    await user.click(screen.getByRole("button", { name: loadLabel }));
-
-    expect(await screen.findByRole("heading", { name: expectedHeading })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: excludedHeading })).not.toBeInTheDocument();
   });
 
   it("renders authoritative scope, exact reservation, applicable limits, and fact roles", async () => {

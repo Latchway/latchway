@@ -14,6 +14,7 @@ export { Field, Input } from "./form";
 export { Icon, type IconName, Logo } from "./icon";
 export { Card, EmptyState, Notice, type NoticeTone, PageHeader, Properties, type PropertyItem, Toast, Toolbar } from "./layout";
 export { Menu, type MenuEntry } from "./menu";
+export { MetricTile, StatStrip } from "./metric";
 export { checkCustomRange, DAY_MS, isCustomRange, type RangeValue, rangeText } from "./range";
 export { RangePicker } from "./range-picker";
 export { type StatusItem, StatusRail, type StatusTone } from "./status-rail";

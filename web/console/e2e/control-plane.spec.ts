@@ -464,7 +464,7 @@ test("authenticated console has no automated WCAG A or AA violations", async ({ 
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -478,10 +478,10 @@ test("keyboard navigation reaches content, traps the command dialog, and restore
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
   if (browserName === "webkit") {
     // WebKit follows the host Safari preference that can omit links from sequential Tab order.
@@ -516,7 +516,7 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(primaryNavigation).toBeHidden();
@@ -588,7 +588,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await goTo(page, "Setup wizard");
   await page.getByLabel("Organization slug").fill("example");
   await page.getByLabel("Application name").fill("Mobile App");
@@ -837,18 +837,20 @@ test("owner activates a targeted configuration merge and uses focused observabil
     { etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` }
   ]);
 
+  const costSummary = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/admin/v1/usage/summary" && url.searchParams.get("environment_id") === ids.environment && url.searchParams.get("breakdown_limit") === "50";
+  });
   await goTo(page, "Analytics", "Cost");
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load cost" }).click();
-  await expect(page.getByRole("heading", { name: "Cost provenance" })).toBeVisible();
-  await expect(page.getByText("openrouter_usage_cost")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Latency distributions" })).toHaveCount(0);
+  await costSummary;
+  await expect(page.getByRole("heading", { level: 1, name: "Analytics" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Where the cost comes from" })).toBeVisible();
+  await expect(page.getByText("openrouter_usage_cost", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request latency" })).toHaveCount(0);
 
-  await goTo(page, "Analytics", "Attestation failures");
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load attestation failures" }).click();
-  await expect(page.getByRole("heading", { name: "Attestation rejection aggregate" })).toBeVisible();
-  await expect(page.getByText(/contains no raw App Attest assertion/)).toBeVisible();
+  await page.getByRole("navigation", { name: "Analytics pages" }).getByRole("link", { name: "Reliability" }).click();
+  await expect(page.getByRole("heading", { name: "App verification failures" })).toBeVisible();
+  await expect(page.getByText(/verification checks/).first()).toBeVisible();
 
   await goTo(page, "Simulator");
   await page.getByLabel("Environment context ID").fill(ids.environment);
@@ -918,7 +920,7 @@ test("request usage distinguishes unknown quota charges, missing billing and rep
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await goTo(page, "Requests");
   await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
   const row = page.getByRole("row", { name: /assistant/ });

@@ -1,6 +1,43 @@
 # Implementation status
 
-Status date: 2026-10-02
+Status date: 2026-10-03
+
+## Console redesign phase 3: Analytics and Overview (branch `console-redesign`, unreleased)
+
+Traffic → Analytics is one page with Usage, Cost, Performance and Reliability
+tabs (`/analytics/*`), built only on `GET /admin/v1/usage/summary` and
+`/usage/timeseries` (`src/pages/analytics/`). The five earlier pages redirect:
+`/usage` and `/cost` to their tabs, `/latency` to Performance, `/errors` and
+`/attestation-failures` to Reliability, keeping the workspace selection.
+Overview and Analytics share one URL period (24h, 7d, 30d, 90d, or whole UTC
+days up to 366); presets end now and hatch the incomplete bucket, and the
+comparison period (on by default) shifts by whole buckets. Bars and breakdown
+rows open Requests with real filters and the bucket's or period's start and end;
+plan rows open Policies & Limits because Requests can't filter by plan.
+Exports are breakdown and timeseries CSV (the usage API never emits user IDs)
+and the matching `latchway usage summary|timeseries` commands. No record stays
+distinct from zero throughout, and money stays integer nano-USD until display.
+
+Rates follow the server's definitions: failures and quota denials
+(`quota_exceeded` only) are shares of requests, app-verification failures are a
+share of verification checks, and fallbacks a share of requests that reached a
+provider. Because those denominators differ, the design's "Served %" tile is
+not shown; Overview shows the failure rate instead. Models with usage but no
+recorded cost are flagged on Cost and in Overview's attention list. The Cost
+tab's month-end projection, per-connection breakdowns, per-provider health,
+settlement-lag warnings and the header attention indicator are not built yet.
+
+Overview now has the shared period, a setup checklist until every step is
+done, a "Needs attention" list from server records only (disabled scope, no
+active configuration, draft or invalid revision, unpriced models, a failure
+rate of 5% or more over at least 20 requests, API tokens expiring within 14
+days when the session may list them, and failing readiness checks), usage
+tiles with deltas, a requests chart, top features and requests by model.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (361 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.08 MB.
 
 ## Console redesign phase 2: Requests (branch `console-redesign`, unreleased)
 

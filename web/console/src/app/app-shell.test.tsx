@@ -4,7 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { commands } from "./navigation";
+import { commands, LEGACY_REDIRECT_PATHS } from "./navigation";
 import { createAppRouter } from "./router";
 
 const adminSession = {
@@ -159,9 +159,7 @@ describe("AppShell", () => {
     await user.click(screen.getByRole("button", { name: "Sign in securely" }));
 
     expect(
-      await screen.findByRole("heading", {
-        name: "The gateway is ready for control-plane work."
-      })
+      await screen.findByRole("heading", { level: 1, name: "Overview" })
     ).toBeInTheDocument();
     const loginCall = fetchMock.mock.calls.find(
       ([input]) => requestURL(input) === "/admin/v1/auth/login"
@@ -229,9 +227,7 @@ describe("AppShell", () => {
     await user.type(screen.getByLabelText("Owner password"), "test-only-owner-password");
     await user.click(screen.getByRole("button", { name: "Create first owner" }));
 
-    await screen.findByRole("heading", {
-      name: "The gateway is ready for control-plane work."
-    });
+    await screen.findByRole("heading", { level: 1, name: "Overview" });
     const bootstrapCall = fetchMock.mock.calls.find(
       ([input]) => requestURL(input) === "/admin/v1/auth/bootstrap"
     );
@@ -338,7 +334,21 @@ describe("AppShell", () => {
 
     const destinations = commands.map((command) => command.to);
     expect(new Set(destinations).size).toBe(destinations.length);
-    expect([...destinations].sort()).toEqual(Object.keys(createAppRouter({ history: createMemoryHistory() }).routesByPath).sort());
+    const pages = Object.keys(createAppRouter({ history: createMemoryHistory() }).routesByPath).filter((path) => !LEGACY_REDIRECT_PATHS.includes(path));
+    expect([...destinations].sort()).toEqual(pages.sort());
+  });
+
+  it.each([
+    ["/usage", "Usage"],
+    ["/cost", "Cost"],
+    ["/latency", "Performance"],
+    ["/errors", "Reliability"],
+    ["/attestation-failures", "Reliability"]
+  ])("redirects the retired %s page to the %s tab of Analytics", async (path, tab) => {
+    installConfiguredFetch();
+    renderConsole(`${path}?environment_id=env_0123456789abcdef&interval=hour`);
+    const sectionTabs = await screen.findByRole("navigation", { name: "Analytics pages" });
+    expect(within(sectionTabs).getByRole("link", { name: tab })).toHaveAttribute("aria-current", "page");
   });
 
   it("opens the command palette with every destination and returns focus when it closes", async () => {
