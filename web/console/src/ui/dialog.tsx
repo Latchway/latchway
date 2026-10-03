@@ -75,6 +75,9 @@ interface ImpactDialogProps {
   onConfirm: (input: { confirm: string; reason: string }) => void;
   pending?: boolean;
   preserved?: ReactNode;
+  reasonHint?: ReactNode;
+  /** Changes whenever the counts are reloaded; the acknowledgement must then be given again. */
+  revision?: string;
   scope?: ReactNode;
   /** Set when the impact counts changed after the dialog opened. */
   stale?: ReactNode;
@@ -86,13 +89,15 @@ interface ImpactDialogProps {
  * Destructive confirmation for actions with a wide blast radius: the operator sees counts, types the target's ID,
  * gives a reason (saved to the audit log), and acknowledges the consequence before the action enables.
  */
-export function ImpactDialog({ acknowledgement = "I understand this takes effect immediately and revoked credentials are never restored.", children, confirmLabel, description, facts, impacts, maxReason = 500, minReason = 4, onCancel, onConfirm, pending, preserved, scope, stale, targetId, title }: ImpactDialogProps) {
+export function ImpactDialog({ acknowledgement = "I understand this takes effect immediately and revoked credentials are never restored.", children, confirmLabel, description, facts, impacts, maxReason = 500, minReason = 4, onCancel, onConfirm, pending, preserved, reasonHint = "Saved to the audit log. Don't paste tokens or personal data.", revision = "initial", scope, stale, targetId, title }: ImpactDialogProps) {
   const reasonID = useId();
   const confirmID = useId();
   const [typed, setTyped] = useState("");
   const [reason, setReason] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
-  const ready = typed === targetId && reason.trim().length >= minReason && reason.length <= maxReason && acknowledged && !stale;
+  // The acknowledgement belongs to the counts it was given for; reloaded counts need it again.
+  const [acknowledgedRevision, setAcknowledgedRevision] = useState<string>();
+  const acknowledged = acknowledgedRevision === revision;
+  const ready = typed === targetId && reason.trim().length >= minReason && reason.length <= maxReason && acknowledged;
   return (
     <ConfirmDialog
       confirmDisabled={!ready}
@@ -127,14 +132,14 @@ export function ImpactDialog({ acknowledgement = "I understand this takes effect
         </dl>
       ) : null}
       {children}
-      <Field hint="Saved to the audit log. Don't paste tokens or personal data." id={reasonID} label="Reason">
+      <Field hint={reasonHint} id={reasonID} label="Reason">
         <Input autoComplete="off" id={reasonID} maxLength={maxReason} onChange={(event) => setReason(event.target.value)} value={reason} />
       </Field>
       <Field id={confirmID} label={<>Type <code className="lw-code-inline">{targetId}</code> to confirm</>}>
         <Input autoComplete="off" id={confirmID} mono onChange={(event) => setTyped(event.target.value)} spellCheck={false} value={typed} />
       </Field>
       <label className="lw-check">
-        <input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" />
+        <input checked={acknowledged} onChange={(event) => setAcknowledgedRevision(event.target.checked ? revision : undefined)} type="checkbox" />
         <span>{acknowledgement}</span>
       </label>
     </ConfirmDialog>
