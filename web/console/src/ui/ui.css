@@ -1545,3 +1545,24 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 .lw-an-provcard .lw-an-note code { padding: 0 4px; }
 @media (max-width: 640px) { .lw-an-bar { padding: 10px 16px; } .lw-rank li { grid-template-columns: minmax(0, 1fr) 64px; } .lw-rank li > .lw-faint { display: none; } }
 .lw-stat__delta--flat { font-size: 13px; line-height: 18px; color: var(--foreground-secondary); }
+
+/* ---------- Console additions: Users & Installs ---------- */
+.lw-stack--tight { gap: var(--space-2); }
+.lw-row--tight { gap: 4px 6px; }
+.lw-text-danger { color: var(--destructive); }
+.lw-text-warning { color: var(--orange); }
+.lw-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); align-items: end; gap: 12px 16px; }
+.lw-intents { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.lw-intents li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.lw-intents li:first-child { border-top: 0; }
+.lw-intents li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; line-height: 18px; }
+.lw-intents li > div > span { color: var(--foreground-secondary); }
+.lw-intents li > .lw-btn { flex: none; }
+.lw-part { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: var(--background-l1); box-shadow: inset 0 0 0 1px var(--border); }
+.lw-part.is-delegated { box-shadow: inset 2px 0 0 var(--border), inset 0 0 0 1px var(--border); }
+.lw-part.is-highlighted { box-shadow: inset 0 0 0 2px var(--accent-primary); }
+.lw-bulk-results { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; max-height: 320px; overflow-y: auto; }
+.lw-bulk-results li { display: grid; grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1.5fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 18px; }
+.lw-bulk-results li.is-unknown strong, .lw-bulk-results li.is-failed strong { color: var(--destructive); }
+.lw-bulk-results li.is-done strong { color: var(--success); }
+@media (max-width: 640px) { .lw-intents li { flex-direction: column; align-items: flex-start; } .lw-bulk-results li { grid-template-columns: 1fr; } }

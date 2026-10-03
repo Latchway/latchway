@@ -2,6 +2,58 @@
 
 Status date: 2026-10-03
 
+## Console redesign phase 4: Users & Installs (branch `console-redesign`, unreleased)
+
+Users, Installations and Older installs are rebuilt on the existing Admin API
+(`src/pages/users/`). Lists use server order with appended cursor pages and no
+totals, filters or search, because the users, installation-family and
+installation lists offer none; each page says so. Go to ID replaces search:
+`usr_` opens the user, `fam_` the installation, `cmp_` the installation with
+that part highlighted (looked up through `GET /client-components/{id}`), and
+`req_` the request; anything else explains that emails and sign-in subjects
+are never stored.
+
+The user drawer shows identity, claims masked until Show Values, installations
+(with usage summed from the user's families, since there's no per-user
+aggregate), the last five requests, the existing effective-access check and a
+link to the user's audit events. "What's Going On?" maps six situations to the
+matching review (only Unblock and a plan override for a blocked user). Block,
+Unblock, Require sign-in and Require app re-verification run through the
+server's operation-impact preview; a stale preview (409 `conflict`) reloads the
+counts, shows them as before → after and requires a fresh acknowledgement.
+Bulk Require Sign-in (up to 50 users, blocked users excluded) runs one reviewed
+operation per user with its own preview token and reports Done, Skipped,
+Unknown (with the operation ID and "check the audit log") or Failed per user.
+
+Installations show list-level signals (debug trust outside Development, root
+trust expiring within 7 days) and a "With signals" view over loaded rows only.
+Token reuse, weak key storage and failed sessions are per part, which the list
+doesn't return, so they appear in the installation drawer with their suggested
+actions. The drawer lists the parts root first with delegated parts indented,
+each with key storage, versions, trust, session, delegation, failed sessions,
+refresh reuse and usage. Require Renewal, Revoke Installation, Re-verify and
+Revoke Part use the same review dialog with counts from the loaded record and a
+notice that the server has no preview for these actions; revoking a root part
+becomes revoking the installation. Older wire-1 installs have their own tab
+with a Legacy badge and a reviewed revoke. Detail from another environment, or
+a part outside the opened installation, is rejected as before. The user,
+installation and older-install URL schemas now accept the workspace
+environment as the scope of a selection, so links needn't repeat
+`environment_id`; a mismatching `environment_id` is still refused. Pages now
+check the session before the environment, so a signed-out operator sees the
+sign-in prompt.
+
+Not built because the API has no source: list filters, sort, search and
+totals; server-side signals; an impact preview for installation and component
+actions; a batch endpoint; and the per-part refresh-reuse event list (the
+drawer links each part to its audit events). The Activity tab waits for the
+Audit Log rebuild.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (363 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.10 MB.
+
 ## Console redesign phase 3: Analytics and Overview (branch `console-redesign`, unreleased)
 
 Traffic → Analytics is one page with Usage, Cost, Performance and Reliability

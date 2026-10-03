@@ -701,17 +701,23 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   }));
 
   await goTo(page, "Users & Installs");
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "List users" }).click();
-  await page.getByRole("button", { name: ids.user }).click();
-  await page.getByRole("button", { name: "Review block" }).click();
-  await expect(page.getByRole("heading", { name: "Block user impact" })).toBeVisible();
-  await page.getByLabel("Operator reason").fill("Confirmed compromised account");
-  await page.getByLabel("Type the exact user ID to confirm").fill(ids.user);
-  await page.getByLabel(/acknowledge the immediate application-wide effect/i).check();
-  await page.getByRole("button", { name: "Confirm Block user" }).click();
-  await expect(page.locator(".main-content").getByRole("status")).toContainText("Block user completed");
-  await expect(page.getByRole("button", { name: "Review unblock" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Users" })).toBeVisible();
+  await page.getByRole("row", { name: /firebase/ }).click();
+  await expect(page).toHaveURL(new RegExp(`user_id=${ids.user}`));
+  const userDrawer = page.getByRole("complementary", { name: ids.user });
+  await expect(userDrawer.getByRole("heading", { name: "Identity" })).toBeVisible();
+  await userDrawer.getByRole("button", { name: "Actions" }).click();
+  await page.getByRole("menuitem", { name: "Block" }).click();
+  const blockReview = page.getByRole("alertdialog", { name: "Block user?" });
+  await expect(blockReview).toBeVisible();
+  await blockReview.getByLabel("Reason").fill("Confirmed compromised account");
+  await blockReview.getByLabel(/to confirm/).fill(ids.user);
+  await blockReview.getByRole("checkbox").check();
+  await blockReview.getByRole("button", { name: "Block User" }).click();
+  await expect(userDrawer.getByText("Block user completed.")).toBeVisible();
+  await userDrawer.getByRole("button", { name: "Actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Unblock" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   expect(fixture.mutations.length).toBeGreaterThanOrEqual(8);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });

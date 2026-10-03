@@ -163,7 +163,8 @@ export const InstallationFamilyRouteSearchSchema = z.object({
   family_id: optional(OpaqueID("fam")),
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["component_id", search.component_id], ["cursor", search.cursor], ["family_id", search.family_id], ["user_id", search.user_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["component_id", search.component_id], ["cursor", search.cursor], ["family_id", search.family_id], ["user_id", search.user_id]]);
   if (search.component_id && !search.family_id) context.addIssue({ code: "custom", message: "A family is required for a component selection.", path: ["component_id"] });
 });
 
@@ -176,7 +177,8 @@ export const UserRouteSearchSchema = z.object({
   environment_id: optional(OpaqueID("env")),
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["cursor", search.cursor], ["user_id", search.user_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["cursor", search.cursor], ["user_id", search.user_id]]);
 });
 
 export type UserRouteSearch = z.infer<typeof UserRouteSearchSchema>;
@@ -188,7 +190,8 @@ export const InstallationRouteSearchSchema = z.object({
   environment_id: optional(OpaqueID("env")),
   installation_id: optional(OpaqueID("ins"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["cursor", search.cursor], ["installation_id", search.installation_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["cursor", search.cursor], ["installation_id", search.installation_id]]);
 });
 
 export type InstallationRouteSearch = z.infer<typeof InstallationRouteSearchSchema>;

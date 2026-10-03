@@ -567,10 +567,10 @@ function RequestsView() {
 function RequestsWorkspace() {
   const session = useConsoleSession();
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  return <RequestsView />;
+  return <EnvironmentRequired><RequestsView /></EnvironmentRequired>;
 }
 
 /** Traffic → Requests: individual requests for the selected environment, from GET /admin/v1/requests. */
 export function RequestsPage() {
-  return <EnvironmentRequired><RequestsWorkspace /></EnvironmentRequired>;
+  return <RequestsWorkspace />;
 }

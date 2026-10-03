@@ -468,12 +468,12 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
 function AnalyticsWorkspace({ tab }: { tab: AnalyticsTab }) {
   const session = useConsoleSession();
   if (session.data?.mode !== "configured") return <AccessRequired />;
-  return <AnalyticsView tab={tab} />;
+  return <EnvironmentRequired><AnalyticsView tab={tab} /></EnvironmentRequired>;
 }
 
 /** Traffic → Analytics, on GET /admin/v1/usage/summary and /usage/timeseries for one environment. */
 export function AnalyticsPage({ tab }: { tab: AnalyticsTab }) {
-  return <EnvironmentRequired><AnalyticsWorkspace tab={tab} /></EnvironmentRequired>;
+  return <AnalyticsWorkspace tab={tab} />;
 }
 
 export function UsageAnalyticsPage() { return <AnalyticsPage tab="usage" />; }

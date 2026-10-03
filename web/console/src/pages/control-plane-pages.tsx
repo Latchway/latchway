@@ -4,33 +4,18 @@ import {
   adminRequest,
   AuditEventSchema,
   AuditPageSchema,
-  InstallationPageSchema,
-  InstallationSchema,
-  getUserEffectiveConfiguration,
-  getUserOperationImpact,
   queryPath,
-  requireApplicationUserAppReverification,
-  requireApplicationUserReauthentication,
   RevisionSchema,
   RouteSimulationSchema,
   SelfTestSchema,
   SelfTestSchedulePageSchema,
   SelfTestScheduleSchema,
-  setApplicationUserBlocked,
-  UserSchema,
-  UserPageSchema,
-  type ApplicationUser,
-  type ApplicationUserPage,
   type AuditPage,
   type AuditEvent,
   type EffectiveConfiguration,
-  type Installation,
-  type InstallationPage,
   type RouteSimulation,
   type SelfTestRun,
-  type SelfTestSchedule,
-  type UserOperationAction,
-  type UserOperationImpact
+  type SelfTestSchedule
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
@@ -38,18 +23,13 @@ import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import {
   AuditRouteSearchSchema,
   type AuditRouteSearch,
-  InstallationRouteSearchSchema,
-  type InstallationRouteSearch,
   RouteSimulatorRouteSearchSchema,
   type RouteSimulatorRouteSearch,
   SelfTestRouteSearchSchema,
-  type SelfTestRouteSearch,
-  UserRouteSearchSchema,
-  type UserRouteSearch
+  type SelfTestRouteSearch
 } from "../app/route-search";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import { useAdminRefreshTopic } from "../app/use-admin-refresh";
-import { ImmediateOperationConfirmation } from "../components/immediate-operation-confirmation";
 
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 const environmentInputPattern = environmentPattern.source;
@@ -229,253 +209,6 @@ export function EffectiveConfigurationPanel({ configuration }: { configuration: 
     {configuration.warnings.length ? <div className="control-notice"><strong>Important limitations</strong><ul>{configuration.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
     <p><small>Claim values, provider credentials, authorization headers, proofs, and request or response bodies are excluded from this view.</small></p>
   </section>;
-}
-
-const operationLabels: Record<UserOperationAction, string> = {
-  block: "Block user",
-  require_app_reverification: "Require app reverification",
-  require_reauthentication: "Require reauthentication",
-  unblock: "Unblock user"
-};
-
-export function UsersPage() {
-  const session = useConsoleSession();
-  const consoleCompatibility = useConsoleCompatibility();
-  const workspace = useOptionalWorkspace();
-  const routeSearch = UserRouteSearchSchema.parse(workspace?.search ?? {});
-  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
-  const [page, setPage] = useState<ApplicationUserPage>();
-  const [selected, setSelected] = useState<ApplicationUser>();
-  const [effective, setEffective] = useState<EffectiveConfiguration>();
-  const [effectiveFeature, setEffectiveFeature] = useState("");
-  const [effectiveSurface, setEffectiveSurface] = useState<"latest" | "installation" | "component">("latest");
-  const [effectiveSurfaceID, setEffectiveSurfaceID] = useState("");
-  const [estimatedInputTokens, setEstimatedInputTokens] = useState("");
-  const [maximumOutputTokens, setMaximumOutputTokens] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [impact, setImpact] = useState<UserOperationImpact>();
-  const [typedConfirmation, setTypedConfirmation] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [reason, setReason] = useState("");
-  const [completion, setCompletion] = useState("");
-  const [problem, setProblem] = useState<AdminProblem>();
-  const [busy, setBusy] = useState(false);
-  const canonicalSearchKey = JSON.stringify({ cursor: routeSearch.cursor, environment_id: routeSearch.environment_id, user_id: routeSearch.user_id });
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace) return;
-    // Browser navigation restores the bounded list and selected pseudonymous user.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEnvironment(routeSearch.environment_id ?? "");
-    if (routeSearch.environment_id) void restore(routeSearch);
-    else { setPage(undefined); clearSelectedUser(); }
-    // The validated URL key is the canonical restore trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalSearchKey, session.data?.mode]);
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  const canMutate = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("revoke_installations") ?? false);
-
-  function clearSelectedUser(): void {
-    setSelected(undefined); setEffective(undefined); setImpact(undefined); setCompletion("");
-    setTypedConfirmation(""); setAcknowledged(false); setReason("");
-  }
-
-  async function restore(search: UserRouteSearch): Promise<void> {
-    if (!search.environment_id) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const result = await adminRequest(
-        queryPath("/admin/v1/users", { environment_id: search.environment_id, page_size: "50", cursor: search.cursor }),
-        UserPageSchema
-      );
-      if (result.data.items.some((item) => item.environment_id !== search.environment_id)) throw new Error("user_context");
-      let detail: ApplicationUser | undefined;
-      if (search.user_id) {
-        const response = await adminRequest(queryPath(`/admin/v1/users/${search.user_id}`, { environment_id: search.environment_id }), UserSchema);
-        if (response.data.id !== search.user_id || response.data.environment_id !== search.environment_id) throw new Error("user_context");
-        detail = response.data;
-      }
-      setPage(result.data); clearSelectedUser(); setSelected(detail);
-    } catch (error) {
-      clearSelectedUser();
-      setProblem(error instanceof Error && error.message === "user_context" ? { code: "invalid_response", detail: "The user list or detail did not match the selected environment and pseudonymous user ID.", retryable: true, status: 0, title: "User context mismatch" } : problemFromError(error));
-    } finally { setBusy(false); }
-  }
-
-  function selectUser(user: ApplicationUser): void {
-    clearSelectedUser();
-    if (workspace) workspace.updateSearch({ user_id: user.id }, { replace: false });
-    else setSelected(user);
-  }
-
-  function applyUserFilters(): void {
-    const candidate = UserRouteSearchSchema.safeParse({ ...routeSearch, cursor: undefined, environment_id: environment || undefined, user_id: undefined });
-    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment ID.")); return; }
-    if (workspace) workspace.updateSearch({ cursor: undefined, environment_id: candidate.data.environment_id, user_id: undefined });
-    else void restore(candidate.data);
-  }
-
-  async function explain(user: ApplicationUser): Promise<void> {
-    setBusy(true); setProblem(undefined);
-    try {
-      const result = await getUserEffectiveConfiguration(user.id, {
-        ...(effectiveSurface === "component" ? { componentID: effectiveSurfaceID } : {}),
-        environmentID: environment,
-        ...(estimatedInputTokens ? { estimatedInputTokens: Number(estimatedInputTokens) } : {}),
-        feature: effectiveFeature,
-        ...(effectiveSurface === "installation" ? { installationID: effectiveSurfaceID } : {}),
-        ...(maximumOutputTokens ? { maximumOutputTokens: Number(maximumOutputTokens) } : {}),
-        streaming
-      });
-      if (result.data.subject.id !== user.id || result.data.environment_id !== environment) throw new Error("effective_context");
-      setEffective(result.data);
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
-  }
-
-  async function reviewOperation(user: ApplicationUser, action: UserOperationAction): Promise<void> {
-    if (!canMutate) return;
-    setBusy(true); setProblem(undefined); setCompletion("");
-    try {
-      const result = await getUserOperationImpact(user.id, environment, action);
-      setImpact(result.data); setTypedConfirmation(""); setAcknowledged(false); setReason("");
-    } catch (error) { setImpact(undefined); setProblem(problemFromError(error)); } finally { setBusy(false); }
-  }
-
-  async function performOperation(user: ApplicationUser): Promise<void> {
-    if (!canMutate || !impact) return;
-    setBusy(true); setProblem(undefined); setCompletion("");
-    try {
-      const confirmation = { acknowledge_immediate_effect: true as const, impact_token: impact.impact_token, reason };
-      const result = impact.action === "block" || impact.action === "unblock"
-        ? await setApplicationUserBlocked(user.id, environment, impact.action === "block", confirmation)
-        : impact.action === "require_reauthentication"
-          ? await requireApplicationUserReauthentication(user.id, environment, confirmation)
-          : await requireApplicationUserAppReverification(user.id, environment, confirmation);
-      const updated = "operation_id" in result.data ? result.data.user : result.data;
-      const operationID = "operation_id" in result.data ? ` Operation ${result.data.operation_id}.` : "";
-      setSelected(updated);
-      setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === user.id ? updated : item) } : current);
-      setCompletion(`${operationLabels[impact.action]} completed.${operationID}`);
-      setImpact(undefined); setTypedConfirmation(""); setAcknowledged(false); setReason("");
-    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
-  }
-
-  return <div className="control-page">
-    <PageHeading eyebrow="Identity" title="Application users">Pseudonymous identities, normalized claims, status, and overrides. Raw provider subjects and tokens never appear here.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); applyUserFilters(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); clearSelectedUser(); }} /></label>
-      <FormActions busy={busy}>List users</FormActions>
-    </form>
-    <ProblemNotice problem={problem} />
-    {page ? <>
-      <Table headers={["User", "Status", "Providers", "Last seen", ""]} rows={page.items.map((user) => [
-        <button className="link-button" onClick={() => selectUser(user)} type="button">{user.id}</button>, user.status,
-        user.identity_providers.join(", "), time(user.last_seen_at),
-        <button className="small-action" onClick={() => selectUser(user)} type="button">Inspect</button>
-      ])} />
-      {page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => { const next = UserRouteSearchSchema.parse({ ...routeSearch, cursor: page.page.next_cursor, environment_id: environment, user_id: undefined }); if (workspace) workspace.updateSearch({ cursor: next.cursor, environment_id: next.environment_id, user_id: undefined }, { replace: false }); else void restore(next); }} type="button">Next page</button> : null}
-    </> : null}
-    {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>User detail</h2><button className="small-action" onClick={() => { if (workspace) workspace.updateSearch({ user_id: undefined }); else clearSelectedUser(); }} type="button">Close</button></div><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div></dl><p><a className="secondary-action" href={queryPath("/installation-families", { environment_id: environment, user_id: selected.id })}>View this user's installation families</a></p><h3>Normalized safe claims</h3><pre>{JSON.stringify(selected.normalized_claims, null, 2)}</pre>
-      <h3>Explain effective access and limits</h3>
-      <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); void explain(selected); }}>
-        <label>Feature<input pattern={identifierInputPattern} required value={effectiveFeature} onChange={(event) => setEffectiveFeature(event.target.value)} /></label>
-        <label>Client surface<select value={effectiveSurface} onChange={(event) => { setEffectiveSurface(event.target.value as typeof effectiveSurface); setEffectiveSurfaceID(""); }}><option value="latest">Latest active session</option><option value="installation">Installation</option><option value="component">Component</option></select></label>
-        {effectiveSurface !== "latest" ? <label>{effectiveSurface === "installation" ? "Installation ID" : "Component ID"}<input required value={effectiveSurfaceID} onChange={(event) => setEffectiveSurfaceID(event.target.value)} /></label> : null}
-        <label>Estimated input tokens<input min="0" max="2147483647" step="1" type="number" value={estimatedInputTokens} onChange={(event) => setEstimatedInputTokens(event.target.value)} /></label>
-        <label>Requested output tokens<input min="0" max="2147483647" step="1" type="number" value={maximumOutputTokens} onChange={(event) => setMaximumOutputTokens(event.target.value)} /></label>
-        <label><input checked={streaming} onChange={(event) => setStreaming(event.target.checked)} type="checkbox" /> Streaming request</label>
-        <FormActions busy={busy}>Explain current state</FormActions>
-      </form>
-      {effective ? <EffectiveConfigurationPanel configuration={effective} /> : null}
-      <h3>Sensitive user operations</h3>
-      <p>Every operation starts with a fresh application-wide impact preview. State changes between review and confirmation are rejected.</p>
-      <div className="button-row"><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, selected.status === "blocked" ? "unblock" : "block")} type="button">Review {selected.status === "blocked" ? "unblock" : "block"}</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_reauthentication")} type="button">Review reauthentication</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_app_reverification")} type="button">Review app reverification</button></div>
-      {impact ? <section className="request-explanation"><h4>{operationLabels[impact.action]} impact</h4><p>{impact.summary}</p><dl><div><dt>Immediate</dt><dd>{impact.immediate ? "Yes" : "No"}</dd></div><div><dt>Reversible</dt><dd>{impact.reversible ? "Yes" : "No"}</dd></div><div><dt>Current status</dt><dd>{impact.current_status}</dd></div><div><dt>Access effect</dt><dd>{impact.access_effect}</dd></div></dl><Table headers={["Active user sessions", "User refresh tokens", "Component sessions", "Component refresh tokens", "Installation families", "Client components"]} rows={[[impact.counts.active_session_grants, impact.counts.active_refresh_tokens, impact.counts.active_component_sessions, impact.counts.active_component_refresh_tokens, impact.counts.active_installation_families, impact.counts.active_client_components]]} />
-        {!impact.applicable ? <p role="status">This operation does not apply to the user's current state. Review a different action.</p> : <form onSubmit={(event) => { event.preventDefault(); void performOperation(selected); }}><label>Operator reason<textarea maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} /></label><label>Type the exact user ID to confirm<input required value={typedConfirmation} onChange={(event) => setTypedConfirmation(event.target.value)} /></label><label><input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" /> I acknowledge the immediate application-wide effect described above.</label><button className="primary-action" disabled={busy || !canMutate || !acknowledged || typedConfirmation !== selected.id || !reason.trim()} type="submit">Confirm {operationLabels[impact.action]}</button></form>}
-      </section> : null}
-      {completion ? <p className="control-notice" role="status">{completion}</p> : null}
-    </aside> : null}
-  </div>;
-}
-
-export function InstallationsPage() {
-  const session = useConsoleSession();
-  const consoleCompatibility = useConsoleCompatibility();
-  const workspace = useOptionalWorkspace();
-  const routeSearch = InstallationRouteSearchSchema.parse(workspace?.search ?? {});
-  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? "");
-  const [page, setPage] = useState<InstallationPage>();
-  const [selected, setSelected] = useState<Installation>();
-  const [revocationTarget, setRevocationTarget] = useState<Installation>();
-  const [problem, setProblem] = useState<AdminProblem>();
-  const [busy, setBusy] = useState(false);
-  const canonicalSearchKey = JSON.stringify({ cursor: routeSearch.cursor, environment_id: routeSearch.environment_id, installation_id: routeSearch.installation_id });
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace) return;
-    // Browser navigation restores the bounded list and selected legacy installation.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEnvironment(routeSearch.environment_id ?? "");
-    setRevocationTarget(undefined);
-    if (routeSearch.environment_id) void restore(routeSearch);
-    else { setPage(undefined); setSelected(undefined); }
-    // The validated URL key is the canonical restore trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalSearchKey, session.data?.mode]);
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  const canRevoke = consoleCompatibility.mutationAllowed && (session.data.session?.capabilities.includes("revoke_installations") ?? false);
-
-  async function restore(search: InstallationRouteSearch): Promise<void> {
-    if (!search.environment_id) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const result = await adminRequest(queryPath("/admin/v1/installations", { environment_id: search.environment_id, page_size: "50", cursor: search.cursor }), InstallationPageSchema);
-      if (result.data.items.some((item) => item.environment_id !== search.environment_id)) throw new Error("installation_context");
-      let detail: Installation | undefined;
-      if (search.installation_id) {
-        const response = await adminRequest(`/admin/v1/installations/${search.installation_id}`, InstallationSchema);
-        if (response.data.id !== search.installation_id || response.data.environment_id !== search.environment_id) throw new Error("installation_context");
-        detail = response.data;
-      }
-      setPage(result.data); setSelected(detail); setRevocationTarget(undefined);
-    } catch (error) {
-      setSelected(undefined); setRevocationTarget(undefined);
-      setProblem(error instanceof Error && error.message === "installation_context" ? { code: "invalid_response", detail: "The installation list or detail did not match the selected environment and installation ID.", retryable: true, status: 0, title: "Installation context mismatch" } : problemFromError(error));
-    } finally { setBusy(false); }
-  }
-  function applyInstallationFilters(): void {
-    const candidate = InstallationRouteSearchSchema.safeParse({ ...routeSearch, cursor: undefined, environment_id: environment || undefined, installation_id: undefined });
-    if (!candidate.success) { setProblem(invalidFilterProblem("Enter a canonical environment ID.")); return; }
-    if (workspace) workspace.updateSearch({ cursor: undefined, environment_id: candidate.data.environment_id, installation_id: undefined });
-    else void restore(candidate.data);
-  }
-  function selectInstallation(installation: Installation): void {
-    setRevocationTarget(undefined);
-    if (workspace) workspace.updateSearch({ installation_id: installation.id }, { replace: false });
-    else setSelected(installation);
-  }
-  async function revoke(installation: Installation, reason: string): Promise<void> {
-    if (!canRevoke) return;
-    setBusy(true); setProblem(undefined);
-    try {
-      const result = await adminRequest(`/admin/v1/installations/${installation.id}/revoke`, InstallationSchema, { method: "POST", body: { reason } });
-      if (result.data.id !== installation.id || result.data.environment_id !== environment) throw new Error("installation_context");
-      setSelected((current) => current?.id === installation.id ? result.data : current);
-      setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === installation.id ? result.data : item) } : current);
-      setRevocationTarget(undefined);
-    } catch (error) { setProblem(error instanceof Error && error.message === "installation_context" ? { code: "invalid_response", detail: "The revoked installation response did not match the selected environment and installation ID.", retryable: true, status: 0, title: "Installation context mismatch" } : problemFromError(error)); } finally { setBusy(false); }
-  }
-  return <div className="control-page">
-    <PageHeading eyebrow="Identity" title="Installations">Installation-bound public keys and normalized trust status without raw attestation evidence or DPoP proofs.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); applyInstallationFilters(); }}>
-      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => { setEnvironment(event.target.value); setPage(undefined); setSelected(undefined); setRevocationTarget(undefined); }} /></label><FormActions busy={busy}>List installations</FormActions>
-    </form>
-    <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Installation", "Platform", "Status", "Trust", "Last seen", ""]} rows={page.items.map((item) => [
-      <button className="link-button" onClick={() => selectInstallation(item)} type="button">{item.id}</button>, item.platform, item.status, item.trust_level, time(item.last_seen_at),
-      <button className="small-action" disabled={!canRevoke || busy || item.status === "revoked"} onClick={() => setRevocationTarget(item)} type="button">Review revoke</button>
-    ])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => { const next = InstallationRouteSearchSchema.parse({ ...routeSearch, cursor: page.page.next_cursor, environment_id: environment, installation_id: undefined }); if (workspace) workspace.updateSearch({ cursor: next.cursor, environment_id: next.environment_id, installation_id: undefined }, { replace: false }); else void restore(next); }} type="button">Next page</button> : null}</> : null}
-    {revocationTarget ? <ImmediateOperationConfirmation acknowledgement="I understand this immediately and permanently revokes this installation's trust and credential boundary." affectedScope={<><code>{revocationTarget.id}</code>, its sessions, refresh tokens, and attestation keys</>} busy={busy} confirmLabel="Revoke installation credentials" credentialRestoration="Never. Revoked sessions, refresh tokens, and attestation keys stay revoked; the client must establish a new installation identity." disabled={!canRevoke} heading="Revoke this installation?" key={revocationTarget.id} onCancel={() => setRevocationTarget(undefined)} onConfirm={(reason) => { if (reason) void revoke(revocationTarget, reason); }} requiresReason reversibility="No. Installation revocation is terminal." summary="The server revokes this installation together with its active sessions, refresh tokens, and attestation keys in one operation." timing="Immediately after the server accepts the revocation" /> : null}
-    {selected ? <aside className="detail-card"><div className="detail-card__heading"><h2>Installation detail</h2><button className="small-action" onClick={() => { setRevocationTarget(undefined); if (workspace) workspace.updateSearch({ installation_id: undefined }); else setSelected(undefined); }} type="button">Close</button></div><dl><div><dt>User</dt><dd>{selected.user_id}</dd></div><div><dt>Trust provider</dt><dd>{selected.attestation_provider ?? "—"}</dd></div><div><dt>Trust expires</dt><dd>{time(selected.trust_expires_at)}</dd></div><div><dt>Revoked</dt><dd>{time(selected.revoked_at)}</dd></div></dl></aside> : null}
-  </div>;
 }
 
 export function AuditPageView() {

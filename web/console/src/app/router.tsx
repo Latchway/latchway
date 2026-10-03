@@ -13,15 +13,15 @@ import { SystemHealthPage } from "../pages/system-health-page";
 import { SettingsPage } from "../pages/settings-page";
 import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
-import { InstallationFamiliesPage } from "../pages/installation-families-page";
 import {
   AuditPageView,
-  InstallationsPage,
   RouteSimulatorPage,
   SelfTestsPage,
-  UsersPage
 } from "../pages/control-plane-pages";
 import { RequestsPage } from "../pages/requests/requests-page";
+import { InstallationFamiliesPage } from "../pages/users/installations-page";
+import { InstallationsPage } from "../pages/users/older-installs-page";
+import { UsersPage } from "../pages/users/users-page";
 import {
   CostAnalyticsPage,
   PerformanceAnalyticsPage,
