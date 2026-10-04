@@ -33,6 +33,7 @@ import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { cloneConfigurationDocument, type JSONRecord, validStrongETag } from "../configuration-slice";
 import { changeSetSummary, configurationDiff, discardEntry, fixTarget } from "./config-diff";
 import { DiffGroups } from "./diff-view";
+import { TransferDrawer } from "./transfer-drawer";
 
 function when(value: string | undefined): string {
   return value ? new Date(value).toLocaleString() : "—";
@@ -59,6 +60,7 @@ function author(createdBy: string): ReactNode {
 function DraftView() {
   const draft = useEnvironmentDraft();
   const [discarding, setDiscarding] = useState(false);
+  const [transfer, setTransfer] = useState(false);
   const revision = draft.draft;
   const entries = useMemo(() => (revision ? configurationDiff(draft.activeDocument, revision.document as JSONRecord) : []), [draft.activeDocument, revision]);
   const summary = draftSummary(draft);
@@ -76,10 +78,11 @@ function DraftView() {
   return (
     <div className="lw-page">
       <PageHeader
-        actions={entries.length ? <div className="lw-row">
-          <Link className={buttonClass()} search={(previous) => scoped(previous)} to="/configuration">Edit as JSON</Link>
-          {draft.canConfigure ? <Button destructive onClick={() => setDiscarding(true)}>Discard All</Button> : null}
-        </div> : undefined}
+        actions={<div className="lw-row">
+          <Button icon="upload" onClick={() => setTransfer(true)}>Import / Export</Button>
+          {entries.length ? <Link className={buttonClass()} search={(previous) => scoped(previous)} to="/configuration">Edit as JSON</Link> : null}
+          {entries.length && draft.canConfigure ? <Button destructive onClick={() => setDiscarding(true)}>Discard All</Button> : null}
+        </div>}
         description="Every unpublished change in this environment, by resource. Requests keep using the live configuration until the draft is published."
         title="Draft"
       />
@@ -115,6 +118,7 @@ function DraftView() {
           </>
         )}
       </div>
+      {transfer ? <div className="lw-drawer-dock lw-drawer-dock--wide"><TransferDrawer draft={draft} onClose={() => setTransfer(false)} /></div> : null}
       {discarding ? (
         <ConfirmDialog confirmLabel="Discard All" description="The draft goes back to exactly the live configuration. Nothing live changes. This can't be undone, but the draft's history stays under History." destructive onCancel={() => setDiscarding(false)} onConfirm={() => void discardAll()} pending={draft.busy} title={`Discard all ${entries.length} changes?`}>
           {draft.problem ? <ProblemNotice problem={draft.problem} /> : null}

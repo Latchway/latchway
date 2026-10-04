@@ -118,6 +118,7 @@ export const AuditRouteSearchSchema = z.object({
   end: optional(Instant),
   environment_id: optional(OpaqueID("env")),
   event: optional(OpaqueID("aud")),
+  period: optional(z.enum(["24h", "7d", "30d", "90d"])),
   reason: optional(AuditReason),
   resource_id: optional(AnyOpaqueID),
   resource_type: optional(AuditName(64)),
@@ -126,6 +127,7 @@ export const AuditRouteSearchSchema = z.object({
   start: optional(Instant)
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
+  if (search.period && (search.start || search.end)) context.addIssue({ code: "custom", message: "Use either a preset period or a start and end, not both.", path: ["period"] });
 });
 
 export type AuditRouteSearch = z.infer<typeof AuditRouteSearchSchema>;
@@ -275,7 +277,8 @@ export const SelfTestRouteSearchSchema = z.object({
   schedule_id: optional(OpaqueID("sts")),
   self_test_id: optional(OpaqueID("tst"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["schedule_id", search.schedule_id], ["self_test_id", search.self_test_id]]);
+  // The workspace environment scopes a run or schedule; an explicit environment_id must still match it.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["schedule_id", search.schedule_id], ["self_test_id", search.self_test_id]]);
 });
 
 export type SelfTestRouteSearch = z.infer<typeof SelfTestRouteSearchSchema>;
@@ -332,3 +335,11 @@ export const CompareRouteSearchSchema = z.object({
 export type CompareRouteSearch = z.infer<typeof CompareRouteSearchSchema>;
 export const parseCompareRouteSearch = (value: unknown): CompareRouteSearch => CompareRouteSearchSchema.parse(value);
 
+
+export const TeamRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  member: optional(OpaqueID("adm"))
+});
+
+export type TeamRouteSearch = z.infer<typeof TeamRouteSearchSchema>;
+export const parseTeamRouteSearch = (value: unknown): TeamRouteSearch => TeamRouteSearchSchema.parse(value);

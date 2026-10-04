@@ -9,14 +9,12 @@ import {
 import { AppShell } from "./app-shell";
 import { NotFoundPage } from "../pages/not-found-page";
 import { OverviewPage } from "../pages/overview-page";
-import { SystemHealthPage } from "../pages/system-health-page";
-import { SettingsPage } from "../pages/settings-page";
-import { AdministratorsPage } from "../pages/administrators-page";
-import { APITokensPage } from "../pages/api-tokens-page";
-import {
-  AuditPageView,
-  SelfTestsPage,
-} from "../pages/control-plane-pages";
+import { SystemHealthPage } from "../pages/operate/system-health-page";
+import { SelfTestsPage } from "../pages/operate/self-tests-page";
+import { ApplicationsSettingsPage, GeneralSettingsPage } from "../pages/settings/settings-pages";
+import { AuditLogPage } from "../pages/audit/audit-page";
+import { SecretsPage } from "../pages/build/secrets-page";
+import { MembersPage, RolesPage, SessionsPage, TokensPage } from "../pages/team/team-pages";
 import { ComparePage, DraftChangesPage, JsonEditorPage, RevisionHistoryPage } from "../pages/changes/changes-pages";
 import { LimitPlansPage, OverridesPage, PlanByFeaturePage, ProtectionsPage } from "../pages/policies/policies-pages";
 import { SimulatorPage } from "../pages/simulator/simulator-page";
@@ -42,11 +40,6 @@ import {
   UpstreamsConfigurationPage
 } from "../pages/configuration-area-pages";
 import {
-  ApplicationsPage,
-  EnvironmentsPage,
-  SecretsPage
-} from "../pages/resource-management-pages";
-import {
   AnalyticsRouteSearchSchema,
   parseAnalyticsRouteSearch,
   parseConfigurationRouteSearch,
@@ -62,6 +55,7 @@ import {
   parseRevisionRouteSearch,
   parseRouteSimulatorRouteSearch,
   parseSelfTestRouteSearch,
+  parseTeamRouteSearch,
   parseUserRouteSearch
 } from "./route-search";
 
@@ -81,14 +75,24 @@ const systemHealthRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system-health"
 });
-const settingsRoute = createRoute({ component: SettingsPage, getParentRoute: () => rootRoute, path: "/settings" });
+const settingsRoute = createRoute({ component: GeneralSettingsPage, getParentRoute: () => rootRoute, path: "/settings" });
 
 const setupRoute = createRoute({ component: SetupWizardPage, getParentRoute: () => rootRoute, path: "/setup" });
 const configurationRoute = createRoute({ component: JsonEditorPage, getParentRoute: () => rootRoute, path: "/configuration", validateSearch: parseConfigurationRouteSearch });
-const applicationsRoute = createRoute({ component: ApplicationsPage, getParentRoute: () => rootRoute, path: "/applications" });
-const environmentsRoute = createRoute({ component: EnvironmentsPage, getParentRoute: () => rootRoute, path: "/environments" });
-const administratorsRoute = createRoute({ component: AdministratorsPage, getParentRoute: () => rootRoute, path: "/administrators" });
-const apiTokensRoute = createRoute({ component: APITokensPage, getParentRoute: () => rootRoute, path: "/api-tokens" });
+const applicationsRoute = createRoute({ component: ApplicationsSettingsPage, getParentRoute: () => rootRoute, path: "/applications" });
+/** Environments are managed inside each application's card under Settings → Applications. */
+const environmentsRoute = createRoute({
+  beforeLoad: ({ search }) => {
+    const previous = search as Record<string, unknown>;
+    throw redirect({ replace: true, search: parseFeatureRouteSearch({ application: previous.application, environment: previous.environment, organization: previous.organization }), to: "/applications" });
+  },
+  getParentRoute: () => rootRoute,
+  path: "/environments"
+});
+const administratorsRoute = createRoute({ component: MembersPage, getParentRoute: () => rootRoute, path: "/administrators", validateSearch: parseTeamRouteSearch });
+const adminSessionsRoute = createRoute({ component: SessionsPage, getParentRoute: () => rootRoute, path: "/admin-sessions" });
+const rolesRoute = createRoute({ component: RolesPage, getParentRoute: () => rootRoute, path: "/roles" });
+const apiTokensRoute = createRoute({ component: TokensPage, getParentRoute: () => rootRoute, path: "/api-tokens" });
 const authenticationProvidersRoute = createRoute({ component: AuthenticationProvidersPage, getParentRoute: () => rootRoute, path: "/authentication-providers", validateSearch: parseConfigurationRouteSearch });
 const attestationRoute = createRoute({ component: AttestationConfigurationPage, getParentRoute: () => rootRoute, path: "/attestation" });
 const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users", validateSearch: parseUserRouteSearch });
@@ -162,14 +166,14 @@ const configurationCompareRoute = createRoute({ component: ComparePage, getParen
 const routeSimulatorRoute = createRoute({ component: SimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator", validateSearch: parseRouteSimulatorRouteSearch });
 const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests", validateSearch: parseSelfTestRouteSearch });
 const auditRoute = createRoute({
-  component: AuditPageView,
+  component: AuditLogPage,
   getParentRoute: () => rootRoute,
   path: "/audit",
   validateSearch: parseAuditRouteSearch
 });
 
 const routeTree = rootRoute.addChildren([
-  indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute,
+  indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute, adminSessionsRoute, rolesRoute,
   authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
   componentDefinitionsRoute, clientSessionsRoute,
   featuresRoute, routesRoute, upstreamsRoute, modelsPricingRoute, secretsRoute, configurationRoute,

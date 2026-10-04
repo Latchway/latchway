@@ -93,6 +93,7 @@ async function installAdminFixture(
   const selfTestScheduleBodies: Array<Record<string, unknown>> = [];
   const selfTestScheduleAuthorizations: Array<{ authorization?: string; cookie?: string; csrf?: string }> = [];
   let apiTokens: Array<Record<string, unknown>> = [];
+  let administrators: Array<Record<string, unknown>> = [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }];
   let selfTestRun: Record<string, unknown> | undefined;
   let selfTestSchedules: Array<Record<string, unknown>> = [];
   let secretItems: Array<Record<string, unknown>> = options.includePrimarySecret === false ? [] : [{
@@ -160,14 +161,19 @@ async function installAdminFixture(
       ],
       server_version: "1.0.0"
     });
-    if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }], page: { has_more: false } });
+    if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: administrators, page: { has_more: false } });
     if (url.pathname === "/admin/v1/administrators" && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; administratorBodies.push(body);
-      return json(route, 201, { created_at: instant, display_name: body.display_name, email: body.email, id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: body.role, status: "active", updated_at: instant });
+      const created = { created_at: instant, display_name: body.display_name, email: body.email, id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: true, role: body.role, status: "active", updated_at: instant };
+      administrators = [...administrators, created];
+      return json(route, 201, created);
     }
     if (url.pathname.startsWith(`/admin/v1/administrators/${ids.administrator}/`)) {
       const action = url.pathname.split("/").at(-1); const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>; administratorBodies.push({ action, ...body });
-      return json(route, 200, { created_at: instant, display_name: "Second Owner", email: "second-owner@example.test", id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: action === "role" ? body.role : "operator", status: action === "disable" ? "disabled" : "active", updated_at: instant, ...(action === "disable" ? { disabled_at: instant } : {}) });
+      const current = administrators.find((item) => item.id === ids.administrator) ?? {};
+      const updated = { ...current, role: action === "role" ? body.role : current.role, status: action === "disable" ? "disabled" : action === "enable" ? "active" : current.status, ...(action === "disable" ? { disabled_at: instant } : {}) };
+      administrators = administrators.map((item) => item.id === ids.administrator ? updated : item);
+      return json(route, 200, updated);
     }
     if (url.pathname === "/admin/v1/api-tokens" && request.method() === "GET") return json(route, 200, { items: apiTokens });
     if (url.pathname === "/admin/v1/api-tokens" && request.method() === "POST") {
@@ -747,49 +753,48 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await page.getByRole("button", { name: "Sign in securely" }).click();
 
   await goTo(page, "Settings", "Applications");
-  await page.getByRole("button", { name: "Load applications" }).click();
-  await expect(page.getByText(ids.application)).toBeVisible();
-  await page.getByLabel("Display name").fill("Resource App");
-  await page.getByLabel("Slug").fill("resource-app");
-  await page.getByRole("button", { name: "Create application" }).click();
+  await expect(page.getByRole("heading", { name: "Mobile App" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Application" }).click();
+  const appDrawer = page.getByRole("complementary", { name: "Add application" });
+  await appDrawer.getByLabel("Name").fill("Resource App");
+  await expect(appDrawer.getByLabel("Slug")).toHaveValue("resource-app");
+  await appDrawer.getByRole("button", { name: "Add Application" }).click();
+  await expect(page.getByText("Resource App was added.", { exact: false })).toBeVisible();
   expect(fixture.applicationBodies.at(-1)).toEqual({ display_name: "Resource App", organization_id: ids.organization, slug: "resource-app" });
 
-  await goTo(page, "Settings", "Environments");
-  await page.getByLabel("Application ID").fill(ids.application);
-  await page.getByRole("button", { name: "Load environments" }).click();
-  await expect(page.getByText(ids.environment)).toBeVisible();
-  await page.getByLabel("Display name").fill("Staging");
-  await page.getByLabel("Slug").fill("staging");
-  await page.getByLabel("Kind").selectOption("staging");
-  await page.getByRole("button", { name: "Create environment" }).click();
+  await page.getByRole("button", { name: "Add Environment" }).first().click();
+  const environmentDrawer = page.getByRole("complementary", { name: "Add environment" });
+  await environmentDrawer.locator("label.lw-role-card", { hasText: "Staging" }).click();
+  await environmentDrawer.getByRole("button", { name: "Add Environment" }).click();
+  await expect(page.getByText("Staging was added.", { exact: false })).toBeVisible();
   expect(fixture.environmentBodies.at(-1)).toEqual({ display_name: "Staging", kind: "staging", slug: "staging" });
 
   await goTo(page, "AI Connections", "Secrets");
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load secret metadata" }).click();
   await expect(page.getByText(ids.secret)).toBeVisible();
-  await page.getByLabel("Secret name").fill("unused_provider_key");
-  await page.getByLabel("Secret value").fill("transient-create-secret");
-  await page.getByRole("button", { name: "Create secret" }).click();
-  await expect(page.getByLabel("Secret value")).toHaveValue("");
+  await page.getByRole("button", { name: "Add Secret" }).click();
+  const secretDrawer = page.getByRole("complementary", { name: "Add secret" });
+  await secretDrawer.getByLabel("Name").fill("unused_provider_key");
+  await secretDrawer.getByLabel("Value").fill("transient-create-secret");
+  await secretDrawer.getByRole("button", { name: "Add Secret" }).click();
   await expect(page.getByText(ids.unusedSecret)).toBeVisible();
   expect(await page.locator("body").innerText()).not.toContain("transient-create-secret");
 
   const primaryRow = page.getByRole("row", { name: /primary_api_key/ });
   await primaryRow.getByRole("button", { name: "Rotate" }).click();
-  await page.getByLabel("Replacement secret value").fill("transient-rotation-secret");
-  await page.getByRole("button", { name: "Rotate secret" }).click();
+  const rotateDrawer = page.getByRole("complementary", { name: "Rotate primary_api_key" });
+  await rotateDrawer.getByLabel("New value").fill("transient-rotation-secret");
+  await rotateDrawer.getByRole("button", { name: "Rotate" }).click();
   await expect(page.getByText(ids.rotatedSecret)).toBeVisible();
   expect(await page.locator("body").innerText()).not.toContain("transient-rotation-secret");
 
   const unusedRow = page.getByRole("row", { name: /unused_provider_key/ });
-  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
-  await expect(page.getByText(ids.unusedSecret, { exact: true }).last()).toBeVisible();
-  await page.getByRole("button", { name: "Cancel deletion" }).click();
+  await unusedRow.getByRole("button", { name: "Delete" }).click();
+  const deleteDialog = page.getByRole("alertdialog", { name: "Delete unused_provider_key?" });
+  await deleteDialog.getByRole("button", { name: "Cancel" }).click();
   expect(fixture.secretBodies.some((body) => body.action === "delete")).toBe(false);
-  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
-  await page.getByLabel("Type unused_provider_key to confirm").fill("unused_provider_key");
-  await page.getByRole("button", { name: "Permanently delete secret" }).click();
+  await unusedRow.getByRole("button", { name: "Delete" }).click();
+  await deleteDialog.getByLabel(/to confirm/).fill("unused_provider_key");
+  await deleteDialog.getByRole("button", { name: "Delete Secret" }).click();
   await expect(page.getByText(ids.unusedSecret)).toHaveCount(0);
   expect(fixture.secretBodies.at(-1)).toEqual({ action: "delete", secret_id: ids.unusedSecret });
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
@@ -1021,11 +1026,12 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
       url.searchParams.get("reason") === "security_response" &&
       url.searchParams.get("result") === "succeeded";
   });
+  await page.getByLabel("Source", { exact: true }).selectOption("console");
+  await page.getByLabel("Result", { exact: true }).selectOption("succeeded");
+  await page.getByRole("button", { name: "More filters" }).click();
   await page.getByLabel("Action").fill("admin.user_block");
-  await page.getByLabel("Descriptive source").selectOption("console");
   await page.getByLabel("Reason code").fill("security_response");
-  await page.getByLabel("Result").selectOption("succeeded");
-  await page.getByRole("button", { name: "Apply filters" }).click();
+  await page.getByRole("button", { name: "Apply" }).click();
   await filteredAudit;
   await expect(page).toHaveURL(/reason=security_response/);
   await expect(page).toHaveURL(/source=console/);
@@ -1035,12 +1041,13 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
   });
   await page.reload();
   await restoredAudit;
+  await expect(page.getByLabel("Source", { exact: true })).toHaveValue("console");
+  await expect(page.getByLabel("Result", { exact: true })).toHaveValue("succeeded");
   await expect(page.getByLabel("Action")).toHaveValue("admin.user_block");
-  await expect(page.getByLabel("Descriptive source")).toHaveValue("console");
   await expect(page.getByLabel("Reason code")).toHaveValue("security_response");
-  await expect(page.getByLabel("Result")).toHaveValue("succeeded");
-  await page.getByRole("button", { name: `application_user:${ids.auditUser}` }).click();
-  await expect(page.getByRole("heading", { name: "Field-level diff" })).toBeVisible();
+  await page.getByRole("row", { name: /admin\.user_block|application_user/ }).first().click();
+  await expect(page.getByText("Fields changed", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/event=aud_/);
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
@@ -1053,25 +1060,20 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await goTo(page, "Self-tests");
-  const immediateSelfTest = page.locator("form.control-form").filter({
-    has: page.getByRole("button", { name: "Run self-test" }),
-  });
-  await immediateSelfTest.locator('input[name="environment"]').fill(ids.environment);
-  await immediateSelfTest.locator('select[name="kind"]').selectOption("openrouter");
-  await immediateSelfTest.locator('input[name="config_revision_id"]').fill(ids.activeRevision);
-  await immediateSelfTest.locator('input[name="upstream"]').fill("openrouter");
-  await immediateSelfTest.locator('input[name="model"]').fill("canary");
-  await expect(immediateSelfTest.locator('input[name="max_cost_nano_usd"]')).toHaveValue("10000000");
-  await page.getByRole("button", { name: "Run self-test" }).click();
-  await expect(page.getByRole("heading", { name: "openrouter self-test" })).toBeVisible();
-  await expect(page.getByText("Bounded provider usage passed.")).toBeVisible();
+  await page.getByRole("button", { name: "OpenRouter conformance" }).click();
+  await page.getByLabel("AI connection").selectOption("openai");
+  await expect(page.getByLabel("Model")).toHaveValue("assistant_default");
+  await expect(page.getByLabel("Cost ceiling (USD)")).toHaveValue("0.01");
+  await page.getByRole("button", { name: "Run Test" }).click();
+  const runDrawer = page.getByRole("complementary", { name: ids.selfTest });
+  await expect(runDrawer.getByText("Bounded provider usage passed.")).toBeVisible();
   expect(fixture.selfTestBodies).toEqual([{
     config_revision_id: ids.activeRevision,
     environment_id: ids.environment,
     kind: "openrouter",
     max_cost_nano_usd: 10_000_000,
-    model: "canary",
-    upstream: "openrouter"
+    model: "assistant_default",
+    upstream: "openai"
   }]);
   expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
   expectOnlyAdminMutations(fixture.mutations);
@@ -1084,29 +1086,33 @@ test("self-test schedules bind durable token metadata and support list, detail, 
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await goTo(page, "Team & Access", "API tokens");
-  await page.getByLabel("Token name").fill("self-test-scheduler");
-  await page.getByLabel("Run self-tests").check();
-  await page.getByRole("button", { name: "Create API token" }).click();
-  await page.getByRole("button", { name: "Dismiss token" }).click();
+  await page.getByRole("button", { name: "Create Token" }).click();
+  const tokenDrawer = page.getByRole("complementary", { name: "Create token" });
+  await tokenDrawer.getByRole("button", { name: "Custom" }).click();
+  await tokenDrawer.getByLabel("Name").fill("self-test-scheduler");
+  await tokenDrawer.getByLabel("Run self-tests").check();
+  await tokenDrawer.getByRole("button", { name: "Create Token" }).click();
+  const reveal = page.getByRole("alertdialog", { name: "Save self-test-scheduler now" });
+  await reveal.getByRole("checkbox").check();
+  await reveal.getByRole("button", { name: "Done" }).click();
 
   await goTo(page, "Self-tests");
-  await page.getByLabel("Scheduled environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load schedules" }).click();
-  await page.getByLabel("Durable Admin API token").fill(oneTimeAPIToken);
-  await page.getByLabel("Scheduled upstream ID").fill("primary");
-  await page.getByLabel("Scheduled model ID").fill("canary");
-  await page.getByRole("button", { name: "Create schedule" }).click();
-  await expect(page.getByLabel("Durable Admin API token")).toHaveValue("");
-  await expect(page.getByText(ids.activeRevision)).toBeVisible();
-  await expect(page.getByText(ids.apiToken, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: ids.selfTestSchedule }).click();
-  await page.getByRole("button", { name: "Disable schedule" }).click();
-  await expect(page.getByText(`${ids.selfTestSchedule} · disabled`)).toBeVisible();
+  await page.getByRole("button", { name: "New Schedule" }).click();
+  const scheduleDrawer = page.getByRole("complementary", { name: "New schedule" });
+  await scheduleDrawer.getByLabel("AI connection").selectOption("openai");
+  await scheduleDrawer.getByLabel("API token").fill(oneTimeAPIToken);
+  await scheduleDrawer.getByRole("button", { name: "Create Schedule" }).click();
+  const scheduleView = page.getByRole("complementary", { name: ids.selfTestSchedule });
+  await expect(scheduleView.getByText(ids.activeRevision)).toBeVisible();
+  await expect(scheduleView.getByText(ids.apiToken, { exact: true })).toBeVisible();
+  await scheduleView.getByRole("button", { name: "Disable" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("row", { name: /assistant_default/ }).getByText("Disabled")).toBeVisible();
 
   expect(fixture.selfTestScheduleBodies).toEqual([{
     daily_cost_limit_nano_usd: 240_000_000, environment_id: ids.environment,
     interval_seconds: 3600, kind: "upstream",
-    max_cost_nano_usd: 10_000_000, model: "canary", upstream: "primary"
+    max_cost_nano_usd: 10_000_000, model: "assistant_default", upstream: "openai"
   }]);
   expect(fixture.selfTestScheduleAuthorizations).toEqual([{ authorization: `Bearer ${oneTimeAPIToken}`, cookie: undefined, csrf: undefined }]);
   expect(JSON.stringify(fixture.selfTestScheduleBodies)).not.toContain(oneTimeAPIToken);
@@ -1120,22 +1126,32 @@ test("owner manages administrators without persisting password material", async 
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await goTo(page, "Team & Access");
-  await page.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
-  await page.getByLabel("Display name").fill("Second Owner");
-  await page.locator('select[name="role"]').selectOption("viewer");
-  await page.getByLabel("Initial password").fill("temporary administrator password");
-  await page.getByRole("button", { name: "Create administrator" }).click();
-  await expect(page.getByText("second-owner@example.test")).toBeVisible();
-  await page.getByLabel("Role for second-owner@example.test").selectOption("operator");
-  await page.getByRole("button", { name: "Reset password" }).last().click();
-  await page.getByLabel("Replacement password").fill("replacement administrator password");
-  await page.getByRole("button", { name: "Reset and revoke credentials" }).click();
-  await page.getByRole("button", { name: "Review disable" }).last().click();
-  await expect(page.getByRole("heading", { name: "Disable second-owner@example.test?" })).toBeVisible();
-  await expect(page.getByText(/does not restore revoked sessions or API tokens/i)).toBeVisible();
-  await page.getByLabel(/immediately removes organization access/i).check();
-  await page.getByRole("button", { name: "Disable and revoke credentials" }).click();
-  await expect(page.getByRole("button", { name: "Enable" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Member" }).click();
+  const addDrawer = page.getByRole("complementary", { name: "Add member" });
+  await addDrawer.getByLabel("Name", { exact: true }).fill("Second Owner");
+  await addDrawer.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
+  await addDrawer.locator("label.lw-role-card", { hasText: "Viewer" }).click();
+  await addDrawer.getByLabel("First password").fill("temporary administrator password");
+  await addDrawer.getByRole("checkbox").check();
+  await addDrawer.getByRole("button", { name: "Add Member" }).click();
+  const member = page.getByRole("complementary", { name: "Second Owner" });
+  await expect(member.getByText("Must set password")).toBeVisible();
+  await member.locator("label.lw-role-card", { hasText: "Operator" }).click();
+  await member.getByRole("button", { name: "Change to Operator" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Change to Operator" }).click();
+  await expect(member.getByText("Second Owner is now Operator.")).toBeVisible();
+  await member.getByRole("button", { name: "Reset Password" }).click();
+  const resetDialog = page.getByRole("alertdialog", { name: "Reset Second Owner's password?" });
+  await resetDialog.getByLabel("New password").fill("replacement administrator password");
+  await resetDialog.getByRole("checkbox").check();
+  await resetDialog.getByRole("button", { name: "Reset Password" }).click();
+  await member.getByRole("button", { name: "Disable" }).click();
+  const disableDialog = page.getByRole("alertdialog", { name: "Disable Second Owner?" });
+  await expect(disableDialog.getByText(/ended sessions and revoked tokens aren't restored/)).toBeVisible();
+  await disableDialog.getByLabel(/to confirm/).fill("second-owner@example.test");
+  await disableDialog.getByRole("checkbox").check();
+  await disableDialog.getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("complementary", { name: "Second Owner" }).getByRole("button", { name: "Enable" })).toBeVisible();
   expect(fixture.administratorBodies).toEqual([
     { display_name: "Second Owner", email: "second-owner@example.test", password: "temporary administrator password", role: "viewer" },
     { action: "role", role: "operator" },
@@ -1158,26 +1174,31 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await goTo(page, "Team & Access", "API tokens");
-  await page.getByRole("button", { name: "Load API tokens" }).click();
-  await expect(page.getByText("No scoped automation credentials have been created for this administrator.")).toBeVisible();
-  await page.getByLabel("Token name").fill("mobile-ci");
-  await page.getByLabel("Inspect users and usage").check();
-  await page.getByLabel("Run self-tests").check();
-  await page.getByRole("button", { name: "Create API token" }).click();
-  await expect(page.getByText("This is the only time Latchway will show this credential.")).toBeVisible();
-  await expect(page.getByLabel("One-time API token")).toHaveValue(oneTimeAPIToken);
-  await page.getByRole("button", { name: "Copy token — clipboard may retain it" }).click();
-  await expect(page.getByText(/Copied\. The operating system clipboard may retain this credential\.|Clipboard access was unavailable\./)).toBeVisible();
+  await expect(page.getByText("No active tokens")).toBeVisible();
+  await page.getByRole("button", { name: "Create Token" }).click();
+  const tokenDrawer = page.getByRole("complementary", { name: "Create token" });
+  await tokenDrawer.getByRole("button", { name: "Custom" }).click();
+  await tokenDrawer.getByLabel("Name").fill("mobile-ci");
+  await tokenDrawer.getByLabel("View users, requests, usage and audit").check();
+  await tokenDrawer.getByLabel("Run self-tests").check();
+  await tokenDrawer.getByLabel("Expires").selectOption("never");
+  await tokenDrawer.getByRole("button", { name: "Create Token" }).click();
+  const reveal = page.getByRole("alertdialog", { name: "Save mobile-ci now" });
+  await expect(reveal.getByText(/only time Latchway shows this token/)).toBeVisible();
+  await expect(reveal.getByLabel("Token", { exact: true })).toHaveValue(oneTimeAPIToken);
+  await reveal.getByRole("button", { name: "Copy token" }).click();
   if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(oneTimeAPIToken);
-  await page.getByRole("button", { name: "Dismiss token" }).click();
-  await expect(page.getByLabel("One-time API token")).toHaveCount(0);
+  await expect(reveal.getByRole("button", { name: "Done" })).toBeDisabled();
+  await reveal.getByRole("checkbox").check();
+  await reveal.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByLabel("Token", { exact: true })).toHaveCount(0);
   const tokenRow = page.getByRole("row", { name: /mobile-ci/ });
-  await tokenRow.getByRole("button", { name: "Review revoke" }).click();
-  await expect(page.getByRole("heading", { name: "Revoke mobile-ci?" })).toBeVisible();
-  await expect(page.getByText(/cannot recover or reactivate this token/i)).toBeVisible();
-  await page.getByLabel(/immediately and permanently revokes this token/i).check();
-  await page.getByRole("button", { name: "Revoke API token" }).click();
-  await expect(tokenRow.getByText("Revoked")).toBeVisible();
+  await tokenRow.getByRole("button", { name: "Revoke" }).click();
+  const revokeDialog = page.getByRole("alertdialog", { name: "Revoke mobile-ci?" });
+  await expect(revokeDialog.getByText(/can't be undone/)).toBeVisible();
+  await revokeDialog.getByLabel(/to confirm/).fill("mobile-ci");
+  await revokeDialog.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.getByText("Revoked", { exact: true })).toBeVisible();
   expect(fixture.apiTokenBodies).toEqual([
     { name: "mobile-ci", scopes: ["inspect_users", "run_self_tests"] },
     { action: "revoke", token_id: ids.apiToken }

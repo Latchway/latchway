@@ -3,10 +3,11 @@ import type { IconName } from "../ui";
 export type ConsoleRoute =
   | "/"
   | "/applications"
-  | "/environments"
   | "/setup"
   | "/administrators"
   | "/api-tokens"
+  | "/admin-sessions"
+  | "/roles"
   | "/authentication-providers"
   | "/client-sessions"
   | "/attestation"
@@ -172,8 +173,10 @@ export const organizationNavigation: readonly NavGroup[] = [
         icon: "team",
         label: "Team & Access",
         tabs: [
-          { description: "Accounts and roles", label: "Members", to: "/administrators" },
-          { description: "Scoped automation credentials", label: "API tokens", to: "/api-tokens" }
+          { description: "People who can sign in, and their roles", label: "Members", to: "/administrators" },
+          { description: "Your tokens for scripts and the CLI", label: "API tokens", to: "/api-tokens" },
+          { description: "Console sign-ins, and signing them out", label: "Sessions", to: "/admin-sessions" },
+          { description: "What each role can do", label: "Roles", to: "/roles" }
         ],
         to: "/administrators"
       },
@@ -183,9 +186,8 @@ export const organizationNavigation: readonly NavGroup[] = [
         icon: "settings",
         label: "Settings",
         tabs: [
-          { description: "Compatibility, privacy, transfer and sessions", label: "General", to: "/settings" },
-          { description: "Tenant application resources", label: "Applications", to: "/applications" },
-          { description: "Application deployment scopes", label: "Environments", to: "/environments" }
+          { description: "Organization, appearance, this server and data handling", label: "General", to: "/settings" },
+          { description: "Applications and their environments", label: "Applications", to: "/applications" }
         ],
         to: "/settings"
       }
@@ -202,7 +204,7 @@ export function areaForPath(pathname: string): NavArea | undefined {
 
 /** Pages where the application and environment crumbs are not used, so the header dims them. */
 export function isOrganizationPath(pathname: string): boolean {
-  return organizationNavigation.some((group) => group.areas.some((area) => area.to === pathname || area.tabs?.some((tab) => tab.to === pathname && tab.to !== "/environments")));
+  return organizationNavigation.some((group) => group.areas.some((area) => area.to === pathname || area.tabs?.some((tab) => tab.to === pathname)));
 }
 
 export interface Command {
@@ -221,7 +223,7 @@ export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =
 );
 
 /** Paths kept only to redirect pre-redesign links to their new home. */
-export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls"];
+export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls", "/environments"];
 
 /**
  * The search a shell link carries to another page: only the workspace scope. Page selections such as a feature, a

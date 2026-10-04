@@ -44,7 +44,7 @@ export function attentionItems({ apiTokens, application, environment, latestRevi
   const scope = application && environment ? `${application.display_name} · ${environment.display_name}` : "This environment";
 
   if (application?.status === "disabled" || environment?.status === "disabled") {
-    items.push({ actionLabel: "Open Environments", detail: "Traffic and configuration changes are blocked until both the application and environment are active.", group: "environment", id: "scope-disabled", severity: "critical", title: `${scope} is disabled`, to: "/environments" });
+    items.push({ actionLabel: "Open Applications", detail: "Traffic and configuration changes are blocked until both the application and environment are active.", group: "environment", id: "scope-disabled", severity: "critical", title: `${scope} is disabled`, to: "/applications" });
   }
   if (environment && !environment.active_revision_id) {
     items.push({ actionLabel: "Continue Setup", detail: `${scope} can't serve feature traffic until a configuration is active.`, group: "environment", id: "no-active-configuration", severity: "warning", title: "No active configuration", to: "/setup" });
