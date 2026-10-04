@@ -1,6 +1,62 @@
 # Implementation status
 
-Status date: 2026-10-03
+Status date: 2026-10-04
+
+## Console redesign phase 8: Authentication (branch `console-redesign`, unreleased)
+
+Until there is a session the console shows a sign-in screen instead of the
+shell (`src/app/auth/`): a form on the left, and on the right the host, the
+version `/healthz` reports and whether the public health endpoints answer.
+Sign in takes an email and a password with Show / Hide (`aria-pressed`) and a
+Caps Lock warning. A 429 from the server becomes a countdown from its
+`Retry-After` for that email address, kept in memory only; after three
+failures the screen says the server pauses an address for up to five minutes
+after five failures in five minutes, which is what `adminapi`'s limiter does.
+"Can't sign in?" says the server gives a wrong password, an unknown email and
+a disabled account the same answer, that an owner resets passwords from Team ›
+Members or with `latchway admin accounts reset-password`, and that there is
+no self-service reset. When an administrator belongs to more than one
+organization they choose one; the password stays in its now-hidden input, the
+first session is signed out, and the console signs in again with
+`organization_id`.
+
+First-run setup ("Setting up a new server?") takes the bootstrap token, the
+organization (the slug is suggested from the name until edited) and the
+first owner. It validates every field at once, says how many need attention
+and focuses the first, and requires a password rated Good or Strong by a
+local estimate on top of the server's 12-character minimum. A 409
+`bootstrap_disabled` shows "Setup is already done". After setup, "{Org} is
+ready" shows how to remove `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` on Docker Compose,
+Fly.io, Amazon ECS and Cloud Run, and enters the console (or Setup) once the
+operator confirms they have. The screen stays up through these steps even if
+a background refresh already sees the new session. Signing out shows "You're
+signed out" with the email offered again from memory; a session read that
+fails for any other reason shows "Can't reach the server" with Try Again and
+the `latchway doctor` / `latchway status` commands.
+
+When a session ends while the console is open (a 401 from the Admin API, or
+the expiry time passing), the page stays mounted and a dialog that can't be
+dismissed asks for the password again for the same email and organization,
+or signs in as someone else. Five minutes before `expires_at` the status rail
+offers Sign In Now or Dismiss. The account menu has Your Account (email,
+role, organization, when the session ends, and for owners a link to Sessions)
+and, with more than one membership, Switch Organization, which signs in again
+into the chosen organization; the previous session is no longer used and
+ends at its expiry. Signing out clears every cached response. Passwords and
+the bootstrap token live only in their inputs and are cleared once each
+request finishes. The old access panel, the signed-out overview and their
+styles are gone.
+
+Not built because the API has no source: changing your own password (Your
+Account says so), detecting `password_reset_required` at sign-in, a reason
+for why a session ended, a version check before sign-in, remembering the
+last organization, and two-factor, passkey or SSO sign-in.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (410 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway; its steps are updated for the new screens),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.25 MB.
 
 ## Console redesign phase 7: Operate and Organization (branch `console-redesign`, unreleased)
 
@@ -72,7 +128,7 @@ device details on sessions, provider health per connection (the page links to
 Analytics › Reliability), health history, renaming or deleting applications
 and environments, users per environment, copying one environment's
 configuration into another, and a list of past self-test runs. Your Account
-(own password and sessions) comes with the Authentication phase.
+landed in phase 8.
 
 Validation: lint, typecheck, `check:api`, `pnpm test` (393 passed),
 Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live

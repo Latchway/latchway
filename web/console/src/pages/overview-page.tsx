@@ -5,11 +5,9 @@ import { useState } from "react";
 import { adminRequest, APITokenPageSchema, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
 import { problemFromError } from "../api/auth";
 import { useSystemHealth } from "../api/health";
-import { useConsoleSession } from "../api/session";
 import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { AnalyticsRouteSearchSchema } from "../app/route-search";
 import { useWorkspace } from "../app/workspace-context-value";
-import { AdminAccessPanel } from "../components/admin-access-panel";
 import { AttentionList, buttonClass, Card, Icon, MetricTile, PageHeader, ProportionBar, RangePicker, StatStrip, VolumeChart } from "../ui";
 import {
   buckets,
@@ -31,80 +29,6 @@ import { useUsage } from "./analytics/use-usage";
 import { ProblemNotice } from "./control-plane-pages";
 import { ATTENTION_GROUPS, attentionItems } from "./overview/attention-model";
 import { formatMs } from "./requests/request-format";
-
-function SignedOutOverview() {
-  return (
-    <div className="access-page">
-      <section className="access-intro" aria-labelledby="access-heading">
-        <p className="eyebrow">Same-origin administration</p>
-        <h1 id="access-heading">Sign in to the control plane.</h1>
-        <p className="hero__lede">
-          Use an administrator account to operate this gateway. If this is a new
-          installation, the one-time bootstrap token can create its first organization
-          and owner.
-        </p>
-        <Link className="secondary-action access-intro__health" to="/system-health">
-          Review system health
-          <span aria-hidden="true">→</span>
-        </Link>
-
-        <dl className="access-safeguards">
-          <div>
-            <dt>Session boundary</dt>
-            <dd>Secure, same-site cookies remain scoped to this gateway.</dd>
-          </div>
-          <div>
-            <dt>Secret handling</dt>
-            <dd>Passwords and bootstrap tokens are sent once and never stored here.</dd>
-          </div>
-          <div>
-            <dt>First-owner setup</dt>
-            <dd>The bootstrap path closes permanently after its successful use.</dd>
-          </div>
-        </dl>
-      </section>
-
-      <AdminAccessPanel />
-    </div>
-  );
-}
-
-function SessionUnavailableOverview({
-  isRefreshing,
-  retry
-}: {
-  isRefreshing: boolean;
-  retry: () => void;
-}) {
-  return (
-    <section className="empty-state" aria-labelledby="session-unavailable-heading">
-      <p className="eyebrow">Administrator session</p>
-      <h1 id="session-unavailable-heading">The console cannot confirm your session.</h1>
-      <p>
-        Check same-origin routing and gateway availability. Credentials are not needed
-        until the session endpoint responds.
-      </p>
-      <button
-        className="primary-action"
-        disabled={isRefreshing}
-        onClick={retry}
-        type="button"
-      >
-        {isRefreshing ? "Checking session…" : "Try session check again"}
-      </button>
-    </section>
-  );
-}
-
-function SessionCheckingOverview() {
-  return (
-    <section className="empty-state" aria-labelledby="session-checking-heading" role="status">
-      <p className="eyebrow">Administrator session</p>
-      <h1 id="session-checking-heading">Confirming your console access.</h1>
-      <p>The gateway is checking for a secure administrator session.</p>
-    </section>
-  );
-}
 
 function OperatingOverview() {
   const workspace = useWorkspace();
@@ -267,23 +191,7 @@ function OperatingOverview() {
   );
 }
 
+/** The shell signs the operator in first, so this page always has a session. */
 export function OverviewPage() {
-  const session = useConsoleSession();
-
-  if (session.isPending && !session.data) {
-    return <SessionCheckingOverview />;
-  }
-  if (session.data?.mode === "signed-out") {
-    return <SignedOutOverview />;
-  }
-  if (session.data?.mode !== "configured") {
-    return (
-      <SessionUnavailableOverview
-        isRefreshing={session.isFetching}
-        retry={() => void session.refetch()}
-      />
-    );
-  }
-
   return <OperatingOverview />;
 }
