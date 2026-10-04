@@ -1596,3 +1596,22 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 .lw-legacy-block .task-card-list, .lw-legacy-block .development-path, .lw-guided .control-form { margin: 0; }
 .lw-guided .control-form { border: 0; padding: 0; background: none; box-shadow: none; }
 @media (max-width: 640px) { .lw-route-steps > li { grid-template-columns: 24px minmax(0, 1fr); } .lw-route-steps > li > .lw-row { grid-column: 2; } .lw-page-foot { padding: 12px 16px; } }
+
+/* ---------- Phase 6: Policies, Changes, Simulator ---------- */
+.lw-row--spread { justify-content: space-between; }
+.lw-row--wrap { align-items: flex-end; }
+.lw-textarea { width: 100%; min-height: 60px; padding: 8px 12px; border: 0; border-radius: var(--radius-2_5); background: var(--input-background); box-shadow: 0 0 0 1px var(--border); color: var(--foreground-primary); font: inherit; font-size: 14px; line-height: 20px; resize: vertical; box-sizing: border-box; }
+.lw-textarea:focus { outline: 0; box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-focus-glow); }
+.lw-json-editor--full { min-height: 60vh; }
+.lw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px 12px; }
+.lw-limit__scope { display: flex; flex-direction: column; gap: 8px; }
+.lw-reassign { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.lw-reassign li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lw-tags-inline { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.lw-mini-table { width: 100%; margin-top: 6px; border-collapse: collapse; font-size: 13px; line-height: 18px; }
+.lw-mini-table th { padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 500; text-align: left; color: var(--foreground-secondary); }
+.lw-mini-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.lw-mini-table tr:last-child td { border-bottom: 0; }
+.lw-plan-rule .lw-input-box { min-width: 0; }
+.lw-entry__summary:disabled { cursor: default; }
+ul.lw-limits, ul.lw-entry-list, ol.lw-plan-rules, ol.lw-trace { margin: 0; padding: 0; list-style: none; }

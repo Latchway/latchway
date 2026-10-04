@@ -189,7 +189,7 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
     ] satisfies MenuEntry[]),
     { kind: "separator" },
     { heading: "Limits", kind: "heading" },
-    { label: "Plan Override", onSelect: () => void navigate({ search: linkSearch, to: "/user-overrides" }) }
+    { label: "Plan Override", onSelect: () => void navigate({ search: { ...linkSearch, user: user.id }, to: "/user-overrides" }) }
   ];
 
   return (
@@ -213,7 +213,7 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
                   <Button onClick={() => {
                     setChooser(false);
                     if ("action" in situation.intent) onAction(situation.intent.action);
-                    else void navigate({ search: situation.intent.to === "/installation-families" ? { ...linkSearch, environment_id: environmentID, user_id: user.id } : linkSearch, to: situation.intent.to });
+                    else void navigate({ search: situation.intent.to === "/installation-families" ? { ...linkSearch, environment_id: environmentID, user_id: user.id } : { ...linkSearch, user: user.id }, to: situation.intent.to });
                   }} size="sm">{"action" in situation.intent ? ACTION_TITLE[situation.intent.action] : situation.intent.to === "/user-overrides" ? "Plan Override" : "Pick Installation"}</Button>
                 </li>
               ))}

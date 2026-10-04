@@ -74,7 +74,9 @@ function revision(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => adminRequestMock.mockReset());
+beforeEach(() => {
+  adminRequestMock.mockReset();
+});
 
 describe("setup wizard API context binding", () => {
   it("rejects an application page containing a resource from another organization", async () => {

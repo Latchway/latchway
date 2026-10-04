@@ -12,9 +12,7 @@ import {
   type LogicalRequest,
   type SelfTestRun
 } from "../api/admin";
-import { problemFromError, type AdminProblem } from "../api/auth";
-import { EnvironmentRequired } from "../app/workspace-context";
-import { useOptionalWorkspace } from "../app/workspace-context-value";
+import { problemFromError } from "../api/auth";
 import { type JSONRecord } from "./configuration-slice";
 import { localTaskProblem, useConfigurationTask } from "./configuration-task";
 import { ApplePolicyFields, PlayTestingField } from "./attestation-policy-fields";
@@ -22,10 +20,7 @@ import { applePolicyFromForm } from "./attestation-policy-input";
 import {
   buildClientAccessDocument,
   buildConnectionDocument,
-  buildUsagePlanDocument,
   clientPlatformReadiness,
-  describeLimit,
-  isJSONRecord,
   specRecords,
   type ClientPlatform,
   type TaskProtocol,
@@ -38,24 +33,12 @@ import {
   type WriteOnlySecretResolution
 } from "./write-only-secret";
 
-function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
-}
-
 const protocols: TaskProtocol[] = ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages"];
 
 function integer(form: FormData, name: string): number {
   const value = Number(form.get(name));
   if (!Number.isSafeInteger(value)) throw new Error(`${name.replaceAll("_", " ")} must be a safe integer.`);
   return value;
-}
-
-function TaskScope({ application, environment, purpose }: { application?: { display_name: string }; environment?: { display_name: string; id: string; kind: string }; purpose: string }) {
-  return environment ? <section aria-label={purpose} className={`production-context production-context--${environment.kind}`}><strong>{application?.display_name} / {environment.display_name}</strong><span>{environment.kind === "production" ? "Production configuration · publishing affects client traffic" : `${environment.kind} configuration`}</span><code>{environment.id}</code></section> : null;
-}
-
-function LoadingConfiguration({ pending }: { pending: boolean }) {
-  return pending ? <section className="empty-state" role="status"><h2>Loading active configuration…</h2><p>The task will remain disabled until the exact environment revision is available.</p></section> : null;
 }
 
 function DraftReview({ draft, environmentName, production, title, busy, canPublish, clear, publish }: {
@@ -389,43 +372,3 @@ export function PlatformReadiness({ task }: { task: ConfigurationTask }) {
         </div>
       </section>;
 }
-
-function UsagePlanWorkspace() {
-  const task = useConfigurationTask();
-  const [changeLabel, setChangeLabel] = useState("usage plan");
-  const document = task.source?.document as JSONRecord | undefined;
-  const plans = useMemo(() => document ? specRecords(document, "limitPlans") : [], [document]);
-
-  async function stagePlan(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!task.canConfigure || !document) return;
-    const data = new FormData(event.currentTarget);
-    try {
-      const planID = String(data.get("plan_id"));
-      const next = buildUsagePlanDocument(document, {
-        dailyCostUSD: String(data.get("daily_cost_usd")),
-        dailyInputTokens: integer(data, "daily_input_tokens"),
-        dailyLogicalRequests: integer(data, "daily_requests"),
-        dailyOutputTokens: integer(data, "daily_output_tokens"),
-        dailyTotalTokens: integer(data, "daily_total_tokens"),
-        maximumConcurrentRequests: integer(data, "concurrent_requests"),
-        perRequestInputTokens: integer(data, "per_request_input_tokens"),
-        perRequestOutputTokens: integer(data, "per_request_output_tokens"),
-        planID,
-        scope: String(data.get("scope")) as "environment_feature" | "user" | "user_feature",
-        timezone: String(data.get("timezone"))
-      });
-      const staged = await task.stage(next, `Admin console add usage plan ${planID}`);
-      if (staged) setChangeLabel(planID);
-    } catch (error) { task.setProblem(localTaskProblem(error instanceof Error ? error.message : "Usage-plan details are invalid.", "Usage plan is incomplete")); }
-  }
-
-  return <div className="control-page task-workspace"><section className="page-heading"><div><p className="eyebrow">Usage plans</p><h1>Set limits in operator language.</h1><p>Group enforceable volume, cost, per-request, and concurrency limits into a plan. Advanced units remain available in the full configuration editor.</p></div><button className="secondary-action" disabled={task.busy || task.configuration.isFetching} onClick={() => void task.configuration.refetch()} type="button">Refresh plans</button></section><TaskScope application={task.application} environment={task.environment} purpose="Usage-plan change scope" /><ProblemNotice problem={task.problem ?? (task.configuration.error ? problemFromError(task.configuration.error) : undefined)} /><LoadingConfiguration pending={task.configuration.isPending} />{document ? <><section className="task-card-list"><div className="detail-card__heading"><div><p className="eyebrow">Active revision {task.source?.version}</p><h2>Configured plans</h2></div><code>{task.sourceETag}</code></div>{plans.length ? plans.map((plan) => <article className="task-summary-card" key={String(plan.id)}><div><strong>{String(plan.id)}</strong><span>{Array.isArray(plan.limits) ? `${plan.limits.length} limit(s)` : "Invalid limits"}</span></div>{Array.isArray(plan.limits) ? <ul>{plan.limits.filter(isJSONRecord).map((limit, index) => <li key={`${String(limit.metric)}-${String(limit.algorithm)}-${index}`}>{describeLimit(limit)}</li>)}</ul> : null}</article>) : <p>No usage plans are active.</p>}</section><form className="control-form task-builder" onSubmit={(event) => void stagePlan(event)}><div><p className="eyebrow">New usage plan</p><h2>Choose only the limits this plan needs.</h2><p>Leave a numeric field at zero to omit that rule. Every generated rule is hard, server-owned, and grouped by the selected scope.</p></div><fieldset><legend>1. Plan identity and audience</legend><div className="form-field-grid"><label>Plan ID<input defaultValue="starter" name="plan_id" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Group usage by<select defaultValue="user_feature" name="scope"><option value="user_feature">User + feature</option><option value="user">User across features</option><option value="environment_feature">Environment + feature</option></select></label><label>Calendar timezone<input defaultValue="UTC" name="timezone" /></label></div></fieldset><fieldset><legend>2. Daily volume and cost</legend><div className="form-field-grid"><label>Requests / day<input defaultValue={100} min={0} name="daily_requests" type="number" /></label><label>Input tokens / day<input defaultValue={100000} min={0} name="daily_input_tokens" type="number" /></label><label>Output tokens / day<input defaultValue={100000} min={0} name="daily_output_tokens" type="number" /></label><label>Total tokens / day<input defaultValue={200000} min={0} name="daily_total_tokens" type="number" /></label><label>Cost USD / day<input defaultValue="1" inputMode="decimal" name="daily_cost_usd" /></label></div></fieldset><fieldset><legend>3. Per-request and simultaneous work</legend><div className="form-field-grid"><label>Input tokens / request<input defaultValue={20000} min={0} name="per_request_input_tokens" type="number" /></label><label>Output tokens / request<input defaultValue={2000} min={0} name="per_request_output_tokens" type="number" /></label><label>Concurrent requests<input defaultValue={4} min={0} name="concurrent_requests" type="number" /></label></div></fieldset><button className="primary-action" disabled={!task.canConfigure || task.busy} type="submit">Review usage-plan change</button></form><p className="control-notice"><strong>Effective-limit inspection</strong><span>Resolve the current hard limits and their source for a specific pseudonymous user in the Users inspector.</span><Link to="/users">Inspect resolved limits in Users</Link></p><DraftReview busy={task.busy} canPublish={task.canConfigure} clear={() => task.setDraft(undefined)} draft={task.activeDraft} environmentName={task.environment?.display_name} production={task.environment?.kind === "production"} publish={task.publish} title={changeLabel} /></> : null}</div>;
-}
-
-function useTaskWorkspaceKey(): string {
-  const workspace = useOptionalWorkspace();
-  return `${workspace?.application?.id ?? "none"}:${workspace?.environment?.id ?? "none"}`;
-}
-
-export function UsagePlanWorkspacePage() { const key = useTaskWorkspaceKey(); return <EnvironmentRequired><UsagePlanWorkspace key={key} /></EnvironmentRequired>; }

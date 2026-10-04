@@ -394,10 +394,11 @@ async function installAdminFixture(
     };
     if (url.pathname === "/admin/v1/audit-events") return json(route, 200, { items: [auditEvent], page: { has_more: false } });
     if (url.pathname === `/admin/v1/audit-events/${ids.audit}`) return json(route, 200, auditEvent);
-    if (url.pathname === `/admin/v1/config-revisions/${activeConfigurationRevisionID}/simulate`) return json(route, 200, {
+    const simulated = /^\/admin\/v1\/config-revisions\/(rev_[A-Za-z0-9_-]+)\/simulate$/.exec(url.pathname)?.[1];
+    if (simulated && (simulated === activeConfigurationRevisionID || simulated === ids.draftRevision)) return json(route, 200, {
       allowed: true, application_id: ids.application, environment_id: ids.environment, environment_kind: "production", explanation: ["production policy allowed"],
       facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, expanded_schema_bytes: 0, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
-      fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: activeConfigurationRevisionID, route: "primary", upstream: "openai", warnings: []
+      fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: simulated, route: "primary", upstream: "openai", warnings: []
     });
     if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "GET") return json(route, 200, { items: selfTestSchedules, page: { has_more: false } });
     if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "POST") {
@@ -794,27 +795,37 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 
   await goTo(page, "Policies & Limits", "Overrides");
-  await page.getByLabel("Environment ID").fill(ids.environment);
+  await expect(page.getByText("Changes here apply immediately and never appear in the draft.")).toBeVisible();
   await page.getByLabel("User ID").fill(ids.user);
-  await page.getByRole("button", { name: "Inspect override" }).click();
-  await expect(page.getByText("No override")).toBeVisible();
-  await page.getByLabel("Limit plan").fill("subscriber");
+  await page.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByText("None: the user's claims pick the plan")).toBeVisible();
+  await page.getByLabel("Plan", { exact: true }).selectOption("free");
+  await page.getByLabel("Ends").selectOption("never");
   await page.getByLabel("Reason").fill("support-approved");
-  await page.getByRole("button", { name: "Set override" }).click();
-  await expect(page.getByText("Reason: support-approved")).toBeVisible();
-  await page.getByRole("button", { name: "Clear override" }).click();
-  await expect(page.getByText("No override")).toBeVisible();
+  await page.getByRole("button", { name: "Apply Now" }).click();
+  await expect(page.getByText("Override applied. free is live for this user now.")).toBeVisible();
+  await expect(page.getByText("support-approved")).toBeVisible();
+  await page.getByRole("button", { name: "Clear Override" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Clear Override" }).click();
+  await expect(page.getByText("None: the user's claims pick the plan")).toBeVisible();
   expect(fixture.overrideBodies).toEqual([
-    { limit_plan: "subscriber", reason: "support-approved" },
+    { limit_plan: "free", reason: "support-approved" },
     { action: "clear", user_id: ids.user }
   ]);
 
   await goTo(page, "Changes");
-  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
-  await page.getByRole("button", { name: "Review rollback" }).click();
-  await page.getByLabel("Operator reason").fill("restore known-good revision");
-  await page.getByRole("button", { name: "Confirm rollback to revision 1" }).click();
-  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
+  await expect(page.getByText("No unpublished changes")).toBeVisible();
+  await page.getByRole("navigation", { name: "Changes pages" }).getByRole("link", { name: "History" }).click();
+  await page.getByRole("row", { name: new RegExp(ids.revision) }).click();
+  const revisionDrawer = page.getByRole("complementary", { name: ids.revision });
+  await revisionDrawer.getByRole("button", { name: "Roll Back to This" }).click();
+  const rollbackDialog = page.getByRole("alertdialog", { name: "Roll back to version 1?" });
+  await rollbackDialog.getByLabel("Reason").fill("restore known-good revision");
+  await rollbackDialog.getByLabel(/to confirm/).fill(ids.revision);
+  await rollbackDialog.getByRole("checkbox").check();
+  await rollbackDialog.getByRole("button", { name: "Roll Back" }).click();
+  await expect(revisionDrawer.getByText(`${ids.revision} is live again.`)).toBeVisible();
   expect(fixture.rollbackBodies).toEqual([{ audit_reason: "operator_reason_provided", etag: '"active-revision-etag"', reason: "restore known-good revision", revision_id: ids.revision }]);
 
   expectOnlyAdminMutations(fixture.mutations);
@@ -873,13 +884,13 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByText(/verification checks/).first()).toBeVisible();
 
   await goTo(page, "Simulator");
-  await page.getByLabel("Environment context ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load active route context" }).click();
-  await expect(page.getByText(/Selected active revision/)).toContainText("1 feature");
-  await expect(page.getByLabel("Revision ID")).toHaveValue(ids.draftRevision);
+  await expect(page.getByLabel("Run against")).toHaveValue("live");
   await expect(page.getByLabel("Feature")).toHaveValue("assistant");
-  await page.getByRole("button", { name: "Simulate route" }).click();
-  await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
+  const simulation = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === `/admin/v1/config-revisions/${ids.draftRevision}/simulate`);
+  await page.getByRole("button", { name: "Simulate" }).click();
+  expect((await simulation).postDataJSON()).toMatchObject({ feature: "assistant", principal: { authenticated: true, claims: { plan: "free" } } });
+  await expect(page.locator(".lw-verdict strong")).toHaveText("Allowed");
+  await expect(page).not.toHaveURL(/claims|plan=free/);
 
   await goTo(page, "Requests");
   await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
@@ -932,6 +943,38 @@ test("owner activates a targeted configuration merge and uses focused observabil
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
+});
+
+test("a limit plan edit lands in the shared draft and publishes after spot checks", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+
+  await goTo(page, "Policies & Limits");
+  await expect(page.getByRole("heading", { level: 1, name: "Limit plans" })).toBeVisible();
+  await page.getByRole("row", { name: /free/ }).click();
+  const drawer = page.getByRole("complementary", { name: "free" });
+  await drawer.getByRole("button", { name: /Each user, per feature can use 100 requests per day/ }).click();
+  await drawer.getByLabel("Limit 1 amount").fill("250");
+  await drawer.getByRole("button", { name: "Save to Draft" }).click();
+  await expect(page.getByText("Saved to draft")).toBeVisible();
+  const patched = fixture.configurationPatchBodies.at(-1) as { spec: { limitPlans: Array<{ id: string; limits: Array<Record<string, unknown>> }> } };
+  expect(patched.spec.limitPlans.find((plan) => plan.id === "free")?.limits[0]).toMatchObject({ algorithm: "calendar", maximum: 250, metric: "logical_requests" });
+
+  await goTo(page, "Changes");
+  await expect(page.getByRole("region", { name: "Limits" })).toContainText("limits › 1 › maximum: 100 → 250");
+  await page.getByRole("region", { name: "Console state" }).getByRole("button", { name: "Publish to Production" }).click();
+  const review = page.getByRole("alertdialog", { name: new RegExp(`Publish ${ids.draftRevision} to Production`) });
+  await expect(review.getByText(/All \d+ sample requests get the same result/)).toBeVisible();
+  const publish = review.getByRole("button", { name: "Publish to Production" });
+  await expect(publish).toBeDisabled();
+  await review.getByLabel("I've checked what changes for Production users.").check();
+  await publish.click();
+  await expect(review).toHaveCount(0);
+  expect(fixture.configurationETags.at(-1)).toEqual({ etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` });
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("request usage distinguishes unknown quota charges, missing billing and reported zero", async ({ page }) => {

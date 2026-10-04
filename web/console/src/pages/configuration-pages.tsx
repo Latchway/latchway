@@ -1,12 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
 import {
   adminRequest,
   RequestPageSchema,
   RevisionSchema,
   SelfTestSchema,
-  type ConfigurationPlan,
   type ConfigurationRevision,
   type ConfigurationValidation,
   type LogicalRequest,
@@ -18,7 +17,6 @@ import { useConsoleSession } from "../api/session";
 import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { SecretResourcePageSchema } from "../api/resources";
 import { useConsoleCompatibility } from "../app/console-compatibility-context";
-import { ConfigurationRouteSearchSchema } from "../app/route-search";
 import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 import {
@@ -43,7 +41,6 @@ import {
   type WriteOnlySecretResolution
 } from "./write-only-secret";
 
-const environmentPattern = "env_[A-Za-z0-9_-]{16,128}";
 const setupRequestPageSize = "50";
 const selectablePlatformScopes = [
   "ios",
@@ -953,36 +950,4 @@ function ScopedSetupWizardPage() {
       <section className="wizard-card"><h2>Send and verify a client request</h2><p>Completion is derived only from a succeeded, completed request in this server-owned environment whose feature, protocol, and configuration revision match unchanged active-configuration reads immediately before and after request inspection. The <code>latchway develop</code> sample runner and official SDK requests both create this durable, redaction-safe evidence.</p><div className="button-row"><button className="primary-action" disabled={!canInspect || evidenceBusy || !activeConfigurationReady || !requestTarget} onClick={() => void refreshVerifiedRequest()} type="button">{evidenceBusy ? "Checking durable requests…" : "Check durable client request"}</button><a className="secondary-action" href={`/upstreams${typeof window === "undefined" ? "" : window.location.search}`}>Open AI connections</a><a className="secondary-action" href={`/requests${typeof window === "undefined" ? "" : window.location.search}`}>Open request explorer</a></div>{!canInspect ? <p className="control-notice"><strong>Request inspection unavailable</strong><span>Your current capability set cannot read durable request metadata, so this step remains incomplete.</span></p> : null}{verifiedRequest ? <p className="resource-result">Verified durable request <code>{verifiedRequest.id}</code>: <strong>{verifiedRequest.status}</strong> for {verifiedRequest.feature} via {verifiedRequest.selected_physical_model ?? verifiedRequest.attempts.at(-1)?.model ?? "recorded model"}.</p> : null}</section>
     </>}
   </div>;
-}
-
-interface ConfigurationEditorPageProps {
-  areaDescription?: string;
-  areaTitle?: string;
-  canonicalPaths?: string[];
-}
-
-export function ConfigurationEditorPage({
-  areaDescription = "Pull, edit, validate, diff, and activate every configuration area through immutable revisions and strong ETags.",
-  areaTitle = "Full-document editor",
-  canonicalPaths = []
-}: ConfigurationEditorPageProps = {}) {
-  const session = useConsoleSession(); const consoleCompatibility = useConsoleCompatibility(); const workspace = useOptionalWorkspace(); const routeSearch = ConfigurationRouteSearchSchema.parse(workspace?.search ?? {}); const routeEnvironment = routeSearch.environment_id; const [environment, setEnvironment] = useState(routeEnvironment ?? ""); const [document, setDocument] = useState(""); const [baselineDocument, setBaselineDocument] = useState(""); const [active, setActive] = useState<ConfigurationRevision>(); const [validation, setValidation] = useState<ConfigurationValidation>(); const [plan, setPlan] = useState<ConfigurationPlan>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
-  const dirty = Boolean(document) && comparableDocument(document) !== baselineDocument;
-  const activeMatchesEnvironment = !active || active.environment_id === environment;
-  useDirtyEditProtection(dirty);
-  const canConfigure = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
-  async function pull(targetEnvironment = environment): Promise<void> { setBusy(true); setProblem(undefined); try { const response = await adminRequest(`/admin/v1/environments/${targetEnvironment}/config`, RevisionSchema); if (response.data.environment_id !== targetEnvironment) throw new Error("The active revision did not match the selected environment."); const serialized = JSON.stringify(response.data.document, null, 2); setEnvironment(targetEnvironment); setActive(response.data); setDocument(serialized); setBaselineDocument(canonicalConfigurationJSON(response.data.document)); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
-  function selectEnvironment(): void { if (!new RegExp(`^${environmentPattern}$`, "u").test(environment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading configuration.", retryable: false, status: 0, title: "Invalid environment" }); return; } if (workspace && routeEnvironment !== environment) { workspace.updateSearch({ environment_id: environment }); return; } void pull(environment); }
-  async function apply(activate: boolean): Promise<void> { if (!canConfigure || !activeMatchesEnvironment) return; setBusy(true); setProblem(undefined); setPlan(undefined); try { const result = await createValidateActivate({ document: JSON.parse(document) as unknown, environmentID: environment, activate }); setActive(result.revision); setValidation(result.report); setPlan(result.plan); if (activate && result.report.valid && result.revision.state === "active") { setDocument(JSON.stringify(result.revision.document, null, 2)); setBaselineDocument(canonicalConfigurationJSON(result.revision.document)); } } catch (error) { setProblem(error instanceof SyntaxError ? { code: "invalid_json", detail: "The editor must contain exactly one JSON object.", retryable: false, status: 0, title: "Invalid JSON" } : problemFromError(error)); } finally { setBusy(false); } }
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !routeEnvironment) return;
-    // A validated deep link restores the exact environment revision.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEnvironment(routeEnvironment);
-    void pull(routeEnvironment);
-    // Pulling is intentionally keyed only by canonical route state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeEnvironment, session.data?.mode]);
-  if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to edit configuration.</h1></section>;
-  return <div className="control-page"><section className="page-heading"><div><p className="eyebrow">AI Configuration</p><h1>{areaTitle}</h1><p>{areaDescription}</p></div></section>{canonicalPaths.length ? <p className="resource-result">Canonical document area: {canonicalPaths.map((path, index) => <span key={path}>{index ? ", " : ""}<code>{path}</code></span>)}</p> : null}<div className="filter-bar"><label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><button className="secondary-action" disabled={busy || !environment} onClick={selectEnvironment} type="button">Pull active revision</button></div><ProblemNotice problem={problem} />{!activeMatchesEnvironment ? <p className="control-notice" role="status"><strong>Environment selection changed</strong><span>Pull the newly selected environment before validating or applying this document.</span></p> : null}<textarea aria-label="Configuration document JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} placeholder="Pull an active revision or paste one complete EnvironmentConfig JSON object." rows={34} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={!canConfigure || busy || !document || !environment || !activeMatchesEnvironment} onClick={() => void apply(false)} type="button">Dry-run validate and diff</button><button className="primary-action" disabled={!canConfigure || busy || !document || !environment || !activeMatchesEnvironment} onClick={() => void apply(true)} type="button">Apply with ETag</button></div><ValidationResult report={validation} />{plan ? <section className="detail-card"><h2>Redacted structural diff</h2><ul>{plan.changes.map((change, index) => <li key={`${change.path}-${index}`}><strong>{change.operation}</strong> <code>{change.path}</code>{change.summary ? ` — ${change.summary}` : ""}</li>)}</ul></section> : null}{active ? <p className="resource-result">Revision <code>{active.id}</code> is <strong>{active.state}</strong>.</p> : null}</div>;
 }

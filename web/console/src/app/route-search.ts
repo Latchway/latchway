@@ -10,7 +10,6 @@ const SearchModel = z.string().min(1).max(512).refine(
   "Model filters cannot contain control characters."
 );
 const Platform = z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"]);
-const TrustLevel = z.enum(["none", "identity_only", "app_verified", "device_verified", "strong_device_verified", "debug"]);
 const QueryBoolean = z.preprocess((value) => {
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
@@ -233,24 +232,38 @@ export const AnalyticsRouteSearchSchema = z.object({
 export type AnalyticsRouteSearch = z.infer<typeof AnalyticsRouteSearchSchema>;
 export const parseAnalyticsRouteSearch = (value: unknown): AnalyticsRouteSearch => AnalyticsRouteSearchSchema.parse(value);
 
+const SimulationTarget = z.union([z.enum(["live", "draft"]), OpaqueID("rev")]);
+const SimulationTrust = z.enum(["none", "identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"]);
+export const GRID_DIMENSIONS = ["plan", "platform", "trust_level", "streaming", "size"] as const;
+
+/**
+ * Simulator inputs that may live in the URL: sizes, platform and trust. Claims never do; they stay in the page.
+ * A user or request selection is scoped by the workspace environment.
+ */
 export const RouteSimulatorRouteSearchSchema = z.object({
   ...workspaceSearchFields,
   app_version: optional(AppVersion),
   authenticated: optional(QueryBoolean),
-  environment_id: optional(OpaqueID("env")),
   expanded_schema_bytes: optional(boundedNonnegativeIntegerText(4_194_304)),
   feature: optional(Identifier),
   framing_unit_count: optional(boundedNonnegativeIntegerText(4096)),
+  grid_x: optional(z.enum(GRID_DIMENSIONS)),
+  grid_y: optional(z.enum(GRID_DIMENSIONS)),
+  image_units: optional(boundedNonnegativeIntegerText(1_000_000)),
+  mode: optional(z.enum(["sample", "user", "request", "grid"])),
   platform: optional(Platform),
-  requested_input_tokens: optional(boundedNonnegativeIntegerText(2_147_483_647)),
-  requested_output_max: optional(boundedNonnegativeIntegerText(2_147_483_647)),
-  revision_id: optional(OpaqueID("rev")),
+  request: optional(OpaqueID("req")),
+  requested_input_tokens: optional(boundedNonnegativeIntegerText(100_000_000)),
+  requested_output_max: optional(boundedNonnegativeIntegerText(100_000_000)),
   rewritten_request_bytes: optional(boundedNonnegativeIntegerText(104_857_600)),
+  run: optional(SimulationTarget),
   streaming: optional(QueryBoolean),
-  trust_level: optional(TrustLevel)
+  tool_calls: optional(boundedNonnegativeIntegerText(1_000_000)),
+  trust_level: optional(SimulationTrust),
+  user: optional(OpaqueID("usr")),
+  versus: optional(SimulationTarget)
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["revision_id", search.revision_id], ["feature", search.feature]]);
-  if (search.feature && !search.revision_id) context.addIssue({ code: "custom", message: "A revision is required for a feature selection.", path: ["feature"] });
+  if (search.grid_x && search.grid_x === search.grid_y) context.addIssue({ code: "custom", message: "Choose two different grid dimensions.", path: ["grid_y"] });
 });
 
 export type RouteSimulatorRouteSearch = z.infer<typeof RouteSimulatorRouteSearchSchema>;
@@ -276,3 +289,46 @@ export const FeatureRouteSearchSchema = z.object({
 
 export type FeatureRouteSearch = z.infer<typeof FeatureRouteSearchSchema>;
 export const parseFeatureRouteSearch = (value: unknown): FeatureRouteSearch => FeatureRouteSearchSchema.parse(value);
+
+export const LimitPlanRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  plan: optional(Identifier)
+});
+
+export type LimitPlanRouteSearch = z.infer<typeof LimitPlanRouteSearchSchema>;
+export const parseLimitPlanRouteSearch = (value: unknown): LimitPlanRouteSearch => LimitPlanRouteSearchSchema.parse(value);
+
+export const PlanByFeatureRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  feature: optional(Identifier)
+});
+
+export type PlanByFeatureRouteSearch = z.infer<typeof PlanByFeatureRouteSearchSchema>;
+export const parsePlanByFeatureRouteSearch = (value: unknown): PlanByFeatureRouteSearch => PlanByFeatureRouteSearchSchema.parse(value);
+
+export const OverrideRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  user: optional(OpaqueID("usr"))
+});
+
+export type OverrideRouteSearch = z.infer<typeof OverrideRouteSearchSchema>;
+export const parseOverrideRouteSearch = (value: unknown): OverrideRouteSearch => OverrideRouteSearchSchema.parse(value);
+
+export const RevisionRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  revision: optional(OpaqueID("rev"))
+});
+
+export type RevisionRouteSearch = z.infer<typeof RevisionRouteSearchSchema>;
+export const parseRevisionRouteSearch = (value: unknown): RevisionRouteSearch => RevisionRouteSearchSchema.parse(value);
+
+const CompareTarget = z.union([z.enum(["live", "draft"]), OpaqueID("rev")]);
+export const CompareRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  from: optional(CompareTarget),
+  to: optional(CompareTarget)
+});
+
+export type CompareRouteSearch = z.infer<typeof CompareRouteSearchSchema>;
+export const parseCompareRouteSearch = (value: unknown): CompareRouteSearch => CompareRouteSearchSchema.parse(value);
+
