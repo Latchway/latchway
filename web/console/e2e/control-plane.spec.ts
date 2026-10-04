@@ -479,8 +479,8 @@ test("authenticated console has no automated WCAG A or AA violations", async ({ 
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const results = await new AxeBuilder({ page })
@@ -493,8 +493,8 @@ test("keyboard navigation reaches content, traps the command dialog, and restore
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   await page.reload();
@@ -531,8 +531,8 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
@@ -552,8 +552,8 @@ test("first-run exposes only the evidence fields for each selected platform scop
   await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Setup wizard");
 
   const scopes = [
@@ -576,8 +576,8 @@ test("first-run separates Apple acceptance from distribution and confines Play t
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Setup wizard");
   await page.getByLabel("Environment kind").selectOption("development");
   await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("any");
@@ -603,8 +603,8 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   const fixture = await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await goTo(page, "Setup wizard");
   await page.getByLabel("Organization slug").fill("example");
@@ -739,7 +739,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   expect(fixture.mutations.length).toBeGreaterThanOrEqual(8);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
   await signOut(page);
-  await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "You're signed out" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Your account/ })).toHaveCount(0);
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
@@ -749,8 +749,8 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
 
   await goTo(page, "Settings", "Applications");
   await expect(page.getByRole("heading", { name: "Mobile App" })).toBeVisible();
@@ -841,8 +841,8 @@ test("owner activates a targeted configuration merge and uses focused observabil
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
 
   await goTo(page, "AI Connections");
   await expect(page.getByRole("heading", { level: 1, name: "Connections" })).toBeVisible();
@@ -954,8 +954,8 @@ test("a limit plan edit lands in the shared draft and publishes after spot check
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
 
   await goTo(page, "Policies & Limits");
   await expect(page.getByRole("heading", { level: 1, name: "Limit plans" })).toBeVisible();
@@ -986,8 +986,8 @@ test("request usage distinguishes unknown quota charges, missing billing and rep
   const fixture = await installAdminFixture(page, { incidentUsage: true });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await goTo(page, "Requests");
   await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
@@ -1014,8 +1014,8 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Audit Log");
 
   const filteredAudit = page.waitForRequest((request) => {
@@ -1057,8 +1057,8 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Self-tests");
   await page.getByRole("button", { name: "OpenRouter conformance" }).click();
   await page.getByLabel("AI connection").selectOption("openai");
@@ -1083,8 +1083,8 @@ test("self-test schedules bind durable token metadata and support list, detail, 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Team & Access", "API tokens");
   await page.getByRole("button", { name: "Create Token" }).click();
   const tokenDrawer = page.getByRole("complementary", { name: "Create token" });
@@ -1123,8 +1123,8 @@ test("owner manages administrators without persisting password material", async 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Team & Access");
   await page.getByRole("button", { name: "Add Member" }).click();
   const addDrawer = page.getByRole("complementary", { name: "Add member" });
@@ -1171,8 +1171,8 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Team & Access", "API tokens");
   await expect(page.getByText("No active tokens")).toBeVisible();
   await page.getByRole("button", { name: "Create Token" }).click();

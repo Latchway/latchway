@@ -168,7 +168,6 @@ a {
 }
 
 .hero h1,
-.access-intro h1,
 .page-heading h1,
 .empty-state h1 {
   margin: 0;
@@ -178,14 +177,6 @@ a {
   font-weight: 600;
   line-height: 26px;
   letter-spacing: 0;
-}
-
-.hero__lede {
-  max-width: 43rem;
-  margin: 1.6rem 0 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.75;
 }
 
 .primary-action,
@@ -244,146 +235,6 @@ a {
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-.access-page {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(25rem, 0.86fr);
-  gap: clamp(2.5rem, 7vw, 7rem);
-  align-items: start;
-}
-
-.access-intro {
-  padding-top: clamp(0.5rem, 2vw, 2rem);
-}
-
-.access-intro__health {
-  width: fit-content;
-  margin-top: 1.8rem;
-}
-
-.access-safeguards {
-  display: grid;
-  max-width: 42rem;
-  margin: clamp(2.5rem, 6vw, 5rem) 0 0;
-  border-top: 1px solid var(--line);
-}
-
-.access-safeguards div {
-  display: grid;
-  grid-template-columns: minmax(8rem, 0.45fr) 1fr;
-  padding: 1rem 0;
-  gap: 1rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.access-safeguards dt {
-  color: var(--ink);
-  font-size: 0.76rem;
-  font-weight: 600;
-}
-
-.access-safeguards dd {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.55;
-}
-
-.auth-card {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 1rem 1rem 1rem 0.25rem;
-  background: var(--paper);
-  box-shadow: var(--shadow);
-}
-
-.auth-card__heading {
-  padding: 1.5rem 1.5rem 0;
-}
-
-.auth-card__eyebrow {
-  margin: 0;
-  color: var(--teal);
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.auth-card h2 {
-  margin: 0.5rem 0 0;
-  font-family: var(--font-sans);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-}
-
-.auth-mode-selector {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin: 1.35rem 1.5rem 0;
-  padding: 0.25rem;
-  border: 0;
-  border-radius: 0.65rem;
-  background: var(--background-l1);
-}
-
-.auth-mode-option {
-  position: relative;
-  display: flex;
-  min-height: 2.55rem;
-  padding: 0.6rem 0.75rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.48rem;
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.auth-mode-option input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.auth-mode-option:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.auth-mode-option--active {
-  color: var(--forest);
-  background: var(--background-l3);
-  box-shadow: none;
-}
-
-.auth-mode-selector:disabled .auth-mode-option {
-  cursor: wait;
-  opacity: 0.65;
-}
-
-.auth-form {
-  display: grid;
-  padding: 1.5rem;
-  gap: 1rem;
-}
-
-.auth-form__intro {
-  margin: 0 0 0.2rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.6;
-}
-
-.auth-form__intro--warning {
-  padding: 0.8rem 0.9rem;
-  color: var(--orange);
-  border-left: 0.2rem solid var(--amber);
-  background: var(--amber-light);
-}
-
 .form-field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -426,38 +277,6 @@ a {
   color: var(--muted);
   font-size: 0.66rem;
   line-height: 1.45;
-}
-
-.auth-problem {
-  padding: 0.9rem 1rem;
-  color: var(--destructive);
-  border-left: 0.2rem solid var(--red);
-  background: var(--red-light);
-}
-
-.auth-problem strong {
-  display: block;
-  font-size: 0.8rem;
-}
-
-.auth-problem p {
-  margin: 0.35rem 0 0;
-  font-size: 0.72rem;
-  line-height: 1.5;
-}
-
-.auth-problem__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-  color: var(--destructive);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.62rem !important;
-}
-
-.auth-submit {
-  width: 100%;
-  margin-top: 0.35rem;
 }
 
 .posture-card {
@@ -1904,16 +1723,8 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .access-page {
-    grid-template-columns: 1fr;
-  }
-
   .setup-checklist {
     grid-template-columns: 1fr;
-  }
-
-  .auth-card {
-    max-width: 42rem;
   }
 
   .posture-card {
@@ -1930,11 +1741,6 @@ a {
     font-size: 20px;
   }
 
-  .access-intro h1 {
-    font-size: 20px;
-  }
-
-  .access-safeguards div,
   .form-field-grid {
     grid-template-columns: 1fr;
   }

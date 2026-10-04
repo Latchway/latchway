@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useLocation } from "@tanstack/react-router";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -10,8 +10,12 @@ import {
 } from "../api/admin-events";
 import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
-import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
-import { buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type StatusItem, StatusRail, useFocusTrap } from "../ui";
+import { consoleSessionQueryOptions, forgetConsoleSession, SESSION_ENDED_EVENT, useConsoleSession } from "../api/session";
+import { Button, buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type MenuEntry, type StatusItem, StatusRail, useFocusTrap } from "../ui";
+import { AccountDialog, ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
+import { AuthScreen } from "./auth/auth-screen";
+import { ENDING_SOON_MS, sessionEndText } from "./auth/session-model";
 import { useConsoleCompatibility } from "./console-compatibility-context";
 import { ConsoleCompatibilityProvider } from "./console-compatibility";
 import {
@@ -107,11 +111,8 @@ function SectionTabs({ area, pathname }: { area: NavArea; pathname: string }) {
   );
 }
 
-function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
-  if (mode === "configured") return userLabel ?? "Console ready";
-  if (mode === "signed-out") return "Signed out";
-  return "Discovering console";
-}
+/** Longest delay a browser timer honours; sessions further out than this are re-read before they matter. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 function initials(label: string): string {
   const name = label.split("@")[0] ?? label;
@@ -120,6 +121,7 @@ function initials(label: string): string {
 
 function AppShellContent() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const session = useConsoleSession();
   const consoleCompatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
@@ -132,9 +134,17 @@ function AppShellContent() {
   const accountButton = useRef<HTMLButtonElement>(null);
   const [logoutError, setLogoutError] = useState<string>();
   const [loggingOut, setLoggingOut] = useState(false);
+  // Keeps the sign-in screen up through steps that already hold a session (choosing an organization, setup done).
+  const [authHeld, setAuthHeld] = useState(false);
+  const [dialog, setDialog] = useState<"account" | "switch" | "reauth">();
+  const [endingSoonFor, setEndingSoonFor] = useState<string>();
+  const [dismissedFor, setDismissedFor] = useState<string>();
   const { liveness, readiness } = useSystemHealth();
   const mode = session.data?.mode ?? "unknown";
   const configured = mode === "configured";
+  const adminSession = configured ? session.data?.session : undefined;
+  const expired = configured && Boolean(session.data?.expired);
+  const expiresAt = expired ? undefined : adminSession?.expires_at ?? undefined;
   const sharedDraft = useEnvironmentDraft();
   const draft = configured ? draftSummary(sharedDraft) : undefined;
   const overallState = overallHealthState(liveness.data, readiness.data);
@@ -146,8 +156,7 @@ function AppShellContent() {
         : overallState === "unavailable"
           ? "System unavailable"
           : "Checking system";
-  const userLabel = session.data?.userLabel ?? "Administrator";
-  const area = configured ? areaForPath(pathname) : undefined;
+    const area = configured ? areaForPath(pathname) : undefined;
   const scopeDimmed = isOrganizationPath(pathname);
   const navOpen = navOpenOn === pathname;
   const setNavOpen = useCallback((open: boolean) => setNavOpenOn(open ? pathname : null), [pathname]);
@@ -170,6 +179,27 @@ function AppShellContent() {
     window.addEventListener("keydown", openCommand);
     return () => window.removeEventListener("keydown", openCommand);
   }, [configured, showCommand]);
+
+  useEffect(() => {
+    if (!configured) return;
+    function recheck(): void {
+      void queryClient.invalidateQueries({ exact: true, queryKey: consoleSessionQueryOptions.queryKey });
+    }
+    window.addEventListener(SESSION_ENDED_EVENT, recheck);
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, recheck);
+  }, [configured, queryClient]);
+
+  useEffect(() => {
+    if (!expiresAt) return;
+    const end = Date.parse(expiresAt);
+    const timers: number[] = [];
+    const soon = end - ENDING_SOON_MS - wallClock();
+    if (soon < MAX_TIMER_MS) timers.push(window.setTimeout(() => setEndingSoonFor(expiresAt), Math.max(0, soon)));
+    // Re-read the session just after it ends so the console asks to sign in again instead of failing requests.
+    const ended = end - wallClock() + 1000;
+    if (ended < MAX_TIMER_MS) timers.push(window.setTimeout(() => void queryClient.invalidateQueries({ exact: true, queryKey: consoleSessionQueryOptions.queryKey }), Math.max(0, ended)));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [expiresAt, queryClient]);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -199,13 +229,22 @@ function AppShellContent() {
     };
   }, [configured, consoleCompatibility.status, workspace.environment?.id]);
 
-  async function logout(): Promise<void> {
+  /** Leaves the console: forgets the session and every cached answer from it. */
+  function endConsole(email: string | undefined): void {
+    forgetConsoleSession();
+    rememberSignedOutEmail(email);
+    setDialog(undefined);
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== consoleSessionQueryOptions.queryKey[0] });
+    queryClient.setQueryData(consoleSessionQueryOptions.queryKey, { mode: "signed-out" });
+  }
+
+  async function logout(remember = true): Promise<void> {
     setLoggingOut(true);
     setLogoutError(undefined);
     try {
-      await logoutAdministrator();
-      queryClient.setQueryData(consoleSessionQueryOptions.queryKey, { mode: "signed-out" });
-      await queryClient.invalidateQueries({ exact: true, queryKey: consoleSessionQueryOptions.queryKey });
+      // An ended session has nothing left to sign out on the server.
+      if (!expired) await logoutAdministrator();
+      endConsole(remember ? adminSession?.administrator.email : undefined);
     } catch (error) {
       setLogoutError(problemFromError(error).detail);
     } finally {
@@ -219,8 +258,18 @@ function AppShellContent() {
     setThemeState(next);
   }
 
+  function switched(): void {
+    setDialog(undefined);
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== consoleSessionQueryOptions.queryKey[0] });
+    void navigate({ search: {}, to: "/" });
+  }
+
+  if (!configured || authHeld || !adminSession) {
+    return <AuthScreen checking={session.isPending && !session.data} mode={mode} onHoldChange={setAuthHeld} retry={() => void session.refetch()} retrying={session.isFetching} />;
+  }
+
   const statusItems: StatusItem[] = [];
-  if (configured && !consoleCompatibility.mutationAllowed) {
+  if (!consoleCompatibility.mutationAllowed) {
     const reasons = consoleCompatibility.compatibility?.reasons ?? [];
     statusItems.push({
       chip: "Read-only safe mode",
@@ -234,7 +283,21 @@ function AppShellContent() {
       tone: "danger"
     });
   }
-  if (configured && workspace.environment && draft) {
+  if (expiresAt && endingSoonFor === expiresAt && dismissedFor !== expiresAt) {
+    statusItems.push({
+      actions: <>
+        <Button onClick={() => setDialog("reauth")} size="sm">Sign In Now</Button>
+        <Button onClick={() => setDismissedFor(expiresAt)} size="sm" variant="ghost">Dismiss</Button>
+      </>,
+      chip: "Session ending",
+      icon: "clock",
+      id: "session-ending",
+      text: `It ends at ${sessionEndText(expiresAt)}. Sign in again now to keep working without interruption.`,
+      title: "Your session ends soon.",
+      tone: "warning"
+    });
+  }
+  if (workspace.environment && draft) {
     statusItems.push({
       actions: <DraftActions draft={sharedDraft} />,
       chip: draft.chip,
@@ -244,7 +307,7 @@ function AppShellContent() {
       title: draft.title,
       tone: "draft"
     });
-  } else if (configured && workspace.environment && !sharedDraft.isPending && !workspace.environment.active_revision_id && !sharedDraft.active) {
+  } else if (workspace.environment && !sharedDraft.isPending && !workspace.environment.active_revision_id && !sharedDraft.active) {
     statusItems.push({
       actions: <Link className={buttonClass({ size: "sm" })} search={scopeSearch} to="/setup">Continue setup</Link>,
       chip: "Setup required",
@@ -256,7 +319,15 @@ function AppShellContent() {
     });
   }
 
-  const productionScope = configured && !scopeDimmed && workspace.environment?.kind === "production";
+  const accountEntries: MenuEntry[] = [
+    { heading: adminSession.administrator.email, kind: "heading" },
+    { icon: "users", label: "Your Account", onSelect: () => { setAccountOpen(false); setDialog("account"); } },
+    ...(adminSession.memberships.length > 1 ? [{ icon: "refresh", label: "Switch Organization", onSelect: () => { setAccountOpen(false); setDialog("switch"); } } satisfies MenuEntry] : []),
+    { kind: "separator" },
+    { destructive: true, icon: "external", label: loggingOut ? "Signing out…" : "Sign out", onSelect: () => void logout() }
+  ];
+
+  const productionScope = !scopeDimmed && workspace.environment?.kind === "production";
 
   return (
     <div className="lw-root lw-console" data-nav-open={navOpen ? "" : undefined}>
@@ -264,43 +335,37 @@ function AppShellContent() {
 
       <header className={cx("lw-header lw-console__header", productionScope && "lw-header--production")}>
         <div className="lw-header__logo">
-          {configured ? (
-            <button aria-controls="console-navigation" aria-expanded={navOpen} aria-label={navOpen ? "Close navigation" : "Open navigation"} className="lw-console__nav-toggle" onClick={() => setNavOpen(!navOpen)} type="button">
-              <Icon name={navOpen ? "x" : "menu"} size={20} />
-            </button>
-          ) : null}
+          <button aria-controls="console-navigation" aria-expanded={navOpen} aria-label={navOpen ? "Close navigation" : "Open navigation"} className="lw-console__nav-toggle" onClick={() => setNavOpen(!navOpen)} type="button">
+            <Icon name={navOpen ? "x" : "menu"} size={20} />
+          </button>
           <Link aria-label="Latchway home" className="lw-console__home" search={scopeSearch} to="/"><Logo /></Link>
         </div>
         <div className="lw-header__main">
-          {configured ? <>
-            <span className="lw-crumb lw-crumb--strong lw-crumb--hide-sm" title="Organization">{workspace.organization?.display_name ?? "Organization"}</span>
-            <span aria-hidden="true" className="lw-slash lw-crumb--hide-sm" />
-            <span className={cx("lw-crumb-select", scopeDimmed && "lw-crumb-btn--dim")} title={scopeDimmed ? "Not used on this page" : undefined}>
-              <select aria-label="Current application" disabled={!workspace.applications.length} onChange={(event) => workspace.selectApplication(event.target.value)} value={workspace.application?.slug ?? ""}>
-                <option value="">Application…</option>
-                {workspace.applications.map((application) => <option key={application.id} value={application.slug}>{application.display_name}</option>)}
-              </select>
-              <Icon name="chevronDown" />
-            </span>
-            <span aria-hidden="true" className="lw-slash" />
-            <span className={cx("lw-crumb-select", scopeDimmed && "lw-crumb-btn--dim")} title={scopeDimmed ? "Not used on this page" : undefined}>
-              <select aria-label="Current environment" disabled={!workspace.environments.length} onChange={(event) => workspace.selectEnvironment(event.target.value)} value={workspace.environment?.slug ?? ""}>
-                <option value="">Environment…</option>
-                {workspace.environments.map((environment) => <option key={environment.id} value={environment.slug}>{environment.display_name}</option>)}
-              </select>
-              <Icon name="chevronDown" />
-            </span>
-            {workspace.environment ? <EnvironmentBadge className={cx("lw-console__env", scopeDimmed && "lw-crumb-btn--dim")} kind={workspace.environment.kind} /> : null}
-          </> : <span className="lw-crumb lw-crumb--strong">Latchway</span>}
+          <span className="lw-crumb lw-crumb--strong lw-crumb--hide-sm" title="Organization">{workspace.organization?.display_name ?? "Organization"}</span>
+          <span aria-hidden="true" className="lw-slash lw-crumb--hide-sm" />
+          <span className={cx("lw-crumb-select", scopeDimmed && "lw-crumb-btn--dim")} title={scopeDimmed ? "Not used on this page" : undefined}>
+            <select aria-label="Current application" disabled={!workspace.applications.length} onChange={(event) => workspace.selectApplication(event.target.value)} value={workspace.application?.slug ?? ""}>
+              <option value="">Application…</option>
+              {workspace.applications.map((application) => <option key={application.id} value={application.slug}>{application.display_name}</option>)}
+            </select>
+            <Icon name="chevronDown" />
+          </span>
+          <span aria-hidden="true" className="lw-slash" />
+          <span className={cx("lw-crumb-select", scopeDimmed && "lw-crumb-btn--dim")} title={scopeDimmed ? "Not used on this page" : undefined}>
+            <select aria-label="Current environment" disabled={!workspace.environments.length} onChange={(event) => workspace.selectEnvironment(event.target.value)} value={workspace.environment?.slug ?? ""}>
+              <option value="">Environment…</option>
+              {workspace.environments.map((environment) => <option key={environment.id} value={environment.slug}>{environment.display_name}</option>)}
+            </select>
+            <Icon name="chevronDown" />
+          </span>
+          {workspace.environment ? <EnvironmentBadge className={cx("lw-console__env", scopeDimmed && "lw-crumb-btn--dim")} kind={workspace.environment.kind} /> : null}
         </div>
         <div className="lw-header__right">
-          {configured ? (
-            <button aria-label="Search or jump" className="lw-header__search" onClick={showCommand} type="button">
-              <Icon name="search" />
-              <span>Search</span>
-              <kbd className="lw-kbd">{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
-            </button>
-          ) : null}
+          <button aria-label="Search or jump" className="lw-header__search" onClick={showCommand} type="button">
+            <Icon name="search" />
+            <span>Search</span>
+            <kbd className="lw-kbd">{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
           <Link aria-label={`${healthLabel}. Open system health.`} className={cx("lw-health", overallState !== "available" && `lw-health--${overallState}`)} search={scopeSearch} to="/system-health">
             <span aria-hidden="true" className="lw-badge__dot" />
             <span className="lw-health__text">{healthLabel}</span>
@@ -308,26 +373,20 @@ function AppShellContent() {
           <button aria-label={theme === "dark" ? "Use light theme" : "Use dark theme"} className="lw-btn lw-btn--ghost lw-btn--icon" onClick={toggleTheme} title={theme === "dark" ? "Use light theme" : "Use dark theme"} type="button">
             <Icon name="sun" />
           </button>
-          {configured ? (
-            <span className="lw-console__account">
-              <button aria-expanded={accountOpen} aria-haspopup="menu" aria-label={`Your account: ${userLabel}`} className="lw-avatar lw-avatar--button" onClick={() => setAccountOpen(!accountOpen)} ref={accountButton} title={userLabel} type="button">
-                {initials(userLabel)}
-              </button>
-              {accountOpen ? (
-                <div className="lw-console__popover">
-                  <Menu
-                    entries={[
-                      { heading: modeLabel(mode, session.data?.userLabel), kind: "heading" },
-                      { kind: "separator" },
-                      { destructive: true, icon: "external", label: loggingOut ? "Signing out…" : "Sign out", onSelect: () => void logout() }
-                    ]}
-                    label="Account"
-                    onClose={closeAccount}
-                  />
-                </div>
-              ) : null}
-            </span>
-          ) : null}
+          <span className="lw-console__account">
+            <button aria-expanded={accountOpen} aria-haspopup="menu" aria-label={`Your account: ${adminSession.administrator.email}`} className="lw-avatar lw-avatar--button" onClick={() => setAccountOpen(!accountOpen)} ref={accountButton} title={adminSession.administrator.email} type="button">
+              {initials(adminSession.administrator.email)}
+            </button>
+            {accountOpen ? (
+              <div className="lw-console__popover">
+                <Menu
+                  entries={accountEntries}
+                  label="Account"
+                  onClose={closeAccount}
+                />
+              </div>
+            ) : null}
+          </span>
         </div>
       </header>
       {logoutError ? <p className="lw-console__error" role="alert">{logoutError}</p> : null}
@@ -335,22 +394,17 @@ function AppShellContent() {
       <div className="lw-console__row">
         {navOpen ? <div aria-hidden="true" className="lw-console__scrim" onClick={() => setNavOpen(false)} /> : null}
         <nav aria-label="Primary navigation" className="lw-sidebar lw-console__sidebar" id="console-navigation">
-          {configured ? <>
-            <div className="lw-side-scope">
-              <span className="lw-side-scope__label">Environment</span>
-              <span className="lw-side-scope__sub">{workspace.application && workspace.environment ? `${workspace.application.display_name} · ${workspace.environment.display_name}` : "No environment selected"}</span>
-            </div>
-            {environmentNavigation.map((group, index) => <SideGroup group={group} key={group.title ?? index} pathname={pathname} />)}
-            <hr className="lw-side-divider" />
-            <div className="lw-side-scope">
-              <span className="lw-side-scope__label">Organization</span>
-              <span className="lw-side-scope__sub">{workspace.organization?.display_name ?? "Organization"}</span>
-            </div>
-            {organizationNavigation.map((group, index) => <SideGroup group={group} key={group.title ?? index} pathname={pathname} />)}
-          </> : <>
-            <SideLink area={{ description: "Sign in or create the first owner", icon: "lock", label: "Console access", to: "/" }} pathname={pathname} />
-            <SideLink area={{ description: "Liveness and readiness", icon: "health", label: "System Health", to: "/system-health" }} pathname={pathname} />
-          </>}
+          <div className="lw-side-scope">
+            <span className="lw-side-scope__label">Environment</span>
+            <span className="lw-side-scope__sub">{workspace.application && workspace.environment ? `${workspace.application.display_name} · ${workspace.environment.display_name}` : "No environment selected"}</span>
+          </div>
+          {environmentNavigation.map((group, index) => <SideGroup group={group} key={group.title ?? index} pathname={pathname} />)}
+          <hr className="lw-side-divider" />
+          <div className="lw-side-scope">
+            <span className="lw-side-scope__label">Organization</span>
+            <span className="lw-side-scope__sub">{workspace.organization?.display_name ?? "Organization"}</span>
+          </div>
+          {organizationNavigation.map((group, index) => <SideGroup group={group} key={group.title ?? index} pathname={pathname} />)}
           <p className="lw-side-foot">Changes use the canonical Admin API.</p>
         </nav>
 
@@ -361,6 +415,13 @@ function AppShellContent() {
         </main>
       </div>
       {commandOpen ? <CommandPalette close={closeCommand} /> : null}
+      {expired || dialog === "reauth" ? (
+        <ReauthDialog onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
+      ) : dialog === "account" ? (
+        <AccountDialog onClose={() => setDialog(undefined)} organizationName={workspace.organization?.display_name} session={adminSession} />
+      ) : dialog === "switch" ? (
+        <SwitchOrganizationDialog onClose={() => setDialog(undefined)} onSwitched={switched} session={adminSession} />
+      ) : null}
     </div>
   );
 }
