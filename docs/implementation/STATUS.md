@@ -2,6 +2,83 @@
 
 Status date: 2026-10-03
 
+## Console redesign phase 7: Operate and Organization (branch `console-redesign`, unreleased)
+
+Team & Access has Members, API tokens, Sessions and Roles tabs
+(`src/pages/team/`). Members lists the organization's administrators with
+role and status (Active, Must set password, Disabled), filters over the loaded
+list, and a count of active owners. Add Member takes a name, email (duplicates
+refused), a role chosen as cards with its capabilities, and a first password
+that lives only in the DOM input: Generate fills it from the browser's CSPRNG,
+Copy reads it from the element, and it's read and cleared before the request
+is sent. The member drawer shows a role change as Loses / Gains, keeps the
+last active owner an owner, requires enabling a disabled account before its
+role changes, and confirms role reductions and Disable with the typed email
+and an acknowledgement. Reset Password uses the same write-only field. The
+drawer lists the member's console sessions with Sign Out. API tokens are the
+signed-in administrator's own (the API has no team-wide list): capability
+chips struck through when the role no longer allows them, No expiry and
+expiring-soon badges with a Replace notice, starting points (CI deploys,
+Monitoring, Incident bot, Custom), capabilities above your role disabled with
+the role they need, expiry presets, a one-time reveal whose Done unlocks only
+after "I've saved it" and has no Cancel, Replace (same name and scopes, then
+"revoke the old one now?" or Later) and Revoke with the typed name. Losing
+compatibility scrubs a revealed token for good. Sessions (owners only, as the
+API requires) lists every console session with Sign Out and Sign Out
+Everyone Else, which revokes each other active session. Roles shows the
+server's fixed matrix from `adminauth/role.go`.
+
+The Audit Log is a list with a period picker (24h, 7d, 30d, 90d, All, custom
+up to 730 days), actor, source, result and scope selects plus action,
+resource, member or token and reason-code filters, all in the URL. Pages
+append with Load More; an event opens in a drawer that refuses a detail for a
+different event and shows which fields changed, never values.
+
+System Health (`src/pages/operate/`) reads `GET /system/doctor` every 30
+seconds: a status line, Needs attention with the server's summary and remedy,
+why it matters and a link to the page or card that fixes it, gateway cards
+(server, replicas, database pool and migrations, jobs judged against the
+server's own freshness windows, configuration cache, keys, retention), all
+checks with a Not passed / All filter, a cron snippet for alerting, and a
+support bundle dialog that previews the server's exclusion list and JSON
+before saving. Self-tests run against the workspace environment: a gateway
+check, an AI connection or OpenRouter conformance test against the live
+revision with the connection and model chosen from it and the ceiling entered
+in dollars (sent as exact nano-USD), a run drawer that polls until done, and
+schedules created with a token that is sent once as a bearer credential and
+cleared, with Disable. A run or schedule link carries its environment and is
+refused in another one.
+
+Settings has General (organization, appearance, about this server including
+why the console is read-only, and data handling with the oldest stored
+records) and Applications (each application with its environments, Add
+Application, Add Environment, and Disable / Enable through the server's
+reason-taking endpoints with the typed `app/env` and an acknowledgement;
+managing them needs `activate_configuration`, as the server checks).
+`/environments` redirects to Applications. AI Connections › Secrets shows
+where each secret is referenced in live and in the draft, flags secrets not
+rotated in 90 days, refuses duplicate names, blocks deleting a referenced
+secret, and keeps values in write-only inputs cleared before each request.
+Import / Export moved to Changes › Draft: export live or the draft as YAML or
+JSON through the existing redaction gate, and import a file or pasted text
+into the shared draft (confirming before replacing unpublished changes);
+nothing goes live from it. Forms that hold a password, token or secret value
+close when the console turns read-only.
+
+Not built because the API has no source: email invites, SSO and two-factor
+sign-in, per-application roles, a team-wide token list and token last use,
+non-owners seeing their own sessions, previewing the console as another role,
+device details on sessions, provider health per connection (the page links to
+Analytics › Reliability), health history, renaming or deleting applications
+and environments, users per environment, copying one environment's
+configuration into another, and a list of past self-test runs. Your Account
+(own password and sessions) comes with the Authentication phase.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (393 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.23 MB.
+
 ## Console redesign phase 6: Policies & Limits, Changes, Simulator (branch `console-redesign`, unreleased)
 
 Policies & Limits has four tabs on the shared draft (`src/pages/policies/`).

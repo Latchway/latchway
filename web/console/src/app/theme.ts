@@ -33,3 +33,13 @@ export function setTheme(theme: Theme): void {
     // The choice still applies for this page view.
   }
 }
+
+/** Follows the operating system again and forgets the explicit choice. */
+export function clearTheme(): void {
+  delete document.documentElement.dataset.theme;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Nothing stored to remove.
+  }
+}

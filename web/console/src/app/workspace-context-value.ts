@@ -20,6 +20,7 @@ import type {
   RevisionRouteSearch,
   RouteSimulatorRouteSearch,
   SelfTestRouteSearch,
+  TeamRouteSearch,
   UserRouteSearch
 } from "./route-search";
 
@@ -38,6 +39,7 @@ export interface WorkspaceSearch extends
   Partial<RevisionRouteSearch>,
   Partial<RouteSimulatorRouteSearch>,
   Partial<SelfTestRouteSearch>,
+  Partial<TeamRouteSearch>,
   Partial<UserRouteSearch> {
   application?: string;
   environment?: string;

@@ -1615,3 +1615,45 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 .lw-plan-rule .lw-input-box { min-width: 0; }
 .lw-entry__summary:disabled { cursor: default; }
 ul.lw-limits, ul.lw-entry-list, ol.lw-plan-rules, ol.lw-trace { margin: 0; padding: 0; list-style: none; }
+
+/* ---------- Phase 7: Team & Access, Audit, Settings, Operate ---------- */
+.lw-role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); margin-top: 6px; }
+.lw-role-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius-lg); background: var(--background-l3); box-shadow: 0 0 0 1px var(--border); cursor: pointer; font-size: 14px; }
+.lw-role-card input { position: absolute; opacity: 0; pointer-events: none; }
+.lw-role-card.is-on { box-shadow: 0 0 0 2px var(--accent-primary); }
+.lw-role-card.is-off { cursor: not-allowed; opacity: 0.6; }
+.lw-role-card:focus-within { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.lw-role-card strong { font-weight: 600; }
+.lw-cap-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 10px 12px; border-radius: var(--radius-lg); background: var(--background-l1); list-style: none; font-size: 13px; line-height: 18px; }
+.lw-cap-list .is-yes { color: var(--foreground-primary); }
+.lw-cap-list .is-no { color: var(--foreground-secondary); }
+.lw-cap-list .is-lose { color: var(--destructive); }
+.lw-cap-list .is-gain { color: var(--success); }
+.lw-password { flex-wrap: nowrap; }
+.lw-password__box { flex: 1; min-width: 0; }
+.lw-session-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.lw-session-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.lw-session-list li:first-child { border-top: 0; }
+.lw-role-matrix th, .lw-role-matrix td { text-align: center; vertical-align: top; }
+.lw-role-matrix th:first-child, .lw-role-matrix td:first-child, .lw-role-matrix th:last-child, .lw-role-matrix td:last-child { text-align: left; }
+.lw-audit-more { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.lw-health-status { display: flex; align-items: flex-start; gap: 12px; padding: var(--space-4); border-radius: var(--radius-xl); background: var(--background-l3); box-shadow: 0 0 0 1px var(--border); }
+.lw-health-status > div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.lw-health-status strong { font-size: 16px; font-weight: 600; }
+.lw-health-status__dot { flex: none; width: 12px; height: 12px; margin-top: 5px; border-radius: 50%; background: var(--success); }
+.lw-health-status--degraded .lw-health-status__dot { background: var(--orange); }
+.lw-health-status--unhealthy .lw-health-status__dot { background: var(--destructive); }
+.lw-health-status--unhealthy { box-shadow: 0 0 0 1px color-mix(in srgb, var(--destructive) 40%, transparent); }
+.lw-health-card { scroll-margin-top: 80px; }
+.lw-health-card > .lw-card { height: 100%; }
+.lw-stat-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.lw-stat-row > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius-lg); background: var(--background-l1); }
+.lw-stat-row strong { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lw-stat-row span { font-size: 12px; color: var(--foreground-secondary); }
+.lw-stat-row .is-warn strong { color: var(--orange); }
+.lw-meter { height: 8px; overflow: hidden; border-radius: var(--radius-full); background: var(--background-l1); box-shadow: inset 0 0 0 1px var(--border); }
+.lw-meter > span { display: block; height: 100%; background: var(--accent-primary); }
+.lw-meter[data-warn] > span { background: var(--orange); }
+.lw-issue--ok > .lw-icon { color: var(--success); }
+.lw-bundle-preview { max-height: 320px; overflow: auto; }
+.lw-file-input { font: inherit; font-size: 13px; }

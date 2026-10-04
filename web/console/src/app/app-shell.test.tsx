@@ -300,11 +300,9 @@ describe("AppShell", () => {
     renderConsole("/system-health");
 
     expect(
-      await screen.findByRole("heading", { name: "System health" })
+      await screen.findByRole("heading", { level: 1, name: "System Health" })
     ).toBeInTheDocument();
-    expect(await screen.findByText("Gateway ready")).toBeVisible();
-    expect(screen.getByText("database")).toBeVisible();
-    expect(screen.getByText("signing key")).toBeVisible();
+    await waitFor(() => expect(fetchMock.mock.calls.map(([input]) => requestURL(input))).toContain("/admin/v1/system/doctor"));
 
     const urls = fetchMock.mock.calls.map(([input]) => requestURL(input));
     expect(urls).toContain("/healthz");
@@ -328,7 +326,7 @@ describe("AppShell", () => {
     }
     expect(within(navigation).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     const sectionTabs = screen.getByRole("navigation", { name: "Settings pages" });
-    expect(within(sectionTabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["General", "Applications", "Environments"]);
+    expect(within(sectionTabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["General", "Applications"]);
     expect(within(sectionTabs).getByRole("link", { name: "Applications" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByLabelText("Current environment").closest(".lw-crumb-select")).toHaveClass("lw-crumb-btn--dim");
 
@@ -394,7 +392,7 @@ describe("AppShell", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Current application")).toHaveValue("habitify"));
     await waitFor(() => expect(screen.getByLabelText("Current environment")).toHaveValue("production"));
-    expect(within(screen.getByRole("banner")).getByText("Production", { selector: ".lw-badge span" })).toBeVisible();
+    expect(within(screen.getAllByRole("banner")[0] as HTMLElement).getByText("Production", { selector: ".lw-badge span" })).toBeVisible();
     const statusRail = await screen.findByRole("region", { name: "Console state" });
     // Without a compatibility response the console is in read-only safe mode, which outranks the draft in the rail.
     expect(within(statusRail).getByRole("status")).toHaveTextContent("Read-only safe mode.");
@@ -407,6 +405,6 @@ describe("AppShell", () => {
 
     await user.selectOptions(screen.getByLabelText("Current environment"), "staging");
     await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=staging"));
-    expect(within(screen.getByRole("banner")).getByText("Staging", { selector: ".lw-badge span" })).toBeVisible();
+    expect(within(screen.getAllByRole("banner")[0] as HTMLElement).getByText("Staging", { selector: ".lw-badge span" })).toBeVisible();
   });
 });

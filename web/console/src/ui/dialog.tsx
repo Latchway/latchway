@@ -14,6 +14,8 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   description?: ReactNode;
   destructive?: boolean;
+  /** For one-way steps such as a one-time reveal: no Cancel button, and Escape does nothing. */
+  hideCancel?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   pending?: boolean;
@@ -25,11 +27,11 @@ interface ConfirmDialogProps {
  * Modal confirmation. Focus is trapped while open and returns to the opener on close; Escape cancels unless a
  * request is pending.
  */
-export function ConfirmDialog({ cancelLabel = "Cancel", children, confirmDisabled, confirmLabel = "Confirm", description, destructive, onCancel, onConfirm, pending, size = "md", title }: ConfirmDialogProps) {
+export function ConfirmDialog({ cancelLabel = "Cancel", children, confirmDisabled, confirmLabel = "Confirm", description, destructive, hideCancel, onCancel, onConfirm, pending, size = "md", title }: ConfirmDialogProps) {
   const surface = useRef<HTMLDivElement>(null);
   const titleID = useId();
   const descriptionID = useId();
-  useFocusTrap(surface, pending ? undefined : onCancel);
+  useFocusTrap(surface, pending || hideCancel ? undefined : onCancel);
   return (
     <div className="lw-overlay">
       <div
@@ -47,7 +49,7 @@ export function ConfirmDialog({ cancelLabel = "Cancel", children, confirmDisable
         </div>
         {children ? <div className="lw-confirm__body">{children}</div> : null}
         <div className="lw-confirm__foot">
-          <Button disabled={pending} onClick={onCancel} size="sm">{cancelLabel}</Button>
+          {hideCancel ? null : <Button disabled={pending} onClick={onCancel} size="sm">{cancelLabel}</Button>}
           <Button destructive={destructive} disabled={confirmDisabled} loading={pending} onClick={onConfirm} size="sm" variant="primary">{confirmLabel}</Button>
         </div>
       </div>
