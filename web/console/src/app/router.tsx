@@ -15,9 +15,11 @@ import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
 import {
   AuditPageView,
-  RouteSimulatorPage,
   SelfTestsPage,
 } from "../pages/control-plane-pages";
+import { ComparePage, DraftChangesPage, JsonEditorPage, RevisionHistoryPage } from "../pages/changes/changes-pages";
+import { LimitPlansPage, OverridesPage, PlanByFeaturePage, ProtectionsPage } from "../pages/policies/policies-pages";
+import { SimulatorPage } from "../pages/simulator/simulator-page";
 import { RequestsPage } from "../pages/requests/requests-page";
 import { SessionsPolicyPage } from "../pages/build/client-trust-pages";
 import { InstallationFamiliesPage } from "../pages/users/installations-page";
@@ -29,38 +31,35 @@ import {
   ReliabilityAnalyticsPage,
   UsageAnalyticsPage
 } from "../pages/analytics/analytics-page";
+import { SetupWizardPage } from "../pages/configuration-pages";
 import {
-  ConfigurationEditorPage,
-  SetupWizardPage
-} from "../pages/configuration-pages";
-import {
-  AbuseControlsConfigurationPage,
-  AccessPoliciesConfigurationPage,
   AttestationConfigurationPage,
   AuthenticationProvidersPage,
   ComponentDefinitionsConfigurationPage,
   FeaturesConfigurationPage,
-  LimitPlansConfigurationPage,
   ModelsPricingConfigurationPage,
   RoutesConfigurationPage,
   UpstreamsConfigurationPage
 } from "../pages/configuration-area-pages";
 import {
   ApplicationsPage,
-  ConfigurationRevisionsPage,
   EnvironmentsPage,
-  SecretsPage,
-  UserOverridesPage
+  SecretsPage
 } from "../pages/resource-management-pages";
 import {
   AnalyticsRouteSearchSchema,
   parseAnalyticsRouteSearch,
   parseConfigurationRouteSearch,
   parseAuditRouteSearch,
+  parseCompareRouteSearch,
   parseFeatureRouteSearch,
   parseInstallationFamilyRouteSearch,
   parseInstallationRouteSearch,
+  parseLimitPlanRouteSearch,
+  parseOverrideRouteSearch,
+  parsePlanByFeatureRouteSearch,
   parseRequestRouteSearch,
+  parseRevisionRouteSearch,
   parseRouteSimulatorRouteSearch,
   parseSelfTestRouteSearch,
   parseUserRouteSearch
@@ -85,7 +84,7 @@ const systemHealthRoute = createRoute({
 const settingsRoute = createRoute({ component: SettingsPage, getParentRoute: () => rootRoute, path: "/settings" });
 
 const setupRoute = createRoute({ component: SetupWizardPage, getParentRoute: () => rootRoute, path: "/setup" });
-const configurationRoute = createRoute({ component: ConfigurationEditorPage, getParentRoute: () => rootRoute, path: "/configuration", validateSearch: parseConfigurationRouteSearch });
+const configurationRoute = createRoute({ component: JsonEditorPage, getParentRoute: () => rootRoute, path: "/configuration", validateSearch: parseConfigurationRouteSearch });
 const applicationsRoute = createRoute({ component: ApplicationsPage, getParentRoute: () => rootRoute, path: "/applications" });
 const environmentsRoute = createRoute({ component: EnvironmentsPage, getParentRoute: () => rootRoute, path: "/environments" });
 const administratorsRoute = createRoute({ component: AdministratorsPage, getParentRoute: () => rootRoute, path: "/administrators" });
@@ -102,10 +101,22 @@ const routesRoute = createRoute({ component: RoutesConfigurationPage, getParentR
 const upstreamsRoute = createRoute({ component: UpstreamsConfigurationPage, getParentRoute: () => rootRoute, path: "/upstreams" });
 const modelsPricingRoute = createRoute({ component: ModelsPricingConfigurationPage, getParentRoute: () => rootRoute, path: "/models-pricing", validateSearch: parseConfigurationRouteSearch });
 const secretsRoute = createRoute({ component: SecretsPage, getParentRoute: () => rootRoute, path: "/secrets" });
-const accessPoliciesRoute = createRoute({ component: AccessPoliciesConfigurationPage, getParentRoute: () => rootRoute, path: "/access-policies", validateSearch: parseConfigurationRouteSearch });
-const limitPlansRoute = createRoute({ component: LimitPlansConfigurationPage, getParentRoute: () => rootRoute, path: "/limit-plans" });
-const userOverridesRoute = createRoute({ component: UserOverridesPage, getParentRoute: () => rootRoute, path: "/user-overrides" });
-const abuseControlsRoute = createRoute({ component: AbuseControlsConfigurationPage, getParentRoute: () => rootRoute, path: "/abuse-controls", validateSearch: parseConfigurationRouteSearch });
+const limitPlansRoute = createRoute({ component: LimitPlansPage, getParentRoute: () => rootRoute, path: "/limit-plans", validateSearch: parseLimitPlanRouteSearch });
+const planByFeatureRoute = createRoute({ component: PlanByFeaturePage, getParentRoute: () => rootRoute, path: "/plan-by-feature", validateSearch: parsePlanByFeatureRouteSearch });
+const userOverridesRoute = createRoute({ component: OverridesPage, getParentRoute: () => rootRoute, path: "/user-overrides", validateSearch: parseOverrideRouteSearch });
+const protectionsRoute = createRoute({ component: ProtectionsPage, getParentRoute: () => rootRoute, path: "/protections" });
+/** Access is edited on each feature's Access & limits tab; protective limits moved to Protections. */
+function legacyScopeRoute(path: string, to: "/features" | "/protections") {
+  return createRoute({
+    beforeLoad: ({ search }) => {
+      const previous = search as Record<string, unknown>;
+      throw redirect({ replace: true, search: parseFeatureRouteSearch({ application: previous.application, environment: previous.environment, organization: previous.organization }), to });
+    },
+    getParentRoute: () => rootRoute,
+    path
+  });
+}
+const legacyPolicyRoutes = [legacyScopeRoute("/access-policies", "/features"), legacyScopeRoute("/abuse-controls", "/protections")];
 const requestsRoute = createRoute({
   component: RequestsPage,
   getParentRoute: () => rootRoute,
@@ -145,8 +156,10 @@ const legacyAnalyticsRoutes = [
   legacyAnalyticsRoute("/errors", "/analytics/reliability"),
   legacyAnalyticsRoute("/attestation-failures", "/analytics/reliability")
 ];
-const configurationRevisionsRoute = createRoute({ component: ConfigurationRevisionsPage, getParentRoute: () => rootRoute, path: "/configuration-revisions" });
-const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator", validateSearch: parseRouteSimulatorRouteSearch });
+const changesRoute = createRoute({ component: DraftChangesPage, getParentRoute: () => rootRoute, path: "/changes" });
+const configurationRevisionsRoute = createRoute({ component: RevisionHistoryPage, getParentRoute: () => rootRoute, path: "/configuration-revisions", validateSearch: parseRevisionRouteSearch });
+const configurationCompareRoute = createRoute({ component: ComparePage, getParentRoute: () => rootRoute, path: "/configuration-compare", validateSearch: parseCompareRouteSearch });
+const routeSimulatorRoute = createRoute({ component: SimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator", validateSearch: parseRouteSimulatorRouteSearch });
 const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests", validateSearch: parseSelfTestRouteSearch });
 const auditRoute = createRoute({
   component: AuditPageView,
@@ -160,9 +173,9 @@ const routeTree = rootRoute.addChildren([
   authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
   componentDefinitionsRoute, clientSessionsRoute,
   featuresRoute, routesRoute, upstreamsRoute, modelsPricingRoute, secretsRoute, configurationRoute,
-  accessPoliciesRoute, limitPlansRoute, userOverridesRoute, abuseControlsRoute,
+  limitPlansRoute, planByFeatureRoute, userOverridesRoute, protectionsRoute, ...legacyPolicyRoutes,
   requestsRoute, usageRoute, costRoute, performanceRoute, reliabilityRoute, ...legacyAnalyticsRoutes,
-  configurationRevisionsRoute, routeSimulatorRoute, selfTestsRoute, auditRoute,
+  changesRoute, configurationRevisionsRoute, configurationCompareRoute, routeSimulatorRoute, selfTestsRoute, auditRoute,
   systemHealthRoute, settingsRoute
 ]);
 

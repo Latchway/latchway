@@ -8,11 +8,16 @@ import type {
 import type {
   AnalyticsRouteSearch,
   AuditRouteSearch,
+  CompareRouteSearch,
   ConfigurationRouteSearch,
   FeatureRouteSearch,
   InstallationFamilyRouteSearch,
   InstallationRouteSearch,
+  LimitPlanRouteSearch,
+  OverrideRouteSearch,
+  PlanByFeatureRouteSearch,
   RequestRouteSearch,
+  RevisionRouteSearch,
   RouteSimulatorRouteSearch,
   SelfTestRouteSearch,
   UserRouteSearch
@@ -21,11 +26,16 @@ import type {
 export interface WorkspaceSearch extends
   Partial<AnalyticsRouteSearch>,
   Partial<AuditRouteSearch>,
+  Partial<CompareRouteSearch>,
   Partial<ConfigurationRouteSearch>,
   Partial<FeatureRouteSearch>,
   Partial<InstallationFamilyRouteSearch>,
   Partial<InstallationRouteSearch>,
+  Partial<LimitPlanRouteSearch>,
+  Partial<OverrideRouteSearch>,
+  Partial<PlanByFeatureRouteSearch>,
   Partial<RequestRouteSearch>,
+  Partial<RevisionRouteSearch>,
   Partial<RouteSimulatorRouteSearch>,
   Partial<SelfTestRouteSearch>,
   Partial<UserRouteSearch> {

@@ -26,10 +26,8 @@ vi.mock("../app/console-compatibility-context", () => ({
 
 import {
   ApplicationsPage,
-  ConfigurationRevisionsPage,
   EnvironmentsPage,
   SecretsPage,
-  UserOverridesPage
 } from "./resource-management-pages";
 
 const ids = {
@@ -265,87 +263,4 @@ describe("resource-management pages", () => {
     );
   });
 
-  it("inspects, replaces, and clears one environment-scoped user override", async () => {
-    const user = userEvent.setup();
-    const baseUser = {
-      created_at: instant,
-      environment_id: ids.environment,
-      id: ids.user,
-      identity_providers: ["firebase"],
-      normalized_claims: { plan: "standard" },
-      status: "active"
-    };
-    adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { body?: unknown; method?: string }) => {
-      if (path.includes(`/users/${ids.user}?`) && !options?.method) return Promise.resolve({ data: baseUser });
-      if (path.includes(`/users/${ids.user}/limit-override?`) && options?.method === "PUT") return Promise.resolve({ data: {
-        ...baseUser,
-        limit_plan_override: { created_at: instant, id: "uov_0123456789abcdef", limit_plan: "subscriber", reason: "support-approved" }
-      } });
-      if (path.includes(`/users/${ids.user}/limit-override?`) && options?.method === "DELETE") return Promise.resolve({ data: undefined });
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    render(<UserOverridesPage />);
-    await user.type(screen.getByLabelText("Environment ID"), ids.environment);
-    await user.type(screen.getByLabelText("User ID"), ids.user);
-    await user.click(screen.getByRole("button", { name: "Inspect override" }));
-    await screen.findByText("No override");
-    await user.type(screen.getByLabelText("Limit plan"), "subscriber");
-    await user.type(screen.getByLabelText("Reason"), "support-approved");
-    await user.click(screen.getByRole("button", { name: "Set override" }));
-    await screen.findByText("subscriber");
-
-    expect(adminRequestMock).toHaveBeenCalledWith(
-      `/admin/v1/users/${ids.user}/limit-override?environment_id=${ids.environment}`,
-      expect.anything(),
-      { body: { limit_plan: "subscriber", reason: "support-approved" }, method: "PUT" }
-    );
-    await user.click(screen.getByRole("button", { name: "Clear override" }));
-    await waitFor(() => expect(screen.getByText("No override")).toBeInTheDocument());
-    expect(adminRequestMock).toHaveBeenCalledWith(
-      `/admin/v1/users/${ids.user}/limit-override?environment_id=${ids.environment}`,
-      expect.anything(),
-      { method: "DELETE" }
-    );
-  });
-
-  it("refreshes the active strong ETag immediately before exact-revision rollback", async () => {
-    const user = userEvent.setup();
-    const previous = {
-      activated_at: instant,
-      created_at: instant,
-      created_by: "adm_0123456789abcdef",
-      document: { apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig", metadata: {}, spec: {} },
-      environment_id: ids.environment,
-      id: ids.previousRevision,
-      state: "superseded",
-      version: 1
-    };
-    const active = { ...previous, document: { ...previous.document, spec: { features: [{ id: "assistant" }] } }, id: ids.activeRevision, state: "active", version: 2 };
-    let activeReads = 0;
-    adminRequestMock.mockImplementation((path: string, _schema: unknown, options?: { etag?: string; method?: string }) => {
-      if (path.includes("/config-revisions?")) return Promise.resolve({ data: { items: [previous], page: { has_more: false } } });
-      if (path.endsWith("/config")) {
-        activeReads += 1;
-        return Promise.resolve({ data: active, etag: activeReads === 1 ? '"etag-at-load"' : '"etag-at-click"' });
-      }
-      if (path.endsWith("/rollback") && options?.method === "POST") return Promise.resolve({ data: { ...previous, state: "active" }, etag: '"etag-restored"' });
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    render(<ConfigurationRevisionsPage />);
-    await user.type(screen.getByLabelText("Environment ID"), ids.environment);
-    await user.click(screen.getByRole("button", { name: "Load newest revision" }));
-    await screen.findByText(/Active revision:/);
-    await user.click(screen.getByRole("button", { name: "Review rollback" }));
-    expect(screen.getByRole("heading", { name: "Replace active revision 2 with revision 1?" })).toBeInTheDocument();
-    expect(screen.getByText("$.spec.features")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Operator reason"), "restore known-good revision");
-    await user.click(screen.getByRole("button", { name: "Confirm rollback to revision 1" }));
-
-    await waitFor(() => expect(adminRequestMock).toHaveBeenCalledWith(
-      `/admin/v1/environments/${ids.environment}/rollback`,
-      expect.anything(),
-      { body: { reason: "restore known-good revision", revision_id: ids.previousRevision }, etag: '"etag-at-click"', method: "POST" }
-    ));
-    expect(activeReads).toBe(2);
-  });
 });

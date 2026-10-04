@@ -25,6 +25,7 @@ import {
   Segmented
 } from "../../ui";
 import { formatCount } from "../analytics/usage-model";
+import { type PlanSelection, PlanRulesEditor } from "../policies/plan-rules-editor";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { deleteAreaResource, type JSONRecord, upsertAreaResource } from "../configuration-slice";
 import { CopyButton } from "../requests/request-detail";
@@ -199,13 +200,10 @@ function AccessTab({ draft, feature }: { draft: Draft; feature: JSONRecord }) {
   const document = draft.document;
   const expression = object(feature.access) ? String(feature.access.expression ?? "") : "";
   const planExpression = object(feature.limitPlan) ? String(feature.limitPlan.expression ?? "") : "";
-  const literalPlan = /^'([a-z][a-z0-9_-]{0,62})'$/.exec(planExpression)?.[1];
   const output = object(feature.output) ? feature.output : {};
   const [access, setAccess] = useState(presetOf(expression));
   const [custom, setCustom] = useState(presetOf(expression) === "custom" ? expression : "");
-  const [planMode, setPlanMode] = useState<"plan" | "rule">(literalPlan ? "plan" : "rule");
-  const [plan, setPlan] = useState(literalPlan ?? "");
-  const [planRule, setPlanRule] = useState(literalPlan ? "" : planExpression);
+  const [planSelection, setPlanSelection] = useState<PlanSelection>({ expression: planExpression, problems: [] });
   const [policy, setPolicy] = useState(String(feature.attestationPolicy ?? ""));
   const [defaultTokens, setDefaultTokens] = useState(String(output.defaultMaximumTokens ?? ""));
   const [absoluteTokens, setAbsoluteTokens] = useState(String(output.absoluteMaximumTokens ?? ""));
@@ -216,11 +214,12 @@ function AccessTab({ draft, feature }: { draft: Draft; feature: JSONRecord }) {
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const accessExpression = access === "custom" ? custom.trim() : ACCESS_PRESETS.find((preset) => preset.id === access)?.expression ?? "";
-    const limitExpression = planMode === "plan" ? (plan ? `'${plan}'` : "") : planRule.trim();
+    const limitExpression = planSelection.expression;
     const hasOutput = defaultTokens !== "" || absoluteTokens !== "";
     const d = Number(defaultTokens);
     const a = Number(absoluteTokens);
     if (!accessExpression || !limitExpression || !policy) return setError("Choose who can call it, a plan or plan rule, and an app verification policy.");
+    if (planSelection.problems.length) return setError(planSelection.problems.join(" "));
     if (hasOutput && (!Number.isSafeInteger(d) || !Number.isSafeInteger(a) || d < 1 || a < d)) return setError("The output maximum must be at least the default, and both at least 1.");
     setError(undefined);
     await draft.save((current) => replaceFeature(current, String(feature.id), (value) => {
@@ -242,10 +241,8 @@ function AccessTab({ draft, feature }: { draft: Draft; feature: JSONRecord }) {
       </Card>
       <Card icon="policies" title="Limits">
         <div className="lw-stack lw-stack--tight">
-          <Segmented items={[{ id: "plan", label: "One plan for everyone" }, { id: "rule", label: "Plan rule (CEL)" }]} label="Limit plan" onChange={setPlanMode} value={planMode} />
-          {planMode === "plan"
-            ? <Field id="access-plan" label="Limit plan"><select className="lw-select" id="access-plan" onChange={(event) => setPlan(event.target.value)} value={plan}><option value="">Choose a plan</option>{plans.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-            : <Field hint="Must evaluate to a plan ID, e.g. principal.claims.plan == 'premium' ? 'premium' : 'free'." id="access-plan-rule" label="Plan rule"><textarea className="lw-json-editor lw-json-editor--short" id="access-plan-rule" maxLength={4096} onChange={(event) => setPlanRule(event.target.value)} rows={3} spellCheck={false} value={planRule} /></Field>}
+          <strong className="lw-note">Which limit plan applies</strong>
+          <PlanRulesEditor expression={planExpression} idPrefix="access-plan" onChange={setPlanSelection} plans={plans} />
           <div className="lw-form-grid">
             <Field hint="Used when the app doesn't ask for a maximum." id="access-default-output" label="Default output tokens"><Input id="access-default-output" min={1} placeholder="Server default" onChange={(event) => setDefaultTokens(event.target.value)} type="number" value={defaultTokens} /></Field>
             <Field hint="The most the app may ask for." id="access-absolute-output" label="Most output tokens"><Input id="access-absolute-output" min={1} placeholder="Server default" onChange={(event) => setAbsoluteTokens(event.target.value)} type="number" value={absoluteTokens} /></Field>

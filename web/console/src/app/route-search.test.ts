@@ -211,39 +211,44 @@ describe("shareable operational route search", () => {
       claims: "{\"plan\":\"premium\"}",
       confirmation: "REVOKE",
       credential: "provider-key",
-      environment_id: "env_0123456789abcdef",
       expanded_schema_bytes: 268,
       feature: "assistant",
       framing_unit_count: 2,
+      mode: "grid",
       platform: "react_native_ios",
       reason: "operator prose",
       requested_input_tokens: 100,
       requested_output_max: "200",
-      revision_id: "rev_0123456789abcdef",
       rewritten_request_bytes: 4096,
+      run: "draft",
       streaming: "false",
       token: "secret-token",
-      trust_level: "app_verified"
+      trust_level: "web_risk_verified",
+      versus: "rev_0123456789abcdef"
     });
     expect(parsed).toEqual({
       app_version: "1.2.3-beta",
       authenticated: true,
-      environment_id: "env_0123456789abcdef",
       expanded_schema_bytes: "268",
       feature: "assistant",
       framing_unit_count: "2",
+      mode: "grid",
       platform: "react_native_ios",
       requested_input_tokens: "100",
       requested_output_max: "200",
-      revision_id: "rev_0123456789abcdef",
       rewritten_request_bytes: "4096",
+      run: "draft",
       streaming: false,
-      trust_level: "app_verified"
+      trust_level: "web_risk_verified",
+      versus: "rev_0123456789abcdef"
     });
-    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", feature: "assistant" }).success).toBe(false);
-    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", framing_unit_count: 4097 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ framing_unit_count: 4097 }).success).toBe(false);
     expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: 4_194_305 }).success).toBe(false);
     expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: -1 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ requested_input_tokens: 100_000_001 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ run: "staging" }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ grid_x: "plan", grid_y: "plan" }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ user: "someone@example.com" }).success).toBe(false);
   });
 
   it("keeps feature selection canonical and drops route-foreign sensitive values", () => {

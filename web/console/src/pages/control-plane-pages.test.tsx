@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,28 +44,10 @@ vi.mock("../app/console-compatibility-context", () => ({
   useConsoleCompatibility: () => ({ mutationAllowed: true })
 }));
 
-import { AuditPageView, RouteSimulatorPage, SelfTestsPage } from "./control-plane-pages";
+import { AuditPageView, SelfTestsPage } from "./control-plane-pages";
 import { SelfTestSchema } from "../api/admin";
 import { dispatchAdminRefresh } from "../api/admin-events";
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
-
-
-
-
-
-function routeSimulationFixture() {
-  return {
-    allowed: true, application_id: "app_0123456789abcdef", environment_id: "env_0123456789abcdef",
-    environment_kind: "production", explanation: ["production policy allowed"],
-    facts: { application_id: "app_0123456789abcdef", authenticated: true, environment_id: "env_0123456789abcdef", environment_kind: "production", expanded_schema_bytes: 268, feature: "assistant", framing_unit_count: 1, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 99, requested_output_max: 100, revision_id: "rev_0123456789abcdef", rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
-    fact_usage: [{ affects_cel: true, explanation: "Bounded untrusted CEL estimate; never accounting authority.", fact: "request.estimated_input_tokens", role: "policy" }],
-    feature: "assistant", limit_plan: "subscriber",
-    limits: [{ algorithm: "calendar", hard: true, maximum: 1000, metric: "total_tokens", scope: ["user", "feature"], timezone: "UTC", window: "1d" }],
-    model: "gpt_mobile", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses",
-    reservation: { allocations: [{ algorithm: "calendar", applicable: true, durable: true, metric: "total_tokens", units: 1400 }], applied_output_maximum: 100, cost_bound_known: true, cost_nano_usd_bound: 50, input_accounting: { expanded_schema_bytes: 268, framing_unit_count: 1, input_token_bound: 1300, maximum_context_tokens: 128000, maximum_framing_tokens_per_request: 4, maximum_framing_tokens_per_unit: 4, method: "utf8_byte_bpe_declared_framing_v1", profile_id: "gpt_mobile_input", required: true, rewritten_request_bytes: 1024 }, pricing_catalog: "mobile_price", total_token_bound: 1400 },
-    revision_id: "rev_0123456789abcdef", route: "primary", upstream: "openai", warnings: []
-  };
-}
 
 function renderInWorkspace(children: ReactNode, search: WorkspaceSearch) {
   const organization = { created_at: "2026-08-29T00:00:00Z", display_name: "Example", id: "org_0123456789abcdef", slug: "example" };
@@ -259,46 +241,6 @@ describe("rich usage and route-simulator views", () => {
     expect(updateSearch).toHaveBeenCalledWith({ event: event.id });
   });
 
-  it("restores only non-PII route-simulator shape and never writes claims to URL state", async () => {
-    const search: WorkspaceSearch = {
-      app_version: "1.2.3",
-      authenticated: true,
-      environment_id: "env_0123456789abcdef",
-      expanded_schema_bytes: "268",
-      feature: "assistant",
-      framing_unit_count: "1",
-      platform: "react_native_ios",
-      requested_input_tokens: "99",
-      requested_output_max: "100",
-      revision_id: "rev_0123456789abcdef",
-      rewritten_request_bytes: "1024",
-      streaming: false,
-      trust_level: "app_verified"
-    };
-    adminRequestMock.mockImplementation(async (path: string) => path.endsWith("/config") ? { data: {
-      created_at: "2026-08-29T00:00:00Z", created_by: "adm_0123456789abcdef",
-      document: { spec: { features: [{ id: "assistant" }] } }, environment_id: search.environment_id,
-      id: search.revision_id, state: "active", version: 1
-    } } : { data: routeSimulationFixture() });
-    const user = userEvent.setup();
-    const { updateSearch } = renderInWorkspace(<RouteSimulatorPage />, search);
-
-    await waitFor(() => expect(screen.getByText(/Selected active revision/)).toBeInTheDocument());
-    expect(screen.getByLabelText("Requested input tokens (explanatory)")).toHaveValue(99);
-    expect(screen.getByLabelText("Requested output maximum")).toHaveValue(100);
-    expect(screen.getByLabelText(/Expanded schema bytes/)).toHaveValue(268);
-    fireEvent.change(screen.getByLabelText("Normalized claims JSON"), { target: { value: '{"plan":"private-value"}' } });
-    await user.click(screen.getByRole("button", { name: "Simulate route" }));
-
-    expect(await screen.findByRole("heading", { name: "Allowed" })).toBeInTheDocument();
-    const patch = updateSearch.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(patch).toMatchObject({ environment_id: search.environment_id, expanded_schema_bytes: "268", feature: "assistant", requested_input_tokens: "99", revision_id: search.revision_id });
-    const simulationCall = adminRequestMock.mock.calls.find(([path]) => path.endsWith("/simulate"));
-    expect(simulationCall?.[2]).toMatchObject({ body: { request: { expanded_schema_bytes: 268 } } });
-    expect(patch).not.toHaveProperty("claims");
-    expect(JSON.stringify(patch)).not.toMatch(/private-value|credential|reason|secret|bearer|authorization/i);
-  });
-
   it("restores selected self-test run and schedule IDs while keeping bearer material local", async () => {
     const environmentID = "env_0123456789abcdef";
     const run = { checks: [{ name: "usage", safe_detail: "Bounded usage passed.", state: "passed" }], completed_at: "2026-08-29T00:00:01Z", config_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: "tst_0123456789abcdef", kind: "upstream", state: "passed" };
@@ -347,43 +289,6 @@ describe("rich usage and route-simulator views", () => {
       `/admin/v1/self-tests/${runID}?environment_id=${environmentID}`,
       SelfTestSchema
     );
-  });
-
-  it("renders authoritative scope, exact reservation, applicable limits, and fact roles", async () => {
-    adminRequestMock.mockResolvedValue({ data: routeSimulationFixture() });
-    const user = userEvent.setup();
-    render(<RouteSimulatorPage />);
-    await user.type(screen.getByLabelText("Revision ID"), "rev_0123456789abcdef");
-    await user.type(screen.getByLabelText("Feature"), "assistant");
-    await user.click(screen.getByRole("button", { name: "Simulate route" }));
-
-    expect(await screen.findByRole("heading", { name: "Exact conservative reservation" })).toBeInTheDocument();
-    expect(screen.getByText("app_0123456789abcdef")).toBeInTheDocument();
-    expect(screen.getByText("rev_0123456789abcdef")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Applicable limits" })).toBeInTheDocument();
-    expect(screen.getByText("requested_input_tokens")).toBeInTheDocument();
-    expect(screen.getByText("request.estimated_input_tokens")).toBeInTheDocument();
-    expect(screen.getByText("policy")).toBeInTheDocument();
-  });
-
-  it("loads exact active route context and rejects a cross-environment simulation result", async () => {
-    const simulation = { ...routeSimulationFixture(), environment_id: "env_ffffffffffffffff" };
-    adminRequestMock.mockImplementation(async (path: string) => path.endsWith("/config") ? { data: {
-      created_at: "2026-08-29T00:00:00Z", created_by: "adm_0123456789abcdef",
-      document: { spec: { features: [{ id: "assistant" }, { id: "search" }] } },
-      environment_id: "env_0123456789abcdef", id: "rev_0123456789abcdef", state: "active", version: 1
-    } } : { data: simulation });
-    const user = userEvent.setup();
-    render(<RouteSimulatorPage />);
-    await user.type(screen.getByLabelText("Environment context ID"), "env_0123456789abcdef");
-    await user.click(screen.getByRole("button", { name: "Load active route context" }));
-
-    expect(await screen.findByText(/Selected active revision/)).toHaveTextContent("2 features");
-    expect(screen.getByLabelText("Revision ID")).toHaveValue("rev_0123456789abcdef");
-    expect(screen.getByLabelText("Feature")).toHaveValue("assistant");
-    await user.click(screen.getByRole("button", { name: "Simulate route" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Route context mismatch");
-    expect(screen.queryByRole("heading", { name: "Allowed" })).not.toBeInTheDocument();
   });
 
   it("creates, lists, reads, and disables a schedule using only durable token metadata", async () => {

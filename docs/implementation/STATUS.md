@@ -2,6 +2,93 @@
 
 Status date: 2026-10-03
 
+## Console redesign phase 6: Policies & Limits, Changes, Simulator (branch `console-redesign`, unreleased)
+
+Policies & Limits has four tabs on the shared draft (`src/pages/policies/`).
+Limit plans lists each plan's limits as sentences ("Each user can use 50,000
+tokens per day"), the features that select it and its protection limits. A
+plan opens in a drawer where each limit is a card that expands in place into
+the same sentence as controls: who it counts (ten presets or a custom
+checklist with one optional claim), amount, metric, period or burst refill,
+kind, time zone and, for spend, retry treatment. Spend is entered in dollars
+and converted to integer nano-USD exactly, without floating point. The checks
+mirror the server's activation rules (`internal/configuration/limits.go`,
+`internal/limitmetric`): which algorithms each metric supports, the fields
+each algorithm takes, window and refill bounds, at most one claim, duplicate
+identities, and the cost-retry pairing rule, with Add It inserting the missing
+organization-wide spend limit. This release activates only hard limits, so
+the design's Track only option is left out and the editor says so. Published
+plan IDs are locked (Duplicate instead); an unpublished plan can be renamed
+and the features selecting it follow in the same draft. Removing a plan in use
+asks for a replacement plan per feature and applies both in one save.
+
+Plan by feature edits `feature.limitPlan` as ordered rules (claim, platform,
+component kind, trust level, streaming, prompt size), compiled to the nested
+ternary and shown live. An expression the console can't read back exactly
+stays custom CEL and is never rewritten. The same editor replaces the CEL box
+on each feature's Access & limits tab. Overrides opens one user by `usr_` ID,
+lists only live plans (draft-only plans are disabled), shows each feature's
+current plan from `users/{id}/effective-configuration`, and applies with a
+required reason and an end (none, 24 hours, 7 or 30 days, or a date) through
+Apply Now, with a notice that it skips the draft. A repeated identical
+override is reported as no change (same override ID), and clearing asks first.
+Protections lists limits that count installations, device families, trust
+sources, components or platforms instead of users, names plans without one,
+and adds one of three presets to several plans at once. Check a User opens the
+Simulator in Real user mode. `/access-policies` now redirects to Features and
+`/abuse-controls` to Protections.
+
+Changes has Draft, History, Compare and Edit as JSON tabs
+(`src/pages/changes/`). The draft is computed per resource as the difference
+from live (`config-diff.ts`), grouped into Features, Routing, Limits, AI
+Connections and Client Trust, with a feature's routing and its other settings
+as separate entries. Each entry expands into a field diff and can be
+discarded back to live individually; Discard All resets the draft document to
+exactly the live one (an ordinary ETag-guarded replace), and a draft equal to
+live no longer shows in the status rail. Validation problems link to the page
+that fixes them. The publish review now runs spot checks: four sample people
+on each affected feature, simulated on live and on the draft, listing only
+results that change. It also requires acknowledging warnings, and in
+Production an explicit "I've checked what changes for Production users".
+History lists revisions 20 at a time with a generated summary against the
+previous revision; a revision drawer shows changes against the previous
+revision or live, the document and its audit link, and offers Roll Back (an
+impact review with reason, typed ID and acknowledgement, using a freshly read
+active ETag) and Start a Draft From This (confirming before replacing a draft
+with changes). Compare takes any two of live, the draft, another
+environment's live revision or any listed revision. Edit as JSON replaces the
+old full-document editor: it edits the shared draft and refuses to overwrite
+a draft that changed since it loaded.
+
+The Simulator (`src/pages/simulator/`) has Sample request, Real user, Past
+request and Coverage grid modes. Sample request runs `POST
+/config-revisions/{id}/simulate` against live, a valid draft or a listed
+revision, optionally compared with another; it shows a verdict and the six
+stages, with denials placed by the server's fixed denial sentences, Changed
+marks between columns, inputs that mattered, limits as sentences, the token
+and cost bound and the fallback sequence. Pretend down is computed in the
+console from the fallback sequence; What if runs one-change variants; Copy as
+CLI writes claims to `claims.json` through a heredoc. Claims stay in the page
+and never enter the URL, and a result for another revision or feature is
+refused. Real user and Past request use the users and requests
+effective-configuration endpoints; Coverage grid sends one call per cell, at
+most 25. The diff summary now compares unkeyed lists (such as a plan's limits)
+by position.
+
+Not built because the API has no source: usage histograms and "users limited"
+counts, rule shares of traffic, listing users with overrides and ended
+overrides (the drawer links to the user's audit events), per-change authorship
+on the shared draft, publish notes (revisions have no description), the
+post-publish watch panel, automatic merging when someone else publishes first
+(the draft is reported as out of date), copying one environment into
+another's draft, saved scenarios, remaining quota in simulations, and failure
+simulation beyond Pretend down.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (401 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.22 MB.
+
 ## Console redesign phase 5: Build pages on one shared draft (branch `console-redesign`, unreleased)
 
 Features, Routing, AI Connections and Client Trust are rebuilt around one

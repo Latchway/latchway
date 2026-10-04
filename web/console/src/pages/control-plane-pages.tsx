@@ -5,15 +5,12 @@ import {
   AuditEventSchema,
   AuditPageSchema,
   queryPath,
-  RevisionSchema,
-  RouteSimulationSchema,
   SelfTestSchema,
   SelfTestSchedulePageSchema,
   SelfTestScheduleSchema,
   type AuditPage,
   type AuditEvent,
   type EffectiveConfiguration,
-  type RouteSimulation,
   type SelfTestRun,
   type SelfTestSchedule
 } from "../api/admin";
@@ -23,8 +20,6 @@ import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import {
   AuditRouteSearchSchema,
   type AuditRouteSearch,
-  RouteSimulatorRouteSearchSchema,
-  type RouteSimulatorRouteSearch,
   SelfTestRouteSearchSchema,
   type SelfTestRouteSearch
 } from "../app/route-search";
@@ -363,118 +358,6 @@ export function AuditPageView() {
       <h3>Field-level diff</h3><Table headers={["Field", "Operation", "Classification", "Value"]} rows={selected.changes.map((change) => [change.field, change.operation, change.classification, change.redacted ? "Redacted by contract" : "Value not retained"])} />
       <details><summary>Redaction-safe raw JSON</summary><pre>{JSON.stringify(selected, null, 2)}</pre></details>
     </aside> : null}
-  </div>;
-}
-
-export function RouteSimulatorPage() {
-  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const routeSearch = RouteSimulatorRouteSearchSchema.parse(workspace?.search ?? {}); const [result, setResult] = useState<RouteSimulation>(); const [resultSearchKey, setResultSearchKey] = useState<string>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
-  const [environment, setEnvironment] = useState(routeSearch.environment_id ?? ""); const [revision, setRevision] = useState(routeSearch.revision_id ?? ""); const [feature, setFeature] = useState(routeSearch.feature ?? "");
-  const [platform, setPlatform] = useState(routeSearch.platform ?? "react_native_ios"); const [trustLevel, setTrustLevel] = useState(routeSearch.trust_level ?? "app_verified"); const [appVersion, setAppVersion] = useState(routeSearch.app_version ?? "");
-  const [requestedInputTokens, setRequestedInputTokens] = useState(routeSearch.requested_input_tokens ?? "0"); const [requestedOutputMaximum, setRequestedOutputMaximum] = useState(routeSearch.requested_output_max ?? "0"); const [rewrittenRequestBytes, setRewrittenRequestBytes] = useState(routeSearch.rewritten_request_bytes ?? "1024"); const [framingUnitCount, setFramingUnitCount] = useState(routeSearch.framing_unit_count ?? "1");
-  const [expandedSchemaBytes, setExpandedSchemaBytes] = useState(routeSearch.expanded_schema_bytes ?? "0");
-  const [authenticated, setAuthenticated] = useState(routeSearch.authenticated ?? true); const [streamingSimulation, setStreamingSimulation] = useState(routeSearch.streaming ?? false);
-  const [contextRevision, setContextRevision] = useState<string>(); const [contextFeatures, setContextFeatures] = useState<string[]>([]);
-  const canonicalSearchKey = JSON.stringify(routeSearch);
-  useEffect(() => {
-    if (session.data?.mode !== "configured" || !workspace) return;
-    // Browser navigation restores only redaction-safe simulator inputs; claims and results remain local.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEnvironment(routeSearch.environment_id ?? ""); setRevision(routeSearch.revision_id ?? ""); setFeature(routeSearch.feature ?? "");
-    setPlatform(routeSearch.platform ?? "react_native_ios"); setTrustLevel(routeSearch.trust_level ?? "app_verified"); setAppVersion(routeSearch.app_version ?? "");
-    setRequestedInputTokens(routeSearch.requested_input_tokens ?? "0"); setRequestedOutputMaximum(routeSearch.requested_output_max ?? "0"); setRewrittenRequestBytes(routeSearch.rewritten_request_bytes ?? "1024"); setFramingUnitCount(routeSearch.framing_unit_count ?? "1");
-    setExpandedSchemaBytes(routeSearch.expanded_schema_bytes ?? "0");
-    setAuthenticated(routeSearch.authenticated ?? true); setStreamingSimulation(routeSearch.streaming ?? false);
-    if (routeSearch.environment_id) void loadContext(routeSearch.environment_id, routeSearch, false);
-    else { setContextRevision(undefined); setContextFeatures([]); }
-    // The validated URL key is the canonical restore trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalSearchKey, session.data?.mode]);
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function loadContext(targetEnvironment = environment, selection: RouteSimulatorRouteSearch = routeSearch, canonicalize = true): Promise<void> {
-    if (!environmentPattern.test(targetEnvironment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading route context.", retryable: false, status: 0, title: "Invalid route context" }); return; }
-    setBusy(true); setProblem(undefined);
-    if (canonicalize) { setResult(undefined); setResultSearchKey(undefined); }
-    try {
-      const active = await adminRequest(`/admin/v1/environments/${targetEnvironment}/config`, RevisionSchema);
-      if (active.data.environment_id !== targetEnvironment) throw new Error("context");
-      const spec = active.data.document.spec;
-      if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error("context");
-      const configuredFeatures = (spec as Record<string, unknown>).features;
-      if (!Array.isArray(configuredFeatures) || configuredFeatures.length > 256) throw new Error("context");
-      const ids = configuredFeatures.map((item) => item && typeof item === "object" && !Array.isArray(item) ? String((item as Record<string, unknown>).id ?? "") : "");
-      if (ids.some((id) => !identifierPattern.test(id)) || new Set(ids).size !== ids.length) throw new Error("context");
-      if (selection.revision_id && selection.revision_id !== active.data.id) throw new Error("context_selection");
-      if (selection.feature && !ids.includes(selection.feature)) throw new Error("context_selection");
-      const selectedFeature = selection.feature ?? ids[0] ?? "";
-      setContextRevision(active.data.id); setContextFeatures(ids); setRevision(active.data.id); setFeature(selectedFeature);
-      if (canonicalize && workspace) workspace.updateSearch({ environment_id: targetEnvironment, feature: selectedFeature || undefined, revision_id: active.data.id });
-    } catch (error) { setProblem(error instanceof Error && error.message === "context_selection" ? { code: "context_mismatch", detail: "The selected revision or feature is not active in this environment.", retryable: false, status: 0, title: "Route context changed" } : error instanceof Error && error.message === "context" ? { code: "invalid_response", detail: "The active revision did not match the environment or contain a bounded canonical feature list.", retryable: true, status: 0, title: "Route context unavailable" } : problemFromError(error)); }
-    finally { setBusy(false); }
-  }
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
-    try {
-      const claims = JSON.parse(String(form.get("claims") ?? "{}")) as unknown;
-      if (!claims || Array.isArray(claims) || typeof claims !== "object" || Object.keys(claims).length > 64) throw new Error("claims");
-      if (contextRevision && revision !== contextRevision) throw new Error("context_selection");
-      const safeSearchCandidate = {
-        ...routeSearch,
-        app_version: appVersion || undefined,
-        authenticated,
-        environment_id: environment || undefined,
-        expanded_schema_bytes: expandedSchemaBytes || "0",
-        feature,
-        framing_unit_count: framingUnitCount,
-        platform,
-        requested_input_tokens: requestedInputTokens || "0",
-        requested_output_max: requestedOutputMaximum || "0",
-        revision_id: revision,
-        rewritten_request_bytes: rewrittenRequestBytes || "0",
-        streaming: streamingSimulation,
-        trust_level: trustLevel
-      };
-      const safeSearch = workspace ? RouteSimulatorRouteSearchSchema.parse(safeSearchCandidate) : undefined;
-      const response = await adminRequest(`/admin/v1/config-revisions/${revision}/simulate`, RouteSimulationSchema, { method: "POST", body: {
-        feature, platform, trust_level: trustLevel,
-        principal: { authenticated, claims },
-        request: { streaming: streamingSimulation, app_version: appVersion, requested_input_tokens: Number(requestedInputTokens || 0), requested_output_max: Number(requestedOutputMaximum || 0), rewritten_request_bytes: Number(rewrittenRequestBytes || 0), framing_unit_count: Number(framingUnitCount || 0), expanded_schema_bytes: Number(expandedSchemaBytes || 0) }
-      }});
-      if (response.data.revision_id !== revision || response.data.feature !== feature || (environment && response.data.environment_id !== environment)) throw new Error("context_result");
-      setResult(response.data); setResultSearchKey(safeSearch ? JSON.stringify(safeSearch) : undefined);
-      if (workspace && safeSearch) workspace.updateSearch({
-        app_version: safeSearch.app_version,
-        authenticated: safeSearch.authenticated,
-        environment_id: safeSearch.environment_id,
-        expanded_schema_bytes: safeSearch.expanded_schema_bytes,
-        feature: safeSearch.feature,
-        framing_unit_count: safeSearch.framing_unit_count,
-        platform: safeSearch.platform,
-        requested_input_tokens: safeSearch.requested_input_tokens,
-        requested_output_max: safeSearch.requested_output_max,
-        revision_id: safeSearch.revision_id,
-        rewritten_request_bytes: safeSearch.rewritten_request_bytes,
-        streaming: safeSearch.streaming,
-        trust_level: safeSearch.trust_level
-      });
-    } catch (error) { setProblem(error instanceof SyntaxError || (error instanceof Error && error.message === "claims") ? { code: "invalid_claims", detail: "Normalized claims must be one JSON object with at most 64 properties.", retryable: false, status: 0, title: "Invalid simulator input" } : error instanceof Error && error.message === "context_selection" ? { code: "context_mismatch", detail: "The revision no longer matches the loaded active environment context. Reload context before simulating.", retryable: false, status: 0, title: "Route context changed" } : error instanceof Error && error.message === "context_result" ? { code: "invalid_response", detail: "The simulation result did not match the selected revision, feature, and environment context.", retryable: true, status: 0, title: "Route context mismatch" } : problemFromError(error)); }
-    finally { setBusy(false); }
-  }
-  return <div className="control-page"><PageHeading eyebrow="Operations" title="Route simulator">The server executes the exact compiled production CEL and resolver. This performs no quota reservation and no upstream dispatch.</PageHeading>
-    <section className="filter-bar"><label>Environment context ID<input pattern={environmentInputPattern} value={environment} onChange={(event) => { setEnvironment(event.target.value); setContextRevision(undefined); setContextFeatures([]); setResult(undefined); }} /></label><button className="secondary-action" disabled={busy || !environment} onClick={() => void loadContext(environment, { ...routeSearch, environment_id: environment, feature: undefined, revision_id: undefined })} type="button">Load active route context</button>{contextRevision ? <span>Selected active revision <code>{contextRevision}</code> with {contextFeatures.length} feature{contextFeatures.length === 1 ? "" : "s"}.</span> : null}</section>
-    <form className="control-form" onSubmit={(event) => void submit(event)}>
-      <div className="form-field-grid"><label>Revision ID<input name="revision" pattern={revisionPattern} required value={revision} onChange={(event) => setRevision(event.target.value)} /></label><label>Feature<input list="route-context-feature-options" name="feature" pattern={identifierInputPattern} required value={feature} onChange={(event) => setFeature(event.target.value)} /><datalist id="route-context-feature-options">{contextFeatures.map((id) => <option key={id} value={id} />)}</datalist></label></div>
-      <div className="form-field-grid"><label>Platform<select name="platform" value={platform} onChange={(event) => setPlatform(event.target.value as typeof platform)}><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="node">Node</option></select></label><label>Trust level<select name="trust" value={trustLevel} onChange={(event) => setTrustLevel(event.target.value as typeof trustLevel)}><option value="none">None</option><option value="identity_only">Identity only</option><option value="app_verified">App verified</option><option value="device_verified">Device verified</option><option value="strong_device_verified">Strong device verified</option><option value="debug">Debug</option></select></label></div>
-      <label>Normalized claims JSON<textarea defaultValue="{}" name="claims" rows={6} spellCheck={false} /></label>
-      <div className="form-field-grid"><label>App version (explanatory)<input maxLength={128} name="app_version" pattern="[A-Za-z0-9._+-]+" value={appVersion} onChange={(event) => setAppVersion(event.target.value)} /></label><label>Requested input tokens (explanatory)<input max={2_147_483_647} min={0} name="requested_input" type="number" value={requestedInputTokens} onChange={(event) => setRequestedInputTokens(event.target.value)} /></label><label>Requested output maximum<input max={2_147_483_647} min={0} name="requested_output" type="number" value={requestedOutputMaximum} onChange={(event) => setRequestedOutputMaximum(event.target.value)} /></label></div>
-      <div className="form-field-grid"><label>Rewritten request bytes<input max={104_857_600} min={0} name="rewritten_request_bytes" type="number" value={rewrittenRequestBytes} onChange={(event) => setRewrittenRequestBytes(event.target.value)} /><small>Hypothetical exact post-rewrite body size for reservation projection.</small></label><label>Framing unit count<input max={4096} min={0} name="framing_unit_count" type="number" value={framingUnitCount} onChange={(event) => setFramingUnitCount(event.target.value)} /><small>Messages, input items, tools, schema objects, and content parts after validation.</small></label><label>Expanded schema bytes<input max={4_194_304} min={0} name="expanded_schema_bytes" type="number" value={expandedSchemaBytes} onChange={(event) => setExpandedSchemaBytes(event.target.value)} /><small>Additional local schema accounting for Chat or Responses. Use zero when no schemas are present.</small></label></div>
-      <label className="check-field"><input checked={authenticated} name="authenticated" onChange={(event) => setAuthenticated(event.target.checked)} type="checkbox" />Authenticated principal</label><label className="check-field"><input checked={streamingSimulation} name="streaming" onChange={(event) => setStreamingSimulation(event.target.checked)} type="checkbox" />Streaming request</label><FormActions busy={busy}>Simulate route</FormActions>
-    </form><ProblemNotice problem={problem} />
-    {result && (!workspace || resultSearchKey === canonicalSearchKey) ? <section className={`simulation-result ${result.allowed ? "simulation-result--allowed" : "simulation-result--denied"}`}><h2>{result.allowed ? "Allowed" : "Denied"}</h2><dl><div><dt>Application</dt><dd>{result.application_id}</dd></div><div><dt>Environment</dt><dd>{result.environment_id} ({result.environment_kind})</dd></div><div><dt>Revision</dt><dd>{result.revision_id}</dd></div><div><dt>Access expression</dt><dd>{result.matched_access_expression ?? "—"}</dd></div><div><dt>Limit plan</dt><dd>{result.limit_plan ?? "—"}</dd></div><div><dt>Route</dt><dd>{result.route ?? "—"}</dd></div><div><dt>Upstream</dt><dd>{result.upstream ?? "—"}</dd></div><div><dt>Physical model</dt><dd>{result.physical_model ?? "—"}</dd></div><div><dt>Pricing</dt><dd>{result.pricing_confidence ?? "—"}</dd></div></dl>
-      {result.reservation ? <><h3>Exact conservative reservation</h3><dl><div><dt>Applied output maximum</dt><dd>{result.reservation.applied_output_maximum.toLocaleString()}</dd></div><div><dt>Total token bound</dt><dd>{result.reservation.total_token_bound.toLocaleString()}</dd></div><div><dt>Cost bound</dt><dd>{result.reservation.cost_bound_known ? `${result.reservation.cost_nano_usd_bound.toLocaleString()} nano-USD` : "not applicable / unknown"}</dd></div><div><dt>Input accounting</dt><dd>{result.reservation.input_accounting.required ? `${result.reservation.input_accounting.profile_id}: ${result.reservation.input_accounting.input_token_bound.toLocaleString()} tokens` : "not required"}</dd></div></dl><Table headers={["Metric", "Algorithm", "Units", "Applicable", "Durable"]} rows={result.reservation.allocations.map((allocation) => [allocation.metric, allocation.algorithm, allocation.units, allocation.applicable ? "yes" : "no", allocation.durable ? "yes" : "no"])} /></> : null}
-      {result.limits?.length ? <><h3>Applicable limits</h3><Table headers={["Metric", "Algorithm", "Scope", "Window / timezone", "Maximum", "Per request", "Capacity", "Refill / second"]} rows={result.limits.map((limit) => [limit.metric, limit.algorithm, limit.scope.join(", "), [limit.window, limit.timezone].filter(Boolean).join(" / ") || "—", limit.maximum ?? "—", limit.per_request_maximum ?? "—", limit.capacity ?? "—", limit.refill_per_second ?? "—"])} /></> : null}
-      <h3>Bounded facts</h3><Table headers={["Fact", "Value"]} rows={[["feature", result.facts.feature], ["platform", result.facts.platform], ["trust_level", result.facts.trust_level], ["authenticated", result.facts.authenticated ? "true" : "false"], ["normalized_claims", JSON.stringify(result.facts.normalized_claims)], ["streaming", result.facts.streaming ? "true" : "false"], ["app_version", result.facts.app_version || "—"], ["requested_input_tokens", result.facts.requested_input_tokens], ["requested_output_max", result.facts.requested_output_max], ["rewritten_request_bytes", result.facts.rewritten_request_bytes], ["framing_unit_count", result.facts.framing_unit_count], ["expanded_schema_bytes", result.facts.expanded_schema_bytes]]} />
-      <h3>Bounded fact roles</h3><Table headers={["Fact", "Role", "Affects CEL", "Meaning"]} rows={result.fact_usage.map((fact) => [fact.fact, fact.role, fact.affects_cel ? "yes" : "no", fact.explanation])} />
-      <h3>Explanation</h3><ul>{result.explanation.map((line) => <li key={line}>{line}</li>)}</ul>{result.warnings?.length ? <><h3>Warnings</h3><ul>{result.warnings.map((line) => <li key={line}>{line}</li>)}</ul></> : null}{result.fallback_sequence?.length ? <><h3>Fallback sequence</h3><Table headers={["Route", "Upstream", "Model", "Physical model", "Fallback on"]} rows={result.fallback_sequence.map((candidate) => [candidate.route, candidate.upstream, candidate.model, candidate.physical_model, candidate.fallback_on.join(", ")])} /></> : null}</section> : null}
   </div>;
 }
 

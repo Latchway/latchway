@@ -20,16 +20,18 @@ export type ConsoleRoute =
   | "/models-pricing"
   | "/secrets"
   | "/configuration"
-  | "/access-policies"
   | "/limit-plans"
+  | "/plan-by-feature"
   | "/user-overrides"
-  | "/abuse-controls"
+  | "/protections"
   | "/requests"
   | "/analytics/usage"
   | "/analytics/cost"
   | "/analytics/performance"
   | "/analytics/reliability"
+  | "/changes"
   | "/configuration-revisions"
+  | "/configuration-compare"
   | "/route-simulator"
   | "/self-tests"
   | "/audit"
@@ -127,10 +129,10 @@ export const environmentNavigation: readonly NavGroup[] = [
         icon: "policies",
         label: "Policies & Limits",
         tabs: [
-          { description: "Durable quota policies", label: "Limit plans", to: "/limit-plans" },
-          { description: "Per-feature authorization", label: "Access policies", to: "/access-policies" },
-          { description: "Per-user plan selection", label: "Overrides", to: "/user-overrides" },
-          { description: "Composed protective controls", label: "Abuse controls", to: "/abuse-controls" }
+          { description: "How much each user, device and feature can use", label: "Limit plans", to: "/limit-plans" },
+          { description: "Which plan each feature selects for whom", label: "Plan by feature", to: "/plan-by-feature" },
+          { description: "Live per-user plan exceptions", label: "Overrides", to: "/user-overrides" },
+          { description: "Limits per installation, device or trust source", label: "Protections", to: "/protections" }
         ],
         to: "/limit-plans"
       }
@@ -145,10 +147,12 @@ export const environmentNavigation: readonly NavGroup[] = [
         icon: "changes",
         label: "Changes",
         tabs: [
-          { description: "History and safe rollback", label: "History", to: "/configuration-revisions" },
-          { description: "Validate, diff and activate", label: "Full configuration", to: "/configuration" }
+          { description: "Unpublished changes, problems and publishing", label: "Draft", to: "/changes" },
+          { description: "Every revision and rollback", label: "History", to: "/configuration-revisions" },
+          { description: "Compare any two revisions", label: "Compare", to: "/configuration-compare" },
+          { description: "The whole draft document as JSON", label: "Edit as JSON", to: "/configuration" }
         ],
-        to: "/configuration-revisions"
+        to: "/changes"
       },
       { description: "Exact production policy resolver", icon: "simulator", label: "Simulator", to: "/route-simulator" },
       { description: "Bounded installation diagnostics", icon: "selftest", label: "Self-tests", to: "/self-tests" },
@@ -217,7 +221,7 @@ export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =
 );
 
 /** Paths kept only to redirect pre-redesign links to their new home. */
-export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures"];
+export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls"];
 
 /**
  * The search a shell link carries to another page: only the workspace scope. Page selections such as a feature, a
