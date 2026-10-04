@@ -1568,6 +1568,9 @@ export async function adminRequest<T>(
   }
   const payload = await parseAdminJSON(response);
   if (!response.ok) {
+    // A cookie session that stops working mid-task is reported once to the shell, which asks the operator to sign in
+    // again without discarding the page. Bearer-token calls are the caller's own credential and are left alone.
+    if (response.status === 401 && !bearerToken && typeof window !== "undefined") window.dispatchEvent(new Event("latchway:session-ended"));
     throw new AdminRequestError(responseProblem(response, payload));
   }
   const parsed = schema.safeParse(payload);

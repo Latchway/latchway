@@ -18,6 +18,7 @@ import {
   SelfTestRouteSearchSchema,
   UserRouteSearchSchema
 } from "./route-search";
+import { scopeSearch } from "./navigation";
 
 describe("request route search", () => {
   it("parses every request-list filter into bounded canonical URL state", () => {
@@ -193,15 +194,14 @@ describe("shareable operational route search", () => {
     expect(SelfTestRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", schedule_id: "sts_0123456789abcdef", self_test_id: "tst_0123456789abcdef" }).success).toBe(true);
   });
 
-  it("accepts only complete ordered analytics windows", () => {
-    expect(parseAnalyticsRouteSearch({
-      end: "2026-08-30T00:00:00Z",
-      environment_id: "env_0123456789abcdef",
-      interval: "hour",
-      start: "2026-08-29T00:00:00Z"
-    })).toMatchObject({ interval: "hour" });
-    expect(AnalyticsRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef" }).success).toBe(false);
-    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-29T00:00:00Z", environment_id: "env_0123456789abcdef", interval: "day", start: "2026-08-30T00:00:00Z" }).success).toBe(false);
+  it("accepts a preset or a whole-UTC-day custom period of at most 366 days", () => {
+    expect(parseAnalyticsRouteSearch({ by: "model", period: "30d" })).toMatchObject({ by: "model", period: "30d" });
+    expect(parseAnalyticsRouteSearch({ end: "2026-09-01T00:00:00Z", start: "2026-08-01T00:00:00Z" })).toMatchObject({ start: "2026-08-01T00:00:00Z" });
+    expect(AnalyticsRouteSearchSchema.safeParse({ start: "2026-08-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-02T00:00:00Z", period: "7d", start: "2026-08-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-02T00:00:00Z", start: "2026-08-01T06:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-01T00:00:00Z", start: "2025-07-01T00:00:00Z" }).success).toBe(false);
+    expect(AnalyticsRouteSearchSchema.safeParse({ end: "2026-08-01T00:00:00Z", start: "2026-08-02T00:00:00Z" }).success).toBe(false);
   });
 
   it("keeps only non-PII simulator request shape and strips sensitive local state", () => {
@@ -211,43 +211,55 @@ describe("shareable operational route search", () => {
       claims: "{\"plan\":\"premium\"}",
       confirmation: "REVOKE",
       credential: "provider-key",
-      environment_id: "env_0123456789abcdef",
       expanded_schema_bytes: 268,
       feature: "assistant",
       framing_unit_count: 2,
+      mode: "grid",
       platform: "react_native_ios",
       reason: "operator prose",
       requested_input_tokens: 100,
       requested_output_max: "200",
-      revision_id: "rev_0123456789abcdef",
       rewritten_request_bytes: 4096,
+      run: "draft",
       streaming: "false",
       token: "secret-token",
-      trust_level: "app_verified"
+      trust_level: "web_risk_verified",
+      versus: "rev_0123456789abcdef"
     });
     expect(parsed).toEqual({
       app_version: "1.2.3-beta",
       authenticated: true,
-      environment_id: "env_0123456789abcdef",
       expanded_schema_bytes: "268",
       feature: "assistant",
       framing_unit_count: "2",
+      mode: "grid",
       platform: "react_native_ios",
       requested_input_tokens: "100",
       requested_output_max: "200",
-      revision_id: "rev_0123456789abcdef",
       rewritten_request_bytes: "4096",
+      run: "draft",
       streaming: false,
-      trust_level: "app_verified"
+      trust_level: "web_risk_verified",
+      versus: "rev_0123456789abcdef"
     });
-    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", feature: "assistant" }).success).toBe(false);
-    expect(RouteSimulatorRouteSearchSchema.safeParse({ environment_id: "env_0123456789abcdef", framing_unit_count: 4097 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ framing_unit_count: 4097 }).success).toBe(false);
     expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: 4_194_305 }).success).toBe(false);
     expect(RouteSimulatorRouteSearchSchema.safeParse({ expanded_schema_bytes: -1 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ requested_input_tokens: 100_000_001 }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ run: "staging" }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ grid_x: "plan", grid_y: "plan" }).success).toBe(false);
+    expect(RouteSimulatorRouteSearchSchema.safeParse({ user: "someone@example.com" }).success).toBe(false);
   });
 
   it("keeps feature selection canonical and drops route-foreign sensitive values", () => {
     expect(FeatureRouteSearchSchema.parse({ feature: "assistant", reason: "never-share", secret: "never-share" })).toEqual({ feature: "assistant" });
     expect(FeatureRouteSearchSchema.safeParse({ feature: "Assistant display name" }).success).toBe(false);
+  });
+});
+
+describe("shell navigation search", () => {
+  it("carries only the workspace scope to another page", () => {
+    expect(scopeSearch({ application: "mobile", environment: "production", feature: "assistant", organization: "example", status: "failed", tab: "routing" })).toEqual({ application: "mobile", environment: "production", organization: "example" });
+    expect(scopeSearch({ application: "", feature: "assistant" })).toEqual({});
   });
 });

@@ -55,6 +55,8 @@ export interface AdminProblem {
   documentationURL?: string;
   operationId?: string;
   requestId?: string;
+  /** Seconds until a rate-limited request may be retried, from the Retry-After header. */
+  retryAfterSeconds?: number;
   retryable: boolean;
   status: number;
   title: string;
@@ -254,7 +256,9 @@ export function responseProblem(response: Response, payload: unknown): AdminProb
     return fallbackProblem(response.status);
   }
 
+  const retryAfter = Number(response.headers.get("Retry-After"));
   return {
+    ...(Number.isSafeInteger(retryAfter) && retryAfter > 0 && retryAfter <= 86_400 ? { retryAfterSeconds: retryAfter } : {}),
     code: safeText(parsed.data.code, 128),
     detail: safeText(parsed.data.detail, 2048),
     documentationURL: parsed.data.documentation_url,

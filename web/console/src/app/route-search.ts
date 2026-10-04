@@ -10,7 +10,6 @@ const SearchModel = z.string().min(1).max(512).refine(
   "Model filters cannot contain control characters."
 );
 const Platform = z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"]);
-const TrustLevel = z.enum(["none", "identity_only", "app_verified", "device_verified", "strong_device_verified", "debug"]);
 const QueryBoolean = z.preprocess((value) => {
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
@@ -80,7 +79,9 @@ export const RequestRouteSearchSchema = z.object({
   latency_max_ms: optional(NonnegativeIntegerText),
   latency_min_ms: optional(NonnegativeIntegerText),
   model: optional(SearchModel),
+  page_size: optional(z.enum(["50", "100", "200"])),
   platform: optional(z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"])),
+  range: optional(z.enum(["15m", "1h", "24h", "7d"])),
   request: optional(OpaqueID("req")),
   request_id: optional(OpaqueID("req")),
   route: optional(Identifier),
@@ -94,6 +95,9 @@ export const RequestRouteSearchSchema = z.object({
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
+  if (search.range && (search.start || search.end)) {
+    context.addIssue({ code: "custom", message: "Use either a relative range or a start and end, not both.", path: ["range"] });
+  }
   validateOrderedRange(context, search.latency_min_ms, search.latency_max_ms, "latency_max_ms");
   validateOrderedRange(context, search.tokens_min, search.tokens_max, "tokens_max");
   validateOrderedRange(context, search.cost_min_nano_usd, search.cost_max_nano_usd, "cost_max_nano_usd");
@@ -114,6 +118,7 @@ export const AuditRouteSearchSchema = z.object({
   end: optional(Instant),
   environment_id: optional(OpaqueID("env")),
   event: optional(OpaqueID("aud")),
+  period: optional(z.enum(["24h", "7d", "30d", "90d"])),
   reason: optional(AuditReason),
   resource_id: optional(AnyOpaqueID),
   resource_type: optional(AuditName(64)),
@@ -122,6 +127,7 @@ export const AuditRouteSearchSchema = z.object({
   start: optional(Instant)
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
+  if (search.period && (search.start || search.end)) context.addIssue({ code: "custom", message: "Use either a preset period or a start and end, not both.", path: ["period"] });
 });
 
 export type AuditRouteSearch = z.infer<typeof AuditRouteSearchSchema>;
@@ -158,7 +164,8 @@ export const InstallationFamilyRouteSearchSchema = z.object({
   family_id: optional(OpaqueID("fam")),
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["component_id", search.component_id], ["cursor", search.cursor], ["family_id", search.family_id], ["user_id", search.user_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["component_id", search.component_id], ["cursor", search.cursor], ["family_id", search.family_id], ["user_id", search.user_id]]);
   if (search.component_id && !search.family_id) context.addIssue({ code: "custom", message: "A family is required for a component selection.", path: ["component_id"] });
 });
 
@@ -171,7 +178,8 @@ export const UserRouteSearchSchema = z.object({
   environment_id: optional(OpaqueID("env")),
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["cursor", search.cursor], ["user_id", search.user_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["cursor", search.cursor], ["user_id", search.user_id]]);
 });
 
 export type UserRouteSearch = z.infer<typeof UserRouteSearchSchema>;
@@ -183,47 +191,81 @@ export const InstallationRouteSearchSchema = z.object({
   environment_id: optional(OpaqueID("env")),
   installation_id: optional(OpaqueID("ins"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["cursor", search.cursor], ["installation_id", search.installation_id]]);
+  // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["cursor", search.cursor], ["installation_id", search.installation_id]]);
 });
 
 export type InstallationRouteSearch = z.infer<typeof InstallationRouteSearchSchema>;
 export const parseInstallationRouteSearch = (value: unknown): InstallationRouteSearch => InstallationRouteSearchSchema.parse(value);
 
+/**
+ * Analytics and Overview share one period. Presets are relative to now; a custom period is whole UTC days
+ * `[start, end)` of at most 366 days, which is the usage API's limit.
+ */
 export const AnalyticsRouteSearchSchema = z.object({
   ...workspaceSearchFields,
+  breakdown_limit: optional(z.enum(["5", "50", "200"])),
+  by: optional(z.enum(["feature", "model", "plan"])),
+  chart: optional(z.enum(["requests", "tokens"])),
+  compare: optional(z.enum(["off"])),
   end: optional(Instant),
-  environment_id: optional(OpaqueID("env")),
-  interval: optional(z.enum(["hour", "day"])),
+  period: optional(z.enum(["24h", "7d", "30d", "90d"])),
   start: optional(Instant)
 }).superRefine((search, context) => {
   validateTimeRange(context, search.start, search.end);
-  const values = [search.environment_id, search.start, search.end, search.interval];
-  if (values.some((value) => value !== undefined) && values.some((value) => value === undefined)) {
-    context.addIssue({ code: "custom", message: "Environment, start, end, and interval must be supplied together." });
+  if ((search.start === undefined) !== (search.end === undefined)) {
+    context.addIssue({ code: "custom", message: "A custom period needs both a start and an end.", path: ["end"] });
+  }
+  if (search.period && search.start) {
+    context.addIssue({ code: "custom", message: "Use either a preset period or a start and end, not both.", path: ["period"] });
+  }
+  if (search.start && search.end) {
+    const start = Date.parse(search.start);
+    const end = Date.parse(search.end);
+    if (start % 86_400_000 !== 0 || end % 86_400_000 !== 0) {
+      context.addIssue({ code: "custom", message: "A custom period is whole UTC days.", path: ["start"] });
+    }
+    if (end - start > 366 * 86_400_000) {
+      context.addIssue({ code: "custom", message: "A custom period is at most 366 days.", path: ["end"] });
+    }
   }
 });
 
 export type AnalyticsRouteSearch = z.infer<typeof AnalyticsRouteSearchSchema>;
 export const parseAnalyticsRouteSearch = (value: unknown): AnalyticsRouteSearch => AnalyticsRouteSearchSchema.parse(value);
 
+const SimulationTarget = z.union([z.enum(["live", "draft"]), OpaqueID("rev")]);
+const SimulationTrust = z.enum(["none", "identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"]);
+export const GRID_DIMENSIONS = ["plan", "platform", "trust_level", "streaming", "size"] as const;
+
+/**
+ * Simulator inputs that may live in the URL: sizes, platform and trust. Claims never do; they stay in the page.
+ * A user or request selection is scoped by the workspace environment.
+ */
 export const RouteSimulatorRouteSearchSchema = z.object({
   ...workspaceSearchFields,
   app_version: optional(AppVersion),
   authenticated: optional(QueryBoolean),
-  environment_id: optional(OpaqueID("env")),
   expanded_schema_bytes: optional(boundedNonnegativeIntegerText(4_194_304)),
   feature: optional(Identifier),
   framing_unit_count: optional(boundedNonnegativeIntegerText(4096)),
+  grid_x: optional(z.enum(GRID_DIMENSIONS)),
+  grid_y: optional(z.enum(GRID_DIMENSIONS)),
+  image_units: optional(boundedNonnegativeIntegerText(1_000_000)),
+  mode: optional(z.enum(["sample", "user", "request", "grid"])),
   platform: optional(Platform),
-  requested_input_tokens: optional(boundedNonnegativeIntegerText(2_147_483_647)),
-  requested_output_max: optional(boundedNonnegativeIntegerText(2_147_483_647)),
-  revision_id: optional(OpaqueID("rev")),
+  request: optional(OpaqueID("req")),
+  requested_input_tokens: optional(boundedNonnegativeIntegerText(100_000_000)),
+  requested_output_max: optional(boundedNonnegativeIntegerText(100_000_000)),
   rewritten_request_bytes: optional(boundedNonnegativeIntegerText(104_857_600)),
+  run: optional(SimulationTarget),
   streaming: optional(QueryBoolean),
-  trust_level: optional(TrustLevel)
+  tool_calls: optional(boundedNonnegativeIntegerText(1_000_000)),
+  trust_level: optional(SimulationTrust),
+  user: optional(OpaqueID("usr")),
+  versus: optional(SimulationTarget)
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["revision_id", search.revision_id], ["feature", search.feature]]);
-  if (search.feature && !search.revision_id) context.addIssue({ code: "custom", message: "A revision is required for a feature selection.", path: ["feature"] });
+  if (search.grid_x && search.grid_x === search.grid_y) context.addIssue({ code: "custom", message: "Choose two different grid dimensions.", path: ["grid_y"] });
 });
 
 export type RouteSimulatorRouteSearch = z.infer<typeof RouteSimulatorRouteSearchSchema>;
@@ -235,7 +277,8 @@ export const SelfTestRouteSearchSchema = z.object({
   schedule_id: optional(OpaqueID("sts")),
   self_test_id: optional(OpaqueID("tst"))
 }).superRefine((search, context) => {
-  requireEnvironmentForSelection(context, search.environment_id, [["schedule_id", search.schedule_id], ["self_test_id", search.self_test_id]]);
+  // The workspace environment scopes a run or schedule; an explicit environment_id must still match it.
+  requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["schedule_id", search.schedule_id], ["self_test_id", search.self_test_id]]);
 });
 
 export type SelfTestRouteSearch = z.infer<typeof SelfTestRouteSearchSchema>;
@@ -243,8 +286,60 @@ export const parseSelfTestRouteSearch = (value: unknown): SelfTestRouteSearch =>
 
 export const FeatureRouteSearchSchema = z.object({
   ...workspaceSearchFields,
-  feature: optional(Identifier)
+  feature: optional(Identifier),
+  tab: optional(z.enum(["overview", "access", "routing", "setup"]))
 });
 
 export type FeatureRouteSearch = z.infer<typeof FeatureRouteSearchSchema>;
 export const parseFeatureRouteSearch = (value: unknown): FeatureRouteSearch => FeatureRouteSearchSchema.parse(value);
+
+export const LimitPlanRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  plan: optional(Identifier)
+});
+
+export type LimitPlanRouteSearch = z.infer<typeof LimitPlanRouteSearchSchema>;
+export const parseLimitPlanRouteSearch = (value: unknown): LimitPlanRouteSearch => LimitPlanRouteSearchSchema.parse(value);
+
+export const PlanByFeatureRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  feature: optional(Identifier)
+});
+
+export type PlanByFeatureRouteSearch = z.infer<typeof PlanByFeatureRouteSearchSchema>;
+export const parsePlanByFeatureRouteSearch = (value: unknown): PlanByFeatureRouteSearch => PlanByFeatureRouteSearchSchema.parse(value);
+
+export const OverrideRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  user: optional(OpaqueID("usr"))
+});
+
+export type OverrideRouteSearch = z.infer<typeof OverrideRouteSearchSchema>;
+export const parseOverrideRouteSearch = (value: unknown): OverrideRouteSearch => OverrideRouteSearchSchema.parse(value);
+
+export const RevisionRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  revision: optional(OpaqueID("rev"))
+});
+
+export type RevisionRouteSearch = z.infer<typeof RevisionRouteSearchSchema>;
+export const parseRevisionRouteSearch = (value: unknown): RevisionRouteSearch => RevisionRouteSearchSchema.parse(value);
+
+const CompareTarget = z.union([z.enum(["live", "draft"]), OpaqueID("rev")]);
+export const CompareRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  from: optional(CompareTarget),
+  to: optional(CompareTarget)
+});
+
+export type CompareRouteSearch = z.infer<typeof CompareRouteSearchSchema>;
+export const parseCompareRouteSearch = (value: unknown): CompareRouteSearch => CompareRouteSearchSchema.parse(value);
+
+
+export const TeamRouteSearchSchema = z.object({
+  ...workspaceSearchFields,
+  member: optional(OpaqueID("adm"))
+});
+
+export type TeamRouteSearch = z.infer<typeof TeamRouteSearchSchema>;
+export const parseTeamRouteSearch = (value: unknown): TeamRouteSearch => TeamRouteSearchSchema.parse(value);

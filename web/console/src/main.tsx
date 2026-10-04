@@ -4,6 +4,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { createAppRouter } from "./app/router";
+import { applyStoredTheme } from "./app/theme";
+// Fonts are bundled (OFL-1.1) and served same-origin: the console's CSP allows only 'self'.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "./ui/tokens.css";
+import "./ui/ui.css";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -13,6 +19,7 @@ const queryClient = new QueryClient({
     }
   }
 });
+applyStoredTheme();
 const router = createAppRouter();
 const container = document.querySelector<HTMLDivElement>("#root");
 

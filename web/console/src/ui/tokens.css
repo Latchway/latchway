@@ -1,0 +1,193 @@
+/*
+ * Galva design tokens for the Latchway console (light and dark).
+ * Generated from the Latchway Console design system (tokens.json); edit the source tokens, not this file.
+ * Dark applies with the operating-system preference unless the administrator picks a theme, which sets
+ * data-theme on the root element.
+ */
+:root {
+  color-scheme: light;
+  --accent-primary: #2c6eec;
+  --accent-primary-hover: #1d4799;
+  --accent-foreground: #ffffff;
+  --accent-subtle: #e1eafc;
+  --border: #e8e8e8;
+  --background-l1: #f5f5f5;
+  --background-l2: #fafafa;
+  --background-l3: #ffffff;
+  --background-grouped-container: #f5f5f5;
+  --background-grouped-content: #fcfcfc;
+  --foreground-primary: #28262c;
+  --foreground-secondary: #7b7980;
+  --destructive: #d02323;
+  --destructive-hover: #9c1a1a;
+  --success: #1a9c5a;
+  --success-foreground: #ffffff;
+  --warning-background: #ef640e;
+  --warning-foreground: #ffffff;
+  --orange: #ee7e16;
+  --orange-subtle: #fcdec2;
+  --yellow: #fbb719;
+  --grey: #98a9bf;
+  --menu-background: #ffffff;
+  --item-selection: #ededed;
+  --dialog-backdrop: rgba(0, 0, 0, 0.16);
+  --input-background: #ffffff;
+  --button-background: #fcfcfc;
+  --scrollbar-thumb: rgba(40, 38, 44, 0.16);
+  --scrollbar-thumb-hover: rgba(40, 38, 44, 0.32);
+  --badge-violet-background: #e2daf8;
+  --badge-violet-foreground: #7d59d6;
+  --badge-red-background: #fbcfca;
+  --badge-red-foreground: #ec3924;
+  --badge-green-background: #c7f7d5;
+  --badge-green-foreground: #21b84c;
+  --badge-cyan-background: #bdf7f5;
+  --badge-cyan-foreground: #1a9490;
+  --code-keyword: #3c67ab;
+  --code-type: #bd5524;
+  --code-tag: #531fe0;
+  --focus-ring: rgba(44, 110, 236, 0.5);
+  --toast-shadow-ink: rgba(0, 0, 0, 0.06);
+  --shadow-toast: 0 2px 8px 0 rgba(0, 0, 0, 0.06);
+  --shadow-dialog: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
+  --shadow-drawer: -5px 0 25px 0 rgba(0, 0, 0, 0.07);
+  --shadow-focus-glow: 0 0 6px 0 rgba(44, 110, 236, 0.35);
+  --space-1: 4px;
+  --space-1_5: 6px;
+  --space-2: 8px;
+  --space-2_5: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-0_5: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-2_5: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  --header-height: 60px;
+  --rail-width: 72px;
+  --sidebar-width: 318px;
+  --drawer-width: 720px;
+  --button-height-lg: 36px;
+  --button-height-md: 32px;
+  --pagination-height: 53px;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --accent-primary: #2069f4;
+    --accent-primary-hover: #1d4799;
+    --accent-foreground: #ffffff;
+    --accent-subtle: #0d1f4d;
+    --border: #232427;
+    --background-l1: #0a0a0b;
+    --background-l2: #141516;
+    --background-l3: #1e1f22;
+    --background-grouped-container: #0d0e0f;
+    --background-grouped-content: #1e1f22;
+    --foreground-primary: #d8d8d8;
+    --foreground-secondary: #808080;
+    --destructive: #c81f1f;
+    --destructive-hover: #9c1a1a;
+    --success: #4dbe82;
+    --success-foreground: #ffffff;
+    --warning-background: #ef640e;
+    --warning-foreground: #ffffff;
+    --orange: #f0913b;
+    --orange-subtle: #442a12;
+    --yellow: #fbb719;
+    --grey: #6f7f94;
+    --menu-background: #0e0f11;
+    --item-selection: #232428;
+    --dialog-backdrop: rgba(0, 0, 0, 0.75);
+    --input-background: #000000;
+    --button-background: #000000;
+    --scrollbar-thumb: rgba(216, 216, 216, 0.16);
+    --scrollbar-thumb-hover: rgba(216, 216, 216, 0.32);
+    --badge-violet-background: #2a2340;
+    --badge-violet-foreground: #b39aef;
+    --badge-red-background: #3d1f1c;
+    --badge-red-foreground: #f07a6c;
+    --badge-green-background: #1a3324;
+    --badge-green-foreground: #5fd68a;
+    --badge-cyan-background: #1a3332;
+    --badge-cyan-foreground: #4dcdc8;
+    --code-keyword: #7aa2e3;
+    --code-type: #e08a5c;
+    --code-tag: #a78bfa;
+    --focus-ring: rgba(32, 105, 244, 0.5);
+    --toast-shadow-ink: rgba(0, 0, 0, 0.4);
+    --shadow-toast: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+    --shadow-dialog: 0 2px 16px 0 rgba(0, 0, 0, 0.5);
+    --shadow-drawer: -8px 0 32px 0 rgba(0, 0, 0, 0.55);
+    --shadow-focus-glow: 0 0 6px 0 rgba(32, 105, 244, 0.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent-primary: #2069f4;
+  --accent-primary-hover: #1d4799;
+  --accent-foreground: #ffffff;
+  --accent-subtle: #0d1f4d;
+  --border: #232427;
+  --background-l1: #0a0a0b;
+  --background-l2: #141516;
+  --background-l3: #1e1f22;
+  --background-grouped-container: #0d0e0f;
+  --background-grouped-content: #1e1f22;
+  --foreground-primary: #d8d8d8;
+  --foreground-secondary: #808080;
+  --destructive: #c81f1f;
+  --destructive-hover: #9c1a1a;
+  --success: #4dbe82;
+  --success-foreground: #ffffff;
+  --warning-background: #ef640e;
+  --warning-foreground: #ffffff;
+  --orange: #f0913b;
+  --orange-subtle: #442a12;
+  --yellow: #fbb719;
+  --grey: #6f7f94;
+  --menu-background: #0e0f11;
+  --item-selection: #232428;
+  --dialog-backdrop: rgba(0, 0, 0, 0.75);
+  --input-background: #000000;
+  --button-background: #000000;
+  --scrollbar-thumb: rgba(216, 216, 216, 0.16);
+  --scrollbar-thumb-hover: rgba(216, 216, 216, 0.32);
+  --badge-violet-background: #2a2340;
+  --badge-violet-foreground: #b39aef;
+  --badge-red-background: #3d1f1c;
+  --badge-red-foreground: #f07a6c;
+  --badge-green-background: #1a3324;
+  --badge-green-foreground: #5fd68a;
+  --badge-cyan-background: #1a3332;
+  --badge-cyan-foreground: #4dcdc8;
+  --code-keyword: #7aa2e3;
+  --code-type: #e08a5c;
+  --code-tag: #a78bfa;
+  --focus-ring: rgba(32, 105, 244, 0.5);
+  --toast-shadow-ink: rgba(0, 0, 0, 0.4);
+  --shadow-toast: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 2px 16px 0 rgba(0, 0, 0, 0.5);
+  --shadow-drawer: -8px 0 32px 0 rgba(0, 0, 0, 0.55);
+  --shadow-focus-glow: 0 0 6px 0 rgba(32, 105, 244, 0.35);
+}
+
+/*
+ * Console accessibility overrides (hand-maintained, not generated). The design system's light secondary text
+ * (#7b7980) and accent (#2c6eec) fall just short of WCAG AA 4.5:1 on the light surfaces at 11–14px; these are the
+ * nearest values that pass on --background-l1/l2/l3. Dark-theme values already pass and are left alone.
+ */
+:root {
+  --foreground-secondary: #6b6970;
+  --accent-primary: #2a69e2;
+}

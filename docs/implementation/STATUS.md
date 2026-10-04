@@ -1,6 +1,449 @@
 # Implementation status
 
-Status date: 2026-09-23
+Status date: 2026-10-04
+
+## Console redesign phase 8: Authentication (branch `console-redesign`, unreleased)
+
+Until there is a session the console shows a sign-in screen instead of the
+shell (`src/app/auth/`): a form on the left, and on the right the host, the
+version `/healthz` reports and whether the public health endpoints answer.
+Sign in takes an email and a password with Show / Hide (`aria-pressed`) and a
+Caps Lock warning. A 429 from the server becomes a countdown from its
+`Retry-After` for that email address, kept in memory only; after three
+failures the screen says the server pauses an address for up to five minutes
+after five failures in five minutes, which is what `adminapi`'s limiter does.
+"Can't sign in?" says the server gives a wrong password, an unknown email and
+a disabled account the same answer, that an owner resets passwords from Team ›
+Members or with `latchway admin accounts reset-password`, and that there is
+no self-service reset. When an administrator belongs to more than one
+organization they choose one; the password stays in its now-hidden input, the
+first session is signed out, and the console signs in again with
+`organization_id`.
+
+First-run setup ("Setting up a new server?") takes the bootstrap token, the
+organization (the slug is suggested from the name until edited) and the
+first owner. It validates every field at once, says how many need attention
+and focuses the first, and requires a password rated Good or Strong by a
+local estimate on top of the server's 12-character minimum. A 409
+`bootstrap_disabled` shows "Setup is already done". After setup, "{Org} is
+ready" shows how to remove `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` on Docker Compose,
+Fly.io, Amazon ECS and Cloud Run, and enters the console (or Setup) once the
+operator confirms they have. The screen stays up through these steps even if
+a background refresh already sees the new session. Signing out shows "You're
+signed out" with the email offered again from memory; a session read that
+fails for any other reason shows "Can't reach the server" with Try Again and
+the `latchway doctor` / `latchway status` commands.
+
+When a session ends while the console is open (a 401 from the Admin API, or
+the expiry time passing), the page stays mounted and a dialog that can't be
+dismissed asks for the password again for the same email and organization,
+or signs in as someone else. Five minutes before `expires_at` the status rail
+offers Sign In Now or Dismiss. The account menu has Your Account (email,
+role, organization, when the session ends, and for owners a link to Sessions)
+and, with more than one membership, Switch Organization, which signs in again
+into the chosen organization; the previous session is no longer used and
+ends at its expiry. Signing out clears every cached response. Passwords and
+the bootstrap token live only in their inputs and are cleared once each
+request finishes. The old access panel, the signed-out overview and their
+styles are gone.
+
+Not built because the API has no source: changing your own password (Your
+Account says so), detecting `password_reset_required` at sign-in, a reason
+for why a session ended, a version check before sign-in, remembering the
+last organization, and two-factor, passkey or SSO sign-in.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (410 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway; its steps are updated for the new screens),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.25 MB.
+
+## Console redesign phase 7: Operate and Organization (branch `console-redesign`, unreleased)
+
+Team & Access has Members, API tokens, Sessions and Roles tabs
+(`src/pages/team/`). Members lists the organization's administrators with
+role and status (Active, Must set password, Disabled), filters over the loaded
+list, and a count of active owners. Add Member takes a name, email (duplicates
+refused), a role chosen as cards with its capabilities, and a first password
+that lives only in the DOM input: Generate fills it from the browser's CSPRNG,
+Copy reads it from the element, and it's read and cleared before the request
+is sent. The member drawer shows a role change as Loses / Gains, keeps the
+last active owner an owner, requires enabling a disabled account before its
+role changes, and confirms role reductions and Disable with the typed email
+and an acknowledgement. Reset Password uses the same write-only field. The
+drawer lists the member's console sessions with Sign Out. API tokens are the
+signed-in administrator's own (the API has no team-wide list): capability
+chips struck through when the role no longer allows them, No expiry and
+expiring-soon badges with a Replace notice, starting points (CI deploys,
+Monitoring, Incident bot, Custom), capabilities above your role disabled with
+the role they need, expiry presets, a one-time reveal whose Done unlocks only
+after "I've saved it" and has no Cancel, Replace (same name and scopes, then
+"revoke the old one now?" or Later) and Revoke with the typed name. Losing
+compatibility scrubs a revealed token for good. Sessions (owners only, as the
+API requires) lists every console session with Sign Out and Sign Out
+Everyone Else, which revokes each other active session. Roles shows the
+server's fixed matrix from `adminauth/role.go`.
+
+The Audit Log is a list with a period picker (24h, 7d, 30d, 90d, All, custom
+up to 730 days), actor, source, result and scope selects plus action,
+resource, member or token and reason-code filters, all in the URL. Pages
+append with Load More; an event opens in a drawer that refuses a detail for a
+different event and shows which fields changed, never values.
+
+System Health (`src/pages/operate/`) reads `GET /system/doctor` every 30
+seconds: a status line, Needs attention with the server's summary and remedy,
+why it matters and a link to the page or card that fixes it, gateway cards
+(server, replicas, database pool and migrations, jobs judged against the
+server's own freshness windows, configuration cache, keys, retention), all
+checks with a Not passed / All filter, a cron snippet for alerting, and a
+support bundle dialog that previews the server's exclusion list and JSON
+before saving. Self-tests run against the workspace environment: a gateway
+check, an AI connection or OpenRouter conformance test against the live
+revision with the connection and model chosen from it and the ceiling entered
+in dollars (sent as exact nano-USD), a run drawer that polls until done, and
+schedules created with a token that is sent once as a bearer credential and
+cleared, with Disable. A run or schedule link carries its environment and is
+refused in another one.
+
+Settings has General (organization, appearance, about this server including
+why the console is read-only, and data handling with the oldest stored
+records) and Applications (each application with its environments, Add
+Application, Add Environment, and Disable / Enable through the server's
+reason-taking endpoints with the typed `app/env` and an acknowledgement;
+managing them needs `activate_configuration`, as the server checks).
+`/environments` redirects to Applications. AI Connections › Secrets shows
+where each secret is referenced in live and in the draft, flags secrets not
+rotated in 90 days, refuses duplicate names, blocks deleting a referenced
+secret, and keeps values in write-only inputs cleared before each request.
+Import / Export moved to Changes › Draft: export live or the draft as YAML or
+JSON through the existing redaction gate, and import a file or pasted text
+into the shared draft (confirming before replacing unpublished changes);
+nothing goes live from it. Forms that hold a password, token or secret value
+close when the console turns read-only.
+
+Not built because the API has no source: email invites, SSO and two-factor
+sign-in, per-application roles, a team-wide token list and token last use,
+non-owners seeing their own sessions, previewing the console as another role,
+device details on sessions, provider health per connection (the page links to
+Analytics › Reliability), health history, renaming or deleting applications
+and environments, users per environment, copying one environment's
+configuration into another, and a list of past self-test runs. Your Account
+landed in phase 8.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (393 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.23 MB.
+
+## Console redesign phase 6: Policies & Limits, Changes, Simulator (branch `console-redesign`, unreleased)
+
+Policies & Limits has four tabs on the shared draft (`src/pages/policies/`).
+Limit plans lists each plan's limits as sentences ("Each user can use 50,000
+tokens per day"), the features that select it and its protection limits. A
+plan opens in a drawer where each limit is a card that expands in place into
+the same sentence as controls: who it counts (ten presets or a custom
+checklist with one optional claim), amount, metric, period or burst refill,
+kind, time zone and, for spend, retry treatment. Spend is entered in dollars
+and converted to integer nano-USD exactly, without floating point. The checks
+mirror the server's activation rules (`internal/configuration/limits.go`,
+`internal/limitmetric`): which algorithms each metric supports, the fields
+each algorithm takes, window and refill bounds, at most one claim, duplicate
+identities, and the cost-retry pairing rule, with Add It inserting the missing
+organization-wide spend limit. This release activates only hard limits, so
+the design's Track only option is left out and the editor says so. Published
+plan IDs are locked (Duplicate instead); an unpublished plan can be renamed
+and the features selecting it follow in the same draft. Removing a plan in use
+asks for a replacement plan per feature and applies both in one save.
+
+Plan by feature edits `feature.limitPlan` as ordered rules (claim, platform,
+component kind, trust level, streaming, prompt size), compiled to the nested
+ternary and shown live. An expression the console can't read back exactly
+stays custom CEL and is never rewritten. The same editor replaces the CEL box
+on each feature's Access & limits tab. Overrides opens one user by `usr_` ID,
+lists only live plans (draft-only plans are disabled), shows each feature's
+current plan from `users/{id}/effective-configuration`, and applies with a
+required reason and an end (none, 24 hours, 7 or 30 days, or a date) through
+Apply Now, with a notice that it skips the draft. A repeated identical
+override is reported as no change (same override ID), and clearing asks first.
+Protections lists limits that count installations, device families, trust
+sources, components or platforms instead of users, names plans without one,
+and adds one of three presets to several plans at once. Check a User opens the
+Simulator in Real user mode. `/access-policies` now redirects to Features and
+`/abuse-controls` to Protections.
+
+Changes has Draft, History, Compare and Edit as JSON tabs
+(`src/pages/changes/`). The draft is computed per resource as the difference
+from live (`config-diff.ts`), grouped into Features, Routing, Limits, AI
+Connections and Client Trust, with a feature's routing and its other settings
+as separate entries. Each entry expands into a field diff and can be
+discarded back to live individually; Discard All resets the draft document to
+exactly the live one (an ordinary ETag-guarded replace), and a draft equal to
+live no longer shows in the status rail. Validation problems link to the page
+that fixes them. The publish review now runs spot checks: four sample people
+on each affected feature, simulated on live and on the draft, listing only
+results that change. It also requires acknowledging warnings, and in
+Production an explicit "I've checked what changes for Production users".
+History lists revisions 20 at a time with a generated summary against the
+previous revision; a revision drawer shows changes against the previous
+revision or live, the document and its audit link, and offers Roll Back (an
+impact review with reason, typed ID and acknowledgement, using a freshly read
+active ETag) and Start a Draft From This (confirming before replacing a draft
+with changes). Compare takes any two of live, the draft, another
+environment's live revision or any listed revision. Edit as JSON replaces the
+old full-document editor: it edits the shared draft and refuses to overwrite
+a draft that changed since it loaded.
+
+The Simulator (`src/pages/simulator/`) has Sample request, Real user, Past
+request and Coverage grid modes. Sample request runs `POST
+/config-revisions/{id}/simulate` against live, a valid draft or a listed
+revision, optionally compared with another; it shows a verdict and the six
+stages, with denials placed by the server's fixed denial sentences, Changed
+marks between columns, inputs that mattered, limits as sentences, the token
+and cost bound and the fallback sequence. Pretend down is computed in the
+console from the fallback sequence; What if runs one-change variants; Copy as
+CLI writes claims to `claims.json` through a heredoc. Claims stay in the page
+and never enter the URL, and a result for another revision or feature is
+refused. Real user and Past request use the users and requests
+effective-configuration endpoints; Coverage grid sends one call per cell, at
+most 25. The diff summary now compares unkeyed lists (such as a plan's limits)
+by position.
+
+Not built because the API has no source: usage histograms and "users limited"
+counts, rule shares of traffic, listing users with overrides and ended
+overrides (the drawer links to the user's audit events), per-change authorship
+on the shared draft, publish notes (revisions have no description), the
+post-publish watch panel, automatic merging when someone else publishes first
+(the draft is reported as out of date), copying one environment into
+another's draft, saved scenarios, remaining quota in simulations, and failure
+simulation beyond Pretend down.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (401 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.22 MB.
+
+## Console redesign phase 5: Build pages on one shared draft (branch `console-redesign`, unreleased)
+
+Features, Routing, AI Connections and Client Trust are rebuilt around one
+working draft per environment (`src/pages/build/environment-draft.ts`). The
+working draft is the newest revision that is still a draft and has a higher
+version than the active one; revision versions only grow, so a draft started
+before the current active revision is no longer treated as working. Every save
+opens that draft (or creates one from the active revision with
+`base_revision_id`), applies the change to its current document, replaces it
+with the draft's strong ETag, then validates and, when valid, plans. A
+whole-document change computed from an older copy is refused before the PATCH
+if the draft moved underneath it, and a 412 or 409 is explained in plain words
+("The draft changed", "The draft is out of date"); nothing is merged
+automatically. Publishing re-reads the draft for a fresh ETag and activates it.
+The status rail shows the draft on every page with Review Changes and Publish
+(or Validate / Check Again while it has problems); Publish lists the plan's
+changes and warnings first. The existing guided flows (Add Connection, Add
+Platform, usage plans) keep their secret handling and now save into the same
+draft.
+
+Collections (connections, sign-in providers, app verification, components,
+models & pricing, access and abuse) use one list page: rows marked New, Edited
+or Removing against the live configuration, a drawer with settings, Edit as
+JSON and Save to Draft, per-resource undo, a typed-ID removal into the draft,
+and removal blocked with an explanation while something still references the
+resource (for example routes using a connection). Features is a list with a
+New Feature drawer and a page per feature with Overview, Access & limits,
+Routing and Client setup tabs held in the URL. Routes can be added, edited,
+removed (a feature keeps at least one) and reordered by swapping priorities
+with the neighbour; reordering is disabled while routes share a priority to
+split traffic, so weights are never renumbered. Routing lists every feature's
+routes with first choices per connection ("counts features, not traffic") and
+the features without a backup. A connection's drawer lists its models and
+routes and runs the existing bounded self-test against the active revision.
+Client Trust gains a Sessions tab editing `spec.session` lifetimes and clock
+skew. A deep-linked feature waits for the configuration instead of briefly
+reporting "Feature not found".
+
+Shell links (sidebar, tabs, command palette, home, health, Continue setup) now
+carry only the workspace scope (`organization`, `application`, `environment`);
+page selections such as `feature`, `tab` or request filters no longer follow
+the operator to the next page. "Setup required" is also suppressed whenever the
+active configuration loads.
+
+Not built because the API has no source: discarding a draft (there is no
+delete or discard endpoint, so a draft is replaced by publishing or by a newer
+draft), the draft's base revision (not exposed; the server's activation
+conflict is the authority), per-connection traffic, latency or health, and
+route traffic shares. Secrets, limit plans and policies keep their existing
+pages until Phase 6.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (372 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed, live
+stack skipped without a gateway), build, `verify:reproducible` and
+`go test ./web/console/ ./internal/server/` passed. Entry bundle 1.13 MB.
+
+## Console redesign phase 4: Users & Installs (branch `console-redesign`, unreleased)
+
+Users, Installations and Older installs are rebuilt on the existing Admin API
+(`src/pages/users/`). Lists use server order with appended cursor pages and no
+totals, filters or search, because the users, installation-family and
+installation lists offer none; each page says so. Go to ID replaces search:
+`usr_` opens the user, `fam_` the installation, `cmp_` the installation with
+that part highlighted (looked up through `GET /client-components/{id}`), and
+`req_` the request; anything else explains that emails and sign-in subjects
+are never stored.
+
+The user drawer shows identity, claims masked until Show Values, installations
+(with usage summed from the user's families, since there's no per-user
+aggregate), the last five requests, the existing effective-access check and a
+link to the user's audit events. "What's Going On?" maps six situations to the
+matching review (only Unblock and a plan override for a blocked user). Block,
+Unblock, Require sign-in and Require app re-verification run through the
+server's operation-impact preview; a stale preview (409 `conflict`) reloads the
+counts, shows them as before → after and requires a fresh acknowledgement.
+Bulk Require Sign-in (up to 50 users, blocked users excluded) runs one reviewed
+operation per user with its own preview token and reports Done, Skipped,
+Unknown (with the operation ID and "check the audit log") or Failed per user.
+
+Installations show list-level signals (debug trust outside Development, root
+trust expiring within 7 days) and a "With signals" view over loaded rows only.
+Token reuse, weak key storage and failed sessions are per part, which the list
+doesn't return, so they appear in the installation drawer with their suggested
+actions. The drawer lists the parts root first with delegated parts indented,
+each with key storage, versions, trust, session, delegation, failed sessions,
+refresh reuse and usage. Require Renewal, Revoke Installation, Re-verify and
+Revoke Part use the same review dialog with counts from the loaded record and a
+notice that the server has no preview for these actions; revoking a root part
+becomes revoking the installation. Older wire-1 installs have their own tab
+with a Legacy badge and a reviewed revoke. Detail from another environment, or
+a part outside the opened installation, is rejected as before. The user,
+installation and older-install URL schemas now accept the workspace
+environment as the scope of a selection, so links needn't repeat
+`environment_id`; a mismatching `environment_id` is still refused. Pages now
+check the session before the environment, so a signed-out operator sees the
+sign-in prompt.
+
+Not built because the API has no source: list filters, sort, search and
+totals; server-side signals; an impact preview for installation and component
+actions; a batch endpoint; and the per-part refresh-reuse event list (the
+drawer links each part to its audit events). The Activity tab waits for the
+Audit Log rebuild.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (363 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.10 MB.
+
+## Console redesign phase 3: Analytics and Overview (branch `console-redesign`, unreleased)
+
+Traffic → Analytics is one page with Usage, Cost, Performance and Reliability
+tabs (`/analytics/*`), built only on `GET /admin/v1/usage/summary` and
+`/usage/timeseries` (`src/pages/analytics/`). The five earlier pages redirect:
+`/usage` and `/cost` to their tabs, `/latency` to Performance, `/errors` and
+`/attestation-failures` to Reliability, keeping the workspace selection.
+Overview and Analytics share one URL period (24h, 7d, 30d, 90d, or whole UTC
+days up to 366); presets end now and hatch the incomplete bucket, and the
+comparison period (on by default) shifts by whole buckets. Bars and breakdown
+rows open Requests with real filters and the bucket's or period's start and end;
+plan rows open Policies & Limits because Requests can't filter by plan.
+Exports are breakdown and timeseries CSV (the usage API never emits user IDs)
+and the matching `latchway usage summary|timeseries` commands. No record stays
+distinct from zero throughout, and money stays integer nano-USD until display.
+
+Rates follow the server's definitions: failures and quota denials
+(`quota_exceeded` only) are shares of requests, app-verification failures are a
+share of verification checks, and fallbacks a share of requests that reached a
+provider. Because those denominators differ, the design's "Served %" tile is
+not shown; Overview shows the failure rate instead. Models with usage but no
+recorded cost are flagged on Cost and in Overview's attention list. The Cost
+tab's month-end projection, per-connection breakdowns, per-provider health,
+settlement-lag warnings and the header attention indicator are not built yet.
+
+Overview now has the shared period, a setup checklist until every step is
+done, a "Needs attention" list from server records only (disabled scope, no
+active configuration, draft or invalid revision, unpriced models, a failure
+rate of 5% or more over at least 20 requests, API tokens expiring within 14
+days when the session may list them, and failing readiness checks), usage
+tiles with deltas, a requests chart, top features and requests by model.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (361 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.08 MB.
+
+## Console redesign phase 2: Requests (branch `console-redesign`, unreleased)
+
+Traffic → Requests is rebuilt on `GET /admin/v1/requests` and
+`GET /admin/v1/requests/{id}` only (`src/pages/requests/`). The header has a
+range picker (15m · 1h · 24h · 7d · All · custom whole UTC days up to 90),
+Export (CSV of the loaded rows, without user IDs unless chosen, with
+spreadsheet formula prefixes neutralized; and a `curl` for the current query
+that reads `$LATCHWAY_TOKEN`) and a Live toggle. Quick views (All, Failed,
+Denied, Slow over 2 s, Expensive over $0.02) and filter chips are plain API
+filters kept in the URL; More filters converts seconds and dollars to integer
+milliseconds and nano-USD without floating-point steps. Go to ID replaces
+search, which the API doesn't offer: a `req_` ID opens the record (or names it
+as not found in this application and environment) and a `usr_` ID filters.
+Paging appends server cursor pages ("N shown · more available", Load More) with
+no total, since the API has none; page size 50/100/200 and sort are in the URL.
+Admin event hints no longer reload the list under the reader: they show a
+"new requests may have arrived" notice.
+
+The request drawer follows `?request=` and ↑/↓ (j/k) and Escape: an outcome
+sentence from registered codes with documentation links, shortcuts that set
+filters, a summary, one waterfall of decision stages and attempts with
+first-byte and first-token marks, numbered decision stages with limit
+sentences, attempt cards with provider error categories in words and copyable
+provider request and generation IDs, the collapsed input-reservation breakdown,
+usage through the existing provenance-aware display, and the recorded
+configuration explanation. Older requests without stages say so. Detail from
+another environment is still rejected. Not built because the API has no
+source: a Platform column (request records don't carry platform), filter value
+lists for features, connections, models and routes (chips take exact values;
+Error suggests registered codes), per-connection pages to link to, and request
+data in the event stream. The design system's 30%-opacity faint text is
+replaced with secondary text color to pass WCAG AA.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (345 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (43 passed),
+build, `verify:reproducible` and `go test ./web/console/ ./internal/server/`
+passed. Entry bundle 1.06 MB.
+
+## Console redesign phase 1: shell and information architecture (branch `console-redesign`, unreleased)
+
+The console shell is rebuilt on the phase 0 components: Organization /
+Application / Environment crumbs (native selects, dimmed on organization pages),
+a two-scope sidebar (Environment areas: Overview, Traffic, Build, Users &
+Limits, Operate; Organization areas: Team & Access, Audit Log, Settings),
+shell-rendered section tabs that group related existing pages, a status rail
+for read-only safe mode, an unpublished draft revision and an environment with
+no active configuration, an account menu holding Sign out, a light/dark theme
+toggle (stored per browser, storage failures tolerated) and a phone drawer. The
+command palette lists every destination and still only navigates. URL paths are
+unchanged in this phase, so no redirects are needed; paths move, with redirects,
+only when a later phase rebuilds a page. The disabled-scope notice stays on
+`EnvironmentRequired` pages. Unit and Playwright tests were updated for the new
+navigation (Sign out is now inside the account menu).
+
+Validation for phases 0 and 1: `pnpm lint`, `pnpm typecheck`, `pnpm check:api`,
+`pnpm test` (330 passed), Playwright across Chromium, Firefox, WebKit and mobile
+WebKit (43 passed; live-stack skipped without its base URL), `pnpm build`,
+`pnpm verify:reproducible` (identical checksums) and
+`go test ./web/console/ ./internal/server/` passed. The entry bundle is 1.02 MB
+(954 kB before), still over Vite's 500 kB advisory as it was before this work.
+
+## Console redesign phase 0: design-system foundation (branch `console-redesign`, unreleased)
+
+The console palette is replaced with the Latchway Console design-system tokens
+(light, plus dark following the operating system). Geist and Geist Mono
+(OFL-1.1, `@fontsource-variable` 5.3.0) are bundled and served same-origin, so
+the `style-src 'self'` / `default-src 'self'` CSP is unchanged. `src/ui/` holds
+typed React ports of the design-system components (Icon from generated SVG data
+with no `innerHTML`, Button, badges, Card, PageHeader, Tabs, Segmented,
+FilterChip, Notice, EmptyState, Toast, Properties, DataTable, DetailPanel,
+ConfirmDialog/ImpactDialog with focus trap and focus return, Menu, StatusRail,
+AttentionList, RangePicker with whole-UTC-day validation, VolumeChart and
+ProportionBar) with unit tests. Legacy page and shell styles are remapped onto
+the tokens; no page behavior or navigation changed. The design system's light
+secondary-text and accent colors are darkened slightly (`#6b6970`, `#2a69e2`)
+in a hand-maintained override block because the generated values fell just
+short of WCAG AA at small sizes.
 
 ## Redaction-safe production failure visibility
 

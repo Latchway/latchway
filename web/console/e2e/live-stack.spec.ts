@@ -21,19 +21,22 @@ test.describe("real first-run control plane", () => {
 
   test("bootstraps, activates a native-mobile configuration, and signs back in", async ({ page }) => {
     await page.goto("/");
-    await page.getByLabel("First-owner setup").check();
+    await page.getByRole("button", { name: "Setting up a new server?" }).click();
     await page.getByLabel("One-time bootstrap token").fill(bootstrapToken ?? "");
     await page.getByLabel("Organization name").fill("Latchway Live E2E");
     await page.getByLabel("Organization slug").fill("latchway-live");
     await page.getByLabel("Owner display name").fill("Live E2E Owner");
     await page.getByLabel("Owner email address").fill("owner@live-e2e.invalid");
     await page.getByLabel("Owner password").fill(ownerPassword ?? "");
-    await page.getByRole("button", { name: "Create first owner" }).click();
+    await page.getByRole("button", { name: "Create First Owner" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Latchway Live E2E is ready" })).toBeVisible();
+    await page.getByRole("checkbox", { name: /I've removed LATCHWAY_ADMIN_BOOTSTRAP_TOKEN/ }).check();
+    await page.getByRole("button", { name: "Go to the Console" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "The gateway is ready for control-plane work." })
+      page.getByRole("heading", { level: 1, name: "Overview" })
     ).toBeVisible();
-    await page.getByRole("link", { name: /Setup wizard/ }).click();
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Setup wizard" }).click();
     await expect(
       page.getByRole("heading", { name: "Configure your first client platform end to end." })
     ).toBeVisible();
@@ -69,18 +72,17 @@ test.describe("real first-run control plane", () => {
     await page.getByRole("button", { name: "Validate and activate with ETag" }).click();
     await expect(page.getByText(/is active/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Sign in to continue setup." })
-    ).toBeVisible();
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "You're signed out" })).toBeVisible();
 
-    await page.getByRole("link", { name: /Console access/ }).click();
-    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
-    await page.getByLabel("Email address").fill("owner@live-e2e.invalid");
-    await page.getByLabel("Password").fill(ownerPassword ?? "");
-    await page.getByRole("button", { name: "Sign in securely" }).click();
+    await page.getByRole("button", { name: "Sign In Again" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Sign in to Latchway" })).toBeVisible();
+    await expect(page.getByLabel("Email address")).toHaveValue("owner@live-e2e.invalid");
+    await page.getByLabel("Password", { exact: true }).fill(ownerPassword ?? "");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "The gateway is ready for control-plane work." })
+      page.getByRole("heading", { level: 1, name: "Overview" })
     ).toBeVisible();
   });
 });

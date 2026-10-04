@@ -1,6 +1,19 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+/** Follows the console's two-level navigation: a sidebar area, then (optionally) one of its section tabs. */
+async function goTo(page: Page, area: string, tab?: string): Promise<void> {
+  const toggle = page.getByRole("button", { name: "Open navigation" });
+  if (await toggle.isVisible()) await toggle.click();
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: area, exact: true }).click();
+  if (tab) await page.getByRole("navigation", { name: `${area} pages` }).getByRole("link", { name: tab, exact: true }).click();
+}
+
+async function signOut(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^Your account/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+}
+
 const ids = {
   admin: "adm_0123456789abcdef",
   administrator: "adm_1123456789abcdef",
@@ -80,6 +93,7 @@ async function installAdminFixture(
   const selfTestScheduleBodies: Array<Record<string, unknown>> = [];
   const selfTestScheduleAuthorizations: Array<{ authorization?: string; cookie?: string; csrf?: string }> = [];
   let apiTokens: Array<Record<string, unknown>> = [];
+  let administrators: Array<Record<string, unknown>> = [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }];
   let selfTestRun: Record<string, unknown> | undefined;
   let selfTestSchedules: Array<Record<string, unknown>> = [];
   let secretItems: Array<Record<string, unknown>> = options.includePrimarySecret === false ? [] : [{
@@ -106,6 +120,7 @@ async function installAdminFixture(
   let activeConfigurationDocument: unknown = configurationDocument;
   let activeConfigurationRevisionID = ids.activeRevision;
   let activeConfigurationVersion = 2;
+  let workingDraft: { document: unknown; etag: string } | undefined;
   let userStatus: "active" | "blocked" = "active";
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
@@ -146,14 +161,19 @@ async function installAdminFixture(
       ],
       server_version: "1.0.0"
     });
-    if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }], page: { has_more: false } });
+    if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: administrators, page: { has_more: false } });
     if (url.pathname === "/admin/v1/administrators" && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; administratorBodies.push(body);
-      return json(route, 201, { created_at: instant, display_name: body.display_name, email: body.email, id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: body.role, status: "active", updated_at: instant });
+      const created = { created_at: instant, display_name: body.display_name, email: body.email, id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: true, role: body.role, status: "active", updated_at: instant };
+      administrators = [...administrators, created];
+      return json(route, 201, created);
     }
     if (url.pathname.startsWith(`/admin/v1/administrators/${ids.administrator}/`)) {
       const action = url.pathname.split("/").at(-1); const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>; administratorBodies.push({ action, ...body });
-      return json(route, 200, { created_at: instant, display_name: "Second Owner", email: "second-owner@example.test", id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: action === "role" ? body.role : "operator", status: action === "disable" ? "disabled" : "active", updated_at: instant, ...(action === "disable" ? { disabled_at: instant } : {}) });
+      const current = administrators.find((item) => item.id === ids.administrator) ?? {};
+      const updated = { ...current, role: action === "role" ? body.role : current.role, status: action === "disable" ? "disabled" : action === "enable" ? "active" : current.status, ...(action === "disable" ? { disabled_at: instant } : {}) };
+      administrators = administrators.map((item) => item.id === ids.administrator ? updated : item);
+      return json(route, 200, updated);
     }
     if (url.pathname === "/admin/v1/api-tokens" && request.method() === "GET") return json(route, 200, { items: apiTokens });
     if (url.pathname === "/admin/v1/api-tokens" && request.method() === "POST") {
@@ -202,7 +222,9 @@ async function installAdminFixture(
       return route.fulfill({ status: 204 });
     }
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, {
-      items: [createdStandaloneRevision
+      items: [workingDraft
+        ? { created_at: instant, created_by: ids.admin, document: workingDraft.document, environment_id: ids.environment, id: ids.draftRevision, state: "valid", version: 3 }
+        : createdStandaloneRevision
         ? { created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "valid", validation: { checked_at: instant, issues: [], valid: true }, version: 1 }
         : { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }],
       page: { has_more: false }
@@ -211,6 +233,7 @@ async function installAdminFixture(
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       if (body.base_revision_id === activeConfigurationRevisionID) {
         revisionBodies.push(body);
+        workingDraft = { document: activeConfigurationDocument, etag: '"draft-etag-1"' };
         return json(route, 201, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-1"' });
       }
       const document = body.document as unknown;
@@ -233,16 +256,22 @@ async function installAdminFixture(
       activeConfigurationVersion = 1;
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: createdRevisionDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
     }
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "GET" && workingDraft) return json(route, 200, { created_at: instant, created_by: ids.admin, document: workingDraft.document, environment_id: ids.environment, id: ids.draftRevision, state: "valid", version: 3 }, { ETag: workingDraft.etag });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "PATCH") {
-      activeConfigurationDocument = JSON.parse(request.postData() ?? "{}");
-      configurationPatchBodies.push(activeConfigurationDocument);
+      const document: unknown = JSON.parse(request.postData() ?? "{}");
+      configurationPatchBodies.push(document);
       configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
-      return json(route, 200, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-2"' });
+      if (request.headers()["if-match"] !== workingDraft?.etag) return problem(route, "etag_mismatch", 412, "The draft changed.");
+      workingDraft = { document, etag: '"draft-etag-2"' };
+      return json(route, 200, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: workingDraft.etag });
     }
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/plan`) return json(route, 200, { changes: [{ operation: "replace", path: "/spec/upstreams/0/baseUrl" }], from_revision_id: ids.activeRevision, to_revision_id: ids.draftRevision, warnings: [] });
     if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/activate`) {
       configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
+      if (!workingDraft || request.headers()["if-match"] !== workingDraft.etag) return problem(route, "etag_mismatch", 412, "The draft changed.");
+      activeConfigurationDocument = workingDraft.document;
+      workingDraft = undefined;
       activeConfigurationRevisionID = ids.draftRevision;
       activeConfigurationVersion = 3;
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "active", version: 3 }, { ETag: '"targeted-active-etag"' });
@@ -371,10 +400,11 @@ async function installAdminFixture(
     };
     if (url.pathname === "/admin/v1/audit-events") return json(route, 200, { items: [auditEvent], page: { has_more: false } });
     if (url.pathname === `/admin/v1/audit-events/${ids.audit}`) return json(route, 200, auditEvent);
-    if (url.pathname === `/admin/v1/config-revisions/${activeConfigurationRevisionID}/simulate`) return json(route, 200, {
+    const simulated = /^\/admin\/v1\/config-revisions\/(rev_[A-Za-z0-9_-]+)\/simulate$/.exec(url.pathname)?.[1];
+    if (simulated && (simulated === activeConfigurationRevisionID || simulated === ids.draftRevision)) return json(route, 200, {
       allowed: true, application_id: ids.application, environment_id: ids.environment, environment_kind: "production", explanation: ["production policy allowed"],
       facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, expanded_schema_bytes: 0, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
-      fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: activeConfigurationRevisionID, route: "primary", upstream: "openai", warnings: []
+      fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: simulated, route: "primary", upstream: "openai", warnings: []
     });
     if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "GET") return json(route, 200, { items: selfTestSchedules, page: { has_more: false } });
     if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "POST") {
@@ -449,9 +479,9 @@ test("authenticated console has no automated WCAG A or AA violations", async ({ 
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -463,12 +493,12 @@ test("keyboard navigation reaches content, traps the command dialog, and restore
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
   if (browserName === "webkit") {
     // WebKit follows the host Safari preference that can omit links from sequential Tab order.
@@ -501,15 +531,19 @@ test("@mobile authenticated incident navigation fits a phone viewport", async ({
   await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(primaryNavigation).toBeHidden();
+  await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(primaryNavigation).toBeVisible();
-  await primaryNavigation.getByRole("link", { name: /^Requests/ }).click();
-  await expect(page.getByRole("heading", { name: "Understand what happened." })).toBeVisible();
+  await primaryNavigation.getByRole("link", { name: "Requests", exact: true }).click();
+  await expect(primaryNavigation).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh requests" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /assistant/ })).toBeVisible();
   const viewport = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
   expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1);
 });
@@ -518,9 +552,9 @@ test("first-run exposes only the evidence fields for each selected platform scop
   await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Setup wizard");
 
   const scopes = [
     { android: false, apple: true, value: "ios", web: false },
@@ -542,9 +576,9 @@ test("first-run separates Apple acceptance from distribution and confines Play t
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Setup wizard");
   await page.getByLabel("Environment kind").selectOption("development");
   await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("any");
   await expect(page.getByLabel("Development signing", { exact: true })).toBeChecked();
@@ -569,10 +603,10 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   const fixture = await installAdminFixture(page, { includePrimarySecret: false });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
-  await page.getByRole("link", { name: /Setup wizard/ }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await goTo(page, "Setup wizard");
   await page.getByLabel("Organization slug").fill("example");
   await page.getByLabel("Application name").fill("Mobile App");
   await page.getByLabel("Application slug").fill("mobile-app");
@@ -683,24 +717,30 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     ]) })
   }));
 
-  await page.getByRole("link", { name: /^Users/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "List users" }).click();
-  await page.getByRole("button", { name: ids.user }).click();
-  await page.getByRole("button", { name: "Review block" }).click();
-  await expect(page.getByRole("heading", { name: "Block user impact" })).toBeVisible();
-  await page.getByLabel("Operator reason").fill("Confirmed compromised account");
-  await page.getByLabel("Type the exact user ID to confirm").fill(ids.user);
-  await page.getByLabel(/acknowledge the immediate application-wide effect/i).check();
-  await page.getByRole("button", { name: "Confirm Block user" }).click();
-  await expect(page.getByRole("status")).toContainText("Block user completed");
-  await expect(page.getByRole("button", { name: "Review unblock" })).toBeVisible();
+  await goTo(page, "Users & Installs");
+  await expect(page.getByRole("heading", { level: 1, name: "Users" })).toBeVisible();
+  await page.getByRole("row", { name: /firebase/ }).click();
+  await expect(page).toHaveURL(new RegExp(`user_id=${ids.user}`));
+  const userDrawer = page.getByRole("complementary", { name: ids.user });
+  await expect(userDrawer.getByRole("heading", { name: "Identity" })).toBeVisible();
+  await userDrawer.getByRole("button", { name: "Actions" }).click();
+  await page.getByRole("menuitem", { name: "Block" }).click();
+  const blockReview = page.getByRole("alertdialog", { name: "Block user?" });
+  await expect(blockReview).toBeVisible();
+  await blockReview.getByLabel("Reason").fill("Confirmed compromised account");
+  await blockReview.getByLabel(/to confirm/).fill(ids.user);
+  await blockReview.getByRole("checkbox").check();
+  await blockReview.getByRole("button", { name: "Block User" }).click();
+  await expect(userDrawer.getByText("Block user completed.")).toBeVisible();
+  await userDrawer.getByRole("button", { name: "Actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Unblock" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   expect(fixture.mutations.length).toBeGreaterThanOrEqual(8);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  await signOut(page);
+  await expect(page.getByRole("heading", { level: 1, name: "You're signed out" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Your account/ })).toHaveCount(0);
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
@@ -709,79 +749,88 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
 
-  await page.getByRole("link", { name: /^Applications/ }).click();
-  await page.getByRole("button", { name: "Load applications" }).click();
-  await expect(page.getByText(ids.application)).toBeVisible();
-  await page.getByLabel("Display name").fill("Resource App");
-  await page.getByLabel("Slug").fill("resource-app");
-  await page.getByRole("button", { name: "Create application" }).click();
+  await goTo(page, "Settings", "Applications");
+  await expect(page.getByRole("heading", { name: "Mobile App" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Application" }).click();
+  const appDrawer = page.getByRole("complementary", { name: "Add application" });
+  await appDrawer.getByLabel("Name").fill("Resource App");
+  await expect(appDrawer.getByLabel("Slug")).toHaveValue("resource-app");
+  await appDrawer.getByRole("button", { name: "Add Application" }).click();
+  await expect(page.getByText("Resource App was added.", { exact: false })).toBeVisible();
   expect(fixture.applicationBodies.at(-1)).toEqual({ display_name: "Resource App", organization_id: ids.organization, slug: "resource-app" });
 
-  await page.getByRole("link", { name: /^Environments/ }).click();
-  await page.getByLabel("Application ID").fill(ids.application);
-  await page.getByRole("button", { name: "Load environments" }).click();
-  await expect(page.getByText(ids.environment)).toBeVisible();
-  await page.getByLabel("Display name").fill("Staging");
-  await page.getByLabel("Slug").fill("staging");
-  await page.getByLabel("Kind").selectOption("staging");
-  await page.getByRole("button", { name: "Create environment" }).click();
+  await page.getByRole("button", { name: "Add Environment" }).first().click();
+  const environmentDrawer = page.getByRole("complementary", { name: "Add environment" });
+  await environmentDrawer.locator("label.lw-role-card", { hasText: "Staging" }).click();
+  await environmentDrawer.getByRole("button", { name: "Add Environment" }).click();
+  await expect(page.getByText("Staging was added.", { exact: false })).toBeVisible();
   expect(fixture.environmentBodies.at(-1)).toEqual({ display_name: "Staging", kind: "staging", slug: "staging" });
 
-  await page.getByRole("link", { name: /^Secrets/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load secret metadata" }).click();
+  await goTo(page, "AI Connections", "Secrets");
   await expect(page.getByText(ids.secret)).toBeVisible();
-  await page.getByLabel("Secret name").fill("unused_provider_key");
-  await page.getByLabel("Secret value").fill("transient-create-secret");
-  await page.getByRole("button", { name: "Create secret" }).click();
-  await expect(page.getByLabel("Secret value")).toHaveValue("");
+  await page.getByRole("button", { name: "Add Secret" }).click();
+  const secretDrawer = page.getByRole("complementary", { name: "Add secret" });
+  await secretDrawer.getByLabel("Name").fill("unused_provider_key");
+  await secretDrawer.getByLabel("Value").fill("transient-create-secret");
+  await secretDrawer.getByRole("button", { name: "Add Secret" }).click();
   await expect(page.getByText(ids.unusedSecret)).toBeVisible();
   expect(await page.locator("body").innerText()).not.toContain("transient-create-secret");
 
   const primaryRow = page.getByRole("row", { name: /primary_api_key/ });
   await primaryRow.getByRole("button", { name: "Rotate" }).click();
-  await page.getByLabel("Replacement secret value").fill("transient-rotation-secret");
-  await page.getByRole("button", { name: "Rotate secret" }).click();
+  const rotateDrawer = page.getByRole("complementary", { name: "Rotate primary_api_key" });
+  await rotateDrawer.getByLabel("New value").fill("transient-rotation-secret");
+  await rotateDrawer.getByRole("button", { name: "Rotate" }).click();
   await expect(page.getByText(ids.rotatedSecret)).toBeVisible();
   expect(await page.locator("body").innerText()).not.toContain("transient-rotation-secret");
 
   const unusedRow = page.getByRole("row", { name: /unused_provider_key/ });
-  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
-  await expect(page.getByText(ids.unusedSecret, { exact: true }).last()).toBeVisible();
-  await page.getByRole("button", { name: "Cancel deletion" }).click();
+  await unusedRow.getByRole("button", { name: "Delete" }).click();
+  const deleteDialog = page.getByRole("alertdialog", { name: "Delete unused_provider_key?" });
+  await deleteDialog.getByRole("button", { name: "Cancel" }).click();
   expect(fixture.secretBodies.some((body) => body.action === "delete")).toBe(false);
-  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
-  await page.getByLabel("Type unused_provider_key to confirm").fill("unused_provider_key");
-  await page.getByRole("button", { name: "Permanently delete secret" }).click();
+  await unusedRow.getByRole("button", { name: "Delete" }).click();
+  await deleteDialog.getByLabel(/to confirm/).fill("unused_provider_key");
+  await deleteDialog.getByRole("button", { name: "Delete Secret" }).click();
   await expect(page.getByText(ids.unusedSecret)).toHaveCount(0);
   expect(fixture.secretBodies.at(-1)).toEqual({ action: "delete", secret_id: ids.unusedSecret });
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 
-  await page.getByRole("link", { name: /^User overrides/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
+  await goTo(page, "Policies & Limits", "Overrides");
+  await expect(page.getByText("Changes here apply immediately and never appear in the draft.")).toBeVisible();
   await page.getByLabel("User ID").fill(ids.user);
-  await page.getByRole("button", { name: "Inspect override" }).click();
-  await expect(page.getByText("No override")).toBeVisible();
-  await page.getByLabel("Limit plan").fill("subscriber");
+  await page.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByText("None: the user's claims pick the plan")).toBeVisible();
+  await page.getByLabel("Plan", { exact: true }).selectOption("free");
+  await page.getByLabel("Ends").selectOption("never");
   await page.getByLabel("Reason").fill("support-approved");
-  await page.getByRole("button", { name: "Set override" }).click();
-  await expect(page.getByText("Reason: support-approved")).toBeVisible();
-  await page.getByRole("button", { name: "Clear override" }).click();
-  await expect(page.getByText("No override")).toBeVisible();
+  await page.getByRole("button", { name: "Apply Now" }).click();
+  await expect(page.getByText("Override applied. free is live for this user now.")).toBeVisible();
+  await expect(page.getByText("support-approved")).toBeVisible();
+  await page.getByRole("button", { name: "Clear Override" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Clear Override" }).click();
+  await expect(page.getByText("None: the user's claims pick the plan")).toBeVisible();
   expect(fixture.overrideBodies).toEqual([
-    { limit_plan: "subscriber", reason: "support-approved" },
+    { limit_plan: "free", reason: "support-approved" },
     { action: "clear", user_id: ids.user }
   ]);
 
-  await page.getByRole("link", { name: /^Configuration revisions/ }).click();
-  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
-  await page.getByRole("button", { name: "Review rollback" }).click();
-  await page.getByLabel("Operator reason").fill("restore known-good revision");
-  await page.getByRole("button", { name: "Confirm rollback to revision 1" }).click();
-  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
+  await goTo(page, "Changes");
+  await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
+  await expect(page.getByText("No unpublished changes")).toBeVisible();
+  await page.getByRole("navigation", { name: "Changes pages" }).getByRole("link", { name: "History" }).click();
+  await page.getByRole("row", { name: new RegExp(ids.revision) }).click();
+  const revisionDrawer = page.getByRole("complementary", { name: ids.revision });
+  await revisionDrawer.getByRole("button", { name: "Roll Back to This" }).click();
+  const rollbackDialog = page.getByRole("alertdialog", { name: "Roll back to version 1?" });
+  await rollbackDialog.getByLabel("Reason").fill("restore known-good revision");
+  await rollbackDialog.getByLabel(/to confirm/).fill(ids.revision);
+  await rollbackDialog.getByRole("checkbox").check();
+  await rollbackDialog.getByRole("button", { name: "Roll Back" }).click();
+  await expect(revisionDrawer.getByText(`${ids.revision} is live again.`)).toBeVisible();
   expect(fixture.rollbackBodies).toEqual([{ audit_reason: "operator_reason_provided", etag: '"active-revision-etag"', reason: "restore known-good revision", revision_id: ids.revision }]);
 
   expectOnlyAdminMutations(fixture.mutations);
@@ -792,11 +841,14 @@ test("owner activates a targeted configuration merge and uses focused observabil
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
 
-  await page.getByRole("link", { name: /^Upstreams/ }).click();
-  await expect(page.getByRole("heading", { name: "Connect a provider without exposing its credential." })).toBeVisible();
+  await goTo(page, "AI Connections");
+  await expect(page.getByRole("heading", { level: 1, name: "Connections" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /openai/ })).toBeVisible();
+  await page.getByRole("button", { name: "Add Connection" }).click();
+  await expect(page.getByRole("complementary", { name: "Add connection" }).getByRole("heading", { name: "Endpoint, credential, model, and price" })).toBeVisible();
   await page.getByLabel("Connection ID").fill("gateway");
   await page.getByLabel("Base URL").fill("https://gateway.example.test/v1");
   await page.getByLabel("Secret name").fill("gateway_api_key");
@@ -807,7 +859,8 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByRole("heading", { name: "Publish gateway to Production?" })).toBeVisible();
   await expect(page.getByLabel("Provider credential")).toHaveValue("");
   expect(fixture.secretBodies.at(-1)).toEqual({ environment_id: ids.environment, name: "gateway_api_key", value: "test-only-gateway-secret" });
-  await page.getByRole("button", { name: "Publish to Production" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Unpublished changes." })).toBeVisible();
+  await page.getByRole("complementary", { name: "Add connection" }).getByRole("button", { name: "Publish to Production" }).click();
   await expect(page.getByRole("heading", { name: "Test the published connection" })).toBeVisible();
 
   const patched = fixture.configurationPatchBodies[0] as { metadata: unknown; spec: { identityProviders: unknown; models: Array<Record<string, unknown>>; upstreams: Array<Record<string, unknown>> } };
@@ -820,45 +873,53 @@ test("owner activates a targeted configuration merge and uses focused observabil
     { etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` }
   ]);
 
-  await page.getByRole("link", { name: /^Cost/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load cost" }).click();
-  await expect(page.getByRole("heading", { name: "Cost provenance" })).toBeVisible();
-  await expect(page.getByText("openrouter_usage_cost")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Latency distributions" })).toHaveCount(0);
+  const costSummary = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/admin/v1/usage/summary" && url.searchParams.get("environment_id") === ids.environment && url.searchParams.get("breakdown_limit") === "50";
+  });
+  await goTo(page, "Analytics", "Cost");
+  await costSummary;
+  await expect(page.getByRole("heading", { level: 1, name: "Analytics" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Where the cost comes from" })).toBeVisible();
+  await expect(page.getByText("openrouter_usage_cost", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request latency" })).toHaveCount(0);
 
-  await page.getByRole("link", { name: /^Attestation failures/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load attestation failures" }).click();
-  await expect(page.getByRole("heading", { name: "Attestation rejection aggregate" })).toBeVisible();
-  await expect(page.getByText(/contains no raw App Attest assertion/)).toBeVisible();
+  await page.getByRole("navigation", { name: "Analytics pages" }).getByRole("link", { name: "Reliability" }).click();
+  await expect(page.getByRole("heading", { name: "App verification failures" })).toBeVisible();
+  await expect(page.getByText(/verification checks/).first()).toBeVisible();
 
-  await page.getByRole("link", { name: /^Route simulator/ }).click();
-  await page.getByLabel("Environment context ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load active route context" }).click();
-  await expect(page.getByText(/Selected active revision/)).toContainText("1 feature");
-  await expect(page.getByLabel("Revision ID")).toHaveValue(ids.draftRevision);
+  await goTo(page, "Simulator");
+  await expect(page.getByLabel("Run against")).toHaveValue("live");
   await expect(page.getByLabel("Feature")).toHaveValue("assistant");
-  await page.getByRole("button", { name: "Simulate route" }).click();
-  await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
+  const simulation = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === `/admin/v1/config-revisions/${ids.draftRevision}/simulate`);
+  await page.getByRole("button", { name: "Simulate" }).click();
+  expect((await simulation).postDataJSON()).toMatchObject({ feature: "assistant", principal: { authenticated: true, claims: { plan: "free" } } });
+  await expect(page.locator(".lw-verdict strong")).toHaveText("Allowed");
+  await expect(page).not.toHaveURL(/claims|plan=free/);
 
-  await page.getByRole("link", { name: /^Requests/ }).click();
-  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
+  await goTo(page, "Requests");
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/admin/v1/requests" &&
+      url.searchParams.get("environment_id") === ids.environment &&
       url.searchParams.get("status") === "succeeded" &&
       url.searchParams.get("feature") === "assistant" &&
       url.searchParams.get("platform") === "react_native_ios" &&
       url.searchParams.get("tokens_min") === "1" &&
       url.searchParams.get("sort") === "started_at_asc";
   });
-  await page.getByLabel("Status").selectOption("succeeded");
-  await page.getByLabel("Feature").fill("assistant");
-  await page.getByLabel("Platform").selectOption("react_native_ios");
-  await page.getByLabel("Token minimum").fill("1");
-  await page.getByLabel("Sort").selectOption("started_at_asc");
-  await page.getByRole("button", { name: "Apply filters" }).click();
+  await page.getByRole("button", { name: /^Outcome:/ }).click();
+  await page.getByRole("menuitem", { name: "Succeeded" }).click();
+  await page.getByRole("button", { name: /^Feature:/ }).click();
+  await page.getByLabel("Feature", { exact: true }).fill("assistant");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await page.getByRole("button", { name: /^Platform:/ }).click();
+  await page.getByRole("menuitem", { name: "React Native iOS" }).click();
+  await page.getByRole("button", { name: /^More filters/ }).click();
+  await page.getByLabel("Tokens at least").fill("1");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await page.getByRole("group", { name: "Sort" }).getByRole("button", { name: "Oldest" }).click();
   await filteredRequest;
   await expect(page).toHaveURL(/feature=assistant/);
   await expect(page).toHaveURL(/platform=react_native_ios/);
@@ -868,41 +929,83 @@ test("owner activates a targeted configuration merge and uses focused observabil
   });
   await page.reload();
   await restoredRequest;
-  await expect(page.getByLabel("Status")).toHaveValue("succeeded");
-  await expect(page.getByLabel("Feature")).toHaveValue("assistant");
-  await expect(page.getByLabel("Platform")).toHaveValue("react_native_ios");
-  await expect(page.getByLabel("Token minimum")).toHaveValue("1");
-  await expect(page.getByLabel("Sort")).toHaveValue("started_at_asc");
-  await page.getByRole("button", { name: ids.request }).click();
-  await expect(page.getByRole("heading", { name: "Durable execution timeline" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "2.5 s" })).toBeVisible();
-  await expect(page.getByRole("cell", { exact: true, name: "primary" })).toBeVisible();
-  await expect(page.getByText("750 ms")).toBeVisible();
-  await expect(page.getByText(/closed, sanitized vocabulary/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Outcome:\s*Succeeded/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Feature:\s*assistant/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Platform:\s*React Native iOS/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^More filters:\s*1/ })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Sort" }).getByRole("button", { name: "Oldest" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("row", { name: /assistant/ }).click();
+  const drawer = page.getByRole("complementary", { name: ids.request });
+  await expect(drawer.getByRole("heading", { name: "Decision stages" })).toBeVisible();
+  await expect(drawer.getByText("Limit checked")).toBeVisible();
+  await expect(drawer.getByRole("img", { name: /decision stages/ })).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: /^Attempts/ })).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(drawer.getByText(/closed, sanitized vocabulary/)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`request=${ids.request}`));
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
+});
+
+test("a limit plan edit lands in the shared draft and publishes after spot checks", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+
+  await goTo(page, "Policies & Limits");
+  await expect(page.getByRole("heading", { level: 1, name: "Limit plans" })).toBeVisible();
+  await page.getByRole("row", { name: /free/ }).click();
+  const drawer = page.getByRole("complementary", { name: "free" });
+  await drawer.getByRole("button", { name: /Each user, per feature can use 100 requests per day/ }).click();
+  await drawer.getByLabel("Limit 1 amount").fill("250");
+  await drawer.getByRole("button", { name: "Save to Draft" }).click();
+  await expect(page.getByText("Saved to draft")).toBeVisible();
+  const patched = fixture.configurationPatchBodies.at(-1) as { spec: { limitPlans: Array<{ id: string; limits: Array<Record<string, unknown>> }> } };
+  expect(patched.spec.limitPlans.find((plan) => plan.id === "free")?.limits[0]).toMatchObject({ algorithm: "calendar", maximum: 250, metric: "logical_requests" });
+
+  await goTo(page, "Changes");
+  await expect(page.getByRole("region", { name: "Limits" })).toContainText("limits › 1 › maximum: 100 → 250");
+  await page.getByRole("region", { name: "Console state" }).getByRole("button", { name: "Publish to Production" }).click();
+  const review = page.getByRole("alertdialog", { name: new RegExp(`Publish ${ids.draftRevision} to Production`) });
+  await expect(review.getByText(/All \d+ sample requests get the same result/)).toBeVisible();
+  const publish = review.getByRole("button", { name: "Publish to Production" });
+  await expect(publish).toBeDisabled();
+  await review.getByLabel("I've checked what changes for Production users.").check();
+  await publish.click();
+  await expect(review).toHaveCount(0);
+  expect(fixture.configurationETags.at(-1)).toEqual({ etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` });
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("request usage distinguishes unknown quota charges, missing billing and reported zero", async ({ page }) => {
   const fixture = await installAdminFixture(page, { incidentUsage: true });
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await expect(page.getByRole("heading", { name: "The gateway is ready for control-plane work." })).toBeVisible();
-  await page.getByRole("link", { name: /^Requests/ }).click();
-  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
-  await page.getByRole("button", { name: ids.request }).click();
-  await expect(page.getByRole("heading", { name: "Usage and quota accounting" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "92,444 recorded · 92,444 unknown quota charge", exact: true })).toHaveCount(3);
-  await expect(page.getByRole("cell", { name: "Not recorded", exact: true })).toHaveCount(5);
-  await expect(page.getByRole("cell", { name: "0 reported", exact: true })).toHaveCount(2);
-  await expect(page.getByText("0 nUSD", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/missing cost is not a zero bill/)).toBeVisible();
-  await page.getByRole("heading", { name: "Usage and quota accounting" }).scrollIntoViewIfNeeded();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await goTo(page, "Requests");
+  await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
+  const row = page.getByRole("row", { name: /assistant/ });
+  await expect(row.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(row.getByText("~92,444", { exact: true })).toBeVisible();
+  await row.click();
+  const drawer = page.getByRole("complementary", { name: ids.request });
+  await expect(drawer.getByRole("heading", { name: "Usage" })).toBeVisible();
+  const usage = drawer.locator("section", { has: page.getByRole("heading", { name: "Usage" }) });
+  await expect(usage.getByText("92,444 recorded · 92,444 unknown quota charge", { exact: true })).toHaveCount(1);
+  await expect(usage.getByText("Not recorded", { exact: true })).toHaveCount(2);
+  await expect(usage.getByText("0 reported", { exact: true })).toHaveCount(1);
+  await expect(drawer.locator(".lw-attempt")).toContainText("92,444 recorded · 92,444 unknown quota charge");
+  await expect(drawer.locator(".lw-attempt")).toContainText("Not recorded · provenance unknown");
+  await expect(drawer.getByText("0 nUSD", { exact: true })).toHaveCount(0);
+  await expect(drawer.getByText(/missing cost is not a zero bill/)).toBeVisible();
+  await drawer.getByRole("heading", { name: "Usage" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("usage-accounting.png"), fullPage: true });
   expectOnlyAdminMutations(fixture.mutations);
 });
@@ -911,9 +1014,9 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Audit log/ }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Audit Log");
 
   const filteredAudit = page.waitForRequest((request) => {
     const url = new URL(request.url());
@@ -923,11 +1026,12 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
       url.searchParams.get("reason") === "security_response" &&
       url.searchParams.get("result") === "succeeded";
   });
+  await page.getByLabel("Source", { exact: true }).selectOption("console");
+  await page.getByLabel("Result", { exact: true }).selectOption("succeeded");
+  await page.getByRole("button", { name: "More filters" }).click();
   await page.getByLabel("Action").fill("admin.user_block");
-  await page.getByLabel("Descriptive source").selectOption("console");
   await page.getByLabel("Reason code").fill("security_response");
-  await page.getByLabel("Result").selectOption("succeeded");
-  await page.getByRole("button", { name: "Apply filters" }).click();
+  await page.getByRole("button", { name: "Apply" }).click();
   await filteredAudit;
   await expect(page).toHaveURL(/reason=security_response/);
   await expect(page).toHaveURL(/source=console/);
@@ -937,12 +1041,13 @@ test("audit filters and inspected detail survive a fresh browser reload", async 
   });
   await page.reload();
   await restoredAudit;
+  await expect(page.getByLabel("Source", { exact: true })).toHaveValue("console");
+  await expect(page.getByLabel("Result", { exact: true })).toHaveValue("succeeded");
   await expect(page.getByLabel("Action")).toHaveValue("admin.user_block");
-  await expect(page.getByLabel("Descriptive source")).toHaveValue("console");
   await expect(page.getByLabel("Reason code")).toHaveValue("security_response");
-  await expect(page.getByLabel("Result")).toHaveValue("succeeded");
-  await page.getByRole("button", { name: `application_user:${ids.auditUser}` }).click();
-  await expect(page.getByRole("heading", { name: "Field-level diff" })).toBeVisible();
+  await page.getByRole("row", { name: /admin\.user_block|application_user/ }).first().click();
+  await expect(page.getByText("Fields changed", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/event=aud_/);
 
   expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
@@ -952,28 +1057,23 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Self-tests/ }).click();
-  const immediateSelfTest = page.locator("form.control-form").filter({
-    has: page.getByRole("button", { name: "Run self-test" }),
-  });
-  await immediateSelfTest.locator('input[name="environment"]').fill(ids.environment);
-  await immediateSelfTest.locator('select[name="kind"]').selectOption("openrouter");
-  await immediateSelfTest.locator('input[name="config_revision_id"]').fill(ids.activeRevision);
-  await immediateSelfTest.locator('input[name="upstream"]').fill("openrouter");
-  await immediateSelfTest.locator('input[name="model"]').fill("canary");
-  await expect(immediateSelfTest.locator('input[name="max_cost_nano_usd"]')).toHaveValue("10000000");
-  await page.getByRole("button", { name: "Run self-test" }).click();
-  await expect(page.getByRole("heading", { name: "openrouter self-test" })).toBeVisible();
-  await expect(page.getByText("Bounded provider usage passed.")).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Self-tests");
+  await page.getByRole("button", { name: "OpenRouter conformance" }).click();
+  await page.getByLabel("AI connection").selectOption("openai");
+  await expect(page.getByLabel("Model")).toHaveValue("assistant_default");
+  await expect(page.getByLabel("Cost ceiling (USD)")).toHaveValue("0.01");
+  await page.getByRole("button", { name: "Run Test" }).click();
+  const runDrawer = page.getByRole("complementary", { name: ids.selfTest });
+  await expect(runDrawer.getByText("Bounded provider usage passed.")).toBeVisible();
   expect(fixture.selfTestBodies).toEqual([{
     config_revision_id: ids.activeRevision,
     environment_id: ids.environment,
     kind: "openrouter",
     max_cost_nano_usd: 10_000_000,
-    model: "canary",
-    upstream: "openrouter"
+    model: "assistant_default",
+    upstream: "openai"
   }]);
   expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
   expectOnlyAdminMutations(fixture.mutations);
@@ -983,32 +1083,36 @@ test("self-test schedules bind durable token metadata and support list, detail, 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^API tokens/ }).click();
-  await page.getByLabel("Token name").fill("self-test-scheduler");
-  await page.getByLabel("Run self-tests").check();
-  await page.getByRole("button", { name: "Create API token" }).click();
-  await page.getByRole("button", { name: "Dismiss token" }).click();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Team & Access", "API tokens");
+  await page.getByRole("button", { name: "Create Token" }).click();
+  const tokenDrawer = page.getByRole("complementary", { name: "Create token" });
+  await tokenDrawer.getByRole("button", { name: "Custom" }).click();
+  await tokenDrawer.getByLabel("Name").fill("self-test-scheduler");
+  await tokenDrawer.getByLabel("Run self-tests").check();
+  await tokenDrawer.getByRole("button", { name: "Create Token" }).click();
+  const reveal = page.getByRole("alertdialog", { name: "Save self-test-scheduler now" });
+  await reveal.getByRole("checkbox").check();
+  await reveal.getByRole("button", { name: "Done" }).click();
 
-  await page.getByRole("link", { name: /^Self-tests/ }).click();
-  await page.getByLabel("Scheduled environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load schedules" }).click();
-  await page.getByLabel("Durable Admin API token").fill(oneTimeAPIToken);
-  await page.getByLabel("Scheduled upstream ID").fill("primary");
-  await page.getByLabel("Scheduled model ID").fill("canary");
-  await page.getByRole("button", { name: "Create schedule" }).click();
-  await expect(page.getByLabel("Durable Admin API token")).toHaveValue("");
-  await expect(page.getByText(ids.activeRevision)).toBeVisible();
-  await expect(page.getByText(ids.apiToken, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: ids.selfTestSchedule }).click();
-  await page.getByRole("button", { name: "Disable schedule" }).click();
-  await expect(page.getByText(`${ids.selfTestSchedule} · disabled`)).toBeVisible();
+  await goTo(page, "Self-tests");
+  await page.getByRole("button", { name: "New Schedule" }).click();
+  const scheduleDrawer = page.getByRole("complementary", { name: "New schedule" });
+  await scheduleDrawer.getByLabel("AI connection").selectOption("openai");
+  await scheduleDrawer.getByLabel("API token").fill(oneTimeAPIToken);
+  await scheduleDrawer.getByRole("button", { name: "Create Schedule" }).click();
+  const scheduleView = page.getByRole("complementary", { name: ids.selfTestSchedule });
+  await expect(scheduleView.getByText(ids.activeRevision)).toBeVisible();
+  await expect(scheduleView.getByText(ids.apiToken, { exact: true })).toBeVisible();
+  await scheduleView.getByRole("button", { name: "Disable" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("row", { name: /assistant_default/ }).getByText("Disabled")).toBeVisible();
 
   expect(fixture.selfTestScheduleBodies).toEqual([{
     daily_cost_limit_nano_usd: 240_000_000, environment_id: ids.environment,
     interval_seconds: 3600, kind: "upstream",
-    max_cost_nano_usd: 10_000_000, model: "canary", upstream: "primary"
+    max_cost_nano_usd: 10_000_000, model: "assistant_default", upstream: "openai"
   }]);
   expect(fixture.selfTestScheduleAuthorizations).toEqual([{ authorization: `Bearer ${oneTimeAPIToken}`, cookie: undefined, csrf: undefined }]);
   expect(JSON.stringify(fixture.selfTestScheduleBodies)).not.toContain(oneTimeAPIToken);
@@ -1019,25 +1123,35 @@ test("owner manages administrators without persisting password material", async 
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^Administrators/ }).click();
-  await page.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
-  await page.getByLabel("Display name").fill("Second Owner");
-  await page.locator('select[name="role"]').selectOption("viewer");
-  await page.getByLabel("Initial password").fill("temporary administrator password");
-  await page.getByRole("button", { name: "Create administrator" }).click();
-  await expect(page.getByText("second-owner@example.test")).toBeVisible();
-  await page.getByLabel("Role for second-owner@example.test").selectOption("operator");
-  await page.getByRole("button", { name: "Reset password" }).last().click();
-  await page.getByLabel("Replacement password").fill("replacement administrator password");
-  await page.getByRole("button", { name: "Reset and revoke credentials" }).click();
-  await page.getByRole("button", { name: "Review disable" }).last().click();
-  await expect(page.getByRole("heading", { name: "Disable second-owner@example.test?" })).toBeVisible();
-  await expect(page.getByText(/does not restore revoked sessions or API tokens/i)).toBeVisible();
-  await page.getByLabel(/immediately removes organization access/i).check();
-  await page.getByRole("button", { name: "Disable and revoke credentials" }).click();
-  await expect(page.getByRole("button", { name: "Enable" })).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Team & Access");
+  await page.getByRole("button", { name: "Add Member" }).click();
+  const addDrawer = page.getByRole("complementary", { name: "Add member" });
+  await addDrawer.getByLabel("Name", { exact: true }).fill("Second Owner");
+  await addDrawer.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
+  await addDrawer.locator("label.lw-role-card", { hasText: "Viewer" }).click();
+  await addDrawer.getByLabel("First password").fill("temporary administrator password");
+  await addDrawer.getByRole("checkbox").check();
+  await addDrawer.getByRole("button", { name: "Add Member" }).click();
+  const member = page.getByRole("complementary", { name: "Second Owner" });
+  await expect(member.getByText("Must set password")).toBeVisible();
+  await member.locator("label.lw-role-card", { hasText: "Operator" }).click();
+  await member.getByRole("button", { name: "Change to Operator" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Change to Operator" }).click();
+  await expect(member.getByText("Second Owner is now Operator.")).toBeVisible();
+  await member.getByRole("button", { name: "Reset Password" }).click();
+  const resetDialog = page.getByRole("alertdialog", { name: "Reset Second Owner's password?" });
+  await resetDialog.getByLabel("New password").fill("replacement administrator password");
+  await resetDialog.getByRole("checkbox").check();
+  await resetDialog.getByRole("button", { name: "Reset Password" }).click();
+  await member.getByRole("button", { name: "Disable" }).click();
+  const disableDialog = page.getByRole("alertdialog", { name: "Disable Second Owner?" });
+  await expect(disableDialog.getByText(/ended sessions and revoked tokens aren't restored/)).toBeVisible();
+  await disableDialog.getByLabel(/to confirm/).fill("second-owner@example.test");
+  await disableDialog.getByRole("checkbox").check();
+  await disableDialog.getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("complementary", { name: "Second Owner" }).getByRole("button", { name: "Enable" })).toBeVisible();
   expect(fixture.administratorBodies).toEqual([
     { display_name: "Second Owner", email: "second-owner@example.test", password: "temporary administrator password", role: "viewer" },
     { action: "role", role: "operator" },
@@ -1057,29 +1171,34 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
   const fixture = await installAdminFixture(page);
   await page.goto("/");
   await page.getByLabel("Email address").fill("owner@example.test");
-  await page.getByLabel("Password").fill("test-only-owner-password");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
-  await page.getByRole("link", { name: /^API tokens/ }).click();
-  await page.getByRole("button", { name: "Load API tokens" }).click();
-  await expect(page.getByText("No scoped automation credentials have been created for this administrator.")).toBeVisible();
-  await page.getByLabel("Token name").fill("mobile-ci");
-  await page.getByLabel("Inspect users and usage").check();
-  await page.getByLabel("Run self-tests").check();
-  await page.getByRole("button", { name: "Create API token" }).click();
-  await expect(page.getByText("This is the only time Latchway will show this credential.")).toBeVisible();
-  await expect(page.getByLabel("One-time API token")).toHaveValue(oneTimeAPIToken);
-  await page.getByRole("button", { name: "Copy token — clipboard may retain it" }).click();
-  await expect(page.getByText(/Copied\. The operating system clipboard may retain this credential\.|Clipboard access was unavailable\./)).toBeVisible();
+  await page.getByLabel("Password", { exact: true }).fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await goTo(page, "Team & Access", "API tokens");
+  await expect(page.getByText("No active tokens")).toBeVisible();
+  await page.getByRole("button", { name: "Create Token" }).click();
+  const tokenDrawer = page.getByRole("complementary", { name: "Create token" });
+  await tokenDrawer.getByRole("button", { name: "Custom" }).click();
+  await tokenDrawer.getByLabel("Name").fill("mobile-ci");
+  await tokenDrawer.getByLabel("View users, requests, usage and audit").check();
+  await tokenDrawer.getByLabel("Run self-tests").check();
+  await tokenDrawer.getByLabel("Expires").selectOption("never");
+  await tokenDrawer.getByRole("button", { name: "Create Token" }).click();
+  const reveal = page.getByRole("alertdialog", { name: "Save mobile-ci now" });
+  await expect(reveal.getByText(/only time Latchway shows this token/)).toBeVisible();
+  await expect(reveal.getByLabel("Token", { exact: true })).toHaveValue(oneTimeAPIToken);
+  await reveal.getByRole("button", { name: "Copy token" }).click();
   if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(oneTimeAPIToken);
-  await page.getByRole("button", { name: "Dismiss token" }).click();
-  await expect(page.getByLabel("One-time API token")).toHaveCount(0);
+  await expect(reveal.getByRole("button", { name: "Done" })).toBeDisabled();
+  await reveal.getByRole("checkbox").check();
+  await reveal.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByLabel("Token", { exact: true })).toHaveCount(0);
   const tokenRow = page.getByRole("row", { name: /mobile-ci/ });
-  await tokenRow.getByRole("button", { name: "Review revoke" }).click();
-  await expect(page.getByRole("heading", { name: "Revoke mobile-ci?" })).toBeVisible();
-  await expect(page.getByText(/cannot recover or reactivate this token/i)).toBeVisible();
-  await page.getByLabel(/immediately and permanently revokes this token/i).check();
-  await page.getByRole("button", { name: "Revoke API token" }).click();
-  await expect(tokenRow.getByText("Revoked")).toBeVisible();
+  await tokenRow.getByRole("button", { name: "Revoke" }).click();
+  const revokeDialog = page.getByRole("alertdialog", { name: "Revoke mobile-ci?" });
+  await expect(revokeDialog.getByText(/can't be undone/)).toBeVisible();
+  await revokeDialog.getByLabel(/to confirm/).fill("mobile-ci");
+  await revokeDialog.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.getByText("Revoked", { exact: true })).toBeVisible();
   expect(fixture.apiTokenBodies).toEqual([
     { name: "mobile-ci", scopes: ["inspect_users", "run_self_tests"] },
     { action: "revoke", token_id: ids.apiToken }

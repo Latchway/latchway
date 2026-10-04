@@ -11,6 +11,11 @@ export const adminSessionEndpoint = adminAuthEndpoints.session;
 export type ConsoleMode = "configured" | "signed-out" | "unknown";
 
 export interface ConsoleSessionState {
+  /**
+   * The session ended while the console was open (it expired, was revoked or the password was reset). The last
+   * session stays so the page underneath keeps its context until the operator signs in again.
+   */
+  expired?: boolean;
   mode: ConsoleMode;
   session?: AdminSession;
   userLabel?: string;
@@ -35,11 +40,11 @@ async function parseJSON(response: Response): Promise<unknown> {
 export function consoleStateFromAdminSession(
   session: AdminSession
 ): ConsoleSessionState {
-  return {
+  return rememberConsoleSession({
     mode: "configured",
     session,
     userLabel: session.administrator.email
-  };
+  });
 }
 
 export async function fetchConsoleSession(
@@ -78,9 +83,39 @@ export async function fetchConsoleSession(
   }
 }
 
+/** The last confirmed session, kept in memory only, so an ending session can be resumed instead of discarded. */
+let lastConfigured: ConsoleSessionState | undefined;
+
+/** Called on an explicit sign-out: the next signed-out answer really means "signed out". */
+export function forgetConsoleSession(): void {
+  lastConfigured = undefined;
+}
+
+export function lastConsoleSession(): ConsoleSessionState | undefined {
+  return lastConfigured;
+}
+
+async function observeConsoleSession(signal?: AbortSignal): Promise<ConsoleSessionState> {
+  const state = await fetchConsoleSession(signal);
+  if (state.mode === "configured") {
+    lastConfigured = state;
+    return state;
+  }
+  if (state.mode === "signed-out" && lastConfigured) return { ...lastConfigured, expired: true };
+  return state;
+}
+
+/** Records a session the operator just established, e.g. after sign-in. */
+export function rememberConsoleSession(state: ConsoleSessionState): ConsoleSessionState {
+  lastConfigured = state.mode === "configured" ? { ...state, expired: undefined } : undefined;
+  return state;
+}
+
+export const SESSION_ENDED_EVENT = "latchway:session-ended";
+
 export const consoleSessionQueryOptions = queryOptions({
   queryKey: ["admin-session"] as const,
-  queryFn: ({ signal }) => fetchConsoleSession(signal),
+  queryFn: ({ signal }) => observeConsoleSession(signal),
   retry: false,
   staleTime: 30_000
 });
