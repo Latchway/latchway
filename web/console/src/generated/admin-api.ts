@@ -1065,7 +1065,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Replace the document of a mutable draft using optimistic concurrency. */
+        /**
+         * Replace the document of a never-activated draft using optimistic concurrency.
+         * @description A validated revision that was never activated returns to draft; activated and discarded revisions are immutable. Each replacement is recorded in the edit history.
+         */
         patch: operations["replaceDraftConfiguration"];
         trace?: never;
     };
@@ -1078,8 +1081,51 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Atomically activate a fully valid immutable revision. */
+        /**
+         * Atomically activate a fully valid immutable revision.
+         * @description An optional body records a publish note on the revision. Without a body the revision activates without one.
+         */
         post: operations["activateConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a never-activated draft, keeping it in history.
+         * @description The revision becomes `discarded`; its document stays readable, and it can no longer be edited, validated, simulated or activated.
+         */
+        post: operations["discardConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List who changed a revision, when, and which paths.
+         * @description Newest first, at most 200 edits. Paths only; values are never recorded. Edits made before the server recorded history are absent.
+         */
+        get: operations["listConfigurationRevisionEdits"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1097,6 +1143,51 @@ export interface paths {
         put?: never;
         /** Diff a valid draft against the active revision and identify impact. */
         post: operations["planConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/rebase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring a draft up to date with the live revision.
+         * @description Merges the live revision's changes into the draft and moves its base to `live_revision_id`,
+         *     which must still be live. Objects merge by key and lists of identified entries by `id`;
+         *     reordered lists, sensitive values and other values are taken whole. `resolutions` must name
+         *     `draft` or `live` for every conflicting path and nothing else. The draft returns to `draft`.
+         */
+        post: operations["rebaseConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/rebase-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview bringing a draft up to date with the live revision.
+         * @description Compares the draft and the live revision with the revision the draft started from. Lists the
+         *     paths each side changed and the paths both changed differently. Paths only; read the three
+         *     revisions to show values.
+         */
+        get: operations["previewConfigurationRebase"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1166,6 +1257,33 @@ export interface paths {
         put?: never;
         /** Create a draft revision from an explicit document or active revision. */
         post: operations["createConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/environments/{environmentId}/config-revisions/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a draft from another environment's live configuration.
+         * @description Creates a draft in this environment from the live revision of another environment of the
+         *     same application. Features, models, input accounting, pricing, limit plans, session and
+         *     privacy settings come from the source. Sign-in providers, attestation policies, component
+         *     definitions and AI connections this environment already has are kept; entries only the
+         *     source has are copied and listed under `review`, because they may point at the source's
+         *     projects, app identifiers, origins, base URLs or secret references. Metadata always names
+         *     this environment. Refused with `conflict` while this environment has an unpublished,
+         *     undiscarded draft.
+         */
+        post: operations["promoteConfiguration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2131,6 +2249,10 @@ export interface components {
             display_name: string;
             password: string;
             token: string;
+        };
+        ActivateConfigurationRequest: {
+            /** @description Publish note; empty means none. */
+            note?: string;
         };
         AddedPasskey: {
             passkey: components["schemas"]["Passkey"];
@@ -3098,6 +3220,21 @@ export interface components {
                 };
             };
         };
+        ConfigurationChange: {
+            /** @enum {string} */
+            operation: "add" | "remove" | "replace";
+            path: string;
+            summary?: string;
+        };
+        ConfigurationMergePreview: {
+            base_revision_id?: components["schemas"]["RevisionID"];
+            conflicts: string[];
+            draft_changes: components["schemas"]["ConfigurationChange"][];
+            live_changes: components["schemas"]["ConfigurationChange"][];
+            live_revision_id: components["schemas"]["RevisionID"];
+            revision_id: components["schemas"]["RevisionID"];
+            up_to_date: boolean;
+        };
         ConfigurationPlan: {
             changes: {
                 /** @enum {string} */
@@ -3109,19 +3246,63 @@ export interface components {
             to_revision_id: components["schemas"]["RevisionID"];
             warnings: components["schemas"]["ValidationIssue"][];
         };
+        ConfigurationPromotion: {
+            promotion: {
+                /** @description Spec sections taken from the source. */
+                copied: string[];
+                /** @description Paths kept from this environment. */
+                kept: string[];
+                /** @description Entries copied from the source that may point at its infrastructure. */
+                review: string[];
+                source_environment_id: components["schemas"]["EnvironmentID"];
+                source_revision_id: components["schemas"]["RevisionID"];
+            };
+            revision: components["schemas"]["ConfigurationRevision"];
+        };
         ConfigurationRevision: {
             /** Format: date-time */
             activated_at?: string;
+            /** @description Publish note recorded at activation. */
+            activation_note?: string;
+            /** @description The live revision this draft started from. */
+            base_revision_id?: components["schemas"]["RevisionID"];
             /** Format: date-time */
             created_at: string;
             created_by: string;
+            description?: string;
+            /** Format: date-time */
+            discarded_at?: string;
+            discarded_by?: string;
             document: components["schemas"]["config.schema"];
             environment_id: components["schemas"]["EnvironmentID"];
             id: components["schemas"]["RevisionID"];
             /** @enum {string} */
-            state: "draft" | "valid" | "active" | "superseded" | "invalid";
+            state: "draft" | "valid" | "active" | "superseded" | "invalid" | "discarded";
+            /**
+             * Format: date-time
+             * @description Time of the latest recorded edit
+             */
+            updated_at: string;
+            /** @description Author of the latest recorded edit */
+            updated_by: string;
             validation?: components["schemas"]["ValidationReport"];
             version: number;
+        };
+        ConfigurationRevisionEdit: {
+            /** @description Every changed path; `changes` lists at most 100. */
+            change_count: number;
+            changes: components["schemas"]["ConfigurationChange"][];
+            /** Format: date-time */
+            edited_at: string;
+            edited_by: string;
+            /** @enum {string} */
+            kind: "created" | "edited" | "rebased" | "promoted";
+            version: number;
+        };
+        ConfigurationRevisionEdits: {
+            items: components["schemas"]["ConfigurationRevisionEdit"][];
+            revision_id: components["schemas"]["RevisionID"];
+            truncated: boolean;
         };
         ConfigurationRevisionPage: {
             items: components["schemas"]["ConfigurationRevision"][];
@@ -4026,6 +4207,10 @@ export interface components {
             /** Format: uri */
             type: string;
         } & unknown;
+        PromoteConfigurationRequest: {
+            description?: string;
+            source_environment_id: components["schemas"]["EnvironmentID"];
+        };
         /** @description Allowlisted bounded provider metadata only; never raw messages, prompts, response bodies or credentials. */
         ProviderErrorDiagnostics: {
             /** @enum {string} */
@@ -4043,6 +4228,12 @@ export interface components {
             currency: "USD";
             /** @constant */
             source: "openrouter_usage_cost";
+        };
+        RebaseConfigurationRequest: {
+            live_revision_id: components["schemas"]["RevisionID"];
+            resolutions?: {
+                [key: string]: "draft" | "live";
+            };
         };
         RecoveryCodes: {
             recovery_codes: string[];
@@ -4573,7 +4764,8 @@ export interface components {
                 "admin_invitations",
                 "admin_application_roles",
                 "admin_user_insights",
-                "admin_request_search"
+                "admin_request_search",
+                "admin_configuration_drafts"
             ];
             server_version: string;
         };
@@ -6527,7 +6719,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ActivateConfigurationRequest"];
+            };
+        };
         responses: {
             /** @description Activated revision. */
             200: {
@@ -6540,6 +6736,59 @@ export interface operations {
             };
             412: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    discardConfigurationRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discarded revision. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevision"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listConfigurationRevisionEdits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Edit history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevisionEdits"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };
@@ -6564,6 +6813,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigurationPlan"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    rebaseConfigurationRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebaseConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description Rebased draft. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevision"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewConfigurationRebase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merge preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationMergePreview"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -6704,6 +7011,39 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigurationRevision"];
                 };
             };
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    promoteConfiguration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                environmentId: components["parameters"]["EnvironmentID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description Promoted draft and where each part came from. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationPromotion"];
+                };
+            };
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };

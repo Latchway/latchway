@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { components } from "../generated/admin-api";
+import { REVISION_STATES, revisionLifecycleFields } from "./admin";
 
 type AdminSchema<Name extends keyof components["schemas"]> = components["schemas"][Name];
 
@@ -126,9 +127,10 @@ export const ConfigurationRevisionResourceSchema = z
     document: ConfigurationDocumentSchema,
     environment_id: EnvironmentID,
     id: RevisionID,
-    state: z.enum(["draft", "valid", "active", "superseded", "invalid"]),
+    state: z.enum(REVISION_STATES),
     validation: ValidationReportSchema.optional(),
-    version: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
+    version: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    ...revisionLifecycleFields
   })
   .strict();
 

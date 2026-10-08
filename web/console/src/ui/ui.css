@@ -1728,3 +1728,17 @@ a.lw-setup-step[aria-disabled="true"] { cursor: default; opacity: 0.55; }
 .lw-vf__value { min-width: 0; overflow-wrap: anywhere; }
 .lw-rq-total { font-weight: 600; color: var(--foreground-primary); }
 .lw-rq-clientid { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+
+/* Changes: edit history, merge choices and publish notes. */
+.lw-prewrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lw-edit-history { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 0; padding: 0; list-style: none; }
+.lw-edit { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--border); }
+.lw-edit__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; }
+.lw-merge-list { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.lw-merge { display: flex; flex-direction: column; gap: 8px; }
+.lw-merge__path { overflow-wrap: anywhere; }
+.lw-merge__sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.lw-merge__side { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--border); cursor: pointer; }
+.lw-merge__side.is-chosen { box-shadow: 0 0 0 2px var(--accent-primary); }
+.lw-merge__head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+.lw-merge__value { max-height: 180px; margin: 0; overflow: auto; font-size: 12px; }
