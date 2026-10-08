@@ -1,15 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 
-import { type AdminProblem, type AdminSession, loginAdministrator, problemFromError } from "../../api/auth";
+import { type AdminProblem, type AdminSession, loginAdministrator, problemFromError, switchAdminOrganization } from "../../api/auth";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { ROLE_LABEL } from "../../pages/team/roles";
-import { Button, buttonClass, Field, Properties } from "../../ui";
-import { scopeSearch } from "../navigation";
+import { Button, Field } from "../../ui";
 import { AccountDialogFrame, AuthProblem, PasswordInput } from "./auth-fields";
-import { sessionEndText } from "./session-model";
 
 /** Signs in again as the same administrator, into the given organization, and replaces the console's session. */
 function useSignInAgain(session: AdminSession) {
@@ -40,7 +37,7 @@ function useSignInAgain(session: AdminSession) {
  * Sign in again without leaving the page. When the session has ended it can't be dismissed, only completed or traded
  * for a different account; when it's offered early the operator can close it.
  */
-export function ReauthDialog({ onClose, onSignedIn, onSomeoneElse, session }: { onClose?: () => void; onSignedIn: () => void; onSomeoneElse: () => void; session: AdminSession }) {
+export function ReauthDialog({ endReason, onClose, onSignedIn, onSomeoneElse, session }: { endReason?: string; onClose?: () => void; onSignedIn: () => void; onSomeoneElse: () => void; session: AdminSession }) {
   const queryClient = useQueryClient();
   const again = useSignInAgain(session);
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -51,7 +48,7 @@ export function ReauthDialog({ onClose, onSignedIn, onSomeoneElse, session }: { 
   }
   return (
     <AccountDialogFrame
-      description={onClose ? "Start a new session now so this one doesn't end while you work." : "Sign in again to carry on. This page stays as it was; anything that failed while you were signed out needs another try."}
+      description={onClose ? "Start a new session now so this one doesn't end while you work." : `${endReason ? `${endReason} ` : ""}Sign in again to carry on. This page stays as it was; anything that failed while you were signed out needs another try.`}
       onEscape={onClose && !again.pending ? onClose : undefined}
       title={onClose ? "Sign in again" : "Your session ended"}
     >
@@ -73,59 +70,45 @@ export function ReauthDialog({ onClose, onSignedIn, onSomeoneElse, session }: { 
   );
 }
 
-/** Each session belongs to one organization, so switching signs in again into the other one. */
+/** Moves this console session to another organization; the server ends the current session in the same step. */
 export function SwitchOrganizationDialog({ onClose, onSwitched, session }: { onClose: () => void; onSwitched: () => void; session: AdminSession }) {
+  const queryClient = useQueryClient();
   const organizations = useQuery(organizationsQueryOptions());
   const names = new Map((organizations.data?.items ?? []).map((item) => [item.id, item.display_name]));
   const others = session.memberships.filter((membership) => membership.organization_id !== session.organization_id);
   const [target, setTarget] = useState(others[0]?.organization_id ?? "");
-  const again = useSignInAgain(session);
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<AdminProblem>();
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!target || !(await again.submit(target))) return;
-    onSwitched();
+    if (!target) return;
+    setPending(true);
+    setProblem(undefined);
+    try {
+      const next = await switchAdminOrganization(target);
+      queryClient.setQueryData(consoleSessionQueryOptions.queryKey, consoleStateFromAdminSession(next));
+      onSwitched();
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setPending(false);
+    }
   }
   return (
-    <AccountDialogFrame description="Each session works in one organization, so switching signs you in again." onEscape={again.pending ? undefined : onClose} title="Switch organization">
+    <AccountDialogFrame description="This session moves to the organization you pick; nothing else changes." onEscape={pending ? undefined : onClose} title="Switch organization">
       <form className="lw-confirm__body lw-auth__form" onSubmit={(event) => void submit(event)}>
         <Field id="switch-organization" label="Organization">
           <div className="lw-input-box">
-            <select className="lw-input" disabled={again.pending} id="switch-organization" onChange={(event) => setTarget(event.target.value)} value={target}>
+            <select className="lw-input" disabled={pending} id="switch-organization" onChange={(event) => setTarget(event.target.value)} value={target}>
               {others.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{names.get(membership.organization_id) ?? membership.organization_id} · {ROLE_LABEL[membership.role]}</option>)}
             </select>
           </div>
         </Field>
-        <PasswordInput autoFocus disabled={again.pending} id="switch-password" inputRef={again.password} />
-        <p className="lw-auth__fine">Your current session isn't signed out by the switch; it stops being used and ends when it expires.</p>
-        {again.problem ? <AuthProblem problem={again.problem} /> : null}
+        {problem ? <AuthProblem problem={problem} /> : null}
         <div className="lw-confirm__foot">
-          <Button disabled={again.pending} onClick={onClose} size="sm">Cancel</Button>
-          <Button disabled={!target} loading={again.pending} size="sm" type="submit" variant="primary">Switch</Button>
+          <Button disabled={pending} onClick={onClose} size="sm">Cancel</Button>
+          <Button disabled={!target} loading={pending} size="sm" type="submit" variant="primary">Switch</Button>
         </div>
       </form>
-    </AccountDialogFrame>
-  );
-}
-
-/** Who is signed in, where and until when. Changing your own password has no API yet, so the dialog says so. */
-export function AccountDialog({ onClose, organizationName, session }: { onClose: () => void; organizationName?: string; session: AdminSession }) {
-  const role = session.memberships.find((membership) => membership.organization_id === session.organization_id)?.role;
-  const owner = session.capabilities.includes("manage_owners");
-  return (
-    <AccountDialogFrame onEscape={onClose} title="Your account">
-      <div className="lw-confirm__body">
-        <Properties items={[
-          { label: "Email", value: session.administrator.email },
-          { label: "Role", value: role ? ROLE_LABEL[role] : "Unknown" },
-          { label: "Organization", value: organizationName ?? session.organization_id },
-          { label: "Session ends", value: session.expires_at ? sessionEndText(session.expires_at) : "Not reported" }
-        ]} />
-        <p className="lw-auth__fine">The console can't change your own password: the Admin API has no endpoint for it yet. {owner ? "Another owner" : "An owner"} can reset it from Team › Members.</p>
-        {owner ? <Link className={buttonClass({ size: "sm" })} onClick={onClose} search={scopeSearch} to="/admin-sessions">Review Sessions</Link> : null}
-      </div>
-      <div className="lw-confirm__foot">
-        <Button onClick={onClose} size="sm" variant="primary">Done</Button>
-      </div>
     </AccountDialogFrame>
   );
 }

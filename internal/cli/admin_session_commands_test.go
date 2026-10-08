@@ -111,6 +111,8 @@ func TestAdminSessionCommandsUseCanonicalAPIWithoutCredentialOrReasonDisclosure(
 
 const managedSessionRevokeReasonForTest = "administrator_session_management"
 
+var deviceSummaryForTest = "Chrome on macOS"
+
 func TestAdminSessionJSONAndTableOutputAreDeterministic(t *testing.T) {
 	page := adminSessionPageCLI{
 		Items: []adminSessionMetadataCLI{{
@@ -118,7 +120,8 @@ func TestAdminSessionJSONAndTableOutputAreDeterministic(t *testing.T) {
 			Administrator: adminSessionAdministratorCLI{
 				ID: adminSessionAdministratorID, Email: "owner@example.test",
 			},
-			CreatedAt: "2026-08-29T12:00:00+00:00", LastSeenAt: "2026-08-29T12:10:00Z",
+			DeviceSummary: &deviceSummaryForTest,
+			CreatedAt:     "2026-08-29T12:00:00+00:00", LastSeenAt: "2026-08-29T12:10:00Z",
 			ExpiresAt: "2026-08-29T13:00:00Z", Status: "active", Current: false,
 		}},
 		Page: pageInfoCLI{HasMore: true, NextCursor: "cursor-two"},
@@ -146,6 +149,7 @@ func TestAdminSessionJSONAndTableOutputAreDeterministic(t *testing.T) {
 					"        \"id\": \"" + adminSessionAdministratorID + "\",\n" +
 					"        \"email\": \"owner@example.test\"\n" +
 					"      },\n" +
+					"      \"device_summary\": \"Chrome on macOS\",\n" +
 					"      \"created_at\": \"2026-08-29T12:00:00+00:00\",\n" +
 					"      \"last_seen_at\": \"2026-08-29T12:10:00Z\",\n" +
 					"      \"expires_at\": \"2026-08-29T13:00:00Z\",\n" +
@@ -163,7 +167,7 @@ func TestAdminSessionJSONAndTableOutputAreDeterministic(t *testing.T) {
 				}
 			} else {
 				for _, expected := range []string{
-					"SESSION", "ADMINISTRATOR", "2026-08-29 12:00:00Z", "2026-08-29 12:10:00Z",
+					"SESSION", "ADMINISTRATOR", "DEVICE", "Chrome on macOS", "2026-08-29 12:00:00Z", "2026-08-29 12:10:00Z",
 					"2026-08-29 13:00:00Z", "active", "no", "next cursor: cursor-two",
 				} {
 					if !strings.Contains(first.String(), expected) {
@@ -195,6 +199,7 @@ func TestAdminSessionListRejectsInvalidAndCrossShapeDocuments(t *testing.T) {
 	tests := map[string]string{
 		"cross resource shape":      `{"items":[{"id":"tok_00000000000000000000000000","name":"ci","scopes":[],"created_at":"2026-08-29T12:00:00Z","revoked":false}],"page":{"has_more":false}}`,
 		"unknown credential field":  strings.Replace(validItem, `"current":false`, `"current":false,"token_hint":"unsafe-shape"`, 1),
+		"raw user agent as device":  strings.Replace(validItem, `"current":false`, `"current":false,"device_summary":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"`, 1),
 		"missing items":             `{"page":{"has_more":false}}`,
 		"missing page":              `{"items":[]}`,
 		"missing has more":          `{"items":[],"page":{}}`,

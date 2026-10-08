@@ -3,6 +3,7 @@ import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AdminSessionSchema,
   adminAuthEndpoints,
+  responseProblem,
   type AdminSession
 } from "./auth";
 
@@ -16,6 +17,8 @@ export interface ConsoleSessionState {
    * session stays so the page underneath keeps its context until the operator signs in again.
    */
   expired?: boolean;
+  /** The server's explanation when a session it recognised has ended (signed out elsewhere, password changed…). */
+  endReason?: string;
   mode: ConsoleMode;
   session?: AdminSession;
   userLabel?: string;
@@ -72,7 +75,10 @@ export async function fetchConsoleSession(
     }
 
     if (response.status === 401) {
-      return { mode: "signed-out" };
+      const problem = responseProblem(response, payload);
+      return problem.code === "session_expired" || problem.code === "session_revoked"
+        ? { endReason: problem.detail, mode: "signed-out" }
+        : { mode: "signed-out" };
     }
     return { mode: "unknown" };
   } catch (error) {
@@ -101,13 +107,13 @@ async function observeConsoleSession(signal?: AbortSignal): Promise<ConsoleSessi
     lastConfigured = state;
     return state;
   }
-  if (state.mode === "signed-out" && lastConfigured) return { ...lastConfigured, expired: true };
+  if (state.mode === "signed-out" && lastConfigured) return { ...lastConfigured, endReason: state.endReason, expired: true };
   return state;
 }
 
 /** Records a session the operator just established, e.g. after sign-in. */
 export function rememberConsoleSession(state: ConsoleSessionState): ConsoleSessionState {
-  lastConfigured = state.mode === "configured" ? { ...state, expired: undefined } : undefined;
+  lastConfigured = state.mode === "configured" ? { ...state, endReason: undefined, expired: undefined } : undefined;
   return state;
 }
 

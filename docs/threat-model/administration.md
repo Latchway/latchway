@@ -4,6 +4,8 @@
 
 The first owner flow requires a high-entropy `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN`, stores only its hash, consumes it transactionally, and permanently closes after an owner exists. A remaining environment variable triggers a warning but cannot reopen bootstrap. Local passwords use Argon2id with versioned parameters. Cookie sessions require secure attributes, CSRF tokens, origin checks, expiry and revocation.
 
+A password an owner sets (on creation or reset) is temporary: until the administrator chooses their own, their session can only read itself, read system status, change the password and sign out. A self-service change verifies the current password under the login failure limiter, refuses reuse, and revokes the administrator's other console sessions in every organization. Ended sessions explain their end reason only to the holder of that session's cookie; unknown cookies get the generic authentication failure. Organization switching re-issues the session for an active membership and revokes the old one atomically. Session records keep a coarse "Browser on OS" summary, never the raw User-Agent or a network address (ADR 0040).
+
 ## Authorization
 
 Capabilities derive from server-side memberships and the roles `owner`, `admin`, `operator`, and `viewer`. Every Admin API handler checks the specific capability and tenant scope. UI hiding is not authorization. API tokens are high-entropy, displayed once, hashed, scoped, expirable, revocable, and audited. A bearer-authenticated token creation request may delegate only capabilities in that bearer's effective scope; the administrator's broader underlying role cannot elevate it.

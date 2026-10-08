@@ -59,7 +59,7 @@ func TestMigratorPostgreSQLDiagnosticUpgradeAndRollback(t *testing.T) {
 		}
 	}
 	current, available, err := migrator.Status(ctx)
-	if err != nil || current != 33 || available != 33 {
+	if err != nil || current != latestTestSchemaVersion || available != latestTestSchemaVersion {
 		t.Fatalf("upgrade schema=%d/%d err=%v", current, available, err)
 	}
 }

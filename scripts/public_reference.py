@@ -1192,14 +1192,17 @@ def render_all() -> Mapping[Path, str]:
                     "published SDKs and server 1.0.x do not provide them. Do not treat this reference as release evidence."
                 ) + "</Warning>\n" + body
             documents[path] = content
-    if protocol["contract_version"] == "1.1.2" and client_contract_version == "1.1.0":
+    # Admin bundle editions ship with a server release while the client contract stays 1.1.0.
+    admin_edition_servers = {"1.1.2": ("1.1.3", "2026-09-10"), "1.1.3": ("1.2.0", "2026-10-08")}
+    if protocol["contract_version"] in admin_edition_servers and client_contract_version == "1.1.0":
+        server_version, verified = admin_edition_servers[protocol["contract_version"]]
         for path in (ADMIN_OUTPUT, CONFIG_OUTPUT):
             documents[path] = re.sub(
-                r'^serverVersion: .*$', 'serverVersion: "1.1.3"',
+                r'^serverVersion: .*$', f'serverVersion: "{server_version}"',
                 documents[path], count=1, flags=re.MULTILINE,
             )
             documents[path] = re.sub(
-                r'^lastVerified: .*$', 'lastVerified: "2026-09-10"',
+                r'^lastVerified: .*$', f'lastVerified: "{verified}"',
                 documents[path], count=1, flags=re.MULTILINE,
             )
     if protocol["contract_status"] == "draft" and protocol["contract_version"] != client_contract_version:
