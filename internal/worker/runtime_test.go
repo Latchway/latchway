@@ -479,7 +479,9 @@ func TestRuntimeExecutesStaleAuthenticatedRequestRecoveryLane(t *testing.T) {
 func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	t.Parallel()
 	types := scheduledDurableJobTypes()
-	if len(types)+1 != len(supportedJobTypes) {
+	// run_scheduled_self_test is per schedule, and record_health_sample is
+	// scheduled only when a sampler is configured.
+	if len(types)+2 != len(supportedJobTypes) {
 		t.Fatalf("periodic jobs=%d supported=%d", len(types), len(supportedJobTypes))
 	}
 	seen := make(map[string]struct{}, len(types))
@@ -532,6 +534,23 @@ func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	if processed, err := runtime.executeJob(context.Background(), Job{Type: "run_scheduled_self_test", ScheduledAt: now}); err != nil || processed != 1 {
 		t.Fatalf("scheduled self-test processed=%d err=%v", processed, err)
 	}
+	if _, err := runtime.executeJob(context.Background(), Job{Type: "record_health_sample", ScheduledAt: now}); err == nil {
+		t.Fatal("a health sample ran without a configured sampler")
+	}
+	var sampledAt time.Time
+	runtime.health = healthSamplerFunc(func(_ context.Context, at time.Time) error { sampledAt = at; return nil })
+	if processed, err := runtime.executeJob(context.Background(), Job{Type: "record_health_sample", ScheduledAt: now}); err != nil || processed != 1 || !sampledAt.Equal(now) {
+		t.Fatalf("health sample processed=%d err=%v at=%s", processed, err, sampledAt)
+	}
+	if _, supported := supportedJobTypes["record_health_sample"]; !supported {
+		t.Fatal("health samples have no executable queue contract")
+	}
+}
+
+type healthSamplerFunc func(context.Context, time.Time) error
+
+func (sample healthSamplerFunc) RecordHealthSample(ctx context.Context, at time.Time) error {
+	return sample(ctx, at)
 }
 
 type scheduledSelfTestsFunc func(context.Context, string) (int64, error)

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { adminRequestMock, compatibility } = vi.hoisted(() => ({ adminRequestMock: vi.fn(), compatibility: { mutationAllowed: true } }));
+const { adminRequestMock, compatibility } = vi.hoisted(() => ({ adminRequestMock: vi.fn(), compatibility: { mutationAllowed: true, status: undefined as { server_capabilities: string[] } | undefined } }));
 
 vi.mock("../../api/admin", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../api/admin")>()), adminRequest: adminRequestMock }));
 vi.mock("../../api/session", () => ({
@@ -34,6 +34,9 @@ function server() {
     if (path.startsWith("/admin/v1/applications?")) return Promise.resolve({ data: { items: [application], page: { has_more: false } } });
     if (path === `/admin/v1/applications/${ids.application}/environments` && method === "GET") return Promise.resolve({ data: { items: state.environments } });
     if (path === `/admin/v1/applications/${ids.application}/environments` && method === "POST") { const created = { ...production, active_revision_id: undefined, display_name: options?.body?.display_name, id: "env_2123456789abcdef", kind: options?.body?.kind, slug: options?.body?.slug } as unknown as typeof production; state.environments = [...state.environments, created]; return Promise.resolve({ data: created }); }
+    if (path === `/admin/v1/environments/${ids.environment}` && method === "PATCH") { state.environments = state.environments.map((environment) => (environment.id === ids.environment ? { ...environment, display_name: String(options?.body?.display_name) } : environment)); return Promise.resolve({ data: state.environments[0] }); }
+    if (path === `/admin/v1/applications/${ids.application}` && method === "PATCH") return Promise.resolve({ data: { ...application, display_name: options?.body?.display_name } });
+    if (path.startsWith("/admin/v1/users?")) return Promise.resolve({ data: { items: [], page: { has_more: false }, total: { capped: false, count: 1234 } } });
     if (path === `/admin/v1/environments/${ids.environment}/disable`) { state.environments = state.environments.map((environment) => (environment.id === ids.environment ? { ...environment, status: "disabled" } : environment)); return Promise.resolve({ data: state.environments[0] }); }
     if (path === `/admin/v1/environments/${ids.environment}/config` && method === "GET") return Promise.resolve({ data: { activated_at: instant, created_at: instant, created_by: "adm_0123456789abcdef", document: live, environment_id: ids.environment, id: ids.activeRevision, state: "active", version: 1 }, etag: '"active"' });
     if (path.startsWith(`/admin/v1/environments/${ids.environment}/config-revisions?`)) return Promise.resolve({ data: { items: [state.draft ? { created_at: instant, created_by: "adm_0123456789abcdef", document: state.draft.document, environment_id: ids.environment, id: ids.draftRevision, state: "valid", version: 2 } : { activated_at: instant, created_at: instant, created_by: "adm_0123456789abcdef", document: live, environment_id: ids.environment, id: ids.activeRevision, state: "active", version: 1 }], page: { has_more: false } } });
@@ -54,6 +57,7 @@ function server() {
 beforeEach(() => {
   adminRequestMock.mockReset();
   compatibility.mutationAllowed = true;
+  compatibility.status = undefined;
 });
 
 describe("Applications", () => {
@@ -81,6 +85,36 @@ describe("Applications", () => {
     await user.click(confirm);
     await waitFor(() => expect(mutationsOf(adminRequestMock)).toContain(`POST /admin/v1/environments/${ids.environment}/disable`));
     expect(adminRequestMock.mock.calls.find(([path]) => String(path).endsWith("/disable"))?.[2]).toEqual({ body: { reason: "Leaked build in the wild" }, method: "POST" });
+  });
+
+  it("renames only the display name and counts each environment's users when the server supports it", async () => {
+    const user = userEvent.setup();
+    compatibility.status = { server_capabilities: ["admin_operations_history", "admin_user_insights"] };
+    server();
+    renderWithWorkspace(<ApplicationsSettingsPage />);
+    const row = (await screen.findAllByText("production", { selector: "td" }))[0]?.closest("tr") as HTMLElement;
+    expect(await within(row).findByText("1,234")).toBeInTheDocument();
+    expect(adminRequestMock.mock.calls.some(([path]) => String(path).startsWith("/admin/v1/users?") && String(path).includes(`environment_id=${ids.environment}`) && String(path).includes("include_total=true"))).toBe(true);
+    await user.click(within(row).getByRole("button", { name: "Rename" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("The slug production stays");
+    const confirm = within(dialog).getByRole("button", { name: "Rename" });
+    expect(confirm).toBeDisabled();
+    await user.clear(within(dialog).getByLabelText("Display name"));
+    await user.type(within(dialog).getByLabelText("Display name"), "  Live  ");
+    await user.click(confirm);
+    await waitFor(() => expect(mutationsOf(adminRequestMock)).toEqual([`PATCH /admin/v1/environments/${ids.environment}`]));
+    expect(adminRequestMock.mock.calls.find(([path, , options]) => path === `/admin/v1/environments/${ids.environment}` && (options as Options)?.method === "PATCH")?.[2]).toEqual({ body: { display_name: "Live" }, method: "PATCH" });
+    expect(await screen.findByText("Renamed to Live.")).toBeInTheDocument();
+  });
+
+  it("offers no rename and no users column on a server without them", async () => {
+    server();
+    renderWithWorkspace(<ApplicationsSettingsPage />);
+    expect(await screen.findByText(ids.activeRevision)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rename" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Users" })).not.toBeInTheDocument();
+    expect(adminRequestMock.mock.calls.some(([path]) => String(path).startsWith("/admin/v1/users?"))).toBe(false);
   });
 });
 

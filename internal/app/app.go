@@ -388,6 +388,15 @@ func newWorkerRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("construct worker identity-key maintenance: %w", err)
 	}
+	healthSamples, err := diagnostics.NewSampler(pool, string(role), diagnostics.Dependencies{
+		MasterKey: func(checkCtx context.Context) error {
+			return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
+		},
+		ConfigurationCache: configurationStore.ActiveSnapshotCacheStatus,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("construct worker health sampler: %w", err)
+	}
 	instanceID, err := newRuntimeInstanceID()
 	if err != nil {
 		return nil, err
@@ -399,8 +408,8 @@ func newWorkerRuntime(
 	runtime, err := worker.New(worker.Config{
 		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys,
 		Challenges: challengeMaintenance, SigningKeys: keyManager, IdentityKeys: identityKeys, Operations: operations,
-		SelfTests: selfTests,
-		Queue:     queue, Telemetry: observability, Logger: logger,
+		SelfTests: selfTests, HealthSamples: healthSamples,
+		Queue: queue, Telemetry: observability, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker runtime: %w", err)

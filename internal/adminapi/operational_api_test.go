@@ -654,6 +654,7 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	assertRequestSearch(t, ctx, pool, handler, cookie, baseQuery, environment.ID, fixture.requestID,
 		filteredRequestQuery, requestStart, requestEnd)
 	assertUsageDistribution(t, handler, cookie, environment.ID, fixture.recordedAt, 12)
+	assertConnectionHealth(t, handler, cookie, environment.ID, fixture.recordedAt)
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.secondAttemptID)) ||
@@ -944,6 +945,7 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if selfTestGet.Code != http.StatusOK || !bytes.Contains(selfTestGet.Body.Bytes(), []byte(`"active_configuration"`)) {
 		t.Fatalf("self-test get status/body=%d %s", selfTestGet.Code, selfTestGet.Body.String())
 	}
+	assertOperationsHistory(t, ctx, pool, handler, cookie, csrf, session.OrganizationID, application.ID, environment.ID, selfTestDocument.ID)
 	selfTestWithoutEnvironment := performGET(handler, "/admin/v1/self-tests/"+selfTestDocument.ID, cookie)
 	if selfTestWithoutEnvironment.Code != http.StatusBadRequest {
 		t.Fatalf("environment-free self-test get status/body=%d %s", selfTestWithoutEnvironment.Code, selfTestWithoutEnvironment.Body.String())

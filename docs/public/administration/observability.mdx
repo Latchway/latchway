@@ -76,7 +76,16 @@ latchway requests inspect req_...
 latchway requests facets --environment env_...
 latchway usage summary --environment env_...
 latchway usage timeseries --environment env_... --interval hour
+latchway usage connections --environment env_...
 ```
+
+`GET /admin/v1/usage/connections` summarizes each AI connection's upstream
+attempts over at most 90 days: attempts, successes, failures, cancellations,
+429 and 5xx counts, attempts that another attempt followed, failures by public
+category, first-byte and duration percentiles and recorded usage, with an
+optional hourly (at most 14 days) or daily series. It reads what requests
+recorded and never probes a provider. The console shows the last 24 hours on
+System Health.
 
 ## Audit history
 
@@ -113,6 +122,15 @@ keys, JWKS, worker/job state, scheduled connection tests, quota cleanup, clock,
 storage, pool pressure, and SDK compatibility. Downloaded support bundles are
 structurally allowlisted and exclude credentials, tokens, cookies, proofs,
 master-key material, attestation evidence, and request/response content.
+
+With a worker running, the server also keeps its self-check over time: every
+five minutes a worker runs the same checks and stores the overall state and
+the IDs of failed and warning checks, never their summaries or facts.
+`GET /admin/v1/system/health-history` returns those samples for at most 7
+days (24 hours by default), the console's System Health page shows them as a
+strip with incidents, and `latchway status history` prints them. Samples are
+kept for 30 days. A gap means no worker was running, so nothing is known about
+that time.
 
 Read each check as a bounded observation, not as a broader certification:
 

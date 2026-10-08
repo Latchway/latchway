@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/quota"
@@ -391,6 +393,102 @@ func assertUsageDistribution(t *testing.T, handler http.Handler, cookie *http.Co
 		bad.Set(change[0], change[1])
 		if response := performGET(handler, "/admin/v1/usage/distribution?"+bad.Encode(), cookie); response.Code != http.StatusBadRequest {
 			t.Fatalf("%s distribution status/body=%d %s", name, response.Code, response.Body.String())
+		}
+	}
+}
+
+// assertConnectionHealth checks the per-connection summary against the
+// operational fixture: a timed-out attempt on openai, then a successful
+// fallback on anthropic.
+func assertConnectionHealth(t *testing.T, handler http.Handler, cookie *http.Cookie, environmentID string, recordedAt time.Time) {
+	t.Helper()
+	query := url.Values{
+		"environment_id": {environmentID}, "interval": {"hour"},
+		"start": {recordedAt.Add(-48 * time.Hour).Format(time.RFC3339)}, "end": {recordedAt.Add(48 * time.Hour).Format(time.RFC3339)},
+	}
+	response := performGET(handler, "/admin/v1/usage/connections?"+query.Encode(), cookie)
+	var document connectionHealthDocument
+	decodeResponse(t, response, &document)
+	if response.Code != http.StatusOK || len(document.Connections) != 2 || len(document.Series) == 0 {
+		t.Fatalf("connection health status/body=%d %s", response.Code, response.Body.String())
+	}
+	byUpstream := make(map[string]connectionHealth, len(document.Connections))
+	for _, connection := range document.Connections {
+		byUpstream[connection.Upstream] = connection
+	}
+	failed, served := byUpstream["openai"], byUpstream["anthropic"]
+	if failed.Attempts != 1 || failed.Failed != 1 || failed.ServerErrors != 1 || failed.FellBack != 1 ||
+		len(failed.Failures) != 1 || failed.Failures[0].Code != "timeout" ||
+		served.Succeeded != 1 || served.Usage.LogicalRequests != 1 || served.FirstByte.Samples != 1 {
+		t.Fatalf("connection health = %s", response.Body.String())
+	}
+	query.Set("start", recordedAt.Add(-15*24*time.Hour).Format(time.RFC3339))
+	if long := performGET(handler, "/admin/v1/usage/connections?"+query.Encode(), cookie); long.Code != http.StatusBadRequest {
+		t.Fatalf("hourly series over 14 days status/body=%d %s", long.Code, long.Body.String())
+	}
+	query.Set("interval", "day")
+	if daily := performGET(handler, "/admin/v1/usage/connections?"+query.Encode(), cookie); daily.Code != http.StatusOK {
+		t.Fatalf("daily connection health status/body=%d %s", daily.Code, daily.Body.String())
+	}
+}
+
+// assertOperationsHistory covers health history, the self-test run list and
+// renames against the operational fixture's environment.
+func assertOperationsHistory(t *testing.T, ctx context.Context, pool *pgxpool.Pool, handler http.Handler, cookie *http.Cookie, csrf, organizationID, applicationID, environmentID, selfTestID string) {
+	t.Helper()
+	sampler, err := diagnostics.NewSampler(pool, "worker", diagnostics.Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := time.Now().UTC().Truncate(diagnostics.HealthSampleInterval)
+	for range 2 {
+		if err := sampler.RecordHealthSample(ctx, slot.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := performGET(handler, "/admin/v1/system/health-history?"+url.Values{
+		"start": {slot.Add(-time.Hour).Format(time.RFC3339)}, "end": {slot.Add(time.Hour).Format(time.RFC3339)},
+	}.Encode(), cookie)
+	var historyDocument healthHistoryDocument
+	decodeResponse(t, history, &historyDocument)
+	if history.Code != http.StatusOK || len(historyDocument.Samples) != 1 || !historyDocument.Samples[0].SampledAt.Equal(slot) ||
+		historyDocument.IntervalSeconds != 300 || historyDocument.Samples[0].OverallState == "" {
+		t.Fatalf("health history status/body=%d %s", history.Code, history.Body.String())
+	}
+	if tooLong := performGET(handler, "/admin/v1/system/health-history?"+url.Values{
+		"start": {slot.Add(-8 * 24 * time.Hour).Format(time.RFC3339)}, "end": {slot.Format(time.RFC3339)},
+	}.Encode(), cookie); tooLong.Code != http.StatusBadRequest {
+		t.Fatalf("eight-day health history status=%d", tooLong.Code)
+	}
+
+	runs := performGET(handler, "/admin/v1/self-tests?environment_id="+url.QueryEscape(environmentID)+"&state=passed", cookie)
+	if runs.Code != http.StatusOK || !bytes.Contains(runs.Body.Bytes(), []byte(`"id":"`+selfTestID+`"`)) {
+		t.Fatalf("self-test list status/body=%d %s", runs.Code, runs.Body.String())
+	}
+	if failed := performGET(handler, "/admin/v1/self-tests?environment_id="+url.QueryEscape(environmentID)+"&state=failed", cookie); failed.Code != http.StatusOK ||
+		bytes.Contains(failed.Body.Bytes(), []byte(selfTestID)) {
+		t.Fatalf("failed self-test list status/body=%d %s", failed.Code, failed.Body.String())
+	}
+	if invalid := performGET(handler, "/admin/v1/self-tests?environment_id="+url.QueryEscape(environmentID)+"&state=warning", cookie); invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unknown self-test state status=%d", invalid.Code)
+	}
+
+	for path, name := range map[string]string{
+		"/admin/v1/organizations/" + organizationID: "Operations Org",
+		"/admin/v1/applications/" + applicationID:   "Operations App",
+		"/admin/v1/environments/" + environmentID:   "Operations Production",
+	} {
+		renamed := performJSON(t, handler, http.MethodPatch, path, map[string]string{"display_name": "  " + name + "  "}, cookie, csrf, "https://console.example.test")
+		if renamed.Code != http.StatusOK || !bytes.Contains(renamed.Body.Bytes(), []byte(`"display_name":"`+name+`"`)) {
+			t.Fatalf("rename %s status/body=%d %s", path, renamed.Code, renamed.Body.String())
+		}
+		if invalid := performJSON(t, handler, http.MethodPatch, path, map[string]string{"display_name": "two\nlines"}, cookie, csrf, "https://console.example.test"); invalid.Code != http.StatusBadRequest {
+			t.Fatalf("rename %s with a line break status=%d", path, invalid.Code)
+		}
+	}
+	for _, action := range []string{"admin.organization_rename", "admin.application_rename", "admin.environment_rename"} {
+		if count := auditActionCount(t, ctx, pool, action); count != 1 {
+			t.Fatalf("%s audit events = %d", action, count)
 		}
 	}
 }
