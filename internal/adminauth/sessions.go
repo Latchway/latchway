@@ -61,10 +61,12 @@ type AdminSessionAdministrator struct {
 
 // AdminSessionMetadata is the redaction-safe administrator-session view.
 // Token hashes, token hints, CSRF material, network metadata, and revocation
-// reasons are deliberately absent.
+// reasons are deliberately absent; DeviceSummary is a coarse server-derived
+// "Browser on OS" phrase, never the raw User-Agent.
 type AdminSessionMetadata struct {
 	ID            string                    `json:"id"`
 	Administrator AdminSessionAdministrator `json:"administrator"`
+	DeviceSummary *string                   `json:"device_summary,omitempty"`
 	CreatedAt     time.Time                 `json:"created_at"`
 	LastSeenAt    time.Time                 `json:"last_seen_at"`
 	ExpiresAt     time.Time                 `json:"expires_at"`
@@ -99,6 +101,7 @@ func (store *Store) ListAdminSessions(
 		SELECT session.admin_session_id,
 		       admin_user.admin_user_id,
 		       admin_user.email,
+		       session.device_summary,
 		       session.created_at,
 		       session.last_seen_at,
 		       session.expires_at,
@@ -126,6 +129,7 @@ func (store *Store) ListAdminSessions(
 			&item.ID,
 			&item.Administrator.ID,
 			&item.Administrator.Email,
+			&item.DeviceSummary,
 			&item.CreatedAt,
 			&item.LastSeenAt,
 			&item.ExpiresAt,

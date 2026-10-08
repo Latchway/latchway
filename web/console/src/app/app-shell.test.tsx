@@ -341,9 +341,10 @@ describe("AppShell", () => {
         session = body.organization_id ? { ...twoOrgs, capabilities: [], organization_id: body.organization_id } : twoOrgs;
         return json(session, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
       }
-      if (url === "/admin/v1/auth/logout") {
-        session = undefined;
-        return new Response(null, { status: 204 });
+      if (url === "/admin/v1/auth/organization") {
+        const body = JSON.parse(String(init?.body)) as { organization_id: string };
+        session = { ...twoOrgs, capabilities: [], organization_id: body.organization_id };
+        return json(session, 200, { "X-CSRF-Token": "test-only-csrf-token-1123456789abcdef" });
       }
       if (url === "/admin/v1/organizations?page_size=200") return json({ items: [
         { created_at: "2026-08-29T00:00:00Z", display_name: "Example Org", id: adminSession.organization_id, slug: "example" },
@@ -363,8 +364,8 @@ describe("AppShell", () => {
     await user.click(await screen.findByRole("button", { name: /Second Org/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
     const calls = fetchMock.mock.calls.map(([input, init]) => [requestURL(input), init?.body]);
-    expect(calls.filter(([url]) => url === "/admin/v1/auth/logout")).toHaveLength(1);
-    expect(calls.filter(([url]) => url === "/admin/v1/auth/login").at(-1)?.[1]).toBe(JSON.stringify({ email: "owner@example.test", organization_id: second, password: "test-only-login-password" }));
+    expect(calls.filter(([url]) => url === "/admin/v1/auth/login")).toHaveLength(1);
+    expect(calls.filter(([url]) => url === "/admin/v1/auth/organization")).toEqual([["/admin/v1/auth/organization", JSON.stringify({ organization_id: second })]]);
     expect(screen.queryByDisplayValue("test-only-login-password")).not.toBeInTheDocument();
   });
 
@@ -400,7 +401,7 @@ describe("AppShell", () => {
     expect(fetchMock.mock.calls.some(([input]) => requestURL(input) === "/admin/v1/auth/login")).toBe(true);
   });
 
-  it("shows the signed-in account and says the password can't be changed here", async () => {
+  it("opens the account page from the account menu", async () => {
     const user = userEvent.setup();
     installConfiguredFetch();
     renderConsole("/requests");
@@ -408,11 +409,64 @@ describe("AppShell", () => {
     await user.click(await screen.findByRole("button", { name: "Your account: owner@example.test" }));
     expect(screen.queryByRole("menuitem", { name: "Switch Organization" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Your Account" }));
-    const dialog = screen.getByRole("dialog", { name: "Your account" });
-    expect(within(dialog).getByText("Owner")).toBeInTheDocument();
-    expect(within(dialog).getByText(/no endpoint for it yet/)).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Your account" })).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
+    // Without a verified compatible server the password form stays closed.
+    expect(screen.getByText("Password changes are unavailable.")).toBeInTheDocument();
+  });
+
+  it("requires a new password before showing the console when an owner set it", async () => {
+    const user = userEvent.setup();
+    let resetRequired = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return json({ ...adminSession, password_reset_required: resetRequired });
+      if (url === "/admin/v1/auth/password") {
+        expect(init?.body).toBe(JSON.stringify({ current_password: "test-only-temporary-pass", new_password: "test-only-chosen-password" }));
+        resetRequired = false;
+        return json({ signed_out_sessions: 0 });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    document.cookie = "__Host-latchway_csrf=test-only-csrf-token-0123456789abcdef";
+    renderConsole("/applications");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Choose your password" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Temporary password"), "test-only-temporary-pass");
+    await user.type(screen.getByLabelText("New password"), "test-only-chosen-password");
+    await user.click(screen.getByRole("button", { name: "Save Password" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("test-only-chosen-password")).not.toBeInTheDocument();
+  });
+
+  it("explains why a session ended on the sign-in screen", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return problemResponse(401, "session_revoked", "Session revoked", "Your password was changed, which signed out your other sessions.");
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign in to Latchway" })).toBeInTheDocument();
+    expect(screen.getByText("Your session ended")).toBeInTheDocument();
+    expect(screen.getByText("Your password was changed, which signed out your other sessions.")).toBeInTheDocument();
+  });
+
+  it("opens first-owner setup when the server reports setup is open", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedOutResponse();
+      if (url === "/admin/v1/auth/info") return json({ contract_version: "1.1.0", protocol_versions: [1, 2, 3], setup_open: true, sign_in_methods: ["password"] });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Set up Latchway" })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Back to sign in" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Sign in to Latchway" })).toBeInTheDocument();
   });
 
   it("says when the server can't be reached instead of showing sign-in", async () => {

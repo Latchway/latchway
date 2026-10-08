@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 1.1.2
+  version: 1.1.3
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -102,12 +102,135 @@ paths:
       tags: [Authentication]
       operationId: getAdminSession
       summary: Return the current administrator and capabilities.
+      description: |
+        A cookie that belonged to a session that has ended returns 401 with
+        `session_expired` or `session_revoked` and a detail naming the reason
+        (signed out, signed out from another session, revoked by an owner,
+        password reset by an owner, password changed, organization switch, or
+        access disabled). Unknown credentials keep `authentication_required`.
       responses:
         '200':
           description: Current session.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/info:
+    get:
+      tags: [Authentication]
+      operationId: getAdminSignInInfo
+      summary: Return what the sign-in screen needs before authentication.
+      description: |
+        Public. Reports the advertised client contract and protocols so a
+        console can detect a version mismatch before sign-in, whether
+        first-owner setup can still be completed, and the enabled sign-in
+        methods. It never reports server build versions or account data.
+      security: []
+      responses:
+        '200':
+          description: Pre-authentication sign-in information.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSignInInfo' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/password:
+    post:
+      tags: [Authentication]
+      operationId: changeOwnAdminPassword
+      summary: Change the signed-in administrator's own password.
+      description: |
+        Console sessions only. Verifies the current password (rate limited),
+        refuses reuse, clears a pending forced change, and signs out every
+        other console session of the administrator in every organization. API
+        tokens are unaffected. A session whose password was set by an owner may
+        call only this operation, `GET /auth/session`, `GET /system` and logout
+        until it succeeds; anything else returns `permission_denied`.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeOwnPasswordRequest' }
+      responses:
+        '200':
+          description: Password changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/organization:
+    post:
+      tags: [Authentication]
+      operationId: switchAdminOrganization
+      summary: Replace the console session with one for another organization.
+      description: |
+        Console sessions only. The administrator must be an active member of
+        the target organization. The current session is revoked and a new
+        session cookie is issued in the same transaction.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SwitchOrganizationRequest' }
+      responses:
+        '200':
+          description: Session for the chosen organization.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions:
+    get:
+      tags: [Authentication]
+      operationId: listOwnAdminSessions
+      summary: List the signed-in administrator's own console sessions.
+      description: |
+        Covers every organization. Includes active sessions and sessions that
+        ended in the last 30 days, newest activity first, at most 100.
+      responses:
+        '200':
+          description: Own sessions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnAdminSessionList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions/revoke-others:
+    post:
+      tags: [Authentication]
+      operationId: revokeOtherOwnAdminSessions
+      summary: Sign out every other console session of the signed-in administrator.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Sessions signed out.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions/{adminSessionId}/revoke:
+    post:
+      tags: [Authentication]
+      operationId: revokeOwnAdminSession
+      summary: Sign out one of the signed-in administrator's own sessions.
+      parameters:
+        - $ref: '#/components/parameters/AdminSessionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Session signed out; signing out the current session also clears its cookie.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/organizations:
     get:
@@ -567,6 +690,15 @@ paths:
       tags: [API tokens]
       operationId: listAdminApiTokens
       summary: List token metadata without token hashes or plaintext.
+      description: |
+        Lists the caller's own tokens. With `scope=organization` it lists every
+        administrator's tokens in the organization with their owner; that
+        requires `manage_owners`.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [organization] }
       responses:
         '200':
           description: API token metadata.
@@ -736,8 +868,9 @@ paths:
       operationId: listAdminSessions
       summary: List redaction-safe administrator sessions in the active organization.
       description: |
-        Requires `manage_owners`. Returns administrator identity and lifecycle
-        metadata only. Token hints, hashes, CSRF material, network metadata, and
+        Requires `manage_owners`. Returns administrator identity, lifecycle
+        metadata and a coarse server-derived device summary only. Token hints,
+        hashes, CSRF material, raw User-Agent strings, network addresses and
         revocation reasons are never returned. `current` is true only when the
         request itself authenticated with that cookie session; bearer-token
         requests report false for every item.
@@ -1857,17 +1990,21 @@ components:
     AdminSession:
       type: object
       additionalProperties: false
-      required: [administrator, organization_id, memberships, capabilities, expires_at]
+      required: [administrator, organization_id, memberships, capabilities, expires_at, password_reset_required]
       properties:
         administrator:
           type: object
           additionalProperties: false
-          required: [id, email, enabled]
+          required: [id, email, enabled, display_name]
           properties:
             id: { type: string, pattern: '^adm_[A-Za-z0-9_-]{16,128}$' }
             email: { type: string, format: email }
             enabled: { type: boolean }
+            display_name: { type: string, minLength: 1, maxLength: 200 }
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        password_reset_required:
+          type: boolean
+          description: True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes.
         memberships:
           type: array
           items:
@@ -2297,7 +2434,16 @@ components:
         scopes: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
         revoked: { type: boolean }
+        administrator:
+          description: The token's owner; present only in the organization-wide listing.
+          type: object
+          additionalProperties: false
+          required: [id, email]
+          properties:
+            id: { $ref: '#/components/schemas/AdminUserID' }
+            email: { type: string, format: email, maxLength: 320 }
     CreatedApiToken:
       type: object
       additionalProperties: false
@@ -2354,11 +2500,75 @@ components:
           properties:
             id: { $ref: '#/components/schemas/AdminUserID' }
             email: { type: string, format: email, maxLength: 320 }
+        device_summary: { $ref: '#/components/schemas/DeviceSummary' }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         status: { type: string, enum: [active, expired, revoked] }
         current: { type: boolean }
+    DeviceSummary:
+      type: string
+      description: Coarse "Browser on OS" phrase derived by the server; never a raw User-Agent or network address.
+      pattern: '^[A-Za-z0-9 .()/-]{1,80}$'
+    SessionEndReason:
+      type: string
+      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, other]
+    OwnAdminSession:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, created_at, last_seen_at, expires_at, status, current]
+      properties:
+        id: { $ref: '#/components/schemas/AdminSessionID' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        device_summary: { $ref: '#/components/schemas/DeviceSummary' }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, expired, revoked] }
+        end_reason: { $ref: '#/components/schemas/SessionEndReason' }
+        current: { type: boolean }
+    OwnAdminSessionList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/OwnAdminSession' } }
+    SignedOutSessions:
+      type: object
+      additionalProperties: false
+      required: [signed_out_sessions]
+      properties:
+        signed_out_sessions: { type: integer, minimum: 0 }
+    ChangeOwnPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        new_password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    SwitchOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [organization_id]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    AdminSignInInfo:
+      type: object
+      additionalProperties: false
+      required: [contract_version, protocol_versions, setup_open, sign_in_methods]
+      properties:
+        contract_version: { type: string, const: 1.1.0 }
+        protocol_versions:
+          type: array
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        setup_open:
+          type: boolean
+          description: True while a bootstrap token is installed and unconsumed and no owner exists.
+        sign_in_methods:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [password] }
     AdminSessionMetadataPage:
       type: object
       additionalProperties: false
@@ -3309,12 +3519,13 @@ components:
         contract_version: { type: string, const: 1.1.0 }
         protocol_versions:
           type: array
-          minItems: 2
-          maxItems: 2
+          minItems: 3
+          maxItems: 3
           uniqueItems: true
           prefixItems:
             - { const: 1 }
             - { const: 2 }
+            - { const: 3 }
           items: false
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
@@ -3323,8 +3534,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 14
-          maxItems: 14
+          minItems: 15
+          maxItems: 15
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -3341,6 +3552,7 @@ components:
             - { const: configuration_import_export }
             - { const: admin_session_management }
             - { const: admin_event_stream }
+            - { const: admin_account_self_service }
           items: false
     DoctorCheck:
       type: object

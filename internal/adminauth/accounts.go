@@ -187,7 +187,7 @@ func (store *Store) CreateAdministrator(
 		INSERT INTO admin_users (
 			admin_user_id, email, email_normalized, display_name, status,
 			created_at, updated_at, password_reset_required
-		) VALUES ($1, $2, $3, $4, 'active', $5, $5, false)
+		) VALUES ($1, $2, $3, $4, 'active', $5, $5, true)
 	`, adminUserID, strings.TrimSpace(input.Email), emailNormalized, strings.TrimSpace(input.DisplayName), now); err != nil {
 		if isUniqueViolation(err) {
 			return Administrator{}, ErrAdminConflict
@@ -227,7 +227,7 @@ func (store *Store) CreateAdministrator(
 	return Administrator{
 		ID: adminUserID, MembershipID: membershipID, OrganizationID: principal.OrganizationID,
 		Email: strings.TrimSpace(input.Email), DisplayName: strings.TrimSpace(input.DisplayName),
-		Role: input.Role, Status: "active", CreatedAt: now, UpdatedAt: now,
+		Role: input.Role, Status: "active", PasswordResetRequired: true, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -412,7 +412,7 @@ func (store *Store) ResetAdministratorPassword(
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE admin_users
-		SET password_reset_required = false, updated_at = $2
+		SET password_reset_required = true, updated_at = $2
 		WHERE admin_user_id = $1
 	`, targetAdminUserID, now); err != nil {
 		return Administrator{}, fmt.Errorf("update administrator password state: %w", err)

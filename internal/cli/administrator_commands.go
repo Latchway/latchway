@@ -88,7 +88,7 @@ func newAdminAccountsListCommand(opts *options, root *controlCommandOptions) *co
 func newAdminAccountCreateCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	values := administratorCreateCLIOptions{role: "viewer", password: secretValueCLIOptions{valueFD: -1}}
 	command := &cobra.Command{
-		Use: "create", Short: "Create a local administrator and first organization membership", Args: cobra.NoArgs,
+		Use: "create", Short: "Create a local administrator who chooses a new password at first sign-in", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !validAdministratorRole(values.role) || strings.TrimSpace(values.email) == "" || strings.TrimSpace(values.displayName) == "" {
 				return errors.New("administrator email, display name, or role is invalid")
@@ -176,7 +176,7 @@ func newAdminAccountResetCommand(opts *options, root *controlCommandOptions) *co
 	values := secretValueCLIOptions{valueFD: -1}
 	command := &cobra.Command{
 		Use: "reset-password ADMIN_USER_ID", Aliases: []string{"reset"},
-		Short: "Replace a local administrator password and revoke active credentials", Args: cobra.ExactArgs(1),
+		Short: "Set a temporary administrator password, revoke active credentials and require a new password at next sign-in", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if id.Validate(args[0], id.AdminUser) != nil {
 				return errors.New("administrator ID is invalid")

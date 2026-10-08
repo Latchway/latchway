@@ -2,13 +2,16 @@ import { z } from "zod";
 
 export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
+  info: "/admin/v1/auth/info",
   login: "/admin/v1/auth/login",
   logout: "/admin/v1/auth/logout",
+  organization: "/admin/v1/auth/organization",
   session: "/admin/v1/auth/session"
 } as const;
 
 const AdministratorSchema = z
   .object({
+    display_name: z.string().min(1).max(200).optional(),
     email: z.email().max(320),
     enabled: z.boolean(),
     id: z.string().regex(/^adm_[A-Za-z0-9_-]{16,128}$/)
@@ -28,9 +31,22 @@ export const AdminSessionSchema = z
     capabilities: z.array(z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/)),
     expires_at: z.union([z.iso.datetime({ offset: true }), z.null()]),
     memberships: z.array(MembershipSchema),
-    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/)
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    /** An owner set the password; only the password change, sign-out and session read work until it changes. */
+    password_reset_required: z.boolean().optional()
   })
   .strict();
+
+export const AdminSignInInfoSchema = z
+  .object({
+    contract_version: z.string().max(64),
+    protocol_versions: z.array(z.number().int().min(1)).max(16),
+    setup_open: z.boolean(),
+    sign_in_methods: z.array(z.enum(["password"])).max(8)
+  })
+  .strict();
+
+export type AdminSignInInfo = z.infer<typeof AdminSignInInfoSchema>;
 
 export type AdminSession = z.infer<typeof AdminSessionSchema>;
 
@@ -324,6 +340,30 @@ async function submitCredentials(
   return parsed.data;
 }
 
+/**
+ * What the sign-in screen needs before anyone signs in: the server's advertised contract and whether first-owner
+ * setup is still open. Returns undefined when the server predates this endpoint or can't answer.
+ */
+export async function fetchAdminSignInInfo(signal?: AbortSignal, fetcher: typeof fetch = globalThis.fetch): Promise<AdminSignInInfo | undefined> {
+  try {
+    const response = await fetcher(adminAuthEndpoints.info, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      method: "GET",
+      redirect: "error",
+      referrerPolicy: "same-origin",
+      signal
+    });
+    if (!response.ok) return undefined;
+    const parsed = AdminSignInInfoSchema.safeParse(await parseAdminJSON(response));
+    return parsed.success ? parsed.data : undefined;
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    return undefined;
+  }
+}
+
 export function bootstrapFirstOwner(
   input: BootstrapOwnerInput,
   signal?: AbortSignal,
@@ -371,6 +411,41 @@ export async function logoutAdministrator(
     throw new AdminRequestError(responseProblem(response, payload));
   }
   rememberedCSRFToken = undefined;
+}
+
+/**
+ * Replaces the signed-in console session with one for another organization the administrator belongs to. The server
+ * revokes the old session in the same step, so no password is needed.
+ */
+export async function switchAdminOrganization(organizationID: string, signal?: AbortSignal, fetcher: typeof fetch = globalThis.fetch): Promise<AdminSession> {
+  const csrf = adminCSRFToken();
+  if (!csrf) {
+    throw new AdminRequestError({ code: "csrf_token_required", detail: "Refresh the administrator session before switching organization.", retryable: true, status: 0, title: "Session confirmation required" });
+  }
+  let response: Response;
+  try {
+    response = await fetcher(adminAuthEndpoints.organization, {
+      body: JSON.stringify({ organization_id: organizationID }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json, application/problem+json", "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      method: "POST",
+      redirect: "error",
+      referrerPolicy: "same-origin",
+      signal
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new AdminRequestError({ code: "network_error", detail: "The gateway could not be reached. Check system health and try again.", retryable: true, status: 0, title: "Connection failed" });
+  }
+  const payload = await parseAdminJSON(response);
+  if (!response.ok) throw new AdminRequestError(responseProblem(response, payload));
+  rememberAdminCSRFToken(response);
+  const parsed = AdminSessionSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid administrator session.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return parsed.data;
 }
 
 export function problemFromError(error: unknown): AdminProblem {

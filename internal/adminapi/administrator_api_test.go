@@ -90,6 +90,19 @@ func TestAdministratorLifecyclePostgreSQL(t *testing.T) {
 	}
 	operatorCookie := operatorLogin.Result().Cookies()[0]
 	operatorCSRF := operatorLogin.Header().Get(csrfHeader)
+	if !bytes.Contains(operatorLogin.Body.Bytes(), []byte(`"password_reset_required":true`)) {
+		t.Fatalf("owner-set password must require a change: %s", operatorLogin.Body.String())
+	}
+	if restricted := performJSON(t, handler, http.MethodPost, "/admin/v1/api-tokens", map[string]any{
+		"name": "too-early", "scopes": []string{"inspect_users"},
+	}, operatorCookie, operatorCSRF, "https://console.example.test"); restricted.Code != http.StatusForbidden {
+		t.Fatalf("restricted session token status=%d body=%s", restricted.Code, restricted.Body.String())
+	}
+	if changed := performJSON(t, handler, http.MethodPost, "/admin/v1/auth/password", map[string]string{
+		"current_password": "initial operator password", "new_password": "operator chosen password",
+	}, operatorCookie, operatorCSRF, "https://console.example.test"); changed.Code != http.StatusOK {
+		t.Fatalf("operator password change status=%d body=%s", changed.Code, changed.Body.String())
+	}
 	operatorTokenResponse := performJSON(t, handler, http.MethodPost, "/admin/v1/api-tokens", map[string]any{
 		"name": "operator-token", "scopes": []string{"inspect_users"},
 	}, operatorCookie, operatorCSRF, "https://console.example.test")
@@ -157,8 +170,10 @@ func TestAdministratorLifecyclePostgreSQL(t *testing.T) {
 	if reset.Code != http.StatusOK || bytes.Contains(reset.Body.Bytes(), []byte("replacement operator password")) {
 		t.Fatalf("reset password status=%d body=%s", reset.Code, reset.Body.String())
 	}
-	if response := performGET(handler, "/admin/v1/auth/session", operatorCookie); response.Code != http.StatusUnauthorized {
-		t.Fatalf("reset session status=%d, want 401", response.Code)
+	if response := performGET(handler, "/admin/v1/auth/session", operatorCookie); response.Code != http.StatusUnauthorized ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"code":"session_revoked"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte("An owner reset your password")) {
+		t.Fatalf("reset session status=%d body=%s, want 401 session_revoked", response.Code, response.Body.String())
 	}
 	if response := performBearerGET(handler, "/admin/v1/auth/session", operatorToken.Token); response.Code != http.StatusUnauthorized {
 		t.Fatalf("reset API token status=%d, want 401", response.Code)
@@ -183,7 +198,8 @@ func TestAdministratorLifecyclePostgreSQL(t *testing.T) {
 	if disabled.Code != http.StatusOK || !bytes.Contains(disabled.Body.Bytes(), []byte(`"status":"disabled"`)) {
 		t.Fatalf("disable administrator status=%d body=%s", disabled.Code, disabled.Body.String())
 	}
-	if response := performGET(handler, "/admin/v1/auth/session", newOperatorCookie); response.Code != http.StatusUnauthorized {
+	if response := performGET(handler, "/admin/v1/auth/session", newOperatorCookie); response.Code != http.StatusUnauthorized ||
+		!bytes.Contains(response.Body.Bytes(), []byte("disabled")) {
 		t.Fatalf("disabled session status=%d, want 401", response.Code)
 	}
 	enabled := performJSON(t, handler, http.MethodPost, "/admin/v1/administrators/"+operator.ID+"/enable", nil,

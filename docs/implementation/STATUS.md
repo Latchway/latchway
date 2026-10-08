@@ -2,6 +2,56 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 10: administrator account self-service (branch `console-api-completion`, unreleased)
+
+Server (ADR 0040, Admin bundle edition 1.1.3 draft, schema 34, server
+capability `admin_account_self_service`):
+
+- Passwords an owner sets on creation or reset are temporary. The account's
+  console session can only read itself, read `GET /system`, change the password
+  and sign out until it does; everything else is `permission_denied`. The
+  `password_reset_required` column was never set before this change.
+- `POST /auth/password` changes your own password (console sessions only),
+  checks the current one under the login limiter, refuses reuse, and signs
+  out your other console sessions in every organization.
+- A cookie for an ended session gets `session_expired` or `session_revoked`
+  (existing registry codes) with the reason in the detail: signed out, signed
+  out from another session, revoked by an owner, password reset, password
+  changed, organization switch, or access disabled. Unknown cookies stay
+  `authentication_required`.
+- `POST /auth/organization` swaps the session to another membership
+  atomically, without a password. A sign-in without an organization uses the
+  last one (`admin_users.last_organization_id`).
+- `GET /auth/sessions`, `POST /auth/sessions/{id}/revoke` and
+  `POST /auth/sessions/revoke-others` cover your own sessions across
+  organizations, with end reasons for the last 30 days.
+- Sessions store a coarse server-derived device summary ("Chrome on macOS"),
+  never the raw User-Agent or an address; owner session lists show it.
+- `GET /api-tokens?scope=organization` lists every administrator's tokens for
+  owners; token metadata now includes `last_used_at`.
+- `GET /auth/info` (public) reports the client contract, protocols, whether
+  first-owner setup is open, and sign-in methods.
+- The CLI decodes session and token documents strictly; it now accepts and
+  prints the device summary and last use, and its `login` accepts the new
+  session fields. `accounts create` and `reset-password` say the password is
+  temporary. The OpenAPI also corrects `SystemStatus.protocol_versions` to the
+  `[1, 2, 3]` the server returns.
+
+Console: a Your account page (profile, password change with the strength
+gate, your sessions with device, organization, end reason and sign-out), a
+full-screen "Choose your password" step for owner-set passwords, organization
+switching without a password (also from the sign-in chooser, which now marks
+the default organization), the sign-in screen opening on setup while setup is
+open and naming why a session ended, a pre-sign-in contract mismatch notice,
+an Everyone view of API tokens for owners with last use, and a Device column
+on Team › Sessions. The live-stack run now also adds a member, signs in as
+them through Choose your password and opens Your account.
+
+Validation: `go test ./...` against PostgreSQL 16, vet and gofmt; contract
+validation and the generated public references; lint, typecheck, `check:api`,
+`pnpm test` (421 passed), Playwright (46 passed), the live-stack run (passed),
+build and `verify:reproducible`.
+
 ## Console redesign phase 9: Setup wizard, CI and cleanup (branch `console-api-completion`, unreleased)
 
 The Setup wizard (`/setup`) uses the design system's setup layout: a step

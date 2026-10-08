@@ -31,23 +31,27 @@ type tokenModeMembershipCLI struct {
 
 type tokenModeSessionCLI struct {
 	Administrator struct {
-		ID      string `json:"id"`
-		Email   string `json:"email"`
-		Enabled bool   `json:"enabled"`
+		ID          string `json:"id"`
+		Email       string `json:"email"`
+		Enabled     bool   `json:"enabled"`
+		DisplayName string `json:"display_name,omitempty"`
 	} `json:"administrator"`
-	OrganizationID string                   `json:"organization_id"`
-	Memberships    []tokenModeMembershipCLI `json:"memberships"`
-	Capabilities   []string                 `json:"capabilities"`
-	ExpiresAt      *string                  `json:"expires_at"`
+	PasswordResetRequired bool                     `json:"password_reset_required,omitempty"`
+	OrganizationID        string                   `json:"organization_id"`
+	Memberships           []tokenModeMembershipCLI `json:"memberships"`
+	Capabilities          []string                 `json:"capabilities"`
+	ExpiresAt             *string                  `json:"expires_at"`
 }
 
 type apiTokenMetadataCLI struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Scopes    []string `json:"scopes"`
-	CreatedAt string   `json:"created_at"`
-	ExpiresAt *string  `json:"expires_at,omitempty"`
-	Revoked   bool     `json:"revoked"`
+	ID            string                        `json:"id"`
+	Name          string                        `json:"name"`
+	Scopes        []string                      `json:"scopes"`
+	CreatedAt     string                        `json:"created_at"`
+	ExpiresAt     *string                       `json:"expires_at,omitempty"`
+	LastUsedAt    *string                       `json:"last_used_at,omitempty"`
+	Revoked       bool                          `json:"revoked"`
+	Administrator *adminSessionAdministratorCLI `json:"administrator,omitempty"`
 }
 
 type apiTokenPageCLI struct {
@@ -368,9 +372,13 @@ func printAPITokens(opts *options, items []apiTokenMetadataCLI) error {
 		if item.ExpiresAt != nil {
 			expiresAt = formatControlTime(*item.ExpiresAt)
 		}
-		rows = append(rows, []string{item.ID, item.Name, strings.Join(item.Scopes, ","), boolLabel(item.Revoked), expiresAt})
+		lastUsed := "never"
+		if item.LastUsedAt != nil {
+			lastUsed = formatControlTime(*item.LastUsedAt)
+		}
+		rows = append(rows, []string{item.ID, item.Name, strings.Join(item.Scopes, ","), boolLabel(item.Revoked), expiresAt, lastUsed})
 	}
-	return printControlTable(opts, []string{"TOKEN", "NAME", "SCOPES", "REVOKED", "EXPIRES"}, rows)
+	return printControlTable(opts, []string{"TOKEN", "NAME", "SCOPES", "REVOKED", "EXPIRES", "LAST USED"}, rows)
 }
 
 func printAPIToken(opts *options, metadata apiTokenMetadataCLI) error {

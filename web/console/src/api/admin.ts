@@ -94,6 +94,9 @@ export const AdministratorPageSchema = z
   .object({ items: z.array(AdministratorSchema).max(200), page: PageInfo })
   .strict();
 
+/** Coarse "Browser on OS" phrase the server derives; never a raw User-Agent or address. */
+const DeviceSummary = z.string().regex(/^[A-Za-z0-9 .()/-]{1,80}$/);
+
 export const AdminSessionMetadataSchema = z
   .object({
     administrator: z
@@ -104,6 +107,7 @@ export const AdminSessionMetadataSchema = z
       .strict(),
     created_at: Instant,
     current: z.boolean(),
+    device_summary: DeviceSummary.optional(),
     expires_at: Instant,
     id: z.string().regex(/^asn_[A-Za-z0-9_-]{16,128}$/),
     last_seen_at: Instant,
@@ -128,14 +132,36 @@ const APITokenScopesSchema = z
 
 export const APITokenMetadataSchema = z
   .object({
+    administrator: z.object({ email: z.email().max(320), id: z.string().regex(/^adm_[A-Za-z0-9_-]{16,128}$/) }).strict().optional(),
     created_at: Instant,
     expires_at: OptionalInstant,
     id: z.string().regex(/^tok_[A-Za-z0-9_-]{16,128}$/),
+    last_used_at: OptionalInstant,
     name: z.string().min(1).max(256),
     revoked: z.boolean(),
     scopes: APITokenScopesSchema
   })
   .strict();
+
+export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "other"]);
+
+export const OwnAdminSessionSchema = z
+  .object({
+    created_at: Instant,
+    current: z.boolean(),
+    device_summary: DeviceSummary.optional(),
+    end_reason: SessionEndReasonSchema.optional(),
+    expires_at: Instant,
+    id: z.string().regex(/^asn_[A-Za-z0-9_-]{16,128}$/),
+    last_seen_at: Instant,
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    status: z.enum(["active", "expired", "revoked"])
+  })
+  .strict();
+
+export const OwnAdminSessionListSchema = z.object({ items: z.array(OwnAdminSessionSchema).max(100) }).strict();
+
+export const SignedOutSessionsSchema = z.object({ signed_out_sessions: z.number().int().min(0) }).strict();
 
 export const APITokenPageSchema = z
   .object({ items: z.array(APITokenMetadataSchema) })
@@ -1436,6 +1462,8 @@ export type AdministratorPage = z.infer<typeof AdministratorPageSchema>;
 export type AdminSessionMetadata = z.infer<typeof AdminSessionMetadataSchema>;
 export type AdminSessionMetadataPage = z.infer<typeof AdminSessionMetadataPageSchema>;
 export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
+export type OwnAdminSession = z.infer<typeof OwnAdminSessionSchema>;
+export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;
 export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;
 export type ApplicationUserPage = z.infer<typeof UserPageSchema>;

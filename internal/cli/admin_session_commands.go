@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// deviceSummaryPatternCLI mirrors the server's coarse "Browser on OS" summary.
+var deviceSummaryPatternCLI = regexp.MustCompile(`^[A-Za-z0-9 .()/-]{1,80}$`)
+
 type adminSessionAdministratorCLI struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`
@@ -24,6 +28,7 @@ type adminSessionAdministratorCLI struct {
 type adminSessionMetadataWireCLI struct {
 	ID            string                       `json:"id"`
 	Administrator adminSessionAdministratorCLI `json:"administrator"`
+	DeviceSummary *string                      `json:"device_summary,omitempty"`
 	CreatedAt     string                       `json:"created_at"`
 	LastSeenAt    string                       `json:"last_seen_at"`
 	ExpiresAt     string                       `json:"expires_at"`
@@ -44,6 +49,7 @@ type adminSessionPageWireCLI struct {
 type adminSessionMetadataCLI struct {
 	ID            string                       `json:"id"`
 	Administrator adminSessionAdministratorCLI `json:"administrator"`
+	DeviceSummary *string                      `json:"device_summary,omitempty"`
 	CreatedAt     string                       `json:"created_at"`
 	LastSeenAt    string                       `json:"last_seen_at"`
 	ExpiresAt     string                       `json:"expires_at"`
@@ -196,6 +202,9 @@ func validateAdminSessionMetadata(wire adminSessionMetadataWireCLI) (adminSessio
 	if wire.Status != "active" && wire.Status != "expired" && wire.Status != "revoked" {
 		return adminSessionMetadataCLI{}, time.Time{}, errors.New("status is invalid")
 	}
+	if wire.DeviceSummary != nil && !deviceSummaryPatternCLI.MatchString(*wire.DeviceSummary) {
+		return adminSessionMetadataCLI{}, time.Time{}, errors.New("device summary is invalid")
+	}
 	if wire.Current == nil {
 		return adminSessionMetadataCLI{}, time.Time{}, errors.New("current flag is missing")
 	}
@@ -203,7 +212,7 @@ func validateAdminSessionMetadata(wire adminSessionMetadataWireCLI) (adminSessio
 		return adminSessionMetadataCLI{}, time.Time{}, errors.New("current flag is invalid for bearer authentication")
 	}
 	return adminSessionMetadataCLI{
-		ID: wire.ID, Administrator: wire.Administrator,
+		ID: wire.ID, Administrator: wire.Administrator, DeviceSummary: wire.DeviceSummary,
 		CreatedAt: wire.CreatedAt, LastSeenAt: wire.LastSeenAt, ExpiresAt: wire.ExpiresAt,
 		Status: wire.Status, Current: false,
 	}, createdAt, nil
@@ -250,15 +259,19 @@ func printAdminSessions(opts *options, page adminSessionPageCLI) error {
 	}
 	rows := make([][]string, 0, len(page.Items))
 	for _, session := range page.Items {
+		device := "-"
+		if session.DeviceSummary != nil {
+			device = *session.DeviceSummary
+		}
 		rows = append(rows, []string{
-			session.ID, session.Administrator.ID, session.Administrator.Email,
+			session.ID, session.Administrator.ID, session.Administrator.Email, device,
 			formatControlTime(session.CreatedAt), formatControlTime(session.LastSeenAt),
 			formatControlTime(session.ExpiresAt), session.Status, boolLabel(session.Current),
 		})
 	}
 	if err := printControlTable(
 		opts,
-		[]string{"SESSION", "ADMINISTRATOR", "EMAIL", "CREATED", "LAST SEEN", "EXPIRES", "STATUS", "CURRENT"},
+		[]string{"SESSION", "ADMINISTRATOR", "EMAIL", "DEVICE", "CREATED", "LAST SEEN", "EXPIRES", "STATUS", "CURRENT"},
 		rows,
 	); err != nil {
 		return err

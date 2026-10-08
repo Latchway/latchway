@@ -488,7 +488,10 @@ function TokenReveal({ created, onDone }: { created: CreatedAPIToken; onDone: ()
 
 function TokensView() {
   const me = useMe();
-  const tokens = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/api-tokens", APITokenPageSchema)).data.items, queryKey: ["team", "tokens"], retry: false });
+  // Owners can also see everyone's tokens; the server checks manage_owners for that listing.
+  const [scope, setScope] = useState<"mine" | "everyone">("mine");
+  const everyone = scope === "everyone" && me.canManageOwners;
+  const tokens = useQuery({ queryFn: async () => (await adminRequest(everyone ? "/admin/v1/api-tokens?scope=organization" : "/admin/v1/api-tokens", APITokenPageSchema)).data.items, queryKey: ["team", "tokens", everyone ? "everyone" : "mine"], retry: false });
   const [creating, setCreating] = useState(false);
   const [revealed, setRevealed] = useState<{ created: CreatedAPIToken; replaces?: APITokenMetadata }>();
   const [askRevoke, setAskRevoke] = useState<APITokenMetadata>();
@@ -563,14 +566,26 @@ function TokensView() {
         );
       }
     },
+    ...(everyone ? [{ header: "Owner", key: "owner", render: (token: APITokenMetadata) => <span className="lw-note">{token.administrator?.email ?? "—"}{token.administrator?.id === me.id ? <span className="lw-faint"> (you)</span> : null}</span> }] : []),
     { header: "Created", key: "created", render: (token) => <span className="lw-note">{new Date(token.created_at).toLocaleDateString()}</span> },
+    { header: "Last used", key: "used", render: (token) => <span className="lw-note">{token.last_used_at ? when(token.last_used_at) : "Never"}</span> },
     { header: "Expires", key: "expires", render: expiresBadge },
-    { align: "right", header: "", key: "actions", render: (token) => <span className="lw-row lw-row--tight"><Button disabled={!me.mutationAllowed || busy} onClick={() => void replace(token)} size="sm" variant="ghost">Replace</Button><Button destructive disabled={!me.mutationAllowed} onClick={() => { setRevoking(token); setTyped(""); }} size="sm" variant="ghost">Revoke</Button></span> }
+    {
+      align: "right",
+      header: "",
+      key: "actions",
+      render: (token) => {
+        // Replacing creates a token for you, so it's offered only on your own tokens.
+        const mine = !token.administrator || token.administrator.id === me.id;
+        return <span className="lw-row lw-row--tight">{mine ? <Button disabled={!me.mutationAllowed || busy} onClick={() => void replace(token)} size="sm" variant="ghost">Replace</Button> : null}<Button destructive disabled={!me.mutationAllowed} onClick={() => { setRevoking(token); setTyped(""); }} size="sm" variant="ghost">Revoke</Button></span>;
+      }
+    }
   ];
 
   return (
     <div className="lw-page lw-collection">
-      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => setCreating(true)} variant="primary">Create Token</Button>} description="Your tokens for scripts and the CLI. Each acts as you, with only the capabilities you pick, and never more than your role allows." title="API tokens" />
+      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => setCreating(true)} variant="primary">Create Token</Button>} description={everyone ? "Every administrator's tokens in this organization. Revoking one stops its scripts at once." : "Your tokens for scripts and the CLI. Each acts as you, with only the capabilities you pick, and never more than your role allows."} title="API tokens" />
+      {me.canManageOwners ? <div className="lw-toolbar"><Segmented items={[{ id: "mine", label: "Mine" }, { id: "everyone", label: "Everyone" }]} label="Whose tokens" onChange={setScope} value={scope} /></div> : null}
       {expiring.map((token) => <div className="lw-page-notice" key={token.id}><Notice action={<Button onClick={() => void replace(token)} size="sm">Replace {token.name}</Button>} tone="warning">{token.name} expires {daysUntil(token.expires_at, now)! <= 0 ? "now" : `in ${daysUntil(token.expires_at, now)} days`}.</Notice></div>)}
       {problem ? <div className="lw-page-notice"><ProblemNotice problem={problem} /></div> : null}
       {tokens.error ? <div className="lw-page-notice"><ProblemNotice problem={problemFromError(tokens.error)} /></div> : null}
@@ -578,7 +593,6 @@ function TokensView() {
         <DataTable caption="API tokens" columns={columns} rowKey={(token) => token.id} rows={active} />
       ) : <div className="lw-page-empty"><EmptyState icon="key" orientation="horizontal" title="No active tokens">Create one for CI, monitoring or the CLI. It&apos;s shown once.</EmptyState></div>}
       {revoked.length ? <div className="lw-body"><Card icon="ban" meta={`${revoked.length}`} title="Revoked"><ul className="lw-session-list">{revoked.map((token) => <li key={token.id}><span className="lw-mono lw-mono--sm">{token.name}</span><span className="lw-faint lw-note">{token.id}</span></li>)}</ul></Card></div> : null}
-      <p className="lw-secondary lw-note lw-page-foot">When a token was last used isn&apos;t recorded by the server yet.</p>
       {creating && me.mutationAllowed ? <div className="lw-drawer-dock lw-drawer-dock--wide"><CreateTokenDrawer onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); setRevealed({ created }); void tokens.refetch(); }} taken={active.map((token) => token.name)} /></div> : null}
       {revealed && me.mutationAllowed ? <TokenReveal created={revealed.created} onDone={() => { const old = revealed.replaces; setRevealed(undefined); if (old) setAskRevoke(old); }} /> : null}
       {askRevoke ? (
@@ -634,6 +648,7 @@ function SessionsView() {
 
   const columns: Array<Column<AdminSessionMetadata>> = [
     { header: "Member", key: "who", render: (session) => <span>{session.administrator.email}{session.current ? <> <Badge color="accent" variant="soft">This session</Badge></> : null}</span> },
+    { header: "Device", key: "device", render: (session) => <span className="lw-note">{session.device_summary ?? "—"}</span> },
     { header: "Signed in", key: "created", render: (session) => <span className="lw-note">{when(session.created_at)}</span> },
     { header: "Last seen", key: "seen", render: (session) => <span className="lw-note">{when(session.last_seen_at)}</span> },
     { header: "Expires", key: "expires", render: (session) => <span className="lw-note">{when(session.expires_at)}</span> },

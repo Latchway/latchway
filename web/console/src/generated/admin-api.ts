@@ -10,8 +10,9 @@ export interface paths {
         };
         /**
          * List redaction-safe administrator sessions in the active organization.
-         * @description Requires `manage_owners`. Returns administrator identity and lifecycle
-         *     metadata only. Token hints, hashes, CSRF material, network metadata, and
+         * @description Requires `manage_owners`. Returns administrator identity, lifecycle
+         *     metadata and a coarse server-derived device summary only. Token hints,
+         *     hashes, CSRF material, raw User-Agent strings, network addresses and
          *     revocation reasons are never returned. `current` is true only when the
          *     request itself authenticated with that cookie session; bearer-token
          *     requests report false for every item.
@@ -161,7 +162,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List token metadata without token hashes or plaintext. */
+        /**
+         * List token metadata without token hashes or plaintext.
+         * @description Lists the caller's own tokens. With `scope=organization` it lists every
+         *     administrator's tokens in the organization with their owner; that
+         *     requires `manage_owners`.
+         */
         get: operations["listAdminApiTokens"];
         put?: never;
         /** Create a scoped API token shown exactly once. */
@@ -319,6 +325,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return what the sign-in screen needs before authentication.
+         * @description Public. Reports the advertised client contract and protocols so a
+         *     console can detect a version mismatch before sign-in, whether
+         *     first-owner setup can still be completed, and the enabled sign-in
+         *     methods. It never reports server build versions or account data.
+         */
+        get: operations["getAdminSignInInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/login": {
         parameters: {
             query?: never;
@@ -353,6 +382,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the console session with one for another organization.
+         * @description Console sessions only. The administrator must be an active member of
+         *     the target organization. The current session is revoked and a new
+         *     session cookie is issued in the same transaction.
+         */
+        post: operations["switchAdminOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the signed-in administrator's own password.
+         * @description Console sessions only. Verifies the current password (rate limited),
+         *     refuses reuse, clears a pending forced change, and signs out every
+         *     other console session of the administrator in every organization. API
+         *     tokens are unaffected. A session whose password was set by an owner may
+         *     call only this operation, `GET /auth/session`, `GET /system` and logout
+         *     until it succeeds; anything else returns `permission_denied`.
+         */
+        post: operations["changeOwnAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/session": {
         parameters: {
             query?: never;
@@ -360,10 +436,72 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return the current administrator and capabilities. */
+        /**
+         * Return the current administrator and capabilities.
+         * @description A cookie that belonged to a session that has ended returns 401 with
+         *     `session_expired` or `session_revoked` and a detail naming the reason
+         *     (signed out, signed out from another session, revoked by an owner,
+         *     password reset by an owner, password changed, organization switch, or
+         *     access disabled). Unknown credentials keep `authentication_required`.
+         */
         get: operations["getAdminSession"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in administrator's own console sessions.
+         * @description Covers every organization. Includes active sessions and sessions that
+         *     ended in the last 30 days, newest activity first, at most 100.
+         */
+        get: operations["listOwnAdminSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions/{adminSessionId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out one of the signed-in administrator's own sessions. */
+        post: operations["revokeOwnAdminSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out every other console session of the signed-in administrator. */
+        post: operations["revokeOtherOwnAdminSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1308,6 +1446,7 @@ export interface components {
         AdministratorRole: "owner" | "admin" | "operator" | "viewer";
         AdminSession: {
             administrator: {
+                display_name: string;
                 /** Format: email */
                 email: string;
                 enabled: boolean;
@@ -1322,6 +1461,8 @@ export interface components {
                 role: "owner" | "admin" | "operator" | "viewer";
             }[];
             organization_id: components["schemas"]["OrganizationID"];
+            /** @description True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes. */
+            password_reset_required: boolean;
         };
         AdminSessionID: string;
         AdminSessionMetadata: {
@@ -1333,6 +1474,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             current: boolean;
+            device_summary?: components["schemas"]["DeviceSummary"];
             /** Format: date-time */
             expires_at: string;
             id: components["schemas"]["AdminSessionID"];
@@ -1345,13 +1487,29 @@ export interface components {
             items: components["schemas"]["AdminSessionMetadata"][];
             page: components["schemas"]["PageInfo"];
         };
+        AdminSignInInfo: {
+            /** @constant */
+            contract_version: "1.1.0";
+            protocol_versions: number[];
+            /** @description True while a bootstrap token is installed and unconsumed and no owner exists. */
+            setup_open: boolean;
+            sign_in_methods: "password"[];
+        };
         AdminUserID: string;
         ApiTokenMetadata: {
+            /** @description The token's owner; present only in the organization-wide listing. */
+            administrator?: {
+                /** Format: email */
+                email: string;
+                id: components["schemas"]["AdminUserID"];
+            };
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             expires_at?: string;
             id: components["schemas"]["TokenID"];
+            /** Format: date-time */
+            last_used_at?: string;
             name: string;
             revoked: boolean;
             scopes: string[];
@@ -1471,6 +1629,10 @@ export interface components {
         CELExpression: string;
         ChangeAdministratorRoleRequest: {
             role: components["schemas"]["AdministratorRole"];
+        };
+        ChangeOwnPasswordRequest: {
+            current_password: string;
+            new_password: string;
         };
         ClaimMapping: {
             [key: string]: components["schemas"]["CELExpression"];
@@ -2263,6 +2425,8 @@ export interface components {
             /** @default true */
             dnsPinning: boolean;
         } & unknown;
+        /** @description Coarse "Browser on OS" phrase derived by the server; never a raw User-Agent or network address. */
+        DeviceSummary: string;
         DisableResourceRequest: {
             /** @description Bounded operator explanation used only to establish that a reason was supplied; its value is never persisted in audit data. */
             reason: string;
@@ -2782,6 +2946,24 @@ export interface components {
             absoluteMaximumTokens: number;
             defaultMaximumTokens: number;
         };
+        OwnAdminSession: {
+            /** Format: date-time */
+            created_at: string;
+            current: boolean;
+            device_summary?: components["schemas"]["DeviceSummary"];
+            end_reason?: components["schemas"]["SessionEndReason"];
+            /** Format: date-time */
+            expires_at: string;
+            id: components["schemas"]["AdminSessionID"];
+            /** Format: date-time */
+            last_seen_at: string;
+            organization_id: components["schemas"]["OrganizationID"];
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+        };
+        OwnAdminSessionList: {
+            items: components["schemas"]["OwnAdminSession"][];
+        };
         PageInfo: {
             has_more: boolean;
             next_cursor?: string;
@@ -3222,11 +3404,16 @@ export interface components {
             items: components["schemas"]["SelfTestSchedule"][];
             page: components["schemas"]["PageInfo"];
         };
+        /** @enum {string} */
+        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "other";
         SessionPolicy: {
             accessTokenTtl?: components["schemas"]["Duration"];
             challengeTtl?: components["schemas"]["Duration"];
             maximumClockSkewSeconds?: number;
             refreshTokenTtl?: components["schemas"]["Duration"];
+        };
+        SignedOutSessions: {
+            signed_out_sessions: number;
         };
         Spec: {
             attestationPolicies: components["schemas"]["AttestationPolicy"][];
@@ -3277,6 +3464,9 @@ export interface components {
             /** @enum {string} */
             source: "admin_api" | "local_cli" | "unknown";
         };
+        SwitchOrganizationRequest: {
+            organization_id: components["schemas"]["OrganizationID"];
+        };
         SystemStatus: {
             /** @constant */
             contract_version: "1.1.0";
@@ -3285,7 +3475,8 @@ export interface components {
             mutation_ready: boolean;
             protocol_versions: [
                 1,
-                2
+                2,
+                3
             ];
             /** @description Full traffic readiness using the exact same dependency evaluation as /readyz. */
             ready: boolean;
@@ -3306,7 +3497,8 @@ export interface components {
                 "opaque_http",
                 "configuration_import_export",
                 "admin_session_management",
-                "admin_event_stream"
+                "admin_event_stream",
+                "admin_account_self_service"
             ];
             server_version: string;
         };
@@ -3841,7 +4033,9 @@ export interface operations {
     };
     listAdminApiTokens: {
         parameters: {
-            query?: never;
+            query?: {
+                scope?: "organization";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4170,6 +4364,27 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getAdminSignInInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pre-authentication sign-in information. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInInfo"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     adminLogin: {
         parameters: {
             query?: never;
@@ -4221,6 +4436,66 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    switchAdminOrganization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Session for the chosen organization. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    changeOwnAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeOwnPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Password changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getAdminSession: {
         parameters: {
             query?: never;
@@ -4237,6 +4512,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listOwnAdminSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Own sessions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnAdminSessionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeOwnAdminSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminSessionId: components["parameters"]["AdminSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session signed out; signing out the current session also clears its cookie. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeOtherOwnAdminSessions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions signed out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
                 };
             };
             default: components["responses"]["Problem"];
