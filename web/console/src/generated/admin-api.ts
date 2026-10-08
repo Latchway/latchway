@@ -1556,7 +1556,10 @@ export interface paths {
         };
         /**
          * List redaction-safe logical request metadata.
-         * @description Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned.
+         * @description Returns authenticated logical requests using deterministic server-side filtering, sorting, and
+         *     cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider
+         *     error text are never returned. `client_request_id` matches the correlation identifier a client
+         *     sent, exactly. `include_total=true` adds a count of every match, capped at 100,000.
          */
         get: operations["listLogicalRequests"];
         put?: never;
@@ -1599,6 +1602,30 @@ export interface paths {
          *     headers, and bodies are excluded.
          */
         get: operations["getRequestEffectiveConfiguration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/requests/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count requests by each filterable value.
+         * @description Counts the requests started in the half-open `[start, end)` range (at most 90 days) by
+         *     outcome, feature, failure code, AI connection, model, route, platform, component kind and
+         *     trust source, most common first. Every value is one the matching request-list filter accepts.
+         *     Connection, model and route count the selected values; the list filters also match retried
+         *     attempts, so a filter can return more requests than its count. Facets ignore other filters.
+         */
+        get: operations["getRequestFacets"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2439,6 +2466,8 @@ export interface components {
         };
         /** @enum {string} */
         ClientPlatform: "ios" | "android" | "web" | "node" | "react_native_ios" | "react_native_android" | "watchos" | "wearos";
+        /** @description Correlation identifier chosen by the client. Never used for lookup by the runtime, authorization, quota or routing. */
+        ClientRequestID: string;
         /** @enum {string} */
         code: "request_invalid" | "identity_token_missing" | "identity_token_invalid" | "identity_token_expired" | "identity_reauthentication_required" | "attestation_required" | "attestation_unsupported" | "attestation_invalid" | "attestation_stale" | "attestation_step_up_required" | "dpop_missing" | "dpop_invalid" | "dpop_replayed" | "dpop_nonce_required" | "session_expired" | "session_revoked" | "refresh_token_reused" | "installation_revoked" | "installation_family_revoked" | "installation_family_not_found" | "component_definition_not_found" | "component_not_configured" | "component_not_provisioned" | "component_revoked" | "component_key_invalid" | "component_key_replaced" | "component_delegation_expired" | "component_feature_not_granted" | "component_parent_trust_expired" | "component_direct_attestation_required" | "containing_app_setup_required" | "framework_integration_unsupported" | "framework_version_unsupported" | "transport_destination_not_allowed" | "transport_request_not_replayable" | "feature_not_found" | "feature_not_allowed" | "model_not_allowed" | "quota_exceeded" | "concurrency_exceeded" | "output_limit_exceeded" | "pricing_unavailable" | "route_not_found" | "upstream_unavailable" | "upstream_timeout" | "upstream_protocol_error" | "configuration_invalid" | "server_not_ready" | "protocol_version_unsupported" | "authentication_required" | "permission_denied" | "resource_not_found" | "conflict" | "etag_required" | "etag_mismatch" | "bootstrap_disabled" | "rate_limited" | "operation_indeterminate" | "internal_error";
         ComponentAttestationPolicy: {
@@ -3678,6 +3707,7 @@ export interface components {
              */
             caller_sdk?: "ios" | "android" | "react-native" | "javascript";
             client_component_id?: components["schemas"]["ClientComponentID"];
+            client_request_id?: components["schemas"]["ClientRequestID"];
             /** Format: date-time */
             completed_at?: string;
             component_definition_id?: components["schemas"]["Identifier"];
@@ -3694,6 +3724,11 @@ export interface components {
             id: components["schemas"]["RequestID"];
             installation_family_id?: components["schemas"]["InstallationFamilyID"];
             installation_id: components["schemas"]["InstallationID"];
+            /**
+             * @description Platform of the installation that sent the request.
+             * @enum {string}
+             */
+            platform?: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
             /** @enum {string} */
             protocol: "openai_responses" | "openai_chat" | "openai_embeddings" | "anthropic_messages" | "opaque_http";
             selected_limit_plan: components["schemas"]["Identifier"];
@@ -4048,10 +4083,40 @@ export interface components {
             started_at: string;
             upstream?: components["schemas"]["Identifier"];
         };
+        RequestFacet: {
+            /** @description True when more values exist than were returned. */
+            truncated: boolean;
+            values: components["schemas"]["RequestFacetValue"][];
+        };
+        RequestFacets: {
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            facets: {
+                component_kind: components["schemas"]["RequestFacet"];
+                error_code: components["schemas"]["RequestFacet"];
+                feature: components["schemas"]["RequestFacet"];
+                model: components["schemas"]["RequestFacet"];
+                platform: components["schemas"]["RequestFacet"];
+                route: components["schemas"]["RequestFacet"];
+                status: components["schemas"]["RequestFacet"];
+                trust_source: components["schemas"]["RequestFacet"];
+                upstream: components["schemas"]["RequestFacet"];
+            };
+            /** @description Requests started in the range. */
+            requests: number;
+            /** Format: date-time */
+            start: string;
+        };
+        RequestFacetValue: {
+            count: number;
+            value: string;
+        };
         RequestID: string;
         RequestPage: {
             items: components["schemas"]["LogicalRequest"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
         };
         ResetAdministratorPasswordRequest: {
             password: string;
@@ -4507,7 +4572,8 @@ export interface components {
                 "admin_sso",
                 "admin_invitations",
                 "admin_application_roles",
-                "admin_user_insights"
+                "admin_user_insights",
+                "admin_request_search"
             ];
             server_version: string;
         };
@@ -7251,6 +7317,7 @@ export interface operations {
     listLogicalRequests: {
         parameters: {
             query: {
+                client_request_id?: components["schemas"]["ClientRequestID"];
                 component_kind?: components["schemas"]["Identifier"];
                 cost_max_nano_usd?: number;
                 cost_min_nano_usd?: number;
@@ -7261,6 +7328,7 @@ export interface operations {
                 /** @description Matches a stable registered problem code, a public upstream-failure category, or `unknown`. */
                 error_code?: string;
                 feature?: components["schemas"]["Identifier"];
+                include_total?: "true";
                 latency_max_ms?: number;
                 latency_min_ms?: number;
                 /** @description Matches the configured model key or exact redaction-safe physical-model identifier. */
@@ -7338,6 +7406,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EffectiveConfiguration"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getRequestFacets: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                limit?: number;
+                start: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request counts by value. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestFacets"];
                 };
             };
             default: components["responses"]["Problem"];

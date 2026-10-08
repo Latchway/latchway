@@ -62,9 +62,18 @@ Summary ranges are half-open and limited to 366 days. Timeseries use UTC hours
 or days and cannot exceed 10,000 points. Collection pages use opaque keyset
 cursors with at most 200 rows; pass a returned cursor back unchanged.
 
+To find one request from a client log line, search by the client request ID
+the client sent; it is a correlation value only and never used for
+authorization, quota or routing. `include_total=true` on the request list
+adds a match count capped at 100,000, and `GET /admin/v1/requests/facets`
+counts requests by outcome, feature, failure code, connection, model, route,
+platform, component kind and trust source over at most 90 days.
+
 ```bash
 latchway requests list --environment env_...
+latchway requests list --environment env_... --client-request-id checkout:2026-10-08.a1
 latchway requests inspect req_...
+latchway requests facets --environment env_...
 latchway usage summary --environment env_...
 latchway usage timeseries --environment env_... --interval hour
 ```

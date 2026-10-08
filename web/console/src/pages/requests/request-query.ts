@@ -1,3 +1,4 @@
+import { CLIENT_REQUEST_ID_PATTERN } from "../../api/admin";
 import type { RequestRouteSearch } from "../../app/route-search";
 import type { RangeValue } from "../../ui";
 
@@ -13,7 +14,7 @@ export const PAGE_SIZES = ["50", "100", "200"] as const;
 /** The filters that map one-to-one onto GET /admin/v1/requests parameters (everything but time, sort and paging). */
 export const FILTER_KEYS = [
   "status", "feature", "user_id", "platform", "component_kind", "trust_source", "route", "upstream", "model",
-  "error_code", "request_id", "latency_min_ms", "latency_max_ms", "tokens_min", "tokens_max",
+  "error_code", "request_id", "client_request_id", "latency_min_ms", "latency_max_ms", "tokens_min", "tokens_max",
   "cost_min_nano_usd", "cost_max_nano_usd"
 ] as const satisfies ReadonlyArray<keyof RequestRouteSearch>;
 export type FilterKey = typeof FILTER_KEYS[number];
@@ -87,19 +88,63 @@ export function timeBounds(search: RequestRouteSearch, now: number): { end?: str
   return { end: search.end, start: search.start };
 }
 
-/** Query parameters for GET /admin/v1/requests, in a stable order. */
-export function requestListQuery(search: RequestRouteSearch, environmentID: string, now: number, cursor?: string): Record<string, string | undefined> {
+/** Query parameters for GET /admin/v1/requests, in a stable order. `includeTotal` asks for the capped match count. */
+export function requestListQuery(search: RequestRouteSearch, environmentID: string, now: number, cursor?: string, includeTotal = false): Record<string, string | undefined> {
   const bounds = timeBounds(search, now);
   const query: Record<string, string | undefined> = {
     cursor,
     end: bounds.end,
     environment_id: environmentID,
+    include_total: includeTotal ? "true" : undefined,
     page_size: search.page_size ?? "50",
     sort: search.sort,
     start: bounds.start
   };
   for (const key of FILTER_KEYS) query[key] = search[key];
   return query;
+}
+
+/**
+ * A query counting requests that started at or after `since` (a server timestamp), with the list's filters.
+ * Only meaningful for newest-first lists without a fixed end; returns undefined otherwise.
+ */
+export function newArrivalsQuery(search: RequestRouteSearch, environmentID: string, since: string | undefined, now: number): Record<string, string | undefined> | undefined {
+  if ((search.sort ?? "started_at_desc") !== "started_at_desc" || search.end) return undefined;
+  const query = requestListQuery({ ...search, page_size: "50" }, environmentID, now, undefined, true);
+  query.page_size = "1";
+  if (since) query.start = since;
+  return query;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The [start, end) range facet counts cover: the list's own range when it has one, otherwise the last 7 days.
+ * The server counts at most 90 days.
+ */
+export function facetRange(search: RequestRouteSearch, now: number): { end: string; fallback: boolean; start: string } {
+  if (search.range) return { end: new Date(now).toISOString(), fallback: false, start: new Date(now - RANGE_MS[search.range]).toISOString() };
+  if (search.start && search.end && Date.parse(search.end) - Date.parse(search.start) <= CUSTOM_RANGE_MAX_DAYS * DAY_MS) {
+    return { end: search.end, fallback: false, start: search.start };
+  }
+  return { end: new Date(now).toISOString(), fallback: true, start: new Date(now - 7 * DAY_MS).toISOString() };
+}
+
+const CLI_FLAG: Partial<Record<string, string>> = { environment_id: "environment", user_id: "user" };
+
+/** The current query as a `latchway requests list` command; the token comes from the CLI's usual configuration. */
+export function cliCommand(query: Record<string, string | undefined>): string {
+  const parts = ["latchway requests list"];
+  for (const [key, value] of Object.entries(query).sort(([a], [b]) => a.localeCompare(b))) {
+    if (value === undefined || value === "" || key === "cursor") continue;
+    if (key === "include_total") {
+      parts.push("--total");
+      continue;
+    }
+    const flag = CLI_FLAG[key] ?? key.replaceAll("_", "-");
+    parts.push(`--${flag} ${/^[A-Za-z0-9._:/@+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`}`);
+  }
+  return parts.join(" \\\n  ");
 }
 
 /** The current query as a curl command against the Admin API, reading the token from the environment. */
@@ -111,16 +156,17 @@ export function curlCommand(origin: string, query: Record<string, string | undef
   return `curl -s -H "Authorization: Bearer $LATCHWAY_ADMIN_API_TOKEN" \\\n  "${origin}/admin/v1/requests?${params.toString()}"`;
 }
 
-export type GoToTarget = { kind: "request"; id: string } | { kind: "user"; id: string } | { kind: "invalid" };
+export type GoToTarget = { kind: "client"; id: string } | { kind: "request"; id: string } | { kind: "user"; id: string } | { kind: "invalid" };
 
 const REQUEST_ID = /^req_[A-Za-z0-9_-]{16,128}$/;
 const USER_ID = /^usr_[A-Za-z0-9_-]{16,128}$/;
 
-/** Go to ID stands in for search, which the API doesn't offer: a request opens, a user filters. */
+/** The search box: a request ID opens it, a user ID filters by user, anything else shaped like a client request ID searches by it. */
 export function goToTarget(value: string): GoToTarget {
   const trimmed = value.trim();
   if (REQUEST_ID.test(trimmed)) return { id: trimmed, kind: "request" };
   if (USER_ID.test(trimmed)) return { id: trimmed, kind: "user" };
+  if (CLIENT_REQUEST_ID_PATTERN.test(trimmed)) return { id: trimmed, kind: "client" };
   return { kind: "invalid" };
 }
 

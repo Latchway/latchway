@@ -310,6 +310,7 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/require-reattestation", api.requireClientComponentReattestation)
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/revoke", api.revokeClientComponent)
 		protected.Get("/requests", api.requests)
+		protected.Get("/requests/facets", api.requestFacets)
 		protected.Get("/requests/{requestID}", api.request)
 		protected.Get("/requests/{requestID}/effective-configuration", api.effectiveRequestConfiguration)
 		protected.Get("/usage/summary", api.usageSummary)

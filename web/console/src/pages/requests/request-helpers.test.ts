@@ -6,11 +6,14 @@ import { formatMs, formatUsd, metricCell, outcomeSentence, requestsCsv, routeSum
 import {
   activeQuickView,
   applyMoreFilters,
+  cliCommand,
   curlCommand,
+  facetRange,
   filtersOf,
   filtersPatch,
   goToTarget,
   moreFilterDraft,
+  newArrivalsQuery,
   rangeOf,
   rangePatch,
   requestListQuery
@@ -122,10 +125,37 @@ describe("request query state", () => {
     expect(command).not.toContain("cursor");
   });
 
-  it("routes Go to ID by prefix", () => {
+  it("routes Go to ID by prefix, and other correlation-shaped text to client request ID search", () => {
     expect(goToTarget(" req_0123456789abcdef ")).toEqual({ id: "req_0123456789abcdef", kind: "request" });
     expect(goToTarget("usr_0123456789abcdef")).toEqual({ id: "usr_0123456789abcdef", kind: "user" });
+    expect(goToTarget("checkout:2026-10-08.a1")).toEqual({ id: "checkout:2026-10-08.a1", kind: "client" });
     expect(goToTarget("timeout")).toEqual({ kind: "invalid" });
+    expect(goToTarget("has a space in it")).toEqual({ kind: "invalid" });
+  });
+
+  it("builds a CLI command with the list's filters, quoting anything unusual", () => {
+    const command = cliCommand(requestListQuery(RequestRouteSearchSchema.parse({ client_request_id: "checkout:2026.a1", model: "gpt 5", status: "failed", user_id: "usr_0123456789abcdef" }), "env_0123456789abcdef", 0, "cursor-value", true));
+    expect(command).toBe([
+      "latchway requests list", "--client-request-id checkout:2026.a1", "--environment env_0123456789abcdef", "--total",
+      "--model 'gpt 5'", "--page-size 50", "--status failed", "--user usr_0123456789abcdef"
+    ].join(" \\\n  "));
+    expect(cliCommand({ model: "it's" })).toContain("--model 'it'\\''s'");
+  });
+
+  it("counts new arrivals only for newest-first lists without a fixed end", () => {
+    const now = Date.parse("2026-08-30T00:00:00Z");
+    const query = newArrivalsQuery(RequestRouteSearchSchema.parse({ range: "24h", status: "failed" }), "env_0123456789abcdef", "2026-08-29T12:00:00.5Z", now);
+    expect(query).toMatchObject({ include_total: "true", page_size: "1", start: "2026-08-29T12:00:00.5Z", status: "failed" });
+    expect(query?.cursor).toBeUndefined();
+    expect(newArrivalsQuery(RequestRouteSearchSchema.parse({ sort: "started_at_asc" }), "env_0123456789abcdef", undefined, now)).toBeUndefined();
+    expect(newArrivalsQuery(RequestRouteSearchSchema.parse({ end: "2026-08-29T00:00:00Z", start: "2026-08-28T00:00:00Z" }), "env_0123456789abcdef", undefined, now)).toBeUndefined();
+  });
+
+  it("counts facets over the list's range, or the last 7 days when it has none", () => {
+    const now = Date.parse("2026-08-30T00:00:00Z");
+    expect(facetRange(RequestRouteSearchSchema.parse({ range: "1h" }), now)).toEqual({ end: "2026-08-30T00:00:00.000Z", fallback: false, start: "2026-08-29T23:00:00.000Z" });
+    expect(facetRange(RequestRouteSearchSchema.parse({ end: "2026-08-29T00:00:00Z", start: "2026-08-28T00:00:00Z" }), now)).toEqual({ end: "2026-08-29T00:00:00Z", fallback: false, start: "2026-08-28T00:00:00Z" });
+    expect(facetRange(RequestRouteSearchSchema.parse({}), now)).toEqual({ end: "2026-08-30T00:00:00.000Z", fallback: true, start: "2026-08-23T00:00:00.000Z" });
   });
 
   it("converts More filters to integer milliseconds and nano-USD, and validates ranges", () => {
