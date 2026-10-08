@@ -635,7 +635,7 @@ function RequestsView() {
         <span>{rows.length ? `${rows.length.toLocaleString()} shown${hasMore ? total ? ` of ${total.capped ? `${total.count.toLocaleString()}+` : total.count.toLocaleString()}` : " · more available" : " · that's all"}` : ""}</span>
         {hasMore ? <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} size="sm">Load {pageSize} More</Button> : null}
         <span className="lw-spacer" />
-        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/analytics/usage">Analytics</Link></span>
+        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/usage">Analytics</Link></span>
         <Segmented items={PAGE_SIZES.map((size) => ({ id: size, label: size }))} label="Page size" onChange={(value) => update({ cursor: undefined, page_size: value === "50" ? undefined : value })} value={pageSize} />
       </div>
 

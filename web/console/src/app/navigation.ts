@@ -27,10 +27,10 @@ export type ConsoleRoute =
   | "/user-overrides"
   | "/protections"
   | "/requests"
-  | "/analytics/usage"
-  | "/analytics/cost"
-  | "/analytics/performance"
-  | "/analytics/reliability"
+  | "/usage"
+  | "/cost"
+  | "/performance"
+  | "/reliability"
   | "/changes"
   | "/configuration-revisions"
   | "/configuration-compare"
@@ -72,12 +72,12 @@ export const environmentNavigation: readonly NavGroup[] = [
         icon: "analytics",
         label: "Analytics",
         tabs: [
-          { description: "Requests, people and tokens", label: "Usage", to: "/analytics/usage" },
-          { description: "Cost at your configured prices", label: "Cost", to: "/analytics/cost" },
-          { description: "Latency and time to first token", label: "Performance", to: "/analytics/performance" },
-          { description: "Failures, quota denials, app verification and fallbacks", label: "Reliability", to: "/analytics/reliability" }
+          { description: "Requests, people and tokens", label: "Usage", to: "/usage" },
+          { description: "Cost at your configured prices", label: "Cost", to: "/cost" },
+          { description: "Latency and time to first token", label: "Performance", to: "/performance" },
+          { description: "Failures, quota denials, app verification and fallbacks", label: "Reliability", to: "/reliability" }
         ],
-        to: "/analytics/usage"
+        to: "/usage"
       }
     ],
     title: "Traffic"
@@ -232,7 +232,7 @@ export const commands: readonly Command[] = [
 ];
 
 /** Paths kept only to redirect pre-redesign links to their new home. */
-export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls", "/environments"];
+export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls", "/environments"];
 
 /**
  * The search a shell link carries to another page: only the workspace scope. Page selections such as a feature, a

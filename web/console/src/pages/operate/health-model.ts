@@ -17,7 +17,7 @@ interface CheckInfo {
 /** Plain names and deep links for the server's doctor checks (internal/diagnostics). */
 export const CHECK_INFO: Readonly<Record<string, CheckInfo>> = {
   active_configuration: { link: { label: "Open Changes", to: "/changes" }, name: "Live configuration", why: "An environment without a live configuration refuses every request." },
-  ai_connection_health: { link: { label: "Open Reliability", to: "/analytics/reliability" }, name: "AI connections", why: "Requests fail or slow down when a provider is degraded." },
+  ai_connection_health: { link: { label: "Open Reliability", to: "/reliability" }, name: "AI connections", why: "Requests fail or slow down when a provider is degraded." },
   apple_verification_dependencies: { link: { label: "Open App verification", to: "/attestation" }, name: "Apple verification", why: "iOS apps can't prove they're genuine without it." },
   clock_skew: { card: "server", name: "Server clock", why: "Tokens and attestation depend on accurate time." },
   connection_pool_saturation: { card: "database", name: "Database connections", why: "A full pool makes requests wait or fail." },
