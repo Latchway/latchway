@@ -9,8 +9,8 @@ import { applyStoredTheme } from "./app/theme";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./ui/tokens.css";
+import "./ui/base.css";
 import "./ui/ui.css";
-import "./styles.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -38,17 +38,17 @@ test.describe("real first-run control plane", () => {
     ).toBeVisible();
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Setup wizard" }).click();
     await expect(
-      page.getByRole("heading", { name: "Configure your first client platform end to end." })
+      page.getByRole("heading", { level: 1, name: "Set up an application" })
     ).toBeVisible();
 
     await page.getByLabel("Organization slug").fill("latchway-live");
     await page.getByLabel("Application name").fill("Native Mobile");
     await page.getByLabel("Application slug").fill("native-mobile");
-    await page.getByLabel("Firebase project ID").fill("latchway-live-e2e");
     await page.getByLabel("Environment kind").selectOption("production");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Firebase project ID").fill("latchway-live-e2e");
     await page.getByLabel("App ID prefix").fill("TEAM1234");
     await page.getByLabel("Bundle ID", { exact: true }).fill("dev.latchway.livee2e");
-    await page.getByLabel("Signing or distribution").selectOption("app_store");
     await page.getByLabel("Allowed CFBundleVersion (build number)").fill("1");
     await page.getByLabel("Package name").fill("dev.latchway.livee2e.android");
     await page.getByLabel("Cloud project number").fill("123456789");
@@ -56,8 +56,11 @@ test.describe("real first-run control plane", () => {
       "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
     );
     await page.getByLabel("Exact version code").fill("1");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Input price (nano-USD per million tokens)").fill("250000");
     await page.getByLabel("Output price (nano-USD per million tokens)").fill("2000000");
+    await page.getByRole("button", { name: "Continue" }).click();
     const createWorkspace = page.getByRole("button", { name: "Create application and environment" });
     await expect(createWorkspace).toBeEnabled();
     expect(await createWorkspace.evaluate((button) => button.closest("form")?.checkValidity() ?? false)).toBe(true);
@@ -81,8 +84,8 @@ test.describe("real first-run control plane", () => {
     await expect(page.getByLabel("Email address")).toHaveValue("owner@live-e2e.invalid");
     await page.getByLabel("Password", { exact: true }).fill(ownerPassword ?? "");
     await page.getByRole("button", { name: "Sign In", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Overview" })
-    ).toBeVisible();
+    // Signing back in returns to the page that was open, with the server-owned setup resumed.
+    await expect(page.getByRole("heading", { level: 1, name: "Set up an application" })).toBeVisible();
+    await expect(page.getByText(/is active/)).toBeVisible();
   });
 });
