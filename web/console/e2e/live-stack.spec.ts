@@ -103,6 +103,32 @@ test.describe("real first-run control plane", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Set up an application" })).toBeVisible();
     await expect(page.getByText(/is active/)).toBeVisible();
 
+    // Two saves in a row against the real server: the second edits the draft the first one validated.
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Changes", exact: true }).click();
+    await page.getByRole("navigation", { name: "Changes pages" }).getByRole("link", { name: "Edit as JSON", exact: true }).click();
+    const editor = page.getByLabel("Configuration document JSON");
+    const saveToDraft = page.getByRole("button", { name: "Save to Draft" });
+    for (const description of ["First live edit", "Second live edit"]) {
+      const current = JSON.parse(await editor.inputValue()) as { metadata?: Record<string, unknown> };
+      current.metadata = { ...current.metadata, description };
+      await editor.fill(JSON.stringify(current, null, 2));
+      const replaced = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/admin/v1/config-revisions/"));
+      const validated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/validate"));
+      await saveToDraft.click();
+      expect((await replaced).status()).toBe(200);
+      expect((await validated).status()).toBe(200);
+      // The editor resets to the saved draft once the save has finished.
+      await expect(saveToDraft).not.toHaveAttribute("aria-busy", "true");
+      await expect(saveToDraft).toBeDisabled();
+      await expect(page.getByText("The draft is out of date")).toHaveCount(0);
+    }
+    await page.getByRole("navigation", { name: "Changes pages" }).getByRole("link", { name: "Draft", exact: true }).click();
+    await page.getByText("Edit history", { exact: true }).click();
+    await expect(page.getByRole("list", { name: "Edit history" }).getByText("Edited")).toHaveCount(2);
+    await page.getByRole("button", { name: "Discard Draft" }).click();
+    await page.getByRole("alertdialog", { name: /^Discard draft / }).getByRole("button", { name: "Discard Draft" }).click();
+    await expect(page.getByText("No unpublished changes")).toBeVisible();
+
     // An invitation link, opened in another browser, creates the invited account against the real server.
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Team & Access" }).click();
     await page.getByRole("button", { name: "Invite Member" }).click();

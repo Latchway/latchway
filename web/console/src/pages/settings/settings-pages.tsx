@@ -303,7 +303,7 @@ function ApplicationsView() {
           );
         })}
         {!applications.isPending && !items.length ? <Notice tone="info">No applications yet. Add one, or use Setup to create an application with its first environment.</Notice> : null}
-        <p className="lw-secondary lw-note">Users per environment and copying one environment&apos;s configuration into a new one aren&apos;t available from the Admin API yet.</p>
+        <p className="lw-secondary lw-note">Users per environment aren&apos;t available from the Admin API yet. To give a new environment its first configuration, switch to it and use Copy From Environment under Changes → Draft.</p>
       </div>
       {addingApp ? <div className="lw-drawer-dock"><AddApplicationDrawer onClose={() => setAddingApp(false)} onCreated={(application) => { setAddingApp(false); setNotice(`${application.display_name} was added. Add its first environment next.`); void refresh(); }} organizationID={organizationID} /></div> : null}
       {addingEnvironment ? <div className="lw-drawer-dock lw-drawer-dock--wide"><AddEnvironmentDrawer application={addingEnvironment} existing={environments[items.indexOf(addingEnvironment)]?.data?.items ?? []} onClose={() => setAddingEnvironment(undefined)} onCreated={(environment) => { setAddingEnvironment(undefined); setNotice(`${environment.display_name} was added. It refuses requests until a configuration is published.`); void refresh(); }} /></div> : null}

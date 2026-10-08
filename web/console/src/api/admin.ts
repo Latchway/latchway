@@ -1415,6 +1415,34 @@ export const ValidationSchema = z
   })
   .strict();
 
+/** True when text has a control character other than a line break. */
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if ((code < 32 && code !== 10) || (code >= 127 && code < 160)) return true;
+  }
+  return false;
+}
+
+/** A publish note: no control characters other than line breaks. */
+const RevisionText = (maximum: number) => z.string().min(1).max(maximum).refine((value) => !hasControlCharacter(value), { message: "Revision text cannot contain control characters." });
+
+/**
+ * Draft-lifecycle fields (ADR 0048). Servers without `admin_configuration_drafts` omit them, so every one is
+ * optional; `updated_*` falls back to `created_*` where shown.
+ */
+export const revisionLifecycleFields = {
+  activation_note: RevisionText(500).optional(),
+  base_revision_id: OpaqueID.optional(),
+  description: z.string().max(512).optional(),
+  discarded_at: OptionalInstant,
+  discarded_by: z.string().max(256).optional(),
+  updated_at: OptionalInstant,
+  updated_by: z.string().max(256).optional()
+};
+
+export const REVISION_STATES = ["draft", "valid", "active", "superseded", "invalid", "discarded"] as const;
+
 export const RevisionSchema = z
   .object({
     activated_at: OptionalInstant,
@@ -1423,11 +1451,54 @@ export const RevisionSchema = z
     document: z.record(z.string(), z.unknown()),
     environment_id: OpaqueID,
     id: OpaqueID,
-    state: z.enum(["draft", "valid", "active", "superseded", "invalid"]),
+    state: z.enum(REVISION_STATES),
     validation: ValidationSchema.optional(),
-    version: z.number().int().positive()
+    version: z.number().int().positive(),
+    ...revisionLifecycleFields
   })
   .strict();
+
+const ConfigurationChangeSchema = z
+  .object({ operation: z.enum(["add", "remove", "replace"]), path: z.string().max(1024), summary: z.string().max(1024).optional() })
+  .strict();
+
+/** GET /admin/v1/config-revisions/{id}/edits: who changed a revision, when, and which paths (never values). */
+export const RevisionEditsSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            change_count: z.number().int().min(0),
+            changes: z.array(ConfigurationChangeSchema).max(100),
+            edited_at: Instant,
+            edited_by: z.string().max(256),
+            kind: z.enum(["created", "edited", "rebased", "promoted"]),
+            version: z.number().int().positive()
+          })
+          .strict()
+          .refine((edit) => edit.changes.length <= edit.change_count, { message: "An edit lists more changes than it counts." })
+      )
+      .max(200),
+    revision_id: OpaqueID,
+    truncated: z.boolean()
+  })
+  .strict();
+export type RevisionEdits = z.infer<typeof RevisionEditsSchema>;
+
+/** GET /admin/v1/config-revisions/{id}/rebase-preview: paths each side changed and paths both changed differently. */
+export const MergePreviewSchema = z
+  .object({
+    base_revision_id: OpaqueID.optional(),
+    conflicts: z.array(z.string().startsWith("/").max(1024)).max(1000),
+    draft_changes: z.array(ConfigurationChangeSchema),
+    live_changes: z.array(ConfigurationChangeSchema),
+    live_revision_id: OpaqueID,
+    revision_id: OpaqueID,
+    up_to_date: z.boolean()
+  })
+  .strict();
+export type MergePreview = z.infer<typeof MergePreviewSchema>;
 
 export const RouteSimulationSchema = z
   .object({
@@ -1629,6 +1700,23 @@ export type SelfTestSchedulePage = z.infer<typeof SelfTestSchedulePageSchema>;
 export type SystemStatus = z.infer<typeof SystemStatusSchema>;
 export type RouteSimulation = z.infer<typeof RouteSimulationSchema>;
 export type ConfigurationRevision = z.infer<typeof RevisionSchema>;
+
+/** POST /admin/v1/environments/{id}/config-revisions/promote. */
+export const PromotionSchema = z
+  .object({
+    promotion: z
+      .object({
+        copied: z.array(z.string().max(1024)),
+        kept: z.array(z.string().max(1024)),
+        review: z.array(z.string().max(1024)),
+        source_environment_id: OpaqueID,
+        source_revision_id: OpaqueID
+      })
+      .strict(),
+    revision: RevisionSchema
+  })
+  .strict();
+export type Promotion = z.infer<typeof PromotionSchema>;
 export type ConfigurationValidation = z.infer<typeof ValidationSchema>;
 export type ConfigurationPlan = z.infer<typeof ConfigurationPlanSchema>;
 export type DevelopmentSample = z.infer<typeof DevelopmentSampleSchema>;

@@ -17,15 +17,22 @@ import (
 const maxConfigurationCLIBytes = 1 << 20
 
 type configurationRevisionCLI struct {
-	ID            string          `json:"id"`
-	EnvironmentID string          `json:"environment_id"`
-	State         string          `json:"state"`
-	Version       int64           `json:"version"`
-	Document      json.RawMessage `json:"document"`
-	Validation    *validationCLI  `json:"validation,omitempty"`
-	CreatedAt     string          `json:"created_at"`
-	CreatedBy     string          `json:"created_by"`
-	ActivatedAt   string          `json:"activated_at,omitempty"`
+	ID             string          `json:"id"`
+	EnvironmentID  string          `json:"environment_id"`
+	State          string          `json:"state"`
+	Version        int64           `json:"version"`
+	Document       json.RawMessage `json:"document"`
+	Validation     *validationCLI  `json:"validation,omitempty"`
+	CreatedAt      string          `json:"created_at"`
+	CreatedBy      string          `json:"created_by"`
+	UpdatedAt      string          `json:"updated_at,omitempty"`
+	UpdatedBy      string          `json:"updated_by,omitempty"`
+	BaseRevisionID string          `json:"base_revision_id,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	ActivatedAt    string          `json:"activated_at,omitempty"`
+	ActivationNote string          `json:"activation_note,omitempty"`
+	DiscardedAt    string          `json:"discarded_at,omitempty"`
+	DiscardedBy    string          `json:"discarded_by,omitempty"`
 }
 
 type validationIssueCLI struct {
@@ -79,6 +86,9 @@ func newConfigCommand(opts *options) *cobra.Command {
 		newConfigPlanCommand(opts, values, "diff"),
 		newConfigApplyCommand(opts, values),
 		newConfigRollbackCommand(opts, values),
+		newConfigHistoryCommand(opts, values),
+		newConfigDiscardCommand(opts, values),
+		newConfigPromoteCommand(opts, values),
 	)
 	return command
 }
@@ -177,7 +187,7 @@ func newConfigPlanCommand(opts *options, root *controlCommandOptions, name strin
 }
 
 func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Command {
-	var environmentID, baseRevisionID, description string
+	var environmentID, baseRevisionID, description, note string
 	var dryRun bool
 	input := &configurationInputOptions{}
 	command := &cobra.Command{
@@ -185,6 +195,9 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if id.Validate(environmentID, id.Environment) != nil || (baseRevisionID != "" && id.Validate(baseRevisionID, id.ConfigRevision) != nil) {
 				return errors.New("environment or base revision ID is invalid")
+			}
+			if note = strings.TrimSpace(note); note != "" && !validActivationNoteCLI(note) {
+				return errors.New("--note must be 1 to 500 characters without control characters other than line breaks")
 			}
 			document, err := readConfigurationInput(cmd, input)
 			if err != nil {
@@ -254,8 +267,12 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 				return printConfigurationApply(opts, result)
 			}
 			headers := http.Header{"If-Match": []string{etag}}
+			var activationBody any
+			if note != "" {
+				activationBody = map[string]string{"note": note}
+			}
 			var activated configurationRevisionCLI
-			if _, err := client.doWithHeaders(cmd.Context(), http.MethodPost, "/admin/v1/config-revisions/"+draft.ID+"/activate", nil, nil, headers, http.StatusOK, &activated); err != nil {
+			if _, err := client.doWithHeaders(cmd.Context(), http.MethodPost, "/admin/v1/config-revisions/"+draft.ID+"/activate", nil, activationBody, headers, http.StatusOK, &activated); err != nil {
 				return err
 			}
 			result.Revision = activated
@@ -266,6 +283,7 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
 	command.Flags().StringVar(&baseRevisionID, "base-revision", "", "active revision this draft must replace")
 	command.Flags().StringVar(&description, "description", "", "redaction-safe revision description")
+	command.Flags().StringVar(&note, "note", "", "publish note recorded on the activated revision")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "create and validate a draft without activation")
 	addConfigurationInputFlags(command, input)
 	_ = command.MarkFlagRequired("environment")

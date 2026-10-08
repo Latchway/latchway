@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 
-import { adminRequest, queryPath, RevisionSchema } from "../../api/admin";
+import { adminRequest, type Promotion, queryPath, RevisionSchema } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { type ConfigurationRevisionResource, type ConfigurationRevisionResourcePage, ConfigurationRevisionResourcePageSchema } from "../../api/resources";
 import { useConsoleSession } from "../../api/session";
@@ -29,10 +29,13 @@ import {
 } from "../../ui";
 import { draftSummary } from "../build/draft-summary";
 import { DRAFT_STATES, draftProblem, type EnvironmentDraft, useEnvironmentDraft } from "../build/environment-draft";
+import { MergeDialog } from "../build/merge-dialog";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { cloneConfigurationDocument, type JSONRecord, validStrongETag } from "../configuration-slice";
 import { changeSetSummary, configurationDiff, discardEntry, fixTarget } from "./config-diff";
 import { DiffGroups } from "./diff-view";
+import { EditHistory } from "./edit-history";
+import { PromoteDialog, PromotionSummary } from "./promote-dialog";
 import { TransferDrawer } from "./transfer-drawer";
 
 function when(value: string | undefined): string {
@@ -59,8 +62,13 @@ function author(createdBy: string): ReactNode {
 
 function DraftView() {
   const draft = useEnvironmentDraft();
+  const workspace = useWorkspace();
   const [discarding, setDiscarding] = useState(false);
   const [transfer, setTransfer] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [promotion, setPromotion] = useState<Promotion>();
+  const [merging, setMerging] = useState(false);
+  const canPromote = draft.lifecycle && draft.canConfigure && workspace.environments.some((environment) => environment.id !== workspace.environment?.id && environment.application_id === workspace.application?.id);
   const revision = draft.draft;
   const entries = useMemo(() => (revision ? configurationDiff(draft.activeDocument, revision.document as JSONRecord) : []), [draft.activeDocument, revision]);
   const summary = draftSummary(draft);
@@ -69,6 +77,10 @@ function DraftView() {
   const warnings = report?.issues.filter((issue) => issue.severity === "warning") ?? [];
 
   async function discardAll(): Promise<void> {
+    if (draft.lifecycle) {
+      if (await draft.discard()) setDiscarding(false);
+      return;
+    }
     const live = draft.activeDocument;
     if (!live) return;
     const saved = await draft.save(() => cloneConfigurationDocument(live), undefined, "Discard all changes");
@@ -80,13 +92,22 @@ function DraftView() {
       <PageHeader
         actions={<div className="lw-row">
           <Button icon="upload" onClick={() => setTransfer(true)}>Import / Export</Button>
+          {canPromote && !revision ? <Button icon="copy" onClick={() => setPromoting(true)}>Copy From Environment</Button> : null}
           {entries.length ? <Link className={buttonClass()} search={(previous) => scoped(previous)} to="/configuration">Edit as JSON</Link> : null}
-          {entries.length && draft.canConfigure ? <Button destructive onClick={() => setDiscarding(true)}>Discard All</Button> : null}
+          {(entries.length || (draft.lifecycle && revision)) && draft.canConfigure ? <Button destructive onClick={() => setDiscarding(true)}>{draft.lifecycle ? "Discard Draft" : "Discard All"}</Button> : null}
         </div>}
         description="Every unpublished change in this environment, by resource. Requests keep using the live configuration until the draft is published."
         title="Draft"
       />
       {draft.problem ? <div className="lw-page-notice"><ProblemNotice problem={draft.problem} /></div> : null}
+      {promotion ? <div className="lw-page-notice"><PromotionSummary onDismiss={() => setPromotion(undefined)} promotion={promotion} /></div> : null}
+      {draft.stale && revision ? (
+        <div className="lw-page-notice">
+          <Notice action={draft.canConfigure ? <Button onClick={() => setMerging(true)} size="sm" variant="primary">Bring Up to Date</Button> : undefined} title="Something else was published" tone="warning">
+            This draft started from <span className="lw-mono lw-mono--sm">{revision.base_revision_id}</span>; <span className="lw-mono lw-mono--sm">{draft.active?.id}</span> is live now. Bring the draft up to date before publishing it.
+          </Notice>
+        </div>
+      ) : null}
       <div className="lw-body lw-stack">
         {draft.isPending ? <p className="lw-page-status" role="status">Loading the draft…</p> : !revision || !entries.length ? (
           <EmptyState icon="changes" orientation="horizontal" title="No unpublished changes">Saving on any Build or Policies page starts a draft here. Everyone on the team sees the same draft.</EmptyState>
@@ -94,7 +115,9 @@ function DraftView() {
           <>
             <p className="lw-note">
               <strong>{summary?.chip}</strong> · {entries.length} change{entries.length === 1 ? "" : "s"} ({changeSetSummary(entries)}) · draft <span className="lw-mono lw-mono--sm">{revision.id}</span> started by {author(revision.created_by)} {when(revision.created_at)}
+              {revision.updated_by && revision.updated_at !== revision.created_at ? <> · last edited by {author(revision.updated_by)} {when(revision.updated_at)}</> : null}
               {draft.active ? <> · compared with <span className="lw-mono lw-mono--sm">{draft.active.id}</span> (live)</> : null}
+              {revision.description ? <> · <span className="lw-secondary">{revision.description}</span></> : null}
             </p>
             {errors.length || warnings.length ? (
               <Card icon="alert" meta={`${errors.length} problem${errors.length === 1 ? "" : "s"} · ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`} title="Problems">
@@ -114,26 +137,44 @@ function DraftView() {
               </Card>
             ) : null}
             <DiffGroups busy={draft.busy || !draft.canConfigure} entries={entries} onDiscard={draft.canConfigure && draft.activeDocument ? (entry) => { const live = draft.activeDocument; if (live) void draft.save((document) => discardEntry(document, live, entry)); } : undefined} />
-            <p className="lw-secondary lw-note">Who made each change isn't shown: the server records the draft's author, not each edit.</p>
+            {draft.lifecycle ? (
+              <details>
+                <summary className="lw-note">Edit history</summary>
+                <EditHistory revisionID={revision.id} updatedAt={revision.updated_at} />
+              </details>
+            ) : <p className="lw-secondary lw-note">Who made each change isn&apos;t shown: this server records the draft&apos;s author, not each edit.</p>}
           </>
         )}
       </div>
       {transfer ? <div className="lw-drawer-dock lw-drawer-dock--wide"><TransferDrawer draft={draft} onClose={() => setTransfer(false)} /></div> : null}
       {discarding ? (
-        <ConfirmDialog confirmLabel="Discard All" description="The draft goes back to exactly the live configuration. Nothing live changes. This can't be undone, but the draft's history stays under History." destructive onCancel={() => setDiscarding(false)} onConfirm={() => void discardAll()} pending={draft.busy} title={`Discard all ${entries.length} changes?`}>
+        <ConfirmDialog
+          confirmLabel={draft.lifecycle ? "Discard Draft" : "Discard All"}
+          description={draft.lifecycle
+            ? "The draft is set aside: it stays in History as discarded, and this environment has no draft until someone saves again. Nothing live changes."
+            : "The draft goes back to exactly the live configuration. Nothing live changes. This can't be undone, but the draft's history stays under History."}
+          destructive
+          onCancel={() => setDiscarding(false)}
+          onConfirm={() => void discardAll()}
+          pending={draft.busy}
+          title={draft.lifecycle ? `Discard draft ${revision?.id ?? ""}?` : `Discard all ${entries.length} changes?`}
+        >
           {draft.problem ? <ProblemNotice problem={draft.problem} /> : null}
         </ConfirmDialog>
       ) : null}
+      {promoting ? <PromoteDialog onClose={() => setPromoting(false)} onDone={(result) => { setPromoting(false); setPromotion(result); void draft.refetch(); }} /> : null}
+      {merging ? <MergeDialog draft={draft} onClose={() => setMerging(false)} /> : null}
     </div>
   );
 }
 
 // ─── History ────────────────────────────────────────────────────────────────
 
-type RevisionStatus = "Live" | "Draft" | "Superseded" | "Invalid" | "Checked";
+type RevisionStatus = "Live" | "Draft" | "Superseded" | "Invalid" | "Checked" | "Discarded";
 
 function statusOf(revision: ConfigurationRevisionResource, activeID: string | undefined): RevisionStatus {
   if (revision.id === activeID) return "Live";
+  if (revision.state === "discarded") return "Discarded";
   if (revision.state === "invalid") return "Invalid";
   if (DRAFT_STATES.has(revision.state) && !revision.activated_at) return revision.state === "valid" ? "Checked" : "Draft";
   return "Superseded";
@@ -141,6 +182,7 @@ function statusOf(revision: ConfigurationRevisionResource, activeID: string | un
 
 const STATUS_BADGE: Readonly<Record<RevisionStatus, ReactNode>> = {
   Checked: <Badge variant="soft">Not published</Badge>,
+  Discarded: <Badge variant="soft">Discarded</Badge>,
   Draft: <Badge color="orange" variant="soft">Draft</Badge>,
   Invalid: <Badge color="red" variant="soft">Invalid</Badge>,
   Live: <Badge color="success" variant="soft">Live</Badge>,
@@ -245,7 +287,12 @@ function RevisionDrawer({ draft, onClose, previous, revision }: { draft: Environ
             { label: "Summary", value: previous ? changeSetSummary(configurationDiff(previous.document as JSONRecord, revision.document as JSONRecord)) : "First revision" },
             { label: "Created by", value: author(revision.created_by) },
             { label: "Created", value: when(revision.created_at) },
-            { label: "Went live", value: revision.activated_at ? when(revision.activated_at) : "Never" }
+            ...(revision.updated_by && revision.updated_at !== revision.created_at ? [{ label: "Last edited", value: <>{author(revision.updated_by)} {when(revision.updated_at)}</> }] : []),
+            { label: "Went live", value: revision.activated_at ? when(revision.activated_at) : "Never" },
+            ...(revision.base_revision_id ? [{ label: "Started from", value: <span className="lw-mono lw-mono--sm">{revision.base_revision_id}</span> }] : []),
+            ...(revision.description ? [{ label: "Description", value: revision.description }] : []),
+            ...(revision.activation_note ? [{ label: "Publish note", value: <span className="lw-prewrap">{revision.activation_note}</span> }] : []),
+            ...(revision.discarded_at ? [{ label: "Discarded", value: <>{revision.discarded_by ? author(revision.discarded_by) : null} {when(revision.discarded_at)}</> }] : [])
           ]} />
           {done ? <Notice tone="success">{done}</Notice> : null}
           {draft.problem ? <ProblemNotice problem={draft.problem} /> : null}
@@ -255,6 +302,7 @@ function RevisionDrawer({ draft, onClose, previous, revision }: { draft: Environ
             <Segmented items={[...(previous ? [{ id: "previous" as const, label: "Vs previous" }] : []), { id: "live" as const, label: "Vs live" }]} label="Compare with" onChange={setAgainst} value={against} />
           </div>
           {entries.length ? <DiffGroups entries={entries} /> : <p className="lw-secondary lw-note">No differences.</p>}
+          {draft.lifecycle ? <details><summary className="lw-note">Edit history</summary><EditHistory revisionID={revision.id} updatedAt={revision.updated_at} /></details> : null}
           <details><summary className="lw-note">Document (secrets appear only as references)</summary><pre className="lw-code-block">{JSON.stringify(revision.document, null, 2)}</pre></details>
           <Link className="lw-link lw-note" search={(previousSearch) => scoped(previousSearch, { resource_id: revision.id })} to="/audit">Audit events for this revision</Link>
         </div>
@@ -294,6 +342,7 @@ function HistoryView() {
     { header: "Status", key: "status", render: (item) => STATUS_BADGE[statusOf(item, draft.active?.id)] },
     { header: "Changes", key: "summary", render: (item) => { const older = items[items.indexOf(item) + 1]; return older ? <span className="lw-note">{changeSetSummary(configurationDiff(older.document as JSONRecord, item.document as JSONRecord))}</span> : <span className="lw-faint">{history.hasNextPage ? "Load older to compare" : "First revision"}</span>; } },
     { header: "By", key: "by", render: (item) => author(item.created_by) },
+    { header: "Note", key: "note", render: (item) => { const note = item.activation_note ?? item.description; return note ? <span className="lw-note lw-clamp" title={note}>{note}</span> : <span className="lw-faint">—</span>; } },
     { header: "Went live", key: "live", render: (item) => item.activated_at ? when(item.activated_at) : <span className="lw-faint">Never</span> }
   ];
   return (
@@ -379,7 +428,9 @@ function CompareView() {
             <DiffGroups entries={entries} />
           </>
         ) : <p className="lw-note">These two configurations are the same.</p>}
-        <p className="lw-secondary lw-note">Copying one environment into another's draft isn't offered yet: environment-specific values (sign-in projects, app identifiers, base URLs and secret references) need a reviewed promote the Admin API doesn't have.</p>
+        {draft.lifecycle
+          ? <p className="lw-secondary lw-note">To start this environment&apos;s draft from another environment&apos;s live configuration, use Copy From Environment under Draft. It keeps this environment&apos;s sign-in providers, app checks, components and AI connections.</p>
+          : <p className="lw-secondary lw-note">This server can&apos;t copy one environment into another&apos;s draft: environment-specific values (sign-in projects, app identifiers, base URLs and secret references) need a reviewed promote it doesn&apos;t have.</p>}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { adminRequest, ConfigurationPlanSchema, type ConfigurationPlan } from "../../api/admin";
 import { Button, buttonClass, ConfirmDialog } from "../../ui";
@@ -8,6 +8,7 @@ import { SpotChecks } from "../changes/diff-view";
 import type { JSONRecord } from "../configuration-slice";
 import { ProblemNotice } from "../control-plane-pages";
 import { draftProblem, type EnvironmentDraft } from "./environment-draft";
+import { MergeDialog } from "./merge-dialog";
 
 /** The status rail's change-set actions: review the draft, check it, or publish it after a final look at the plan. */
 export function DraftActions({ draft }: { draft: EnvironmentDraft }) {
@@ -16,6 +17,9 @@ export function DraftActions({ draft }: { draft: EnvironmentDraft }) {
   const [planError, setPlanError] = useState<unknown>();
   const [checked, setChecked] = useState(false);
   const [warningsSeen, setWarningsSeen] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const noteID = useId();
   const revision = draft.draft;
   if (!revision) return null;
   const entries = configurationDiff(draft.activeDocument, revision.document as JSONRecord);
@@ -39,7 +43,9 @@ export function DraftActions({ draft }: { draft: EnvironmentDraft }) {
   return (
     <>
       <Link className={buttonClass({ size: "sm" })} search={(previous) => ({ application: previous.application, environment: previous.environment, organization: previous.organization })} to="/changes">Review Changes</Link>
-      {revision.state === "valid" ? (
+      {draft.stale ? (
+        <Button disabled={!draft.canConfigure} icon="refresh" onClick={() => setMerging(true)} size="sm" variant="primary" title="Something else was published after this draft started">Bring Up to Date</Button>
+      ) : revision.state === "valid" ? (
         <Button disabled={!draft.canConfigure} icon="rocket" onClick={() => void openPublish()} size="sm" variant="primary">Publish{production ? " to Production" : ""}</Button>
       ) : (
         <Button disabled={!draft.canConfigure} loading={draft.busy} onClick={() => void draft.validate()} size="sm" variant="primary">{revision.state === "invalid" ? "Check Again" : "Validate"}</Button>
@@ -50,7 +56,7 @@ export function DraftActions({ draft }: { draft: EnvironmentDraft }) {
           confirmLabel={`Publish to ${target}`}
           description={`New requests in ${target} use this configuration as soon as it's published. Requests already running keep the current one. Rolling back later creates a new revision.`}
           onCancel={() => setConfirming(false)}
-          onConfirm={() => void draft.publish().then((published) => { if (published) setConfirming(false); })}
+          onConfirm={() => void draft.publish(noteRef.current?.value).then((published) => { if (published) setConfirming(false); })}
           pending={draft.busy}
           size="xl"
           title={`Publish ${revision.id} to ${target}?`}
@@ -69,11 +75,18 @@ export function DraftActions({ draft }: { draft: EnvironmentDraft }) {
               {draft.active ? <SpotChecks draftID={revision.id} features={affectedFeatures(entries, revision.document as JSONRecord)} liveID={draft.active.id} /> : <p className="lw-secondary lw-note">Nothing is live yet, so there's nothing to compare against.</p>}
               {plan.warnings.length ? <label className="lw-check"><input checked={warningsSeen} onChange={(event) => setWarningsSeen(event.target.checked)} type="checkbox" /><span>I've read the warnings.</span></label> : null}
               {production ? <label className="lw-check"><input checked={checked} onChange={(event) => setChecked(event.target.checked)} type="checkbox" /><span>I've checked what changes for Production users.</span></label> : null}
-              <p className="lw-secondary lw-note">Revisions have no description field yet, so a publish note can't be saved.</p>
+              {draft.lifecycle ? (
+                <div className="lw-field">
+                  <label className="lw-field__label" htmlFor={noteID}>Publish note <span className="lw-faint">(optional)</span></label>
+                  <textarea className="lw-textarea" id={noteID} maxLength={500} placeholder="What changed and why" ref={noteRef} rows={2} />
+                  <span className="lw-field__hint">Saved with the revision and shown in History.</span>
+                </div>
+              ) : <p className="lw-secondary lw-note">This server doesn&apos;t keep publish notes.</p>}
             </div>
           ) : planError ? null : <p role="status">Loading the server's plan…</p>}
         </ConfirmDialog>
       ) : null}
+      {merging ? <MergeDialog draft={draft} onClose={() => setMerging(false)} /> : null}
     </>
   );
 }

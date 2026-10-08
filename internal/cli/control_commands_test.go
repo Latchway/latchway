@@ -867,7 +867,7 @@ func revisionJSON(state string) string {
 	if state == "active" {
 		activated = `,"activated_at":"2026-08-29T00:00:00Z"`
 	}
-	return `{"id":"` + controlTestRevision + `","environment_id":"` + controlTestEnvironment + `","state":"` + state + `","version":1,"document":{"apiVersion":"latchway.dev/v1alpha1"},"created_at":"2026-08-29T00:00:00Z","created_by":"adm_00000000000000000000000000"` + activated + `}`
+	return `{"id":"` + controlTestRevision + `","environment_id":"` + controlTestEnvironment + `","state":"` + state + `","version":1,"document":{"apiVersion":"latchway.dev/v1alpha1"},"created_at":"2026-08-29T00:00:00Z","created_by":"adm_00000000000000000000000000","updated_at":"2026-08-29T00:00:00Z","updated_by":"adm_00000000000000000000000000"` + activated + `}`
 }
 
 func problemJSONForControl(code string, status int) string {

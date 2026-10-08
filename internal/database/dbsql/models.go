@@ -479,24 +479,38 @@ type ConcurrencyLease struct {
 }
 
 type ConfigRevision struct {
-	ConfigRevisionID     string             `db:"config_revision_id" json:"config_revision_id"`
-	OrganizationID       string             `db:"organization_id" json:"organization_id"`
-	ApplicationID        string             `db:"application_id" json:"application_id"`
-	EnvironmentID        string             `db:"environment_id" json:"environment_id"`
-	RevisionNumber       int64              `db:"revision_number" json:"revision_number"`
-	Etag                 string             `db:"etag" json:"etag"`
-	Status               string             `db:"status" json:"status"`
-	Document             []byte             `db:"document" json:"document"`
-	CompiledDocument     []byte             `db:"compiled_document" json:"compiled_document"`
-	ValidationErrors     []byte             `db:"validation_errors" json:"validation_errors"`
-	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	ValidatedAt          pgtype.Timestamptz `db:"validated_at" json:"validated_at"`
-	BaseConfigRevisionID *string            `db:"base_config_revision_id" json:"base_config_revision_id"`
-	Description          *string            `db:"description" json:"description"`
-	EditVersion          int64              `db:"edit_version" json:"edit_version"`
-	ValidationReport     []byte             `db:"validation_report" json:"validation_report"`
-	ActivatedAt          pgtype.Timestamptz `db:"activated_at" json:"activated_at"`
+	ConfigRevisionID       string             `db:"config_revision_id" json:"config_revision_id"`
+	OrganizationID         string             `db:"organization_id" json:"organization_id"`
+	ApplicationID          string             `db:"application_id" json:"application_id"`
+	EnvironmentID          string             `db:"environment_id" json:"environment_id"`
+	RevisionNumber         int64              `db:"revision_number" json:"revision_number"`
+	Etag                   string             `db:"etag" json:"etag"`
+	Status                 string             `db:"status" json:"status"`
+	Document               []byte             `db:"document" json:"document"`
+	CompiledDocument       []byte             `db:"compiled_document" json:"compiled_document"`
+	ValidationErrors       []byte             `db:"validation_errors" json:"validation_errors"`
+	CreatedByAdminUserID   string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt              pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ValidatedAt            pgtype.Timestamptz `db:"validated_at" json:"validated_at"`
+	BaseConfigRevisionID   *string            `db:"base_config_revision_id" json:"base_config_revision_id"`
+	Description            *string            `db:"description" json:"description"`
+	EditVersion            int64              `db:"edit_version" json:"edit_version"`
+	ValidationReport       []byte             `db:"validation_report" json:"validation_report"`
+	ActivatedAt            pgtype.Timestamptz `db:"activated_at" json:"activated_at"`
+	DiscardedAt            pgtype.Timestamptz `db:"discarded_at" json:"discarded_at"`
+	DiscardedByAdminUserID *string            `db:"discarded_by_admin_user_id" json:"discarded_by_admin_user_id"`
+	ActivationNote         *string            `db:"activation_note" json:"activation_note"`
+}
+
+type ConfigRevisionEdit struct {
+	OrganizationID   string             `db:"organization_id" json:"organization_id"`
+	ConfigRevisionID string             `db:"config_revision_id" json:"config_revision_id"`
+	EditVersion      int64              `db:"edit_version" json:"edit_version"`
+	Kind             string             `db:"kind" json:"kind"`
+	AdminUserID      string             `db:"admin_user_id" json:"admin_user_id"`
+	EditedAt         pgtype.Timestamptz `db:"edited_at" json:"edited_at"`
+	ChangeCount      int32              `db:"change_count" json:"change_count"`
+	Changes          []byte             `db:"changes" json:"changes"`
 }
 
 type DpopReplayEntry struct {
