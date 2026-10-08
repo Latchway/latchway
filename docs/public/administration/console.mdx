@@ -1,122 +1,236 @@
 ---
 title: "Admin console"
-description: "Use the embedded same-origin console and its capability-scoped administrative workflows."
+description: "Use the embedded same-origin console to configure, observe and operate Latchway through the canonical Admin API."
 icon: "settings"
 audience: "operator"
 pageType: "how-to"
-serverVersion: "1.0.0"
+serverVersion: "1.2.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-10-08"
 owner: "core-operations"
 ---
 
 The embedded console is a same-origin client of the canonical Admin API. It
-does not connect directly to PostgreSQL, evaluate policy in the browser, keep
-credentials in Web Storage, or maintain a second configuration model.
+does not connect to PostgreSQL, evaluate policy in the browser, keep
+credentials in Web Storage, or keep a second configuration model. Every
+number it shows comes from a server response, and every change it makes is an
+Admin API request the CLI could make too.
 
-## Authentication
+## Signing in
 
 The first owner consumes the one-time bootstrap token. After that, bootstrap is
-permanently closed and administrators sign in with a secure same-origin cookie
-session. Mutations require both a validated Origin and the session-bound CSRF
+closed for good and administrators sign in with a secure same-origin cookie
+session. Every change needs a validated Origin and the session-bound CSRF
 token.
 
-API automation uses scoped, expirable, revocable bearer tokens instead. A token
-cannot exceed its owner's current organization role or its explicit scopes.
+Depending on the server, administrators can also use an authenticator app with
+single-use recovery codes, passkeys, or single sign-on with OpenID Connect, and
+an organization can require a second factor or single sign-on. Owners invite
+people with one-time links. Under **Your account** each administrator changes
+their own password, signs out their other sessions and switches organization.
+
+Automation uses scoped, expirable, revocable API tokens instead. A token can't
+exceed its owner's current role or its explicit scopes.
 
 | Capability | Typical use |
 | --- | --- |
-| `manage_owners` | Administrator membership and owner lifecycle |
-| `manage_secrets` | Create, rotate, and retire write-only secrets |
-| `activate_configuration` | Create tenant resources and activate configuration |
+| `manage_owners` | Members, invitations, roles and the organization itself |
+| `manage_secrets` | Create, rotate and retire write-only secrets |
+| `activate_configuration` | Applications, environments and publishing configuration |
 | `run_self_tests` | Immediate and scheduled bounded verification |
-| `inspect_users` | Users, installations, requests, usage, and audit views |
+| `inspect_users` | Users, installations, requests, usage and audit views |
 | `revoke_installations` | Block users and revoke installations |
-| `view_prompt_bodies` | Reserved capability; v1 rejects body storage and exposes no body-read endpoint |
+| `view_prompt_bodies` | Reserved; version 1 stores no bodies and has no body-read endpoint |
 
-## Console areas
+Owners can grant a member the Admin or Operator role in one application
+without changing their role elsewhere, and can preview the console as another
+role. A preview is read-only.
 
-| Group | Views |
+## Finding your way
+
+The header holds the organization, application and environment you're working
+in; production environments get a distinct header. The selection lives in the
+page URL as `organization`, `application` and `environment` slugs, so a link
+opens the same place for a colleague. A link that names an application or
+environment that doesn't exist says so instead of opening a different one.
+
+**Search** (⌘K or Ctrl K) jumps to any page. It only navigates: nothing that
+changes the server runs from it. The bell counts what needs attention and the
+status pill shows gateway readiness.
+
+| Group | Pages |
 | --- | --- |
-| Workspace | Applications, Environments, Setup wizard |
-| Administration | Administrators, API tokens |
-| Identity | Authentication providers, Attestation, Users, Installations |
-| AI configuration | Features, Routes, Upstreams, Models and pricing, Secrets, Full configuration |
-| Governance | Access policies, Limit plans, User overrides, Abuse controls |
-| Observability | Requests, Usage, Cost, Latency, Errors, Attestation failures |
-| Operations | Configuration revisions, Route simulator, Self-tests, Audit log |
-| System | System health |
+| Overview | Setup checklist, what needs attention, recent traffic |
+| Traffic | Requests; Analytics: Usage, Cost, Performance, Reliability |
+| Build | Features; Routing; AI Connections: Connections, Models & pricing, Secrets; Client Trust: User sign-in, App verification, Components, Sessions; Setup wizard |
+| Users & Limits | Users & Installs: Users, Installations, Older installs; Policies & Limits: Limit plans, Plan by feature, Overrides, Protections |
+| Operate | Changes: Draft, History, Compare, Edit as JSON; Simulator; Self-tests; System Health |
+| Organization | Team & Access: Members, API tokens, Sessions, Roles; Audit Log; Settings: General, Applications |
 
-Resource editors clone the complete active document, replace only the selected
-resource wrapper, preserve every other parsed value, and submit the full draft
-under its ETag. The server remains authoritative for validation, planning,
-simulation, activation, tenancy, and auditing.
+## What needs attention
 
-## Live operational refresh
+Overview lists things to look at, each with the page that fixes it: a
+disabled application or environment, no live configuration, an unpublished
+or invalid draft, models that recorded usage without a cost, a failure rate of
+5% or more over at least 20 requests, API tokens expiring within 14 days,
+failing readiness checks, and a degraded or unhealthy server self-check from
+the last 15 minutes. The bell in the header counts the same items, using the
+last 24 hours of usage. Every item comes from a server record and none can be
+dismissed; fix the cause and it goes away.
 
-Servers that negotiate `admin_event_stream` expose a same-origin Server-Sent
-Events channel. It sends only closed topic hints for requests, usage,
-configuration, audit, self-tests, and health. The console then reloads the
-visible view through its canonical bounded endpoint. The stream never includes
-resource identifiers, user data, counts, request content, credentials, proofs,
-or provider errors.
+## Changing configuration
 
-Each connection closes within one minute so reconnecting reauthenticates the
-administrator session and bounds revocation latency. Reconnect always reloads
-canonical state; event IDs are not a durable replay log. A compatible older
-server without this optional capability uses a bounded foreground refresh
-fallback instead of failing the console compatibility check.
+Pages under Build and Users & Limits edit one shared draft for the
+environment. Each save is a `PATCH` of the complete draft under its ETag, so
+two people can't overwrite each other silently, and resource editors keep
+every value they don't touch. The server validates, plans, simulates,
+activates and audits; the console never decides on its own that a draft is
+valid.
 
-## Application and environment lifecycle
+Under **Changes**:
 
-Applications and environments expose explicit active/disabled state. Disable
-requires `activate_configuration`, a bounded reason, and an acknowledgement of
-the immediate credential effect. The server changes status and transactionally
-revokes active legacy and component session/refresh credentials in the exact
-scope. Disabling an application preserves each child environment's own status.
+- **Draft** shows what will change, the server's validation and plan, and who
+  changed which paths. **Publish** activates the draft with an optional note.
+  **Discard** retires a draft you don't want; it stays in history.
+- When someone publishes after your draft started, **Bring Up to Date** runs a
+  three-way merge and asks you to choose for every conflict.
+- **Copy From Environment** starts a draft from another environment's live
+  configuration and keeps this environment's sign-in, app verification,
+  components and AI connections.
+- **History** lists every revision; you can roll back to one or start a draft
+  from it. **Compare** diffs any two configurations, and **Edit as JSON** and
+  **Import / Export** save the whole document to the draft without publishing.
 
-Enabling restores only future eligibility. It never restores a revoked access
-grant, refresh token, rotation result, or component-session family. The console
-keeps disabled scopes selectable for authorized forensic request, usage, audit,
-user, installation-family, and configuration-history inspection, but disables
-configuration mutation. The server independently enforces the same boundary.
+The **Simulator** asks the server what a request would do against the live
+configuration, a validated draft or an earlier revision: which feature, plan, route and model it gets,
+what happens when connections fail, and how much of each limit a real user has
+used. A coverage grid runs many requests in one call, and saved scenarios are
+shared with the team. See [Configuration](/administration/configuration).
+
+## Traffic and analytics
+
+**Requests** finds requests by outcome, feature, user, platform, route,
+connection, model, error code, latency, tokens, cost, or the client request
+ID your app logged, shows how many match, and counts the common values behind
+each filter. Each request opens its ordered attempts with safe provenance.
+
+**Analytics** covers one environment over a period, optionally compared with
+the one before:
+
+- **Usage**: requests, active users and tokens, by feature, model and plan.
+- **Cost**: cost at your configured prices; this UTC month so far, a
+  straight-line month-end projection after the first full day, and last month;
+  cost by AI connection.
+- **Performance**: request latency and time to first token, and latency by AI
+  connection.
+- **Reliability**: failure, quota-denial, app-verification and fallback rates,
+  requests by error code, and failures by AI connection.
+
+Bars, rows and codes open the matching requests. Exports are CSV and the
+matching CLI commands. A missing value is shown as missing, never as zero, and
+models with usage but no price are called out because they make cost totals
+low. When usage is still waiting for settlement, or no worker is running to
+settle it, every Analytics tab says recent totals may be low. Connection and
+error-code breakdowns cover at most 90 days. See
+[Operational views](/administration/observability).
+
+## Users and limits
+
+User records use opaque IDs and safe normalized claims, never raw external
+subjects. Lists filter, sort and count users and installations, and each user
+shows recent usage and the plan and limits that apply. Blocking a user stops
+future sessions and revokes current grants and refresh state; unblocking allows
+a future enrollment but never restores a revoked credential. Actions on many
+users preview their impact first and skip anyone who changed since. See
+[Users](/administration/users).
+
+Plan editing shows how many users each calendar limit would have stopped in
+recent windows, the plan split for a feature over the last week, and which
+users are overridden to a plan you're about to remove. See
+[Overrides](/administration/overrides).
+
+## Operating the server
+
+**System Health** reads the server's own self-check: what needs attention with
+the server's remedy, the gateway's facts, five-minute health history with
+incidents when a worker keeps it, and how each AI connection did over the last
+day. Latchway doesn't probe providers; connection health comes from the
+attempts your requests made. **Support Bundle** previews exactly what the
+redacted bundle excludes before you save it.
+
+**Self-tests** run bounded checks of the gateway and AI connections, list
+recent runs, and schedule recurring tests. A schedule can't use a browser
+cookie as future execution authority: you paste an existing `run_self_tests`
+token into a password field for one request, the console sends it as a bearer
+credential with cookies omitted, clears the field, and keeps only the token ID
+the server returns. See [Self-tests](/operations/self-tests).
+
+The **Audit Log** filters every administrative change by actor, action,
+resource, source, outcome and time; events carry field markers, never values.
+See [Audit log](/administration/audit-log).
+
+## Applications and environments
+
+Under **Settings → Applications**, applications and environments show their
+status, live revision and, with `inspect_users`, how many users each
+environment has. Renaming changes only the display name: slugs stay, so
+configuration, links and scripts keep working.
+
+Disabling needs `activate_configuration`, a reason, the typed name and an
+acknowledgement. The server refuses
+requests and transactionally revokes active session and refresh credentials in
+that scope; disabling an application keeps each environment's own status.
+Enabling allows future sessions only and never restores a revoked credential.
+Disabled scopes stay readable for requests, usage, audit, users, installations
+and configuration history, and configuration becomes read-only.
+
+Nothing can be deleted. Requests, usage, audit events and configuration
+revisions refer to these records, so disable one to retire it.
 
 ## Secrets
 
-Secret lists show only metadata. Create and rotate inputs are password fields;
-the browser clears plaintext before the request completes and the server never
-returns it. Deletion displays the exact current secret version, explains the
-permanent name tombstone, requires the operator to type the logical name, and
-rechecks the name-to-ID binding before sending the mutation.
+Secret lists show only metadata. Values are typed into password fields that
+the console clears before the request completes, and the server never returns
+them. Deletion shows the current version, explains that the name stays
+reserved, asks you to type the name, and rechecks the name-to-ID binding
+before sending. A secret that configuration uses can't be deleted.
 
-A referenced, stale, superseded, or cross-tenant secret cannot be deleted.
+## Live refresh
 
-## Users and installations
+Servers that support `admin_event_stream` open a same-origin Server-Sent
+Events channel that sends only topic hints for requests, usage,
+configuration, audit, self-tests and health. The console then reloads the
+visible page through its usual endpoint. The stream never carries identifiers,
+user data, counts, request content, credentials, proofs or provider errors.
+Each connection closes within a minute, so reconnecting reauthenticates the
+session. Without the capability, the console refreshes in the foreground.
 
-User records use opaque IDs and safe normalized claims rather than raw external
-subjects. Blocking a user prevents future sessions and revokes current grants
-and refresh state. Unblocking permits a future enrollment but never restores a
-revoked credential.
+## Older servers and read-only mode
 
-Installation revocation destroys that installation's sessions and rotating
-refresh family. Record an operator-approved reason without including identity
-tokens or incident secrets.
+The console checks the server's contract, protocol and capabilities before
+allowing changes. If anything required is missing, or the database isn't
+ready, it switches to read-only mode, says why, and closes any open form that
+holds a password or secret.
 
-## Scheduled self-test exception
+Newer features are optional capabilities. Without one, the console keeps the
+older behavior and says what the server can't do:
 
-Creating a durable self-test schedule cannot use a browser cookie as future
-execution authority. The operator supplies an existing `run_self_tests` token
-in a password field for one request. The console sends only that bearer with
-cookies omitted, does not add CSRF, clears the field, and persists only the
-stable token ID returned by the server.
+| Capability | Without it |
+| --- | --- |
+| `admin_event_stream` | Foreground refresh instead of live hints |
+| `admin_account_self_service` | No own-password change, own sessions or organization switching |
+| `admin_two_factor`, `admin_passkeys`, `admin_sso` | Those sign-in methods and settings are hidden |
+| `admin_invitations`, `admin_application_roles` | No invitations or per-application roles |
+| `admin_user_insights` | No user filters, totals, signals, usage or batch actions |
+| `admin_request_search` | No totals, facets, client request ID search or error-code counts |
+| `admin_configuration_drafts` | Validated drafts are copied before editing; no discard, history, notes, merge or copy |
+| `admin_policy_insights` | No limit impact, plan share or saved scenarios; outages are worked out in the browser, labeled |
+| `admin_operations_history` | No health history, connection health, run list or renames |
 
 ## Strong client boundary
 
 Console response schemas are strict and bounded. An unknown response field,
-including an accidentally returned secret value, fails closed. Request details
-show ordered attempts and safe provenance, never provider bodies, internal
-errors, identity subjects, proofs, or credentials.
-
-Use [Configuration](/administration/configuration) for the revision lifecycle
-and [Operational views](/administration/observability) for requests, usage,
-audit, and system status.
+including an accidentally returned secret, fails closed. Request details never
+show provider bodies, internal errors, identity subjects, proofs or
+credentials. The embedded build serves only same-origin scripts and styles
+under a strict Content Security Policy.
