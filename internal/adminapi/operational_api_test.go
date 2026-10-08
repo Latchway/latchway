@@ -651,6 +651,8 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if duplicateRequestStatus.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate request status status/body=%d %s", duplicateRequestStatus.Code, duplicateRequestStatus.Body.String())
 	}
+	assertRequestSearch(t, ctx, pool, handler, cookie, baseQuery, environment.ID, fixture.requestID,
+		filteredRequestQuery, requestStart, requestEnd)
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.secondAttemptID)) ||

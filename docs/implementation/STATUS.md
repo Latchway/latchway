@@ -2,6 +2,41 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 17: request search, totals and facets (branch `console-api-completion`, unreleased)
+
+Server (ADR 0047, capability `admin_request_search`, no schema change):
+
+- Request documents carry `platform` and `client_request_id`.
+- `GET /requests` accepts `client_request_id` and `include_total` (capped at
+  100,000), sharing one condition builder with the count.
+- `GET /requests/facets`: counts by outcome, feature, failure code,
+  connection, model, route, platform, component kind and trust source over at
+  most 90 days, with public values only.
+- The event stream stays data-free (see the ADR); the console counts new
+  matches instead.
+
+CLI: `requests list` takes every filter (`--status`, `--feature`, `--user`,
+`--platform`, `--component-kind`, `--trust-source`, `--route`, `--upstream`,
+`--model`, `--error-code`, `--request-id`, `--client-request-id`, `--start`,
+`--end`, `--sort`, the latency, token and nano-USD ranges) and `--total`, and
+shows a PLATFORM column; `requests facets` prints counts. Inspect shows the
+platform and client request ID.
+
+Console: filter popovers list the most common values with counts (Outcome,
+Platform and More filters annotate their options), the bar shows the total,
+the search box finds a client request ID, the new-request pill says how many
+arrived, a Platform column is available, the drawer shows the platform and
+client request ID, and Export copies a CLI command. Without the capability
+the page keeps free-text filters and ID-only search.
+
+Validation: `go test ./...` against PostgreSQL 16 (client request filter,
+fields, totals with and without filters, invalid values, facets and their
+range and limit checks), CLI tests (flags sent, invalid flags rejected
+before any request, unrequested or invalid totals rejected, facet counts
+validated), vet, gofmt; contract validation and generated references (119
+operations); lint, typecheck, `check:api`, `pnpm test` (475 passed),
+Playwright (46 passed, 1 skipped), build and `verify:reproducible`.
+
 ## Console completion phase 16: user and installation insights (branch `console-api-completion`, unreleased)
 
 Server (ADR 0046, capability `admin_user_insights`, no schema change):

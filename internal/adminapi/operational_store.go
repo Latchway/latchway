@@ -48,6 +48,9 @@ var (
 	operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	operationalRuleKeyPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 	operationalFailurePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+	// clientRequestIDPattern matches the correlation identifiers the runtime
+	// accepts from clients (8 to 128 characters).
+	clientRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 )
 
 type operationalStore struct {
@@ -84,6 +87,7 @@ type requestListFilter struct {
 	model         string
 	errorCode     string
 	requestID     string
+	clientRequest string
 	start         time.Time
 	end           time.Time
 	sort          string
@@ -119,6 +123,7 @@ func (filter requestListFilter) validate() error {
 		(filter.upstream != "" && !operationalIdentifierPattern.MatchString(filter.upstream)) ||
 		(filter.model != "" && !validOperationalText(filter.model, 512)) ||
 		(filter.requestID != "" && id.Validate(filter.requestID, id.LogicalRequest) != nil) ||
+		(filter.clientRequest != "" && !clientRequestIDPattern.MatchString(filter.clientRequest)) ||
 		(!filter.start.IsZero() && !filter.end.IsZero() && !filter.start.Before(filter.end)) ||
 		!validOptionalRange(filter.minimumLatencyMS, filter.maximumLatencyMS) ||
 		!validOptionalRange(filter.minimumTokens, filter.maximumTokens) ||
@@ -281,6 +286,8 @@ type logicalRequestDocument struct {
 	Framework             *string                        `json:"framework,omitempty"`
 	FrameworkVersion      *string                        `json:"framework_version,omitempty"`
 	CallerSDK             *string                        `json:"caller_sdk,omitempty"`
+	Platform              *string                        `json:"platform,omitempty"`
+	ClientRequestID       *string                        `json:"client_request_id,omitempty"`
 	ConfigRevisionID      string                         `json:"config_revision_id"`
 	SelectedLimitPlan     string                         `json:"selected_limit_plan"`
 	SelectedRoute         *string                        `json:"selected_route,omitempty"`
@@ -1166,19 +1173,11 @@ func (store *operationalStore) revokeInstallation(
 	return result, nil
 }
 
-func (store *operationalStore) listRequests(
-	ctx context.Context,
-	principal adminauth.Principal,
-	environmentID string,
-	filter requestListFilter,
-) ([]logicalRequestDocument, error) {
-	if id.Validate(environmentID, id.Environment) != nil || filter.validate() != nil {
-		return nil, errOperationalInvalid
-	}
-	if !validOperationalRead(principal) {
-		return nil, errOperationalForbidden
-	}
-	arguments := []any{principal.OrganizationID, environmentID}
+// requestListConditions returns the WHERE conditions and bound arguments for
+// a request-list filter, excluding pagination. Every value is bound; only
+// fixed SQL text is chosen by the filter.
+func requestListConditions(organizationID, environmentID string, filter requestListFilter) ([]string, []any) {
+	arguments := []any{organizationID, environmentID}
 	where := []string{
 		"request.organization_id = $1",
 		"request.environment_id = $2",
@@ -1280,6 +1279,9 @@ func (store *operationalStore) listRequests(
 	if filter.requestID != "" {
 		add("request.logical_request_id = $%d", filter.requestID)
 	}
+	if filter.clientRequest != "" {
+		add("request.client_request_id = $%d", filter.clientRequest)
+	}
 	if !filter.start.IsZero() {
 		add("request.requested_at >= $%d", filter.start)
 	}
@@ -1320,6 +1322,22 @@ func (store *operationalStore) listRequests(
 			  AND usage.metric = 'cost_nano_usd'
 		), 0) <= $%d`, *filter.maximumCost)
 	}
+	return where, arguments
+}
+
+func (store *operationalStore) listRequests(
+	ctx context.Context,
+	principal adminauth.Principal,
+	environmentID string,
+	filter requestListFilter,
+) ([]logicalRequestDocument, error) {
+	if id.Validate(environmentID, id.Environment) != nil || filter.validate() != nil {
+		return nil, errOperationalInvalid
+	}
+	if !validOperationalRead(principal) {
+		return nil, errOperationalForbidden
+	}
+	where, arguments := requestListConditions(principal.OrganizationID, environmentID, filter)
 	descending := filter.sort == "started_at_desc"
 	if !filter.page.after.IsZero() {
 		arguments = append(arguments, filter.page.after, filter.page.afterID)
@@ -1338,13 +1356,7 @@ func (store *operationalStore) listRequests(
 		direction = "DESC"
 	}
 	query := fmt.Sprintf(`
-		SELECT logical_request_id, environment_id, application_user_id, installation_id,
-		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version, caller_sdk,
-		       config_revision_id, selected_limit_plan_key,
-		       selected_route_key, selected_upstream_key, selected_model_key,
-		       selected_physical_model, feature_key, protocol, requested_at,
-		       completed_at, status, failure_code
+		SELECT `+requestSummaryColumns+`
 		FROM logical_requests AS request
 		WHERE %s
 		ORDER BY request.requested_at %s, request.logical_request_id %s
@@ -1385,15 +1397,9 @@ func (store *operationalStore) getRequest(
 		return logicalRequestDocument{}, errOperationalForbidden
 	}
 	row := store.pool.QueryRow(ctx, `
-		SELECT logical_request_id, environment_id, application_user_id, installation_id,
-		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version, caller_sdk,
-		       config_revision_id, selected_limit_plan_key,
-		       selected_route_key, selected_upstream_key, selected_model_key,
-		       selected_physical_model, feature_key, protocol, requested_at,
-		       completed_at, status, failure_code
-		FROM logical_requests
-		WHERE organization_id = $1 AND logical_request_id = $2
+		SELECT `+requestSummaryColumns+`
+		FROM logical_requests AS request
+		WHERE request.organization_id = $1 AND request.logical_request_id = $2
 	`, principal.OrganizationID, requestID)
 	item, err := scanLogicalRequestSummary(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1410,6 +1416,24 @@ func (store *operationalStore) getRequest(
 	return items[0], nil
 }
 
+// requestSummaryColumns selects a logical request row (aliased "request") in
+// the order scanLogicalRequestSummary reads it. The platform comes from the
+// installation that sent the request.
+const requestSummaryColumns = `
+		request.logical_request_id, request.environment_id, request.application_user_id,
+		request.installation_id, request.installation_family_id, request.client_component_id,
+		request.component_definition_id, request.component_kind, request.trust_source,
+		request.framework, request.framework_version, request.caller_sdk,
+		request.config_revision_id, request.selected_limit_plan_key,
+		request.selected_route_key, request.selected_upstream_key, request.selected_model_key,
+		request.selected_physical_model, request.feature_key, request.protocol, request.requested_at,
+		request.completed_at, request.status, request.failure_code, request.client_request_id,
+		(
+			SELECT installation.platform FROM installations AS installation
+			WHERE installation.installation_id = request.installation_id
+			  AND installation.organization_id = request.organization_id
+		)`
+
 func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 	var item logicalRequestDocument
 	var status string
@@ -1423,7 +1447,7 @@ func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 		&item.SelectedRoute, &item.SelectedUpstream, &item.SelectedModel,
 		&item.SelectedPhysicalModel,
 		&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
-		&failureCode,
+		&failureCode, &item.ClientRequestID, &item.Platform,
 	); err != nil {
 		return logicalRequestDocument{}, err
 	}
@@ -1491,6 +1515,10 @@ func validRequestAttribution(item logicalRequestDocument) bool {
 			!validOperationalVersion(*item.FrameworkVersion) {
 			return false
 		}
+	}
+	if item.Platform != nil && !operationalIdentifierPattern.MatchString(*item.Platform) ||
+		item.ClientRequestID != nil && !clientRequestIDPattern.MatchString(*item.ClientRequestID) {
+		return false
 	}
 	return true
 }

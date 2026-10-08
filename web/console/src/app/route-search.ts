@@ -71,6 +71,8 @@ function validateTimeRange(
 
 export const RequestRouteSearchSchema = z.object({
   ...workspaceSearchFields,
+  // The correlation identifiers clients may send (see CLIENT_REQUEST_ID_PATTERN in api/admin).
+  client_request_id: optional(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)),
   component_kind: optional(Identifier),
   cost_max_nano_usd: optional(NonnegativeIntegerText),
   cost_min_nano_usd: optional(NonnegativeIntegerText),

@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { adminRequestMock, getRequestEffectiveConfigurationMock } = vi.hoisted(() => ({
+const { adminRequestMock, compatibility, getRequestEffectiveConfigurationMock } = vi.hoisted(() => ({
   adminRequestMock: vi.fn(),
+  compatibility: { current: { mutationAllowed: true, status: undefined as { server_capabilities: string[] } | undefined } },
   getRequestEffectiveConfigurationMock: vi.fn()
 }));
 
@@ -14,6 +15,7 @@ vi.mock("../../api/admin", async (importOriginal) => ({
   adminRequest: adminRequestMock,
   getRequestEffectiveConfiguration: getRequestEffectiveConfigurationMock
 }));
+vi.mock("../../app/console-compatibility-context", () => ({ useConsoleCompatibility: () => compatibility.current }));
 vi.mock("../../api/session", () => ({
   useConsoleSession: () => ({ data: { mode: "configured", session: { capabilities: [], organization_id: "org_0123456789abcdef" } } })
 }));
@@ -86,6 +88,7 @@ function renderRequests(initial: WorkspaceSearch = {}) {
 beforeEach(() => {
   adminRequestMock.mockReset();
   getRequestEffectiveConfigurationMock.mockReset();
+  compatibility.current = { mutationAllowed: true, status: undefined };
 });
 afterEach(cleanup);
 
@@ -180,7 +183,7 @@ describe("Requests", () => {
     const { updates } = renderRequests();
     await waitFor(() => expect(listCalls()).toHaveLength(1));
     await user.type(screen.getByLabelText("Go to a request or user ID"), "timeout{Enter}");
-    expect(screen.getByText(/Search isn't available/)).toBeInTheDocument();
+    expect(screen.getByText(/can't search by client request ID/)).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Go to a request or user ID"));
     await user.type(screen.getByLabelText("Go to a request or user ID"), `${REQUEST}{Enter}`);
     expect(updates.at(-1)).toEqual({ request: REQUEST });
@@ -255,5 +258,97 @@ describe("Requests", () => {
     await screen.findByRole("complementary", { name: "req_1123456789abcdef" });
     await user.keyboard("{Escape}");
     expect(updates.at(-1)).toEqual({ request: undefined });
+  });
+
+  describe("with server search", () => {
+    const facetsFixture = () => ({
+      end: "2026-08-30T00:00:00Z", environment_id: ENV, requests: 3, start: "2026-08-23T00:00:00Z",
+      facets: {
+        component_kind: { truncated: false, values: [{ count: 3, value: "main_app" }] },
+        error_code: { truncated: false, values: [{ count: 1, value: "timeout" }] },
+        feature: { truncated: true, values: [{ count: 2, value: "assistant" }, { count: 1, value: "summarize" }] },
+        model: { truncated: false, values: [] },
+        platform: { truncated: false, values: [{ count: 3, value: "ios" }] },
+        route: { truncated: false, values: [{ count: 3, value: "primary" }] },
+        status: { truncated: false, values: [{ count: 2, value: "succeeded" }, { count: 1, value: "failed" }] },
+        trust_source: { truncated: false, values: [{ count: 3, value: "direct_attested" }] },
+        upstream: { truncated: false, values: [{ count: 3, value: "openai" }] }
+      }
+    });
+
+    function serverSearchApi(total = { capped: false, count: 3 }, arrivals = { capped: false, count: 3 }) {
+      adminRequestMock.mockImplementation(async (path: string) => {
+        if (path.startsWith("/admin/v1/requests/facets?")) return { data: facetsFixture() };
+        const query = new URLSearchParams(path.split("?")[1] ?? "");
+        if (path.startsWith("/admin/v1/requests?") && query.get("page_size") === "1") return { data: { items: [], page: { has_more: false }, total: arrivals } };
+        if (path.startsWith("/admin/v1/requests?")) {
+          return { data: { items: [requestFixture({ client_request_id: "checkout:2026.a1", platform: "ios", started_at: "2026-08-29T00:00:00.123456Z" })], page: { has_more: true, next_cursor: "next" }, total } };
+        }
+        return { data: requestFixture({ client_request_id: "checkout:2026.a1", platform: "ios" }) };
+      });
+      compatibility.current = { mutationAllowed: true, status: { server_capabilities: ["admin_request_search"] } };
+    }
+
+    it("shows the total, offers common values with counts, and searches by client request ID", async () => {
+      serverSearchApi();
+      const user = userEvent.setup();
+      const { updates } = renderRequests();
+      await waitFor(() => expect(listCalls()).toHaveLength(1));
+      expect(listCalls()[0]?.get("include_total")).toBe("true");
+      expect(await screen.findByText(/3 requests ·/)).toBeInTheDocument();
+      expect(screen.getByText("1 shown of 3")).toBeInTheDocument();
+      const facetCall = adminRequestMock.mock.calls.map(([path]) => String(path)).find((path) => path.startsWith("/admin/v1/requests/facets?"));
+      const facetQuery = new URLSearchParams(facetCall?.split("?")[1]);
+      expect(facetQuery.get("environment_id")).toBe(ENV);
+      expect(Date.parse(facetQuery.get("end") ?? "") - Date.parse(facetQuery.get("start") ?? "")).toBe(7 * 86_400_000);
+
+      await user.click(screen.getByRole("button", { name: /^Feature:/ }));
+      const common = await screen.findByRole("list", { name: "Common feature values" });
+      expect(screen.getByText("Most common in the last 7 days")).toBeInTheDocument();
+      expect(screen.getByText(/Other values exist/)).toBeInTheDocument();
+      await user.click(within(common).getByRole("button", { name: /summarize/ }));
+      expect(updates.at(-1)).toMatchObject({ feature: "summarize" });
+      await waitFor(() => expect(listCalls().at(-1)?.get("feature")).toBe("summarize"));
+
+      await user.click(screen.getByRole("button", { name: /^Outcome:/ }));
+      expect(screen.getByRole("menuitem", { name: /Succeeded\s*2/ })).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+
+      await user.type(screen.getByLabelText("Go to a request, user or client request ID"), "checkout:2026.a1{Enter}");
+      expect(updates.at(-1)).toMatchObject({ client_request_id: "checkout:2026.a1" });
+      await waitFor(() => expect(listCalls().at(-1)?.get("client_request_id")).toBe("checkout:2026.a1"));
+      expect(screen.getByRole("button", { name: /Client request:\s*checkout:2026.a1/ })).toBeInTheDocument();
+      await user.type(screen.getByLabelText("Go to a request, user or client request ID"), "no{Enter}");
+      expect(screen.getByText(/Paste a req_ ID, a usr_ ID, or a client request ID/)).toBeInTheDocument();
+    });
+
+    it("counts new requests after the newest loaded one before showing them", async () => {
+      serverSearchApi({ capped: false, count: 1 }, { capped: false, count: 3 });
+      const user = userEvent.setup();
+      renderRequests({ range: "24h" });
+      await screen.findByText(/1 request ·/);
+      act(() => dispatchAdminRefresh(["requests"]));
+      const notice = await screen.findByRole("button", { name: /2 new requests · Show/ });
+      const countCall = listCalls().find((query) => query.get("page_size") === "1");
+      expect(countCall?.get("start")).toBe("2026-08-29T00:00:00.123456Z");
+      expect(countCall?.get("include_total")).toBe("true");
+      expect(countCall?.get("cursor")).toBeNull();
+      const listed = listCalls().filter((query) => query.get("page_size") !== "1").length;
+      await user.click(notice);
+      await waitFor(() => expect(listCalls().filter((query) => query.get("page_size") !== "1").length).toBe(listed + 1));
+    });
+
+    it("adds a platform column and shows the client request ID in the detail", async () => {
+      serverSearchApi();
+      const user = userEvent.setup();
+      renderRequests({ request: REQUEST });
+      expect(await screen.findByText("checkout:2026.a1")).toBeInTheDocument();
+      const drawer = screen.getByRole("complementary", { name: REQUEST });
+      expect(within(drawer).getByRole("button", { name: "Copy client request ID" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Columns/ }));
+      await user.click(screen.getByRole("menuitem", { name: /^Platform/ }));
+      expect(await screen.findByRole("columnheader", { name: "Platform" })).toBeInTheDocument();
+      expect(screen.getAllByText("iOS").length).toBeGreaterThan(0);
+    });
   });
 });
