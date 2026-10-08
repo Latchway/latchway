@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 
-import { changeOwnPassword, ownSessionsQueryOptions, signOutOwnSessions } from "../../api/account";
+import { changeOwnPassword, disableTwoFactor, ownSessionsQueryOptions, replaceRecoveryCodes, signOutOwnSessions, twoFactorStatusQueryOptions } from "../../api/account";
 import type { OwnAdminSession, SessionEndReason } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { useConsoleSession } from "../../api/session";
@@ -12,9 +12,10 @@ import { PasswordInput } from "../../app/auth/auth-fields";
 import { acceptable, passwordStrength, type Strength } from "../../app/auth/password-strength";
 import { sessionEndText } from "../../app/auth/session-model";
 import { StrengthMeter } from "../../app/auth/strength-meter";
+import { RecoveryCodesReveal, TotpSetup } from "../../app/auth/totp-setup";
 import { scopeSearch } from "../../app/navigation";
 import { PasswordField } from "../../components/password-field";
-import { Badge, Button, Card, ConfirmDialog, Notice, PageHeader, Properties } from "../../ui";
+import { Badge, Button, Card, ConfirmDialog, Field, Notice, PageHeader, Properties } from "../../ui";
 import { ProblemNotice } from "../control-plane-pages";
 import { ROLE_LABEL } from "../team/roles";
 
@@ -27,7 +28,8 @@ const END_REASON: Readonly<Record<SessionEndReason, string>> = {
   password_reset: "Password reset by an owner",
   revoked_by_owner: "Signed out by an owner",
   signed_out: "Signed out",
-  signed_out_elsewhere: "Signed out from another session"
+  signed_out_elsewhere: "Signed out from another session",
+  two_factor_reset: "Two-factor reset by an owner"
 };
 
 function when(instant: string): string {
@@ -77,6 +79,89 @@ function PasswordCard({ enabled }: { enabled: boolean }) {
           <div><Button loading={pending} type="submit" variant="primary">Change Password</Button></div>
         </form>
       ) : <Notice icon="lock" title="Password changes are unavailable." tone="info">The console is read-only until it can verify the server, or this server predates account self-service.</Notice>}
+    </Card>
+  );
+}
+
+function CodeInput({ id, inputRef }: { id: string; inputRef: React.RefObject<HTMLInputElement | null> }) {
+  return (
+    <Field id={id} label="Authentication code">
+      <div className="lw-input-box"><input autoComplete="one-time-code" className="lw-input lw-input--mono" id={id} inputMode="numeric" maxLength={6} pattern="[0-9]{6}" ref={inputRef} /></div>
+    </Field>
+  );
+}
+
+function TwoFactorCard({ enabled }: { enabled: boolean }) {
+  const queryClient = useQueryClient();
+  const status = useQuery(twoFactorStatusQueryOptions);
+  const [settingUp, setSettingUp] = useState(false);
+  const [dialog, setDialog] = useState<"codes" | "off">();
+  const [codes, setCodes] = useState<string[]>();
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<AdminProblem>();
+  const code = useRef<HTMLInputElement>(null);
+  const password = useRef<HTMLInputElement>(null);
+  const on = status.data?.totp_enabled ?? false;
+  const required = status.data?.required_by_organization ?? false;
+
+  // Losing the ability to change things closes any step that holds a key, code or password.
+  if (!enabled && (settingUp || dialog || codes)) {
+    setSettingUp(false);
+    setDialog(undefined);
+    setCodes(undefined);
+  }
+
+  async function run(action: () => Promise<void>): Promise<void> {
+    setPending(true);
+    setProblem(undefined);
+    try {
+      await action();
+      await queryClient.invalidateQueries({ queryKey: twoFactorStatusQueryOptions.queryKey });
+    } catch (error) {
+      setProblem(problemFromError(error));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card
+      description="A code from an authenticator app, asked for after your password. Recovery codes get you in if you lose the app."
+      icon="shield"
+      meta={status.data ? <Badge color={on ? "success" : undefined} dot>{on ? "On" : "Off"}</Badge> : undefined}
+      title="Two-factor sign-in"
+    >
+      {status.error ? <ProblemNotice problem={problemFromError(status.error)} /> : null}
+      {required && !on ? <Notice tone="warning">This organization requires two-factor sign-in.</Notice> : null}
+      {!enabled ? <Notice icon="lock" title="Two-factor changes are unavailable." tone="info">The console is read-only until it can verify the server, or this server predates two-factor sign-in.</Notice> : on ? (
+        <div className="lw-stack">
+          <Properties columns={1} items={[
+            { label: "Turned on", value: status.data?.totp_enabled_at ? when(status.data.totp_enabled_at) : "—" },
+            { label: "Recovery codes left", value: `${status.data?.recovery_codes_remaining ?? 0} of 10` }
+          ]} />
+          {(status.data?.recovery_codes_remaining ?? 10) <= 3 ? <Notice tone="warning">You&apos;re running low on recovery codes. Replace them so you aren&apos;t locked out.</Notice> : null}
+          <div className="lw-row lw-row--wrap">
+            <Button onClick={() => { setProblem(undefined); setDialog("codes"); }} size="sm">Replace Recovery Codes</Button>
+            <Button destructive disabled={required} onClick={() => { setProblem(undefined); setDialog("off"); }} size="sm" title={required ? "Your organization requires two-factor sign-in." : undefined} variant="ghost">Turn Off</Button>
+          </div>
+        </div>
+      ) : settingUp ? <TotpSetup onCancel={() => setSettingUp(false)} onDone={() => setSettingUp(false)} /> : (
+        <div><Button onClick={() => setSettingUp(true)} variant="primary">Set Up Two-Factor</Button></div>
+      )}
+      {dialog === "codes" ? (
+        <ConfirmDialog confirmLabel="Replace Codes" description="Your current recovery codes stop working. Enter a code from your authenticator to confirm." onCancel={() => setDialog(undefined)} onConfirm={() => void run(async () => { const issued = await replaceRecoveryCodes(code.current); setDialog(undefined); setCodes(issued); })} pending={pending} title="Replace your recovery codes?">
+          <CodeInput id="replace-codes-code" inputRef={code} />
+          {problem ? <ProblemNotice problem={problem} /> : null}
+        </ConfirmDialog>
+      ) : null}
+      {dialog === "off" ? (
+        <ConfirmDialog confirmLabel="Turn Off" description="Signing in will need only your password. Your recovery codes are deleted." destructive onCancel={() => setDialog(undefined)} onConfirm={() => void run(async () => { await disableTwoFactor(password.current, code.current); setDialog(undefined); })} pending={pending} title="Turn off two-factor sign-in?">
+          <PasswordInput id="disable-two-factor-password" inputRef={password} />
+          <CodeInput id="disable-two-factor-code" inputRef={code} />
+          {problem ? <ProblemNotice problem={problem} /> : null}
+        </ConfirmDialog>
+      ) : null}
+      {codes ? <RecoveryCodesReveal codes={codes} onDone={() => setCodes(undefined)} /> : null}
     </Card>
   );
 }
@@ -148,6 +233,7 @@ export function AccountPage() {
   const admin = session.data?.session;
   if (!admin) return null;
   const supported = compatibility.status?.server_capabilities.includes("admin_account_self_service") ?? false;
+  const twoFactorSupported = compatibility.status?.server_capabilities.includes("admin_two_factor") ?? false;
   const enabled = supported && compatibility.mutationAllowed;
   const role = admin.memberships.find((membership) => membership.organization_id === admin.organization_id)?.role;
   const organization = organizations.data?.items.find((item) => item.id === admin.organization_id);
@@ -167,6 +253,7 @@ export function AccountPage() {
         </Card>
         <PasswordCard enabled={enabled} />
       </div>
+      {twoFactorSupported ? <div className="lw-body"><TwoFactorCard enabled={compatibility.mutationAllowed} /></div> : null}
       <div className="lw-body">
         {supported ? <SessionsCard enabled={enabled} /> : <Notice title="Session history needs a newer server.">This server doesn't list your own sessions yet.</Notice>}
       </div>

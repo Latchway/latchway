@@ -69,12 +69,48 @@ paths:
       tags: [Authentication]
       operationId: adminLogin
       summary: Create a secure administrator cookie session.
+      description: |
+        When the administrator has a confirmed second factor, a correct
+        password returns `202` with a short-lived challenge and no cookie; the
+        session is issued by `POST /auth/login/two-factor`.
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '202':
+          description: Password accepted; a second factor is required.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecondFactorChallenge' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/login/two-factor:
+    post:
+      tags: [Authentication]
+      operationId: adminLoginSecondFactor
+      summary: Finish a sign-in with an authenticator code or a recovery code.
+      description: |
+        Send exactly one of `code` or `recovery_code`. A challenge lasts five
+        minutes and ends after five wrong codes; wrong codes are also limited
+        per administrator across challenges. Authenticator codes work once.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecondFactorRequest' }
       responses:
         '200':
           description: Authenticated administrator session.
@@ -231,6 +267,93 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor:
+    get:
+      tags: [Authentication]
+      operationId: getOwnTwoFactorStatus
+      summary: Report the signed-in administrator's second factor.
+      responses:
+        '200':
+          description: Second-factor status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TwoFactorStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/totp:
+    post:
+      tags: [Authentication]
+      operationId: startTotpEnrollment
+      summary: Start setting up an authenticator app.
+      description: |
+        Console sessions only. Returns a new key and its `otpauth://` link
+        once; the key is sealed server-side and unusable until confirmed.
+        Replaces an earlier unconfirmed key; refuses while a confirmed one
+        exists.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enrollment key, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TotpEnrollment' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/totp/confirm:
+    post:
+      tags: [Authentication]
+      operationId: confirmTotpEnrollment
+      summary: Confirm the authenticator with a current code and receive recovery codes.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TotpCodeRequest' }
+      responses:
+        '200':
+          description: Two-factor sign-in is on; ten single-use recovery codes, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodes' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/recovery-codes:
+    post:
+      tags: [Authentication]
+      operationId: replaceRecoveryCodes
+      summary: Replace every recovery code after checking a current authenticator code.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TotpCodeRequest' }
+      responses:
+        '200':
+          description: New recovery codes, shown once; earlier codes stop working.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodes' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/disable:
+    post:
+      tags: [Authentication]
+      operationId: disableOwnTwoFactor
+      summary: Turn off two-factor sign-in with the password and a current code.
+      description: Refused with `conflict` while any organization the administrator belongs to requires two-factor sign-in.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisableTwoFactorRequest' }
+      responses:
+        '204': { description: Authenticator and recovery codes removed. }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/organizations:
     get:
@@ -832,6 +955,50 @@ paths:
       responses:
         '200':
           description: Enabled administrator membership. Revoked credentials remain revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/two-factor-requirement:
+    put:
+      tags: [Organizations]
+      operationId: setOrganizationTwoFactorRequirement
+      summary: Require, or stop requiring, a second factor for every member.
+      description: |
+        Requires `manage_owners` in that organization. While required, a
+        member's console session without a confirmed second factor may only
+        set one up, change its password, read its session and system status,
+        and sign out. API tokens are not affected.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TwoFactorRequirement' }
+      responses:
+        '200':
+          description: Requirement saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TwoFactorRequirement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/reset-two-factor:
+    post:
+      tags: [Administrators]
+      operationId: resetAdministratorTwoFactor
+      summary: Remove a member's authenticator and recovery codes and end their sessions.
+      description: |
+        Requires `manage_owners`. Like a password reset it is refused when the
+        member also belongs to another organization, because the second
+        factor is global to the account.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Second factor removed.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Administrator' }
@@ -1833,6 +2000,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/AdminSessionID' }
+    OrganizationIDPath:
+      name: organizationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/OrganizationID' }
     UserID:
       name: userId
       in: path
@@ -1990,7 +2162,7 @@ components:
     AdminSession:
       type: object
       additionalProperties: false
-      required: [administrator, organization_id, memberships, capabilities, expires_at, password_reset_required]
+      required: [administrator, organization_id, memberships, capabilities, expires_at, password_reset_required, two_factor_enrollment_required]
       properties:
         administrator:
           type: object
@@ -2005,6 +2177,9 @@ components:
         password_reset_required:
           type: boolean
           description: True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes.
+        two_factor_enrollment_required:
+          type: boolean
+          description: True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed.
         memberships:
           type: array
           items:
@@ -2466,6 +2641,7 @@ components:
         - role
         - status
         - password_reset_required
+        - two_factor_enabled
         - created_at
         - updated_at
       properties:
@@ -2477,6 +2653,7 @@ components:
         role: { $ref: '#/components/schemas/AdministratorRole' }
         status: { type: string, enum: [active, disabled] }
         password_reset_required: { type: boolean }
+        two_factor_enabled: { type: boolean, description: True when the account has a confirmed authenticator. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         disabled_at: { type: string, format: date-time }
@@ -2512,7 +2689,7 @@ components:
       pattern: '^[A-Za-z0-9 .()/-]{1,80}$'
     SessionEndReason:
       type: string
-      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, other]
+      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, two_factor_reset, other]
     OwnAdminSession:
       type: object
       additionalProperties: false
@@ -2552,6 +2729,71 @@ components:
       required: [organization_id]
       properties:
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    SecondFactorChallenge:
+      type: object
+      additionalProperties: false
+      required: [status, challenge, expires_at, methods]
+      properties:
+        status: { type: string, const: two_factor_required }
+        challenge: { type: string, pattern: '^lwsic_[A-Za-z0-9_-]{43}$', writeOnly: false }
+        expires_at: { type: string, format: date-time }
+        methods:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [totp, recovery_code] }
+    SecondFactorRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge]
+      properties:
+        challenge: { type: string, minLength: 16, maxLength: 128 }
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+        recovery_code: { type: string, minLength: 1, maxLength: 64, writeOnly: true }
+    TwoFactorStatus:
+      type: object
+      additionalProperties: false
+      required: [totp_enabled, recovery_codes_remaining, required_by_organization]
+      properties:
+        totp_enabled: { type: boolean }
+        totp_enabled_at: { type: string, format: date-time }
+        recovery_codes_remaining: { type: integer, minimum: 0, maximum: 10 }
+        required_by_organization: { type: boolean }
+    TotpEnrollment:
+      type: object
+      additionalProperties: false
+      required: [secret, uri]
+      properties:
+        secret: { type: string, pattern: '^[A-Z2-7]{32}$', description: Base32 key for manual entry; shown once. }
+        uri: { type: string, pattern: '^otpauth://totp/', description: otpauth link with the same key; shown once. }
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+    RecoveryCodes:
+      type: object
+      additionalProperties: false
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items: { type: string, pattern: '^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$' }
+    DisableTwoFactorRequest:
+      type: object
+      additionalProperties: false
+      required: [password, code]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+    TwoFactorRequirement:
+      type: object
+      additionalProperties: false
+      required: [required]
+      properties:
+        required: { type: boolean }
     AdminSignInInfo:
       type: object
       additionalProperties: false
@@ -3534,8 +3776,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 15
-          maxItems: 15
+          minItems: 16
+          maxItems: 16
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -3553,6 +3795,7 @@ components:
             - { const: admin_session_management }
             - { const: admin_event_stream }
             - { const: admin_account_self_service }
+            - { const: admin_two_factor }
           items: false
     DoctorCheck:
       type: object

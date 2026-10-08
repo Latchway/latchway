@@ -223,7 +223,10 @@ type Principal struct {
 	// PasswordResetRequired marks a session whose administrator must choose a
 	// new password before using anything but sign-out and the password change.
 	PasswordResetRequired bool
-	scope                 *CapabilitySet
+	// TwoFactorEnrollmentRequired marks a session in an organization that
+	// requires a second factor the administrator hasn't set up yet.
+	TwoFactorEnrollmentRequired bool
+	scope                       *CapabilitySet
 }
 
 // Allows evaluates membership role and optional API-token scope.

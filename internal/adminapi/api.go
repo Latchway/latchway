@@ -47,6 +47,7 @@ type API struct {
 	configurations  *configuration.Store
 	overrides       *useroverride.Store
 	secretManager   secretManager
+	factors         factorSealer
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -203,6 +204,7 @@ func (api *API) Handler() http.Handler {
 	router.Use(api.auditMetadata)
 	router.Post("/auth/bootstrap", api.bootstrap)
 	router.Post("/auth/login", api.login)
+	router.Post("/auth/login/two-factor", api.loginSecondFactor)
 	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
@@ -213,6 +215,12 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/auth/sessions", api.ownSessions)
 		protected.With(api.mutationProtection).Post("/auth/sessions/revoke-others", api.revokeOtherOwnSessions)
 		protected.With(api.mutationProtection).Post("/auth/sessions/{adminSessionID}/revoke", api.revokeOwnSession)
+		protected.Get("/auth/two-factor", api.twoFactorStatus)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/totp", api.startTOTPEnrollment)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/totp/confirm", api.confirmTOTPEnrollment)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/recovery-codes", api.replaceRecoveryCodes)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/disable", api.disableTwoFactor)
+		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/two-factor-requirement", api.setTwoFactorRequirement)
 		protected.Get("/organizations", api.organizations)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
@@ -246,6 +254,7 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/disable", api.disableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/enable", api.enableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-password", api.resetAdministratorPassword)
+		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-two-factor", api.resetAdministratorTwoFactor)
 		protected.Get("/admin-sessions", api.adminSessions)
 		protected.With(api.mutationProtection).Post("/admin-sessions/{adminSessionID}/revoke", api.revokeManagedAdminSession)
 		protected.Get("/users", api.users)
@@ -429,28 +438,34 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
 		return
 	}
+	api.loginLimiter.success(key)
+	deviceSummary := adminauth.DeviceSummaryFromUserAgent(r.UserAgent())
+	factors, err := api.auth.TwoFactorStatus(r.Context(), adminUserID, "")
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	if factors.TOTPConfirmed {
+		// The password was right; the session waits for the second factor.
+		challenge, expiresAt, err := api.auth.CreateSignInChallenge(r.Context(), adminauth.SignInChallenge{
+			AdminUserID: adminUserID, OrganizationID: membership.OrganizationID, DeviceSummary: deviceSummary,
+		}, signInChallengeLifetime)
+		if err != nil {
+			api.internal(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status": "two_factor_required", "challenge": challenge, "expires_at": expiresAt,
+			"methods": []string{"totp", "recovery_code"},
+		})
+		return
+	}
 	auditRequestID, err := id.New(id.AdminRequest)
 	if err != nil {
 		api.internal(w, r, err)
 		return
 	}
-	issued, err := api.auth.CreateSession(r.Context(), adminauth.CreateSessionInput{
-		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
-		Lifetime: api.sessionLifetime, RequestID: auditRequestID,
-		DeviceSummary: adminauth.DeviceSummaryFromUserAgent(r.UserAgent()),
-	})
-	if err != nil {
-		api.internal(w, r, err)
-		return
-	}
-	api.loginLimiter.success(key)
-	api.setSession(w, issued)
-	writeJSON(w, http.StatusOK, api.sessionDocument(view, adminauth.Principal{
-		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
-		Role: membership.Role, Method: adminauth.AuthenticationSession,
-		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
-		PasswordResetRequired: signIn.PasswordResetRequired,
-	}))
+	api.issueSignInSession(w, r, view, membership, deviceSummary, auditRequestID)
 }
 
 func (api *API) session(w http.ResponseWriter, r *http.Request) {
@@ -1028,6 +1043,10 @@ func (api *API) authenticate(next http.Handler) http.Handler {
 			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Choose a new password before using the console."})
 			return
 		}
+		if principal.TwoFactorEnrollmentRequired && !twoFactorEnrollmentAllows(r) {
+			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "This organization requires two-factor sign-in. Set it up before using the console."})
+			return
+		}
 		auditContext, auditErr := adminauth.ResolveAuditMetadata(r.Context(), principal.Method)
 		if auditErr != nil {
 			api.internal(w, r, auditErr)
@@ -1092,7 +1111,8 @@ func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth
 		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true, "display_name": view.DisplayName},
 		"organization_id": principal.OrganizationID, "memberships": view.Memberships,
 		"capabilities": capabilities, "expires_at": expiresAt,
-		"password_reset_required": principal.PasswordResetRequired,
+		"password_reset_required":        principal.PasswordResetRequired,
+		"two_factor_enrollment_required": principal.TwoFactorEnrollmentRequired,
 	}
 }
 
@@ -1430,6 +1450,24 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.bootstrap_owner", "admin_request"
 	case strings.HasSuffix(path, "/auth/login"):
 		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/login/two-factor"):
+		return "admin.login_second_factor", "admin_request"
+	case strings.HasSuffix(path, "/auth/password"):
+		return "admin.password_change", "admin_request"
+	case strings.HasSuffix(path, "/auth/organization"):
+		return "admin.session_switch", "admin_request"
+	case strings.Contains(path, "/auth/sessions/"):
+		return "admin.session_revoke", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/totp") || strings.HasSuffix(path, "/auth/two-factor/totp/confirm"):
+		return "admin.two_factor_enable", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/recovery-codes"):
+		return "admin.recovery_codes_replace", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/disable"):
+		return "admin.two_factor_disable", "admin_request"
+	case strings.HasSuffix(path, "/reset-two-factor"):
+		return "admin.two_factor_reset", "admin_request"
+	case strings.HasSuffix(path, "/two-factor-requirement"):
+		return "admin.organization_security_update", "admin_request"
 	case strings.HasSuffix(path, "/auth/logout"):
 		return "admin.logout", "admin_request"
 	case strings.HasSuffix(path, "/organizations"):

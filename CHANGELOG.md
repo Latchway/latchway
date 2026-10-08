@@ -12,6 +12,10 @@ All notable project changes will be documented here. The format follows [Keep a 
   and see why a console session ended. Owners can list every administrator's
   API tokens with their last use, and session lists show a coarse device
   summary. `GET /admin/v1/auth/info` reports what the sign-in screen needs.
+- Two-factor sign-in for administrators (ADR 0041, `admin_two_factor`): TOTP
+  authenticator apps with single-use recovery codes, a `202` second-factor step
+  at sign-in, an organization setting that requires it, and owner resets
+  (also `latchway admin accounts reset-two-factor`).
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.

@@ -24,6 +24,7 @@ import { TeamRouteSearchSchema } from "../../app/route-search";
 import { useOptionalWorkspace } from "../../app/workspace-context-value";
 import { PasswordField } from "../../components/password-field";
 import { takePassword } from "../../components/password-value";
+import { resetMemberTwoFactor } from "../../api/account";
 import {
   Badge,
   Button,
@@ -200,7 +201,7 @@ function AddMemberDrawer({ existing, onClose, onCreated }: { existing: readonly 
   );
 }
 
-type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "signout"; session: AdminSessionMetadata };
+type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "reset2fa" } | { kind: "signout"; session: AdminSessionMetadata };
 
 function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { activeOwners: number; member: Administrator; onClose: () => void; onUpdated: () => Promise<void>; sessions: readonly AdminSessionMetadata[] }) {
   const me = useMe();
@@ -245,8 +246,9 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
         if (secret.length < 12) throw new Error("The new password needs at least 12 characters.");
         await adminRequest(`/admin/v1/administrators/${member.id}/reset-password`, AdministratorSchema, { body: { password: secret }, method: "POST" });
       }
+      if (action.kind === "reset2fa") await resetMemberTwoFactor(member.id);
       if (action.kind === "signout") await adminRequest(`/admin/v1/admin-sessions/${action.session.id}/revoke`, z.undefined(), { method: "POST" });
-      setNotice(action.kind === "role" ? `${member.display_name} is now ${ROLE_LABEL[action.role]}.` : action.kind === "disable" ? `${member.display_name} is disabled; their sessions and API tokens were revoked.` : action.kind === "enable" ? `${member.display_name} can sign in again. Revoked sessions and tokens stay revoked.` : action.kind === "reset" ? "Password replaced. Share it privately; their sessions and API tokens were revoked." : "Session signed out.");
+      setNotice(action.kind === "reset2fa" ? `${member.display_name}'s two-factor sign-in was removed and their sessions here ended.` : action.kind === "role" ? `${member.display_name} is now ${ROLE_LABEL[action.role]}.` : action.kind === "disable" ? `${member.display_name} is disabled; their sessions and API tokens were revoked.` : action.kind === "enable" ? `${member.display_name} can sign in again. Revoked sessions and tokens stay revoked.` : action.kind === "reset" ? "Password replaced. Share it privately; their sessions and API tokens were revoked." : "Session signed out.");
       setAction(undefined);
       await onUpdated();
     } catch (failure) {
@@ -269,6 +271,7 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
         actions={canEdit ? <>
           {disabled ? <Button onClick={() => open({ kind: "enable" })} size="sm">Enable</Button> : <Button destructive disabled={lastOwner} onClick={() => open({ kind: "disable" })} size="sm" title={lastOwner ? "The last active owner can't be disabled" : undefined}>Disable</Button>}
           <Button disabled={disabled} onClick={() => open({ kind: "reset" })} size="sm">Reset Password</Button>
+          {member.two_factor_enabled ? <Button onClick={() => open({ kind: "reset2fa" })} size="sm">Reset Two-Factor</Button> : null}
         </> : undefined}
         className="lw-request-drawer"
         onClose={onClose}
@@ -283,6 +286,7 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
           <Properties columns={2} items={[
             { label: "Email", value: member.email },
             { label: "Role", value: ROLE_LABEL[member.role] },
+            ...(member.two_factor_enabled === undefined ? [] : [{ label: "Two-factor", value: member.two_factor_enabled ? "On" : "Off" }]),
             { label: "Added", value: when(member.created_at) },
             { label: "Updated", value: when(member.updated_at) },
             { label: "Member ID", value: <span className="lw-mono lw-mono--sm">{member.id}</span> }
@@ -308,20 +312,20 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
               </ul>
             ) : <p className="lw-secondary lw-note">No active console sessions.</p>}
           </div>
-          <p className="lw-secondary lw-note">API tokens are listed only to the member who created them; the Admin API has no team-wide token list.</p>
+          <p className="lw-secondary lw-note">Their API tokens are under Team › API tokens › Everyone.</p>
         </div>
       </DetailPanel>
       {action && canEdit ? (
         <ConfirmDialog
           confirmDisabled={(action.kind === "disable" || (action.kind === "role" && change.loses.length > 0)) ? typed !== member.email || !acknowledged : action.kind === "reset" ? !acknowledged : false}
-          confirmLabel={action.kind === "role" ? `Change to ${ROLE_LABEL[action.role]}` : action.kind === "disable" ? "Disable" : action.kind === "enable" ? "Enable" : action.kind === "reset" ? "Reset Password" : "Sign Out"}
-          description={action.kind === "role" ? "It applies at once, in every application and environment." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
+          confirmLabel={action.kind === "role" ? `Change to ${ROLE_LABEL[action.role]}` : action.kind === "disable" ? "Disable" : action.kind === "enable" ? "Enable" : action.kind === "reset" ? "Reset Password" : action.kind === "reset2fa" ? "Reset Two-Factor" : "Sign Out"}
+          description={action.kind === "role" ? "It applies at once, in every application and environment." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.kind === "reset2fa" ? "Their authenticator and recovery codes are removed and their console sessions here end. They sign in with just their password, and set it up again if this organization requires it. Do this only after confirming who's asking." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
           destructive={action.kind !== "enable"}
           onCancel={() => setAction(undefined)}
           onConfirm={() => void run()}
           pending={busy}
           size="wide"
-          title={action.kind === "role" ? `Change ${member.display_name} to ${ROLE_LABEL[action.role]}?` : action.kind === "disable" ? `Disable ${member.display_name}?` : action.kind === "enable" ? `Enable ${member.display_name}?` : action.kind === "reset" ? `Reset ${member.display_name}'s password?` : "Sign out this session?"}
+          title={action.kind === "role" ? `Change ${member.display_name} to ${ROLE_LABEL[action.role]}?` : action.kind === "disable" ? `Disable ${member.display_name}?` : action.kind === "enable" ? `Enable ${member.display_name}?` : action.kind === "reset" ? `Reset ${member.display_name}'s password?` : action.kind === "reset2fa" ? `Reset ${member.display_name}'s two-factor sign-in?` : "Sign out this session?"}
         >
           {action.kind === "role" ? <CapabilityList from={member.role} to={action.role} /> : null}
           {action.kind === "disable" ? <p className="lw-note">Active console sessions: <strong>{theirSessions.length}</strong>.</p> : null}
@@ -366,6 +370,7 @@ function MembersView() {
     { header: "Member", key: "member", render: (member) => <span className="lw-rq-model"><span>{member.display_name}{member.id === me.id ? <span className="lw-faint"> (you)</span> : null}</span><span className="lw-faint">{member.email}</span></span> },
     { header: "Role", key: "role", render: (member) => <Badge color={member.role === "owner" ? "accent" : undefined} variant="soft">{ROLE_LABEL[member.role]}</Badge> },
     { header: "Status", key: "status", render: statusBadge },
+    { header: "Two-factor", key: "two-factor", render: (member) => member.two_factor_enabled === undefined ? <span className="lw-faint">—</span> : member.two_factor_enabled ? <Badge color="success" variant="soft">On</Badge> : <span className="lw-note lw-secondary">Off</span> },
     { header: "Added", key: "added", render: (member) => <span className="lw-note">{new Date(member.created_at).toLocaleDateString()}</span> }
   ];
 

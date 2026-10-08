@@ -21,6 +21,7 @@ type administratorCLI struct {
 	Role                  string  `json:"role"`
 	Status                string  `json:"status"`
 	PasswordResetRequired bool    `json:"password_reset_required"`
+	TwoFactorEnabled      bool    `json:"two_factor_enabled"`
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
 	DisabledAt            *string `json:"disabled_at,omitempty"`
@@ -52,6 +53,7 @@ func newAdminAccountsCommand(opts *options) *cobra.Command {
 		newAdminAccountStatusCommand(opts, values, false),
 		newAdminAccountStatusCommand(opts, values, true),
 		newAdminAccountResetCommand(opts, values),
+		newAdminAccountResetTwoFactorCommand(opts, values),
 	)
 	return command
 }
@@ -204,6 +206,28 @@ func newAdminAccountResetCommand(opts *options, root *controlCommandOptions) *co
 	return command
 }
 
+func newAdminAccountResetTwoFactorCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset-two-factor ADMIN_USER_ID",
+		Short: "Remove an administrator's authenticator and recovery codes and end their console sessions",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.AdminUser) != nil {
+				return errors.New("administrator ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var administrator administratorCLI
+			if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/administrators/"+args[0]+"/reset-two-factor", nil, nil, http.StatusOK, &administrator); err != nil {
+				return err
+			}
+			return printAdministrator(opts, administrator)
+		},
+	}
+}
+
 func readAdministratorPassword(command *cobra.Command, values secretValueCLIOptions) ([]byte, error) {
 	password, err := readSecretValue(command, values)
 	if err != nil {
@@ -242,10 +266,11 @@ func printAdministrators(opts *options, page administratorPageCLI) error {
 	for _, administrator := range page.Items {
 		rows = append(rows, []string{
 			administrator.ID, administrator.Email, administrator.DisplayName,
-			administrator.Role, administrator.Status, formatControlTime(administrator.UpdatedAt),
+			administrator.Role, administrator.Status, boolLabel(administrator.TwoFactorEnabled),
+			formatControlTime(administrator.UpdatedAt),
 		})
 	}
-	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "UPDATED"}, rows); err != nil {
+	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "TWO-FACTOR", "UPDATED"}, rows); err != nil {
 		return err
 	}
 	if page.Page.HasMore {

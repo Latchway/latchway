@@ -442,6 +442,70 @@ describe("AppShell", () => {
     expect(screen.queryByDisplayValue("test-only-chosen-password")).not.toBeInTheDocument();
   });
 
+  it("finishes a two-factor sign-in with an authenticator code", async () => {
+    const user = userEvent.setup();
+    let signedIn = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedIn ? json(adminSession) : signedOutResponse();
+      if (url === "/admin/v1/auth/login") return json({ challenge: `lwsic_${"a".repeat(43)}`, expires_at: "2026-10-08T10:05:00Z", methods: ["totp", "recovery_code"], status: "two_factor_required" }, 202);
+      if (url === "/admin/v1/auth/login/two-factor") {
+        expect(JSON.parse(String(init?.body))).toEqual({ challenge: `lwsic_${"a".repeat(43)}`, code: "123456" });
+        signedIn = true;
+        return json(adminSession, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole("/applications");
+
+    await screen.findByRole("heading", { name: "Sign in to Latchway" });
+    await user.type(screen.getByLabelText("Email address"), "owner@example.test");
+    await user.type(screen.getByLabelText("Password", { exact: true }), "test-only-login-password");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Verify it's you" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("test-only-login-password")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use a recovery code" }));
+    expect(screen.getByLabelText("Recovery code")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use an authentication code" }));
+    await user.type(screen.getByLabelText("Authentication code"), "123456");
+    await user.click(screen.getByRole("button", { name: "Verify" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+  });
+
+  it("requires setting up two-factor before the console when the organization requires it", async () => {
+    const user = userEvent.setup();
+    let enrolled = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return json({ ...adminSession, two_factor_enrollment_required: !enrolled });
+      if (url === "/admin/v1/auth/two-factor/totp") return json({ secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", uri: "otpauth://totp/Latchway%20%28localhost%29:owner@example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Latchway" });
+      if (url === "/admin/v1/auth/two-factor/totp/confirm") {
+        expect(init?.body).toBe(JSON.stringify({ code: "654321" }));
+        enrolled = true;
+        return json({ recovery_codes: Array.from({ length: 10 }, (_, index) => `aaaa-bbbb-ccc${String.fromCharCode(97 + index)}`) });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    document.cookie = "__Host-latchway_csrf=test-only-csrf-token-0123456789abcdef";
+    renderConsole("/applications");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Set up two-factor sign-in" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set Up Authenticator" }));
+    expect(await screen.findByRole("img", { name: "QR code for your authenticator app" })).toBeInTheDocument();
+    expect(screen.getByText("JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Authentication code"), "654321");
+    await user.click(screen.getByRole("button", { name: "Turn On Two-Factor" }));
+    const reveal = await screen.findByRole("alertdialog", { name: "Save your recovery codes" });
+    expect(within(reveal).getByText("aaaa-bbbb-ccca")).toBeInTheDocument();
+    expect(within(reveal).getByRole("button", { name: "Done" })).toBeDisabled();
+    await user.click(within(reveal).getByRole("checkbox"));
+    await user.click(within(reveal).getByRole("button", { name: "Done" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+    expect(screen.queryByText("JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP")).not.toBeInTheDocument();
+  });
+
   it("explains why a session ended on the sign-in screen", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestURL(input);

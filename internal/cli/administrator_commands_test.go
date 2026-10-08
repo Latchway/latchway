@@ -46,6 +46,10 @@ func TestAdministratorCommandsUseCanonicalAPIWithoutPrintingCredentials(t *testi
 		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/administrators/"+adminUserID+"/disable":
 			status = "disabled"
 		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/administrators/"+adminUserID+"/enable":
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/administrators/"+adminUserID+"/reset-two-factor":
+			if request.ContentLength > 0 {
+				t.Fatal("two-factor reset sent a body")
+			}
 		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/administrators/"+adminUserID+"/reset-password":
 			var document map[string]string
 			if err := json.NewDecoder(request.Body).Decode(&document); err != nil {
@@ -57,7 +61,7 @@ func TestAdministratorCommandsUseCanonicalAPIWithoutPrintingCredentials(t *testi
 		default:
 			t.Fatalf("unexpected administrator request %s %s", request.Method, request.URL.Path)
 		}
-		body := `{"id":"` + adminUserID + `","membership_id":"` + membershipID + `","organization_id":"` + organizationID + `","email":"operator@example.test","display_name":"Operator","role":"` + role + `","status":"` + status + `","password_reset_required":false,"created_at":"` + instant + `","updated_at":"` + instant + `"}`
+		body := `{"id":"` + adminUserID + `","membership_id":"` + membershipID + `","organization_id":"` + organizationID + `","email":"operator@example.test","display_name":"Operator","role":"` + role + `","status":"` + status + `","password_reset_required":false,"two_factor_enabled":true,"created_at":"` + instant + `","updated_at":"` + instant + `"}`
 		return administratorCLIResponse(request, statusCode, body), nil
 	})}
 
@@ -71,6 +75,7 @@ func TestAdministratorCommandsUseCanonicalAPIWithoutPrintingCredentials(t *testi
 		append(append([]string{}, base...), "role", adminUserID, "--role", "operator"),
 		append(append([]string{}, base...), "disable", adminUserID),
 		append(append([]string{}, base...), "enable", adminUserID),
+		append(append([]string{}, base...), "reset-two-factor", adminUserID),
 	}
 	for _, args := range commands {
 		if err := executeWithOptions(context.Background(), args, opts); err != nil {
@@ -81,7 +86,7 @@ func TestAdministratorCommandsUseCanonicalAPIWithoutPrintingCredentials(t *testi
 	if err := executeWithOptions(context.Background(), append(append([]string{}, base...), "reset-password", adminUserID, "--from-stdin"), opts); err != nil {
 		t.Fatalf("reset-password: %v", err)
 	}
-	if requests != 6 {
+	if requests != 7 {
 		t.Fatalf("administrator request count=%d", requests)
 	}
 	output := stdout.String() + stderr.String()

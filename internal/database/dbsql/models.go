@@ -64,6 +64,14 @@ type AdminPasswordCredential struct {
 	ResetByAdminUserID *string            `db:"reset_by_admin_user_id" json:"reset_by_admin_user_id"`
 }
 
+// Hashed single-use administrator recovery codes.
+type AdminRecoveryCode struct {
+	AdminUserID string             `db:"admin_user_id" json:"admin_user_id"`
+	CodeHash    []byte             `db:"code_hash" json:"code_hash"`
+	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UsedAt      pgtype.Timestamptz `db:"used_at" json:"used_at"`
+}
+
 type AdminSession struct {
 	AdminSessionID string             `db:"admin_session_id" json:"admin_session_id"`
 	OrganizationID string             `db:"organization_id" json:"organization_id"`
@@ -78,6 +86,29 @@ type AdminSession struct {
 	RevokeReason   *string            `db:"revoke_reason" json:"revoke_reason"`
 	// Coarse browser and operating-system summary for the session owner and owners; never a raw User-Agent or network address.
 	DeviceSummary *string `db:"device_summary" json:"device_summary"`
+}
+
+// Pending second-factor sign-ins after a correct password; hashed, short-lived and attempt-bounded.
+type AdminSignInChallenge struct {
+	ChallengeHash  []byte             `db:"challenge_hash" json:"challenge_hash"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	DeviceSummary  *string            `db:"device_summary" json:"device_summary"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	FailedAttempts int16              `db:"failed_attempts" json:"failed_attempts"`
+	ConsumedAt     pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+}
+
+// Sealed administrator authenticator keys; plaintext keys are never stored.
+type AdminTotpFactor struct {
+	AdminUserID  string             `db:"admin_user_id" json:"admin_user_id"`
+	KeyID        string             `db:"key_id" json:"key_id"`
+	Nonce        []byte             `db:"nonce" json:"nonce"`
+	Ciphertext   []byte             `db:"ciphertext" json:"ciphertext"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ConfirmedAt  pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
+	LastUsedStep *int64             `db:"last_used_step" json:"last_used_step"`
 }
 
 type AdminUser struct {
@@ -598,6 +629,8 @@ type Organization struct {
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
+	// When true, members without a confirmed second factor may only enroll one after signing in.
+	RequireTwoFactor bool `db:"require_two_factor" json:"require_two_factor"`
 }
 
 type QuotaBucket struct {

@@ -6,10 +6,11 @@ import {
   type AdminProblem,
   type AdminSession,
   bootstrapFirstOwner,
+  completeSecondFactor,
   fetchAdminSignInInfo,
-  loginAdministrator,
   logoutAdministrator,
   problemFromError,
+  startAdministratorSignIn,
   switchAdminOrganization
 } from "../../api/auth";
 import { consoleContractVersion } from "../../api/console-compatibility";
@@ -22,10 +23,11 @@ import { AuthProblem, PasswordInput } from "./auth-fields";
 import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
 import { acceptable, passwordStrength, type Strength } from "./password-strength";
+import { type SecondFactorAnswer, SecondFactorForm } from "./second-factor";
 import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
 
-type View = "sign-in" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
+type View = "sign-in" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
 
 /** Failed attempts before the console mentions the server's pause, ahead of the pause itself. */
 const PAUSE_NOTE_AFTER = 3;
@@ -278,6 +280,8 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
   const [created, setCreated] = useState<{ organization: string; session: AdminSession }>();
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+  // The second-factor challenge is short-lived and sensitive, so it lives in a ref, never in rendered state.
+  const challenge = useRef<string | undefined>(undefined);
 
   function show(next: View): void {
     setProblem(undefined);
@@ -308,22 +312,58 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
     setProblem(undefined);
     onHoldChange(true);
     try {
-      const session = await loginAdministrator({ email: address, password });
+      const result = await startAdministratorSignIn({ email: address, password });
       clearInput(passwordRef.current);
       setFailures(0);
-      if (session.memberships.length > 1) {
-        setChosen(session);
+      if (result.kind === "challenge") {
+        challenge.current = result.challenge.challenge;
         setPending(undefined);
-        setView("choose-org");
+        setView("two-factor");
         return;
       }
-      enter(session);
+      afterSignIn(result.session);
     } catch (error) {
       const found = fail(error);
       if (found.code === "rate_limited" && found.retryAfterSeconds) pauseSignIn(address, found.retryAfterSeconds);
       if (found.code === "authentication_required") setFailures((count) => count + 1);
       passwordRef.current?.focus();
     }
+  }
+
+  function afterSignIn(session: AdminSession): void {
+    if (session.memberships.length > 1) {
+      setChosen(session);
+      setPending(undefined);
+      setView("choose-org");
+      return;
+    }
+    enter(session);
+  }
+
+  async function verifySecondFactor(answer: SecondFactorAnswer): Promise<void> {
+    if (!challenge.current) return;
+    setPending("two-factor");
+    setProblem(undefined);
+    try {
+      const session = await completeSecondFactor({ challenge: challenge.current, ...answer });
+      challenge.current = undefined;
+      afterSignIn(session);
+    } catch (error) {
+      const found = problemFromError(error);
+      setPending(undefined);
+      if (found.detail.includes("Sign in again")) {
+        challenge.current = undefined;
+        onHoldChange(false);
+        setView("sign-in");
+      }
+      setProblem(found);
+    }
+  }
+
+  function cancelSecondFactor(): void {
+    challenge.current = undefined;
+    onHoldChange(false);
+    show("sign-in");
   }
 
   async function chooseOrganization(organizationID: string): Promise<void> {
@@ -430,6 +470,12 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
         <AuthLayout description="This server already has an owner, so first-run setup is closed for good. Sign in with your administrator account instead." title="Setup is already done">
           <Button className="lw-auth__submit" onClick={() => show("sign-in")} variant="primary">Go to Sign In</Button>
           <p className="lw-auth__fine">Need an account? Ask an owner to add you from Team › Members.</p>
+        </AuthLayout>
+      );
+    case "two-factor":
+      return (
+        <AuthLayout description={`Two-factor sign-in is on for ${email.trim()}. Enter the code from your authenticator app.`} title="Verify it's you">
+          <SecondFactorForm idPrefix="sign-in" onCancel={cancelSecondFactor} onSubmit={(answer) => void verifySecondFactor(answer)} pending={pending === "two-factor"} problem={problem} />
         </AuthLayout>
       );
     case "choose-org":
