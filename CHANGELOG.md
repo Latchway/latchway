@@ -37,6 +37,11 @@ All notable project changes will be documented here. The format follows [Keep a 
   installation signals, per-user usage, impact previews for installation and
   component actions, and batched user actions that skip anyone who changed
   since the preview. `latchway` family lists show signals.
+- Request search (ADR 0047, `admin_request_search`): requests show their
+  platform and client request ID, can be found by client request ID, report
+  a capped total, and `GET /requests/facets` counts the values behind each
+  filter. `latchway requests list` takes every filter and `--total`, and
+  `latchway requests facets` prints the counts.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.

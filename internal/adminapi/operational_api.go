@@ -248,6 +248,7 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 		"platform", "component_kind", "trust_source", "route", "upstream", "model",
 		"error_code", "request_id", "start", "end", "latency_min_ms", "latency_max_ms",
 		"tokens_min", "tokens_max", "cost_min_nano_usd", "cost_max_nano_usd", "sort",
+		"client_request_id", "include_total",
 	) {
 		api.writeProblem(w, r, invalidRequest("The request-list query is invalid."))
 		return
@@ -262,6 +263,11 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The request-list filters or pagination cursor are invalid."))
 		return
 	}
+	includeTotal, ok := optionalQueryValue(r, "include_total")
+	if !ok || (includeTotal != "" && includeTotal != "true") {
+		api.writeProblem(w, r, invalidRequest("include_total must be true when present."))
+		return
+	}
 	items, err := api.operations.listRequests(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
@@ -270,7 +276,16 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 	items, pageDocument := buildPage(items, int(filter.page.size), func(item logicalRequestDocument) cursorDocument {
 		return cursorDocument{CreatedAt: item.StartedAt, ID: item.ID}
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+	document := map[string]any{"items": items, "page": pageDocument}
+	if includeTotal == "true" {
+		count, capped, err := api.operations.countRequests(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
+		if err != nil {
+			api.handleOperationalError(w, r, err, "")
+			return
+		}
+		document["total"] = map[string]any{"count": count, "capped": capped}
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
@@ -278,10 +293,11 @@ func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
 	if err != nil {
 		return requestListFilter{}, false
 	}
-	values := make(map[string]string, 14)
+	values := make(map[string]string, 15)
 	for _, name := range []string{
 		"status", "feature", "user_id", "platform", "component_kind", "trust_source",
 		"route", "upstream", "model", "error_code", "request_id", "start", "end", "sort",
+		"client_request_id",
 	} {
 		value, ok := optionalQueryValue(r, name)
 		if !ok {
@@ -294,6 +310,7 @@ func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
 		platform: values["platform"], componentKind: values["component_kind"], trustSource: values["trust_source"],
 		route: values["route"], upstream: values["upstream"], model: values["model"],
 		errorCode: values["error_code"], requestID: values["request_id"], sort: values["sort"],
+		clientRequest: values["client_request_id"],
 	}
 	if filter.sort == "" {
 		filter.sort = "started_at_desc"

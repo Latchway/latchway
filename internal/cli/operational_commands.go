@@ -24,7 +24,10 @@ type controlCommandOptions struct {
 	tokenEnvironment string
 }
 
-var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+var (
+	operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	clientRequestIDPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
+)
 var operationalFailurePatternCLI = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
 var operationalImpactTokenPatternCLI = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var operationalDecimalPatternCLI = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
@@ -32,6 +35,11 @@ var operationalDecimalPatternCLI = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
 type pageInfoCLI struct {
 	HasMore    bool   `json:"has_more"`
 	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+type listTotalCLI struct {
+	Count  json.Number `json:"count"`
+	Capped bool        `json:"capped"`
 }
 
 type applicationUserCLI struct {
@@ -227,6 +235,8 @@ type logicalRequestCLI struct {
 	Framework             string                    `json:"framework,omitempty"`
 	FrameworkVersion      string                    `json:"framework_version,omitempty"`
 	CallerSDK             string                    `json:"caller_sdk,omitempty"`
+	Platform              string                    `json:"platform,omitempty"`
+	ClientRequestID       string                    `json:"client_request_id,omitempty"`
 	ConfigRevisionID      string                    `json:"config_revision_id"`
 	SelectedLimitPlan     string                    `json:"selected_limit_plan"`
 	SelectedRoute         string                    `json:"selected_route,omitempty"`
@@ -274,6 +284,25 @@ type effectiveConfigurationCLI struct {
 type logicalRequestPageCLI struct {
 	Items []logicalRequestCLI `json:"items"`
 	Page  pageInfoCLI         `json:"page"`
+	Total *listTotalCLI       `json:"total,omitempty"`
+}
+
+type requestFacetValueCLI struct {
+	Value string      `json:"value"`
+	Count json.Number `json:"count"`
+}
+
+type requestFacetCLI struct {
+	Values    []requestFacetValueCLI `json:"values"`
+	Truncated bool                   `json:"truncated"`
+}
+
+type requestFacetsCLI struct {
+	EnvironmentID string                     `json:"environment_id"`
+	Start         string                     `json:"start"`
+	End           string                     `json:"end"`
+	Requests      json.Number                `json:"requests"`
+	Facets        map[string]requestFacetCLI `json:"facets"`
 }
 
 type usageSummaryCLI struct {
@@ -457,6 +486,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_invitations",
 	"admin_application_roles",
 	"admin_user_insights",
+	"admin_request_search",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {
@@ -813,7 +843,7 @@ func newRequestsCommand(opts *options) *cobra.Command {
 	addControlTokenFlag(command, values)
 	command.AddCommand(
 		newRequestsListCommand(opts, values), newRequestsInspectCommand(opts, values),
-		newRequestsEffectiveCommand(opts, values),
+		newRequestsEffectiveCommand(opts, values), newRequestsFacetsCommand(opts, values),
 	)
 	return command
 }
@@ -821,6 +851,8 @@ func newRequestsCommand(opts *options) *cobra.Command {
 func newRequestsListCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	var environmentID, cursor string
 	var pageSize int
+	var total bool
+	filters := &requestListFlags{}
 	command := &cobra.Command{
 		Use: "list", Short: "List logical requests without prompt or response bodies", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -830,6 +862,12 @@ func newRequestsListCommand(opts *options, root *controlCommandOptions) *cobra.C
 			query, err := pageQuery(environmentID, cursor, pageSize)
 			if err != nil {
 				return err
+			}
+			if err := filters.apply(cmd, query); err != nil {
+				return err
+			}
+			if total {
+				query.Set("include_total", "true")
 			}
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
@@ -844,12 +882,201 @@ func newRequestsListCommand(opts *options, root *controlCommandOptions) *cobra.C
 					return errors.New("admin API returned a non-conforming request document")
 				}
 			}
+			if (page.Total != nil) != total || page.Total != nil && !validListTotalCLI(*page.Total) {
+				return errors.New("admin API returned a non-conforming request total")
+			}
 			return printRequests(opts, page)
 		},
 	}
 	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
 	command.Flags().StringVar(&cursor, "cursor", "", "opaque next-page cursor")
 	command.Flags().IntVar(&pageSize, "page-size", 50, "number of requests to return (1-200)")
+	command.Flags().BoolVar(&total, "total", false, "also count every match (capped at 100,000)")
+	filters.register(command)
+	_ = command.MarkFlagRequired("environment")
+	return command
+}
+
+// requestListFlags mirrors the request-list filters of GET /admin/v1/requests.
+type requestListFlags struct {
+	status, feature, userID, platform, componentKind, trustSource  string
+	route, upstream, model, errorCode, clientRequestID, start, end string
+	requestID, sort                                                string
+	latencyMin, latencyMax, tokensMin, tokensMax, costMin, costMax int64
+}
+
+func (flags *requestListFlags) register(command *cobra.Command) {
+	set := command.Flags()
+	set.StringVar(&flags.status, "status", "", "outcome: succeeded, failed, denied, canceled or unknown")
+	set.StringVar(&flags.feature, "feature", "", "feature key")
+	set.StringVar(&flags.userID, "user", "", "application user ID")
+	set.StringVar(&flags.platform, "platform", "", "installation platform")
+	set.StringVar(&flags.componentKind, "component-kind", "", "client component kind")
+	set.StringVar(&flags.trustSource, "trust-source", "", "component trust source")
+	set.StringVar(&flags.route, "route", "", "route key, selected or attempted")
+	set.StringVar(&flags.upstream, "upstream", "", "AI connection key, selected or attempted")
+	set.StringVar(&flags.model, "model", "", "model key or exact provider model")
+	set.StringVar(&flags.errorCode, "error-code", "", "public failure code")
+	set.StringVar(&flags.clientRequestID, "client-request-id", "", "correlation ID the client sent")
+	set.StringVar(&flags.requestID, "request-id", "", "logical request ID")
+	set.StringVar(&flags.start, "start", "", "inclusive RFC 3339 lower bound for request start")
+	set.StringVar(&flags.end, "end", "", "exclusive RFC 3339 upper bound for request start")
+	set.StringVar(&flags.sort, "sort", "", "started_at_desc (default) or started_at_asc")
+	set.Int64Var(&flags.latencyMin, "latency-min-ms", 0, "minimum duration in milliseconds")
+	set.Int64Var(&flags.latencyMax, "latency-max-ms", 0, "maximum duration in milliseconds")
+	set.Int64Var(&flags.tokensMin, "tokens-min", 0, "minimum total tokens")
+	set.Int64Var(&flags.tokensMax, "tokens-max", 0, "maximum total tokens")
+	set.Int64Var(&flags.costMin, "cost-min-nano-usd", 0, "minimum cost in nano-USD")
+	set.Int64Var(&flags.costMax, "cost-max-nano-usd", 0, "maximum cost in nano-USD")
+}
+
+// apply validates each set filter locally and adds it to query; the server
+// validates again.
+func (flags *requestListFlags) apply(command *cobra.Command, query url.Values) error {
+	identifiers := []struct{ name, value string }{
+		{"feature", flags.feature}, {"component_kind", flags.componentKind},
+		{"trust_source", flags.trustSource}, {"route", flags.route}, {"upstream", flags.upstream},
+	}
+	for _, item := range identifiers {
+		if item.value == "" {
+			continue
+		}
+		if !operationalIdentifierPattern.MatchString(item.value) {
+			return fmt.Errorf("--%s is not a valid key", strings.ReplaceAll(item.name, "_", "-"))
+		}
+		query.Set(item.name, item.value)
+	}
+	if flags.status != "" {
+		if !slices.Contains([]string{"succeeded", "failed", "denied", "canceled", "unknown"}, flags.status) {
+			return errors.New("--status must be succeeded, failed, denied, canceled or unknown")
+		}
+		query.Set("status", flags.status)
+	}
+	if flags.platform != "" {
+		if !slices.Contains([]string{"ios", "android", "web", "react_native_ios", "react_native_android", "node"}, flags.platform) {
+			return errors.New("--platform must be ios, android, web, react_native_ios, react_native_android or node")
+		}
+		query.Set("platform", flags.platform)
+	}
+	if flags.userID != "" {
+		if id.Validate(flags.userID, id.ApplicationUser) != nil {
+			return errors.New("--user is not a valid user ID")
+		}
+		query.Set("user_id", flags.userID)
+	}
+	if flags.model != "" {
+		if len(flags.model) > 512 || strings.ContainsAny(flags.model, "\r\n\x00") {
+			return errors.New("--model is invalid")
+		}
+		query.Set("model", flags.model)
+	}
+	if flags.errorCode != "" {
+		if !operationalFailurePatternCLI.MatchString(flags.errorCode) {
+			return errors.New("--error-code is invalid")
+		}
+		query.Set("error_code", flags.errorCode)
+	}
+	if flags.requestID != "" {
+		if id.Validate(flags.requestID, id.LogicalRequest) != nil {
+			return errors.New("--request-id is not a valid request ID")
+		}
+		query.Set("request_id", flags.requestID)
+	}
+	if flags.clientRequestID != "" {
+		if !clientRequestIDPattern.MatchString(flags.clientRequestID) {
+			return errors.New("--client-request-id must be 8 to 128 letters, digits, '.', '_', ':' or '-'")
+		}
+		query.Set("client_request_id", flags.clientRequestID)
+	}
+	for name, value := range map[string]string{"start": flags.start, "end": flags.end} {
+		if value == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("--%s must be an RFC 3339 instant", name)
+		}
+		query.Set(name, parsed.UTC().Format(time.RFC3339Nano))
+	}
+	if flags.sort != "" {
+		if flags.sort != "started_at_desc" && flags.sort != "started_at_asc" {
+			return errors.New("--sort must be started_at_desc or started_at_asc")
+		}
+		query.Set("sort", flags.sort)
+	}
+	ranges := []struct {
+		flag, name string
+		value      int64
+	}{
+		{"latency-min-ms", "latency_min_ms", flags.latencyMin}, {"latency-max-ms", "latency_max_ms", flags.latencyMax},
+		{"tokens-min", "tokens_min", flags.tokensMin}, {"tokens-max", "tokens_max", flags.tokensMax},
+		{"cost-min-nano-usd", "cost_min_nano_usd", flags.costMin}, {"cost-max-nano-usd", "cost_max_nano_usd", flags.costMax},
+	}
+	for _, item := range ranges {
+		if !command.Flags().Changed(item.flag) {
+			continue
+		}
+		if item.value < 0 {
+			return fmt.Errorf("--%s must not be negative", item.flag)
+		}
+		query.Set(item.name, strconv.FormatInt(item.value, 10))
+	}
+	return nil
+}
+
+func newRequestsFacetsCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	var environmentID, start, end string
+	var limit int
+	command := &cobra.Command{
+		Use: "facets", Short: "Count requests by outcome, feature, failure, connection, model, route and platform", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if id.Validate(environmentID, id.Environment) != nil {
+				return errors.New("environment ID is invalid")
+			}
+			if limit < 1 || limit > 100 {
+				return errors.New("--limit must be between 1 and 100")
+			}
+			endTime := time.Now().UTC()
+			if end != "" {
+				parsed, err := time.Parse(time.RFC3339Nano, end)
+				if err != nil {
+					return errors.New("--end must be an RFC 3339 instant")
+				}
+				endTime = parsed.UTC()
+			}
+			startTime := endTime.Add(-24 * time.Hour)
+			if start != "" {
+				parsed, err := time.Parse(time.RFC3339Nano, start)
+				if err != nil {
+					return errors.New("--start must be an RFC 3339 instant")
+				}
+				startTime = parsed.UTC()
+			}
+			if !startTime.Before(endTime) || endTime.Sub(startTime) > 90*24*time.Hour {
+				return errors.New("the range must start before it ends and span at most 90 days")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			query := url.Values{
+				"environment_id": {environmentID}, "start": {startTime.Format(time.RFC3339Nano)},
+				"end": {endTime.Format(time.RFC3339Nano)}, "limit": {strconv.Itoa(limit)},
+			}
+			var document requestFacetsCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/requests/facets", query, nil, http.StatusOK, &document); err != nil {
+				return err
+			}
+			if !validRequestFacetsCLI(document, environmentID, limit) {
+				return errors.New("admin API returned non-conforming request facets")
+			}
+			return printRequestFacets(opts, document)
+		},
+	}
+	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&start, "start", "", "inclusive RFC 3339 start (default: 24 hours before --end)")
+	command.Flags().StringVar(&end, "end", "", "exclusive RFC 3339 end (default: now)")
+	command.Flags().IntVar(&limit, "limit", 20, "values per facet (1-100)")
 	_ = command.MarkFlagRequired("environment")
 	return command
 }
@@ -1662,6 +1889,61 @@ func containsEffectiveValueCLI(values []string, value string) bool {
 	return false
 }
 
+func validListTotalCLI(total listTotalCLI) bool {
+	count, ok := nonNegativeJSONInteger(total.Count)
+	return ok && count <= 100_000 && (!total.Capped || count == 100_000)
+}
+
+var requestFacetNamesCLI = []string{
+	"status", "feature", "error_code", "upstream", "model", "route",
+	"platform", "component_kind", "trust_source",
+}
+
+func validRequestFacetsCLI(document requestFacetsCLI, environmentID string, limit int) bool {
+	start, startErr := time.Parse(time.RFC3339Nano, document.Start)
+	end, endErr := time.Parse(time.RFC3339Nano, document.End)
+	requests, requestsOK := nonNegativeJSONInteger(document.Requests)
+	if document.EnvironmentID != environmentID || startErr != nil || endErr != nil || !start.Before(end) ||
+		!requestsOK || len(document.Facets) != len(requestFacetNamesCLI) {
+		return false
+	}
+	for _, name := range requestFacetNamesCLI {
+		facet, ok := document.Facets[name]
+		if !ok || len(facet.Values) > limit {
+			return false
+		}
+		for _, value := range facet.Values {
+			count, countOK := nonNegativeJSONInteger(value.Count)
+			if !countOK || count < 1 || count > requests || value.Value == "" || len(value.Value) > 512 ||
+				strings.ContainsAny(value.Value, "\r\n\x00") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func printRequestFacets(opts *options, document requestFacetsCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, document)
+	}
+	rows := make([][]string, 0)
+	for _, name := range requestFacetNamesCLI {
+		facet := document.Facets[name]
+		for _, value := range facet.Values {
+			rows = append(rows, []string{name, value.Value, value.Count.String()})
+		}
+		if facet.Truncated {
+			rows = append(rows, []string{name, "(more values)", ""})
+		}
+	}
+	if _, err := fmt.Fprintf(opts.stdout, "requests started %s to %s: %s\n",
+		formatControlTime(document.Start), formatControlTime(document.End), document.Requests); err != nil {
+		return err
+	}
+	return printControlTable(opts, []string{"FACET", "VALUE", "REQUESTS"}, rows)
+}
+
 func validLogicalRequestCLI(request logicalRequestCLI) bool {
 	if id.Validate(request.ID, id.LogicalRequest) != nil ||
 		id.Validate(request.EnvironmentID, id.Environment) != nil ||
@@ -1712,6 +1994,10 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 	}
 	if request.CallerSDK != "" && request.CallerSDK != "ios" && request.CallerSDK != "android" &&
 		request.CallerSDK != "react-native" && request.CallerSDK != "javascript" {
+		return false
+	}
+	if request.Platform != "" && !operationalIdentifierPattern.MatchString(request.Platform) ||
+		request.ClientRequestID != "" && !clientRequestIDPattern.MatchString(request.ClientRequestID) {
 		return false
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, request.StartedAt)
@@ -1874,15 +2160,24 @@ func printRequests(opts *options, page logicalRequestPageCLI) error {
 	rows := make([][]string, 0, len(page.Items))
 	for _, request := range page.Items {
 		rows = append(rows, []string{
-			request.ID, request.ClientComponentID, request.Framework, request.FrameworkVersion,
+			request.ID, request.Platform, request.ClientComponentID, request.Framework, request.FrameworkVersion,
 			request.Feature, request.Protocol, request.SelectedLimitPlan, request.SelectedRoute, request.Status,
 			strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
 		})
 	}
 	if err := printControlTable(opts, []string{
-		"REQUEST", "COMPONENT", "FRAMEWORK", "VERSION", "FEATURE", "PROTOCOL", "PLAN", "ROUTE", "STATUS", "ATTEMPTS", "STARTED",
+		"REQUEST", "PLATFORM", "COMPONENT", "FRAMEWORK", "VERSION", "FEATURE", "PROTOCOL", "PLAN", "ROUTE", "STATUS", "ATTEMPTS", "STARTED",
 	}, rows); err != nil {
 		return err
+	}
+	if page.Total != nil {
+		qualifier := ""
+		if page.Total.Capped {
+			qualifier = " or more"
+		}
+		if _, err := fmt.Fprintf(opts.stdout, "matching requests: %s%s\n", page.Total.Count, qualifier); err != nil {
+			return err
+		}
 	}
 	if page.Page.HasMore {
 		_, err := fmt.Fprintf(opts.stdout, "next cursor: %s\n", page.Page.NextCursor)
@@ -1896,15 +2191,20 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 		return printControlJSON(opts, request)
 	}
 	rows := [][]string{{
-		request.ID, request.InstallationFamilyID, request.ClientComponentID,
+		request.ID, request.Platform, request.InstallationFamilyID, request.ClientComponentID,
 		request.TrustSource, request.Framework, request.FrameworkVersion, request.CallerSDK,
 		request.ConfigRevisionID, request.Feature, request.SelectedLimitPlan, request.SelectedRoute,
 		request.Status, strconv.Itoa(len(request.DecisionStages)), strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
 	}}
 	if err := printControlTable(opts, []string{
-		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "CALLER", "REVISION", "FEATURE", "PLAN", "ROUTE", "STATUS", "STAGES", "ATTEMPTS", "STARTED",
+		"REQUEST", "PLATFORM", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "CALLER", "REVISION", "FEATURE", "PLAN", "ROUTE", "STATUS", "STAGES", "ATTEMPTS", "STARTED",
 	}, rows); err != nil {
 		return err
+	}
+	if request.ClientRequestID != "" {
+		if _, err := fmt.Fprintf(opts.stdout, "client request ID: %s\n", request.ClientRequestID); err != nil {
+			return err
+		}
 	}
 	stageRows := make([][]string, 0, len(request.DecisionStages))
 	for _, stage := range request.DecisionStages {

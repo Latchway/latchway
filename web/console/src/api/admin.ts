@@ -14,6 +14,9 @@ const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
 const OptionalInstant = Instant.optional();
 const NonnegativeSafeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/** Correlation identifiers clients may send with a request (8 to 128 characters). */
+export const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+
 const Platform = z.enum([
   "ios",
   "android",
@@ -671,6 +674,7 @@ export const RequestSchema = z
     feature: Identifier,
     framework: Identifier.optional(),
     caller_sdk: z.enum(["ios", "android", "react-native", "javascript"]).optional(),
+    client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional(),
     framework_version: z
       .string()
       .min(1)
@@ -682,6 +686,7 @@ export const RequestSchema = z
     id: OpaqueID,
     installation_id: OpaqueID,
     installation_family_id: InstallationFamilyID.optional(),
+    platform: Platform.optional(),
     protocol: z.enum([
       "openai_responses",
       "openai_chat",
@@ -781,8 +786,39 @@ export const RequestSchema = z
   });
 
 export const RequestPageSchema = z
-  .object({ items: z.array(RequestSchema).max(200), page: PageInfo })
+  .object({ items: z.array(RequestSchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
+
+const RequestFacetSchema = z
+  .object({
+    truncated: z.boolean(),
+    values: z
+      .array(z.object({ count: NonnegativeSafeInteger.min(1), value: z.string().min(1).max(512).refine((value) => !/[\r\n\0]/.test(value)) }).strict())
+      .max(100)
+  })
+  .strict();
+
+export const REQUEST_FACETS = ["status", "feature", "error_code", "upstream", "model", "route", "platform", "component_kind", "trust_source"] as const;
+export type RequestFacetName = typeof REQUEST_FACETS[number];
+
+/** GET /admin/v1/requests/facets: request counts by each filterable value over a range. */
+export const RequestFacetsSchema = z
+  .object({
+    end: Instant,
+    environment_id: OpaqueID,
+    facets: z.object(Object.fromEntries(REQUEST_FACETS.map((name) => [name, RequestFacetSchema])) as Record<RequestFacetName, typeof RequestFacetSchema>).strict(),
+    requests: NonnegativeSafeInteger,
+    start: Instant
+  })
+  .strict()
+  .superRefine((document, context) => {
+    for (const name of REQUEST_FACETS) {
+      if (document.facets[name].values.some((item) => item.count > document.requests)) {
+        context.addIssue({ code: "custom", message: "A facet count exceeds the request total.", path: ["facets", name] });
+      }
+    }
+  });
+export type RequestFacets = z.infer<typeof RequestFacetsSchema>;
 
 export const DevelopmentSampleSchema = z
   .object({

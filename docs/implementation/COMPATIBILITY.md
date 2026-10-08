@@ -225,12 +225,13 @@ The current local server source advertises a stable ordered
 `anthropic_messages`, `opaque_http`, `configuration_import_export`,
 `admin_session_management`, `admin_event_stream`,
 `admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
-`admin_sso`, `admin_invitations`, `admin_application_roles`, and
-`admin_user_insights`. The Console Settings surface requires protocol 2 and
-every listed capability except `admin_event_stream`,
-`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
-`admin_sso`, `admin_invitations`, `admin_application_roles` and
-`admin_user_insights` before enabling mutations. Missing protocol or
+`admin_sso`, `admin_invitations`, `admin_application_roles`,
+`admin_user_insights`, and `admin_request_search`. The Console Settings
+surface requires protocol 2 and every listed capability except
+`admin_event_stream`, `admin_account_self_service`, `admin_two_factor`,
+`admin_passkeys`, `admin_sso`, `admin_invitations`,
+`admin_application_roles`, `admin_user_insights` and `admin_request_search`
+before enabling mutations. Missing protocol or
 required capabilities activates read-only safe mode. `admin_event_stream` is
 optional: older servers retain polling and manual refresh instead of being
 treated as mutation-incompatible. `admin_account_self_service` (draft Admin
@@ -251,7 +252,10 @@ roles section; the console always computes capabilities from the session,
 treating a missing `application_roles` as none. Without `admin_user_insights`
 (ADR 0046) Users & Installs lists rows in server order, derives signals from
 loaded rows, previews installation actions from loaded counts and requires
-sign-in one user at a time, and says so on the page.
+sign-in one user at a time, and says so on the page. Without
+`admin_request_search` (ADR 0047) Requests offers free-text filter fields,
+no total, ID-only search and a generic new-request notice; the CLI's
+request filters and `requests facets` need a server with the capability.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the
