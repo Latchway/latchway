@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { adminRequestMock, compatibility, downloadMock } = vi.hoisted(() => ({ adminRequestMock: vi.fn(), compatibility: { mutationAllowed: true }, downloadMock: vi.fn() }));
+const { adminRequestMock, compatibility, downloadMock } = vi.hoisted(() => ({ adminRequestMock: vi.fn(), compatibility: { mutationAllowed: true, status: undefined as { server_capabilities: string[] } | undefined }, downloadMock: vi.fn() }));
 
 vi.mock("../../api/admin", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../api/admin")>()), adminRequest: adminRequestMock }));
 vi.mock("../../api/session", () => ({
@@ -63,6 +63,7 @@ beforeEach(() => {
   adminRequestMock.mockReset();
   downloadMock.mockReset();
   compatibility.mutationAllowed = true;
+  compatibility.status = undefined;
 });
 
 describe("System Health", () => {
@@ -101,6 +102,30 @@ describe("System Health", () => {
     expect(dialog).toHaveTextContent("structural allowlist");
     await user.click(within(dialog).getByRole("button", { name: "Download Bundle" }));
     expect(downloadMock).toHaveBeenCalledWith("latchway-support-bundle.json", expect.stringContaining("\"structural_allowlist\""), "application/json");
+  });
+  it("shows sampled history and each AI connection's last day when the server keeps them", async () => {
+    compatibility.status = { server_capabilities: ["admin_operations_history"] };
+    adminRequestMock.mockImplementation((path: string) => {
+      if (path === "/admin/v1/system/doctor") return Promise.resolve({ data: doctorReport() });
+      if (path.startsWith("/admin/v1/system/health-history?")) return Promise.resolve({ data: { end: instant, interval_seconds: 300, samples: [{ failed_checks: ["worker_heartbeat"], overall_state: "unhealthy", sampled_at: instant, warning_checks: [] }], start: instant } });
+      if (path.startsWith("/admin/v1/usage/connections?")) return Promise.resolve({ data: { connections: [], end: instant, environment_id: ids.environment, start: instant, truncated: false } });
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    renderWithWorkspace(<SystemHealthPage />);
+    const incidents = await screen.findByRole("list", { name: "Incidents" });
+    expect(incidents).toHaveTextContent("Background workers");
+    expect(await screen.findByText(/No attempts in .* in the last 24 hours\./)).toBeInTheDocument();
+    expect(screen.queryByText(/keeps no health history/)).not.toBeInTheDocument();
+  });
+
+  it("says history isn't kept on a server without it, and never asks for it", async () => {
+    adminRequestMock.mockImplementation((path: string) => {
+      if (path === "/admin/v1/system/doctor") return Promise.resolve({ data: doctorReport() });
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    renderWithWorkspace(<SystemHealthPage />);
+    expect(await screen.findByText(/keeps no health history/)).toBeInTheDocument();
+    expect(adminRequestMock.mock.calls.some(([path]) => String(path).includes("health-history") || String(path).includes("/usage/connections"))).toBe(false);
   });
 });
 
@@ -197,6 +222,22 @@ describe("Self-tests", () => {
     expect(options?.bearerToken).toBe("lwt_scheduled_token_value_long_enough_1234567890");
     expect(options?.body).toEqual({ daily_cost_limit_nano_usd: 240_000_000, environment_id: ids.environment, interval_seconds: 3600, kind: "upstream", max_cost_nano_usd: 10_000_000, model: "fast", upstream: "openai" });
     expect(duringRequest).toBe("");
+  });
+
+  it("lists recent runs when the server can, and opens one", async () => {
+    const user = userEvent.setup();
+    const searchLog: WorkspaceSearch[] = [];
+    compatibility.status = { server_capabilities: ["admin_operations_history"] };
+    selfTestServer();
+    const base = adminRequestMock.getMockImplementation();
+    adminRequestMock.mockImplementation((path: string, schema: unknown, options: Options) => {
+      if (path.startsWith("/admin/v1/self-tests?")) return Promise.resolve({ data: { items: [{ checks: [], config_revision_id: ids.activeRevision, created_at: instant, environment_id: ids.environment, id: "tst_0123456789abcdef", kind: "upstream", state: "passed" }], page: { has_more: false } } });
+      return base?.(path, schema, options);
+    });
+    renderWithWorkspace(<SelfTestsPage />, { searchLog });
+    const table = await screen.findByRole("table", { name: "Recent runs" });
+    await user.click(within(table).getByText("tst_0123456789abcdef"));
+    expect(searchLog.at(-1)).toMatchObject({ self_test_id: "tst_0123456789abcdef" });
   });
 
   it("refuses a run link for another environment", async () => {

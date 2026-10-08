@@ -281,6 +281,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/applications/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change an application's display name.
+         * @description The slug never changes: configuration metadata, URLs and CLI flags name applications by slug.
+         *     Applications can't be deleted, because their audit and request history must stay intact; disable
+         *     one instead.
+         */
+        patch: operations["renameApplication"];
+        trace?: never;
+    };
     "/admin/v1/applications/{applicationId}/disable": {
         parameters: {
             query?: never;
@@ -1272,6 +1294,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/environments/{environmentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change an environment's display name.
+         * @description The slug never changes. Environments can't be deleted, because their audit and request history must stay intact; disable one instead.
+         */
+        patch: operations["renameEnvironment"];
+        trace?: never;
+    };
     "/admin/v1/environments/{environmentId}/config": {
         parameters: {
             query?: never;
@@ -1582,6 +1624,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the organization's display name.
+         * @description Owners only. The slug never changes.
+         */
+        patch: operations["renameOrganization"];
         trace?: never;
     };
     "/admin/v1/organizations/{organizationId}/invitations": {
@@ -1912,7 +1974,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List an environment's recent self-test runs, newest first.
+         * @description Runs are kept for the job-history retention window. Needs run_self_tests in the application.
+         */
+        get: operations["listSelfTests"];
         put?: never;
         /**
          * Start a bounded diagnostic or conformance test.
@@ -2009,6 +2075,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/system/health-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the server self-check sampled every five minutes.
+         * @description A worker records the overall state and the identifiers of failed and warning checks every five
+         *     minutes and keeps 30 days. A range is at most 7 days and defaults to the last 24 hours. Gaps
+         *     mean no worker was running.
+         */
+        get: operations["getSystemHealthHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/system/support-bundle": {
         parameters: {
             query?: never;
@@ -2021,6 +2109,30 @@ export interface paths {
          * @description Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key.
          */
         get: operations["downloadSystemSupportBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/usage/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Summarize upstream attempts per AI connection.
+         * @description Outcomes, public failure categories, rate limits and server errors, how many failed attempts were
+         *     followed by another attempt, time to first byte, duration, and recorded usage for each AI
+         *     connection, from attempts that started in `[start, end)` (at most 90 days). `interval=hour`
+         *     (at most 14 days) or `day` adds attempt and failure counts per bucket. Nothing probes the
+         *     providers; this is what your requests recorded.
+         */
+        get: operations["getConnectionHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3422,6 +3534,44 @@ export interface components {
             /** @description Required operator justification. Only a reason-present audit marker is persisted; free-form text is not copied into audit metadata. */
             reason: string;
         };
+        ConnectionHealth: {
+            connections: {
+                attempts: number;
+                canceled: number;
+                duration: components["schemas"]["UsageDistribution"];
+                failed: number;
+                failures: {
+                    code: string;
+                    count: number;
+                }[];
+                /** @description Failed attempts followed by another attempt. */
+                fell_back: number;
+                first_byte: components["schemas"]["UsageDistribution"];
+                /** @description Attempts answered with HTTP 429. */
+                rate_limited: number;
+                /** @description Attempts answered with HTTP 5xx. */
+                server_errors: number;
+                succeeded: number;
+                upstream: components["schemas"]["Identifier"];
+                usage: components["schemas"]["UsageValues"];
+            }[];
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            /** @enum {string} */
+            interval?: "hour" | "day";
+            series?: {
+                attempts: number;
+                failed: number;
+                /** Format: date-time */
+                timestamp: string;
+                upstream: components["schemas"]["Identifier"];
+            }[];
+            /** Format: date-time */
+            start: string;
+            /** @description More than 200 connections had attempts; the busiest 200 are listed. */
+            truncated: boolean;
+        };
         CreateAdministratorRequest: {
             display_name: string;
             /** Format: email */
@@ -3798,6 +3948,22 @@ export interface components {
         FirebaseAppCheckConfiguration: {
             allowedAppIds: string[];
             projectNumber: string;
+        };
+        HealthHistory: {
+            /** Format: date-time */
+            end: string;
+            /** @constant */
+            interval_seconds: 300;
+            samples: {
+                failed_checks: string[];
+                /** @enum {string} */
+                overall_state: "healthy" | "degraded" | "unhealthy";
+                /** Format: date-time */
+                sampled_at: string;
+                warning_checks: string[];
+            }[];
+            /** Format: date-time */
+            start: string;
         };
         Identifier: string;
         IdentityProvider: {
@@ -4359,6 +4525,10 @@ export interface components {
         RecoveryCodesRequest: {
             code?: string;
             password?: string;
+        };
+        RenameRequest: {
+            /** @description One line; surrounding spaces are trimmed. */
+            display_name: string;
         };
         RenewInvitationRequest: {
             send_email?: boolean;
@@ -4960,7 +5130,8 @@ export interface components {
                 "admin_user_insights",
                 "admin_request_search",
                 "admin_configuration_drafts",
-                "admin_policy_insights"
+                "admin_policy_insights",
+                "admin_operations_history"
             ];
             server_version: string;
         };
@@ -5840,6 +6011,36 @@ export interface operations {
         responses: {
             /** @description Application created. */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renameApplication: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed application. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7267,6 +7468,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    renameEnvironment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                environmentId: components["parameters"]["EnvironmentID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed environment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Environment"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getActiveConfiguration: {
         parameters: {
             query?: never;
@@ -7759,6 +7990,36 @@ export interface operations {
         responses: {
             /** @description Organization created. */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renameOrganization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["schemas"]["OrganizationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed organization. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8324,6 +8585,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    listSelfTests: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                page_size?: components["parameters"]["PageSize"];
+                schedule_id?: string;
+                state?: "queued" | "running" | "passed" | "failed" | "canceled";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Self-test run page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SelfTestRun"][];
+                        page: components["schemas"]["PageInfo"];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     startSelfTest: {
         parameters: {
             query?: never;
@@ -8477,6 +8768,30 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getSystemHealthHistory: {
+        parameters: {
+            query?: {
+                end?: string;
+                start?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Health samples, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthHistory"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     downloadSystemSupportBundle: {
         parameters: {
             query?: never;
@@ -8494,6 +8809,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SupportBundle"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getConnectionHealth: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                interval?: "hour" | "day";
+                start: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-connection health. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionHealth"];
                 };
             };
             default: components["responses"]["Problem"];

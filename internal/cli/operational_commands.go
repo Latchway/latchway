@@ -500,6 +500,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_request_search",
 	"admin_configuration_drafts",
 	"admin_policy_insights",
+	"admin_operations_history",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {
@@ -1145,7 +1146,7 @@ func newUsageCommand(opts *options) *cobra.Command {
 	values := &controlCommandOptions{}
 	command := &cobra.Command{Use: "usage", Short: "Inspect immutable usage ledger aggregates"}
 	addControlTokenFlag(command, values)
-	command.AddCommand(newUsageSummaryCommand(opts, values), newUsageTimeseriesCommand(opts, values))
+	command.AddCommand(newUsageSummaryCommand(opts, values), newUsageTimeseriesCommand(opts, values), newUsageConnectionsCommand(opts, values))
 	return command
 }
 
@@ -1315,6 +1316,7 @@ func newStatusCommand(opts *options) *cobra.Command {
 		},
 	}
 	addControlTokenFlag(command, values)
+	command.AddCommand(newStatusHistoryCommand(opts, values))
 	return command
 }
 
@@ -1324,6 +1326,7 @@ func newVerifyCommand(opts *options) *cobra.Command {
 	addControlTokenFlag(command, values)
 	command.AddCommand(newVerifyLocalCommand(opts))
 	command.AddCommand(newVerifyScheduleCommand(opts, values))
+	command.AddCommand(newVerifyRunsCommand(opts, values))
 	for _, kind := range []string{"upstream", "openrouter"} {
 		command.AddCommand(newProviderVerifyCommand(opts, values, kind))
 	}

@@ -2,6 +2,36 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 20: operations history and renames (branch `console-api-completion`, unreleased)
+
+Server (ADR 0050, schema 42, capability `admin_operations_history`):
+
+- A five-minute `record_health_sample` worker job stores the self-check's
+  overall state and failed and warning check IDs; retention keeps 30 days.
+  `GET /system/health-history` returns at most 7 days.
+- `GET /usage/connections`: per-connection attempts, outcomes, 429 and 5xx
+  counts, fallbacks, failure categories, first-byte and duration percentiles
+  and usage, with an optional hourly or daily series.
+- `GET /self-tests`: an environment's runs, newest first, by schedule or state.
+- `PATCH /organizations/{id}`, `/applications/{id}`, `/environments/{id}`:
+  display-name renames, audited; slugs never change and nothing is deleted.
+
+CLI: `status history`, `usage connections`, `verify runs`,
+`applications rename` and `environments rename`.
+
+Console: System Health shows sampled history with incidents and each AI
+connection's last day; Self-tests lists recent runs; Settings renames the
+organization (owners), applications and environments, and shows each
+environment's user count. Older servers keep the earlier behavior, labeled.
+
+Validation: `go test ./...` against PostgreSQL 16 (health sampling and
+retention, history range refusals, connection health with fallback and
+failure categories, self-test paging and filters, renames with audit counts
+and refusals, worker job inventory, migrations to schema 42), CLI tests, vet,
+gofmt, sqlc regenerated; contract validation and generated references; lint,
+typecheck, `check:api`, `pnpm test` (508 passed), Playwright (46 passed, 1
+skipped), the live-stack run, build and `verify:reproducible`.
+
 ## Console completion phase 19: policy insights and simulation (branch `console-api-completion`, unreleased)
 
 Server (ADR 0049, schema 41, capability `admin_policy_insights`):

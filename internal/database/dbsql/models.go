@@ -1005,6 +1005,15 @@ type SimulationScenario struct {
 	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+type SystemHealthSample struct {
+	SampledAt      pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	OverallState   string             `db:"overall_state" json:"overall_state"`
+	FailedChecks   []string           `db:"failed_checks" json:"failed_checks"`
+	WarningChecks  []string           `db:"warning_checks" json:"warning_checks"`
+	RecordedByRole string             `db:"recorded_by_role" json:"recorded_by_role"`
+	RecordedAt     pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
+}
+
 type UpstreamAttempt struct {
 	UpstreamAttemptID             string             `db:"upstream_attempt_id" json:"upstream_attempt_id"`
 	OrganizationID                string             `db:"organization_id" json:"organization_id"`

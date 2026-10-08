@@ -53,6 +53,12 @@ All notable project changes will be documented here. The format follows [Keep a 
   plan share by feature, current limit usage for a user, failure simulation
   with the data plane's retry and fallback rules, batch simulation and saved
   scenarios. `latchway routes simulate --fail`.
+- Operations history (ADR 0050, `admin_operations_history`, schema 42): a
+  worker samples the server self-check every five minutes (kept 30 days),
+  per-connection health from recorded attempts, a list of self-test runs, and
+  display-name renames for organizations, applications and environments.
+  `latchway status history`, `usage connections`, `verify runs`, and
+  `applications rename` / `environments rename`.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.

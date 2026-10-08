@@ -1759,3 +1759,9 @@ a.lw-setup-step[aria-disabled="true"] { cursor: default; opacity: 0.55; }
 .lw-attempt--succeeded { box-shadow: 0 0 0 1px var(--accent-primary); }
 .lw-limit-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; }
 .lw-limit-usage .lw-share__bar { width: 120px; }
+
+/* System health: sampled history strip. */
+.lw-health-strip { display: flex; gap: 1px; height: 24px; margin: 0; padding: 0; list-style: none; overflow: hidden; border-radius: var(--radius-md); }
+.lw-health-strip__cell { flex: 1 1 0; min-width: 1px; background: var(--success); }
+.lw-health-strip__cell.is-degraded { background: var(--orange); }
+.lw-health-strip__cell.is-unhealthy { background: var(--destructive); }

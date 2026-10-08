@@ -36,6 +36,7 @@ var periodicJobTypes = map[string]time.Duration{
 	"aggregate_daily_usage":                24 * time.Hour,
 	"enforce_retention":                    time.Hour,
 	"reconcile_pending_usage":              time.Minute,
+	"record_health_sample":                 5 * time.Minute,
 }
 
 var supportedJobTypes = func() map[string]time.Duration {

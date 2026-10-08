@@ -14,6 +14,8 @@ import { useEnvironmentDraft } from "../build/environment-draft";
 import { specCollection } from "../build/feature-model";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { dollarsToNano, nanoToDollars } from "../policies/limit-model";
+import { OPERATIONS_HISTORY } from "../../api/operations-history";
+import { SelfTestRuns } from "./operations-history";
 
 type Kind = "local" | "upstream" | "openrouter";
 const KIND_LABEL: Readonly<Record<Kind, string>> = { local: "Gateway check", openrouter: "OpenRouter conformance", upstream: "AI connection" };
@@ -259,7 +261,12 @@ function SelfTestsView() {
       {schedules.isPending ? <p className="lw-page-status" role="status">Loading schedules…</p> : schedules.data?.length ? (
         <DataTable caption="Schedules" columns={columns} onSelect={(schedule) => open({ schedule_id: schedule.id })} rowKey={(schedule) => schedule.id} rows={schedules.data} selectedKey={search.schedule_id} />
       ) : <div className="lw-page-empty"><EmptyState icon="clock" orientation="horizontal" title="No schedules">Schedule a connection test to catch provider problems before your users do.</EmptyState></div>}
-      <p className="lw-secondary lw-note lw-page-foot">Past runs aren&apos;t listed: the API returns a run only by its ID. Each schedule links to its latest run.</p>
+      {compatibility.status?.server_capabilities.includes(OPERATIONS_HISTORY) ? (
+        <div className="lw-body lw-stack lw-stack--tight">
+          <h2 className="lw-section-title">Recent runs</h2>
+          <SelfTestRuns environmentID={environmentID} onOpen={(run) => open({ self_test_id: run.id })} selected={search.self_test_id} />
+        </div>
+      ) : <p className="lw-secondary lw-note lw-page-foot">This server returns a run only by its ID, so past runs aren&apos;t listed. Each schedule links to its latest run.</p>}
       {search.self_test_id && !scopeMismatch ? <div className="lw-drawer-dock lw-drawer-dock--wide"><RunDrawer environmentID={environmentID} key={search.self_test_id} onClose={() => open({})} runID={search.self_test_id} /></div> : null}
       {selectedSchedule && !scopeMismatch ? (
         <div className="lw-drawer-dock lw-drawer-dock--wide">

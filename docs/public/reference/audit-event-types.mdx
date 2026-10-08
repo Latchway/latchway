@@ -77,8 +77,11 @@ routes.
 
 ```text
 admin.organization_create
+admin.organization_rename
 admin.application_create
+admin.application_rename
 admin.environment_create
+admin.environment_rename
 admin.configuration_revision_create
 admin.configuration_revision_update
 admin.configuration_revision_validate
@@ -101,6 +104,8 @@ names the draft created from another environment's live revision. A publish
 note is marked as a sensitive `activation_note` field; its text is kept on the
 revision, never in the audit event. Saved simulation scenarios mark their input as
 sensitive; scenario names and test claim values stay on the scenario.
+A rename records a public `display_name` change marker; slugs never change,
+and organizations, applications and environments are never deleted.
 
 ## Secret and user actions
 

@@ -705,6 +705,72 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Application' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}:
+    patch:
+      tags: [Organizations]
+      operationId: renameOrganization
+      summary: Change the organization's display name.
+      description: Owners only. The slug never changes.
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { $ref: '#/components/schemas/OrganizationID' } }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed organization.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}:
+    patch:
+      tags: [Applications]
+      operationId: renameApplication
+      summary: Change an application's display name.
+      description: |
+        The slug never changes: configuration metadata, URLs and CLI flags name applications by slug.
+        Applications can't be deleted, because their audit and request history must stay intact; disable
+        one instead.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed application.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}:
+    patch:
+      tags: [Environments]
+      operationId: renameEnvironment
+      summary: Change an environment's display name.
+      description: The slug never changes. Environments can't be deleted, because their audit and request history must stay intact; disable one instead.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed environment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Environment' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/applications/{applicationId}/disable:
     post:
       tags: [Applications]
@@ -2448,6 +2514,29 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/EffectiveConfiguration' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/connections:
+    get:
+      tags: [Usage]
+      operationId: getConnectionHealth
+      summary: Summarize upstream attempts per AI connection.
+      description: |
+        Outcomes, public failure categories, rate limits and server errors, how many failed attempts were
+        followed by another attempt, time to first byte, duration, and recorded usage for each AI
+        connection, from attempts that started in `[start, end)` (at most 90 days). `interval=hour`
+        (at most 14 days) or `day` adds attempt and failure counts per bucket. Nothing probes the
+        providers; this is what your requests recorded.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: interval, in: query, required: false, schema: { type: string, enum: [hour, day] } }
+      responses:
+        '200':
+          description: Per-connection health.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionHealth' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/usage/distribution:
     get:
       tags: [Usage]
@@ -2710,6 +2799,30 @@ paths:
               schema: { $ref: '#/components/schemas/SelfTestSchedule' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/self-tests:
+    get:
+      tags: [Self-tests]
+      operationId: listSelfTests
+      summary: List an environment's recent self-test runs, newest first.
+      description: Runs are kept for the job-history retention window. Needs run_self_tests in the application.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: schedule_id, in: query, required: false, schema: { type: string, pattern: '^sts_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - { name: state, in: query, required: false, schema: { type: string, enum: [queued, running, passed, failed, canceled] } }
+      responses:
+        '200':
+          description: Self-test run page.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, page]
+                properties:
+                  items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SelfTestRun' } }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       tags: [Self-tests]
       operationId: startSelfTest
@@ -2768,6 +2881,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SystemStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/system/health-history:
+    get:
+      tags: [System]
+      operationId: getSystemHealthHistory
+      summary: Return the server self-check sampled every five minutes.
+      description: |
+        A worker records the overall state and the identifiers of failed and warning checks every five
+        minutes and keeps 30 days. A range is at most 7 days and defaults to the last 24 hours. Gaps
+        mean no worker was running.
+      parameters:
+        - { name: start, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Health samples, oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthHistory' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/system/doctor:
     get:
@@ -3129,6 +3261,81 @@ components:
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string, minLength: 1, maxLength: 256 }
         kind: { type: string, enum: [development, staging, production] }
+    RenameRequest:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 200, description: One line; surrounding spaces are trimmed. }
+    HealthHistory:
+      type: object
+      additionalProperties: false
+      required: [start, end, interval_seconds, samples]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        interval_seconds: { type: integer, const: 300 }
+        samples:
+          type: array
+          maxItems: 2016
+          items:
+            type: object
+            additionalProperties: false
+            required: [sampled_at, overall_state, failed_checks, warning_checks]
+            properties:
+              sampled_at: { type: string, format: date-time }
+              overall_state: { type: string, enum: [healthy, degraded, unhealthy] }
+              failed_checks: { type: array, maxItems: 64, items: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' } }
+              warning_checks: { type: array, maxItems: 64, items: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' } }
+    ConnectionHealth:
+      type: object
+      additionalProperties: false
+      required: [environment_id, start, end, connections, truncated]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        interval: { type: string, enum: [hour, day] }
+        truncated: { type: boolean, description: More than 200 connections had attempts; the busiest 200 are listed. }
+        connections:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [upstream, attempts, succeeded, failed, canceled, rate_limited, server_errors, fell_back, failures, first_byte, duration, usage]
+            properties:
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              attempts: { type: integer, minimum: 0 }
+              succeeded: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              canceled: { type: integer, minimum: 0 }
+              rate_limited: { type: integer, minimum: 0, description: Attempts answered with HTTP 429. }
+              server_errors: { type: integer, minimum: 0, description: Attempts answered with HTTP 5xx. }
+              fell_back: { type: integer, minimum: 0, description: Failed attempts followed by another attempt. }
+              failures:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [code, count]
+                  properties:
+                    code: { type: string, pattern: '^[a-z][a-z0-9_]{0,99}$' }
+                    count: { type: integer, minimum: 1 }
+              first_byte: { $ref: '#/components/schemas/UsageDistribution' }
+              duration: { $ref: '#/components/schemas/UsageDistribution' }
+              usage: { $ref: '#/components/schemas/UsageValues' }
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [upstream, timestamp, attempts, failed]
+            properties:
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              timestamp: { type: string, format: date-time }
+              attempts: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
     Organization:
       type: object
       additionalProperties: false
@@ -5460,8 +5667,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 24
-          maxItems: 24
+          minItems: 25
+          maxItems: 25
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -5488,6 +5695,7 @@ components:
             - { const: admin_request_search }
             - { const: admin_configuration_drafts }
             - { const: admin_policy_insights }
+            - { const: admin_operations_history }
           items: false
     DoctorCheck:
       type: object
