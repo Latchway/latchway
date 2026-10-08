@@ -2,6 +2,15 @@
 
 Status date: 2026-10-08
 
+## Console completion: public console guide (branch `console-api-completion`, unreleased)
+
+`docs/public/administration/console.mdx` now describes the redesigned console:
+navigation and workspace URLs, the attention list and header count, the
+draft lifecycle, Simulator, Analytics, users and limits, operating the server,
+application lifecycle (rename, disable, no deletion), secrets, live refresh,
+read-only mode and what each optional capability adds. Validation: metadata,
+structure, prose (Vale) and broken-link checks.
+
 ## Console completion phase 21: analytics projection and attention (branch `console-api-completion`, unreleased)
 
 Server (ADR 0051): environment lists include `active_revision_id`, which the
