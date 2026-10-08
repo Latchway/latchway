@@ -44,6 +44,25 @@ type AdminBootstrapToken struct {
 	ConsumedByAdminUserID *string            `db:"consumed_by_admin_user_id" json:"consumed_by_admin_user_id"`
 }
 
+// Invitations to join an organization; link tokens are stored only as hashes.
+type AdminInvitation struct {
+	AdminInvitationID    string             `db:"admin_invitation_id" json:"admin_invitation_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	Email                string             `db:"email" json:"email"`
+	EmailNormalized      string             `db:"email_normalized" json:"email_normalized"`
+	DisplayName          *string            `db:"display_name" json:"display_name"`
+	Role                 string             `db:"role" json:"role"`
+	TokenHash            []byte             `db:"token_hash" json:"token_hash"`
+	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt            pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	AcceptedAt           pgtype.Timestamptz `db:"accepted_at" json:"accepted_at"`
+	AcceptedAdminUserID  *string            `db:"accepted_admin_user_id" json:"accepted_admin_user_id"`
+	RevokedAt            pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	EmailStatus          string             `db:"email_status" json:"email_status"`
+	EmailSentAt          pgtype.Timestamptz `db:"email_sent_at" json:"email_sent_at"`
+}
+
 type AdminMembership struct {
 	AdminMembershipID    string             `db:"admin_membership_id" json:"admin_membership_id"`
 	OrganizationID       string             `db:"organization_id" json:"organization_id"`

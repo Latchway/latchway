@@ -1135,6 +1135,8 @@ button.lw-trigger:hover { color: var(--accent-primary); }
 .lw-auth__submit { width: 100%; justify-content: center; }
 .lw-auth__link { align-self: center; font-size: 13px; }
 .lw-auth__fine { margin: 0; font-size: 13px; line-height: 18px; color: var(--foreground-secondary); }
+.lw-break { overflow-wrap: anywhere; word-break: break-all; }
+.lw-auth__lead { margin: 0; font-size: 14px; line-height: 20px; color: var(--foreground-primary); text-wrap: pretty; }
 .lw-auth__alternative { display: flex; flex-direction: column; gap: 16px; }
 .lw-auth__divider { display: flex; align-items: center; gap: 12px; font-size: 12px; line-height: 16px; color: var(--foreground-secondary); }
 .lw-auth__divider::before, .lw-auth__divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }

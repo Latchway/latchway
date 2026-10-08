@@ -224,11 +224,11 @@ The current local server source advertises a stable ordered
 `openai_responses`, `openai_chat`, `openai_embeddings`,
 `anthropic_messages`, `opaque_http`, `configuration_import_export`,
 `admin_session_management`, `admin_event_stream`,
-`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`, and
-`admin_sso`. The Console Settings surface requires protocol 2 and every listed
-capability except `admin_event_stream`, `admin_account_self_service`,
-`admin_two_factor`, `admin_passkeys` and `admin_sso` before enabling
-mutations. Missing protocol or
+`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
+`admin_sso`, and `admin_invitations`. The Console Settings surface requires
+protocol 2 and every listed capability except `admin_event_stream`,
+`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
+`admin_sso` and `admin_invitations` before enabling mutations. Missing protocol or
 required capabilities activates read-only safe mode. `admin_event_stream` is
 optional: older servers retain polling and manual refresh instead of being
 treated as mutation-incompatible. `admin_account_self_service` (draft Admin
@@ -242,7 +242,8 @@ passkeys only when `GET /auth/info` lists `passkey` (the public origin is a
 domain name over HTTPS, or localhost) and the browser supports WebAuthn.
 `admin_sso` (ADR 0043) is optional as well: without it the console hides the
 Single sign-on settings card; Sign In with SSO appears only when
-`GET /auth/info` lists `sso`.
+`GET /auth/info` lists `sso`. Without `admin_invitations` (ADR 0044) the
+console offers only Add Member with a first password.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the

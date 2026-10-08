@@ -10,6 +10,7 @@ vi.mock("./auth/leave-for", () => ({ leaveFor: leaveForMock }));
 import { forgetConsoleSession, SESSION_ENDED_EVENT } from "../api/session";
 import { installPasskeyBrowser } from "../test/passkey-browser";
 import { rememberSignedOutEmail } from "./auth/auth-memory";
+import { captureInvitationLink, forgetInvitation } from "./auth/invitation-link";
 import { captureSSOReturn, forgetSSOReturn } from "./auth/sso-return";
 
 import { commands, LEGACY_REDIRECT_PATHS } from "./navigation";
@@ -640,6 +641,80 @@ describe("AppShell", () => {
     expect(within(dialog).queryByLabelText("Password")).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Sign In with SSO" }));
     await waitFor(() => expect(leaveForMock).toHaveBeenCalledWith("https://login.example.com/authorize?state=again"));
+  });
+
+  it("accepts an invitation with a new account and enters the console", async () => {
+    const user = userEvent.setup();
+    const token = `lwinv_${"b".repeat(43)}`;
+    window.history.replaceState(null, "", `/invitation#${token}`);
+    captureInvitationLink();
+    expect(window.location.pathname).toBe("/");
+    expect(window.location.hash).toBe("");
+    let signedIn = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedIn ? json(adminSession) : signedOutResponse();
+      if (url === "/admin/v1/auth/invitations/preview") return json({ account_exists: false, display_name: "Ada", email: "ada@example.test", expires_at: "2026-10-15T12:00:00Z", invited_by: "Owner One", organization_id: adminSession.organization_id, organization_name: "Acme", role: "operator" });
+      if (url === "/admin/v1/auth/invitations/accept") {
+        expect(JSON.parse(String(init?.body))).toEqual({ display_name: "Ada Lovelace", password: "a sturdy passphrase for latchway", token });
+        signedIn = true;
+        return json(adminSession, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "You're invited" })).toBeInTheDocument();
+    expect(await screen.findByText(/Owner One invited you to join/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Email address")).toHaveValue("ada@example.test");
+    await user.clear(screen.getByLabelText("Your name"));
+    await user.type(screen.getByLabelText("Your name"), "Ada Lovelace");
+    await user.type(screen.getByLabelText("Choose a password"), "a sturdy passphrase for latchway");
+    await user.click(screen.getByRole("button", { name: "Join Acme" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("a sturdy passphrase for latchway")).not.toBeInTheDocument();
+  });
+
+  it("has an existing account sign in, then join the invited organization", async () => {
+    const user = userEvent.setup();
+    const token = `lwinv_${"c".repeat(43)}`;
+    window.history.replaceState(null, "", `/invitation#${token}`);
+    captureInvitationLink();
+    const beta = "org_1123456789abcdef";
+    let session: typeof adminSession | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return session ? json(session) : signedOutResponse();
+      if (url === "/admin/v1/auth/invitations/preview") return json({ account_exists: true, email: "owner@example.test", expires_at: "2026-10-15T12:00:00Z", invited_by: "Bea", organization_id: beta, organization_name: "Beta", role: "viewer" });
+      if (url === "/admin/v1/auth/login") {
+        session = adminSession;
+        return json(adminSession, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      if (url === "/admin/v1/auth/invitations/claim") {
+        expect(JSON.parse(String(init?.body))).toEqual({ token });
+        return json({ organization_id: beta, role: "viewer" });
+      }
+      if (url === "/admin/v1/auth/organization") {
+        session = { ...adminSession, memberships: [...adminSession.memberships, { organization_id: beta, role: "viewer" }], organization_id: beta };
+        return json(session, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    await user.click(await screen.findByRole("button", { name: "Sign In to Accept" }));
+    expect(screen.getByLabelText("Email address")).toHaveValue("owner@example.test");
+    await user.type(screen.getByLabelText("Password", { exact: true }), "test-only-login-password");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    const dialog = await screen.findByRole("dialog", { name: "Join an organization" });
+    expect(await within(dialog).findByText(/Bea invited you to join Beta as Viewer/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Join Beta" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const calls = fetchMock.mock.calls.map(([input]) => requestURL(input));
+    expect(calls.indexOf("/admin/v1/auth/invitations/claim")).toBeLessThan(calls.indexOf("/admin/v1/auth/organization"));
+    forgetInvitation();
   });
 
   it("requires setting up two-factor before the console when the organization requires it", async () => {

@@ -25,6 +25,7 @@ import { useOptionalWorkspace } from "../../app/workspace-context-value";
 import { PasswordField } from "../../components/password-field";
 import { takePassword } from "../../components/password-value";
 import { resetMemberTwoFactor } from "../../api/account";
+import { createInvitation, type Invitation, type InvitationLink, invitationsQueryOptions, renewInvitation, revokeInvitation } from "../../api/invitations";
 import {
   Badge,
   Button,
@@ -201,6 +202,134 @@ function AddMemberDrawer({ existing, onClose, onCreated }: { existing: readonly 
   );
 }
 
+const INVITATION_STATUS: Readonly<Record<Invitation["status"], ReactNode>> = {
+  accepted: <Badge color="success" variant="soft">Accepted</Badge>,
+  expired: <Badge variant="soft">Expired</Badge>,
+  pending: <Badge color="accent" variant="soft">Pending</Badge>,
+  revoked: <Badge variant="soft">Revoked</Badge>
+};
+
+/** Shows an invitation link once; it can't be read back later, only replaced. */
+function InvitationLinkReveal({ link, onDone }: { link: InvitationLink; onDone: () => void }) {
+  const emailed = link.invitation.email_status === "sent" ? `It was also emailed to ${link.invitation.email}.` : link.invitation.email_status === "failed" ? "Emailing it failed, so share it yourself." : "Share it with them privately.";
+  return (
+    <ConfirmDialog confirmLabel="Done" description={`Anyone with this link can join as ${ROLE_LABEL[link.invitation.role]} until ${new Date(link.invitation.expires_at).toLocaleString()} or until it's used. ${emailed} It won't be shown again.`} hideCancel onCancel={onDone} onConfirm={onDone} size="wide" title={`Invitation for ${link.invitation.email}`}>
+      <div className="lw-row lw-row--wrap"><code className="lw-code-inline lw-break">{link.url}</code><CopyButton label="Copy invitation link" value={link.url} /></div>
+      {link.invitation.email_status === "failed" ? <Notice tone="warning">The server couldn&apos;t send the email. Check its SMTP settings.</Notice> : null}
+    </ConfirmDialog>
+  );
+}
+
+function InviteMemberDrawer({ emailDelivery, existing, onClose, onInvited, organizationID }: { emailDelivery: boolean; existing: readonly Administrator[]; onClose: () => void; onInvited: (link: InvitationLink) => void; organizationID: string }) {
+  const [role, setRole] = useState<Role>("viewer");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [send, setSend] = useState(emailDelivery);
+  const [problem, setProblem] = useState<AdminProblem>();
+  const [busy, setBusy] = useState(false);
+  const duplicate = existing.some((member) => member.email.toLowerCase() === email.trim().toLowerCase());
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (duplicate) return;
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      onInvited(await createInvitation(organizationID, { ...(name.trim() ? { display_name: name.trim() } : {}), email: email.trim(), role, send_email: emailDelivery && send }));
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <DetailPanel className="lw-request-drawer" onClose={onClose} subtitle={<span className="lw-faint">They choose their own password, or sign in to an account they already have</span>} title="Invite member">
+      <form autoComplete="off" className="lw-stack" onSubmit={(event) => void submit(event)}>
+        <Field error={duplicate ? "Someone on the team already uses this email." : undefined} id="invite-email" label="Email"><Input id="invite-email" maxLength={320} onChange={(event) => setEmail(event.target.value)} required type="email" value={email} /></Field>
+        <Field hint="Optional; they can change it when they accept." id="invite-name" label="Name"><Input id="invite-name" maxLength={200} onChange={(event) => setName(event.target.value)} value={name} /></Field>
+        <div><strong className="lw-note">Role</strong><RoleCards name="invite-role" onChange={setRole} value={role} /></div>
+        <CapabilityList to={role} />
+        {emailDelivery ? <label className="lw-check"><input checked={send} onChange={(event) => setSend(event.target.checked)} type="checkbox" /><span>Email the invitation link</span></label> : <p className="lw-secondary lw-note">This server doesn&apos;t send email; you&apos;ll get a link to share.</p>}
+        <p className="lw-secondary lw-note">The link works once and expires in seven days. Inviting the same address again replaces the earlier link.</p>
+        {problem ? <ProblemNotice problem={problem} /> : null}
+        <div className="lw-row"><Button onClick={onClose}>Cancel</Button><Button disabled={duplicate} loading={busy} type="submit" variant="primary">Create Invitation</Button></div>
+      </form>
+    </DetailPanel>
+  );
+}
+
+function InvitationsCard({ enabled, onLink, organizationID }: { enabled: boolean; onLink: (link: InvitationLink) => void; organizationID: string }) {
+  const queryClient = useQueryClient();
+  const invitations = useQuery(invitationsQueryOptions(organizationID));
+  const [busy, setBusy] = useState<string>();
+  const [revoking, setRevoking] = useState<Invitation>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const items = invitations.data?.items ?? [];
+  const open = items.filter((item) => item.status === "pending" || item.status === "expired");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: invitationsQueryOptions(organizationID).queryKey });
+
+  async function renew(item: Invitation): Promise<void> {
+    setBusy(item.id);
+    setProblem(undefined);
+    try {
+      onLink(await renewInvitation(organizationID, item.id, false));
+      await refresh();
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function revoke(item: Invitation): Promise<void> {
+    setBusy(item.id);
+    setProblem(undefined);
+    try {
+      await revokeInvitation(organizationID, item.id);
+      setRevoking(undefined);
+      await refresh();
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  if (!invitations.data && !invitations.error) return null;
+  return (
+    <Card description={open.length ? `${open.length} open ${open.length === 1 ? "invitation" : "invitations"}. Links can't be shown again; New Link replaces one.` : "Invitations you send appear here until they're used, revoked or replaced."} flush icon="users" title="Invitations">
+      {invitations.error ? <div className="lw-card__body"><ProblemNotice problem={problemFromError(invitations.error)} /></div> : null}
+      {problem ? <div className="lw-card__body"><ProblemNotice problem={problem} /></div> : null}
+      {items.length ? (
+        <div className="lw-table-wrap">
+          <table className="lw-table lw-table--dense">
+            <thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Invited by</th><th scope="col">Expires</th><th scope="col"><span className="lw-sr">Actions</span></th></tr></thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.email}{item.email_status === "failed" ? <> <Badge color="warning" variant="soft">Email failed</Badge></> : null}</td>
+                  <td>{ROLE_LABEL[item.role]}</td>
+                  <td>{INVITATION_STATUS[item.status]}</td>
+                  <td>{item.invited_by}</td>
+                  <td className="lw-num">{item.status === "pending" || item.status === "expired" ? when(item.expires_at) : "—"}</td>
+                  <td>{enabled && (item.status === "pending" || item.status === "expired") ? (
+                    <span className="lw-row lw-row--wrap">
+                      <Button disabled={Boolean(busy)} loading={busy === item.id && !revoking} onClick={() => void renew(item)} size="sm">New Link</Button>
+                      {item.status === "pending" ? <Button destructive disabled={Boolean(busy)} onClick={() => setRevoking(item)} size="sm" variant="ghost">Revoke</Button> : null}
+                    </span>
+                  ) : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {revoking ? <ConfirmDialog confirmLabel="Revoke" description={`The link sent to ${revoking.email} stops working.`} destructive onCancel={() => setRevoking(undefined)} onConfirm={() => void revoke(revoking)} pending={busy === revoking.id} title="Revoke this invitation?" /> : null}
+    </Card>
+  );
+}
+
 type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "reset2fa" } | { kind: "signout"; session: AdminSessionMetadata };
 
 function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { activeOwners: number; member: Administrator; onClose: () => void; onUpdated: () => Promise<void>; sessions: readonly AdminSessionMetadata[] }) {
@@ -357,6 +486,12 @@ function MembersView() {
   const members = useMembers(me.canManageOwners);
   const sessions = useSessions(me.canManageOwners);
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [link, setLink] = useState<InvitationLink>();
+  const compatibility = useConsoleCompatibility();
+  const invitationsSupported = compatibility.status?.server_capabilities.includes("admin_invitations") ?? false;
+  const organizationID = useConsoleSession().data?.session?.organization_id;
+  const delivery = useQuery({ ...invitationsQueryOptions(organizationID ?? ""), enabled: invitationsSupported && me.canManageOwners && Boolean(organizationID) });
   const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "password" | "disabled">("all");
   const [added, setAdded] = useState<string>();
@@ -385,7 +520,10 @@ function MembersView() {
   }
   return (
     <div className="lw-page lw-collection">
-      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => { setAdding(true); open(undefined); }} variant="primary">Add Member</Button>} description="People who can sign in to this console. Roles apply to the whole organization: every application and environment." title="Members" />
+      <PageHeader actions={<>
+        {invitationsSupported ? <Button disabled={!me.mutationAllowed} icon="plus" onClick={() => { setInviting(true); setAdding(false); open(undefined); }} variant="primary">Invite Member</Button> : null}
+        <Button disabled={!me.mutationAllowed} icon={invitationsSupported ? undefined : "plus"} onClick={() => { setAdding(true); setInviting(false); open(undefined); }} variant={invitationsSupported ? "secondary" : "primary"}>Add Member</Button>
+      </>} description="People who can sign in to this console. Roles apply to the whole organization: every application and environment." title="Members" />
       {added ? <div className="lw-page-notice"><Notice tone="success">{added}</Notice></div> : null}
       {members.error ? <div className="lw-page-notice"><ProblemNotice problem={problemFromError(members.error)} /></div> : null}
       <div className="lw-toolbar lw-toolbar--wrap">
@@ -399,6 +537,9 @@ function MembersView() {
         <span className="lw-secondary lw-note">{activeOwners} active owner{activeOwners === 1 ? "" : "s"}. {activeOwners <= 1 ? "Add a second owner so the team isn't locked out if one account is lost." : ""}</span>
         {members.hasNextPage ? <Button loading={members.isFetchingNextPage} onClick={() => void members.fetchNextPage()} size="sm">Load More</Button> : null}
       </div>
+      {invitationsSupported && organizationID ? <div className="lw-body"><InvitationsCard enabled={me.mutationAllowed} onLink={setLink} organizationID={organizationID} /></div> : null}
+      {inviting && me.mutationAllowed && organizationID ? <div className="lw-drawer-dock lw-drawer-dock--wide"><InviteMemberDrawer emailDelivery={delivery.data?.email_delivery ?? false} existing={items} onClose={() => setInviting(false)} onInvited={(created) => { setInviting(false); setLink(created); void queryClient.invalidateQueries({ queryKey: invitationsQueryOptions(organizationID).queryKey }); }} organizationID={organizationID} /></div> : null}
+      {link ? <InvitationLinkReveal link={link} onDone={() => setLink(undefined)} /> : null}
       {adding && me.mutationAllowed ? <div className="lw-drawer-dock lw-drawer-dock--wide"><AddMemberDrawer existing={items} onClose={() => setAdding(false)} onCreated={(member) => { setAdding(false); setAdded(`${member.display_name} was added as ${ROLE_LABEL[member.role]}. Share their first password privately; they'll choose their own when they sign in.`); void queryClient.invalidateQueries({ queryKey: ["team", "members"] }); open(member.id); }} /></div> : null}
       {selected ? <div className="lw-drawer-dock lw-drawer-dock--wide"><MemberDrawer activeOwners={activeOwners} key={selected.id} member={selected} onClose={() => open(undefined)} onUpdated={async () => { await Promise.all([members.refetch(), sessions.refetch()]); }} sessions={sessionItems} /></div> : null}
       {search.member && !members.isPending && !selected && !members.hasNextPage ? <div className="lw-page-notice"><Notice title="Member not found" tone="danger">No member has the ID <code className="lw-code-inline">{search.member}</code>. No one else was opened instead.</Notice></div> : null}

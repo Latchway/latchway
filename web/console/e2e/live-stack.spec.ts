@@ -33,7 +33,7 @@ test.describe("real first-run control plane", () => {
     "The live-stack harness supplies an isolated PostgreSQL gateway and ephemeral credentials."
   );
 
-  test("bootstraps, activates a native-mobile configuration, and signs back in", async ({ page }) => {
+  test("bootstraps, activates a native-mobile configuration, and signs back in", async ({ browser, page }) => {
     await page.goto("/");
     // A fresh server with an unused bootstrap token opens on setup.
     await expect(page.getByRole("heading", { level: 1, name: "Set up Latchway" })).toBeVisible();
@@ -103,8 +103,31 @@ test.describe("real first-run control plane", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Set up an application" })).toBeVisible();
     await expect(page.getByText(/is active/)).toBeVisible();
 
-    // An owner-set password must be replaced at first sign-in, against the real server.
+    // An invitation link, opened in another browser, creates the invited account against the real server.
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Team & Access" }).click();
+    await page.getByRole("button", { name: "Invite Member" }).click();
+    const invite = page.getByRole("complementary", { name: "Invite member" });
+    await invite.getByLabel("Email", { exact: true }).fill("invitee@live-e2e.invalid");
+    await invite.getByRole("button", { name: "Create Invitation" }).click();
+    const invitationReveal = page.getByRole("alertdialog", { name: "Invitation for invitee@live-e2e.invalid" });
+    const link = ((await invitationReveal.locator("code").textContent()) ?? "").trim();
+    expect(link).toMatch(/\/invitation#lwinv_[A-Za-z0-9_-]{43}$/);
+    await invitationReveal.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByRole("cell", { name: "invitee@live-e2e.invalid" })).toBeVisible();
+    const inviteeContext = await browser.newContext();
+    const invitee = await inviteeContext.newPage();
+    await invitee.goto(link);
+    await expect(invitee.getByRole("heading", { level: 1, name: "You're invited" })).toBeVisible();
+    expect(new URL(invitee.url()).hash).toBe("");
+    await invitee.getByLabel("Your name").fill("Live Invitee");
+    await invitee.getByLabel("Choose a password").fill("invitee chosen live passphrase 2026");
+    await invitee.getByRole("button", { name: "Join Latchway Live E2E" }).click();
+    await expect(invitee.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await inviteeContext.close();
+    await page.reload();
+    await expect(page.getByRole("cell", { name: /Live Invitee/ })).toBeVisible();
+
+    // An owner-set password must be replaced at first sign-in, against the real server.
     await page.getByRole("button", { name: "Add Member" }).click();
     const drawer = page.getByRole("complementary", { name: "Add member" });
     await drawer.getByLabel("Name", { exact: true }).fill("Live Operator");
