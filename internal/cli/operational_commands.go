@@ -456,6 +456,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_sso",
 	"admin_invitations",
 	"admin_application_roles",
+	"admin_user_insights",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {

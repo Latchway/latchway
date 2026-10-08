@@ -287,6 +287,9 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/users/{userID}", api.user)
 		protected.Get("/users/{userID}/effective-configuration", api.effectiveUserConfiguration)
 		protected.Get("/users/{userID}/operation-impact", api.userOperationImpact)
+		protected.Get("/users/{userID}/usage", api.userUsage)
+		protected.With(api.mutationProtection).Post("/users/batch-impact", api.userBatchImpact)
+		protected.With(api.mutationProtection).Post("/users/batch", api.userBatch)
 		protected.With(api.mutationProtection).Post("/users/{userID}/block", api.blockUser)
 		protected.With(api.mutationProtection).Post("/users/{userID}/unblock", api.unblockUser)
 		protected.With(api.mutationProtection).Post("/users/{userID}/require-reauthentication", api.requireUserReauthentication)
@@ -298,10 +301,12 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/installations/{installationID}/revoke", api.revokeInstallation)
 		protected.Get("/installation-families", api.installationFamilies)
 		protected.Get("/installation-families/{familyID}", api.installationFamily)
+		protected.Get("/installation-families/{familyID}/operation-impact", api.installationFamilyImpact)
 		protected.With(api.mutationProtection).Post("/installation-families/{familyID}/require-renewal", api.requireInstallationFamilyRenewal)
 		protected.With(api.mutationProtection).Post("/installation-families/{familyID}/revoke", api.revokeInstallationFamily)
 		protected.Get("/client-components", api.clientComponents)
 		protected.Get("/client-components/{componentID}", api.clientComponent)
+		protected.Get("/client-components/{componentID}/operation-impact", api.clientComponentImpact)
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/require-reattestation", api.requireClientComponentReattestation)
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/revoke", api.revokeClientComponent)
 		protected.Get("/requests", api.requests)
@@ -1580,6 +1585,8 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.user_limit_override_replace", "admin_request"
 	case strings.HasSuffix(path, "/limit-override") && method == http.MethodDelete:
 		return "admin.user_limit_override_clear", "admin_request"
+	case strings.HasSuffix(path, "/users/batch") || strings.HasSuffix(path, "/users/batch-impact"):
+		return "admin.user_batch", "admin_request"
 	case strings.HasSuffix(path, "/block") && strings.Contains(path, "/users/"):
 		return "admin.user_block", "admin_request"
 	case strings.HasSuffix(path, "/unblock") && strings.Contains(path, "/users/"):

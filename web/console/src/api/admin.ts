@@ -249,8 +249,11 @@ export const UserSchema = z
   })
   .strict();
 
+/** A count of every match, capped at 100,000. */
+export const ListTotalSchema = z.object({ capped: z.boolean(), count: NonnegativeSafeInteger.max(100_000) }).strict();
+
 export const UserPageSchema = z
-  .object({ items: z.array(UserSchema).max(200), page: PageInfo })
+  .object({ items: z.array(UserSchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
 
 export const InstallationSchema = z
@@ -427,6 +430,8 @@ export const InstallationFamilySchema = z
     root_component_id: ClientComponentID,
     root_trust_expires_at: OptionalInstant,
     root_trust_source: TrustSource,
+    /** Server-derived conditions worth a look; older servers omit them. */
+    signals: z.array(z.enum(["debug_trust", "trust_expiring", "token_reuse", "weak_key_storage", "failed_sessions"])).max(5).optional(),
     status: z.enum(["active", "suspended", "revoked"]),
     updated_at: Instant,
     usage: UsageValuesSchema,
@@ -473,8 +478,36 @@ export const InstallationFamilySchema = z
   });
 
 export const InstallationFamilyPageSchema = z
-  .object({ items: z.array(InstallationFamilySchema).max(200), page: PageInfo })
+  .object({ items: z.array(InstallationFamilySchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
+
+export const UserUsageSchema = z
+  .object({ end: Instant, provenance: z.array(z.string().max(64)).max(8), request_count: NonnegativeSafeInteger, start: Instant, user_id: OpaqueID, values: UsageValuesSchema })
+  .strict();
+
+export const OperationImpactSchema = z
+  .object({
+    action: z.enum(["revoke", "require_renewal", "require_reattestation"]),
+    applicable: z.boolean(),
+    counts: z
+      .object({
+        active_components: NonnegativeSafeInteger,
+        active_refresh_tokens: NonnegativeSafeInteger,
+        active_sessions: NonnegativeSafeInteger,
+        delegated_components: NonnegativeSafeInteger,
+        last_seen_at: OptionalInstant,
+        requests_last_24_hours: NonnegativeSafeInteger.max(10_000),
+        requests_last_24_hours_capped: z.boolean()
+      })
+      .strict(),
+    current_status: z.string().min(1).max(64),
+    summary: z.string().max(300)
+  })
+  .strict();
+
+export type InstallationSignal = NonNullable<z.infer<typeof InstallationFamilySchema>["signals"]>[number];
+export type UserUsage = z.infer<typeof UserUsageSchema>;
+export type OperationImpact = z.infer<typeof OperationImpactSchema>;
 
 const PublicAttemptFailureCode = z.enum([
   "canceled",

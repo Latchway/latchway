@@ -225,11 +225,12 @@ The current local server source advertises a stable ordered
 `anthropic_messages`, `opaque_http`, `configuration_import_export`,
 `admin_session_management`, `admin_event_stream`,
 `admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
-`admin_sso`, `admin_invitations`, and `admin_application_roles`. The Console
-Settings surface requires protocol 2 and every listed capability except
-`admin_event_stream`, `admin_account_self_service`, `admin_two_factor`,
-`admin_passkeys`, `admin_sso`, `admin_invitations` and
-`admin_application_roles` before enabling mutations. Missing protocol or
+`admin_sso`, `admin_invitations`, `admin_application_roles`, and
+`admin_user_insights`. The Console Settings surface requires protocol 2 and
+every listed capability except `admin_event_stream`,
+`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
+`admin_sso`, `admin_invitations`, `admin_application_roles` and
+`admin_user_insights` before enabling mutations. Missing protocol or
 required capabilities activates read-only safe mode. `admin_event_stream` is
 optional: older servers retain polling and manual refresh instead of being
 treated as mutation-incompatible. `admin_account_self_service` (draft Admin
@@ -247,7 +248,10 @@ Single sign-on settings card; Sign In with SSO appears only when
 console offers only Add Member with a first password. Without
 `admin_application_roles` (ADR 0045) the member drawer has no Application
 roles section; the console always computes capabilities from the session,
-treating a missing `application_roles` as none.
+treating a missing `application_roles` as none. Without `admin_user_insights`
+(ADR 0046) Users & Installs lists rows in server order, derives signals from
+loaded rows, previews installation actions from loaded counts and requires
+sign-in one user at a time, and says so on the page.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the
