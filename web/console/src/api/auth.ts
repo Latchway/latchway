@@ -1,4 +1,7 @@
+import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
+
+import { getPasskey, type PasskeyAssertionJSON, PasskeyPromptError, PasskeyRequestOptionsSchema } from "./webauthn";
 
 export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
@@ -7,6 +10,9 @@ export const adminAuthEndpoints = {
   secondFactor: "/admin/v1/auth/login/two-factor",
   logout: "/admin/v1/auth/logout",
   organization: "/admin/v1/auth/organization",
+  passkeySecondFactorOptions: "/admin/v1/auth/login/two-factor/passkey-options",
+  passkeySignIn: "/admin/v1/auth/passkeys/sign-in",
+  passkeySignInOptions: "/admin/v1/auth/passkeys/sign-in-options",
   session: "/admin/v1/auth/session"
 } as const;
 
@@ -45,7 +51,7 @@ export const AdminSignInInfoSchema = z
     contract_version: z.string().max(64),
     protocol_versions: z.array(z.number().int().min(1)).max(16),
     setup_open: z.boolean(),
-    sign_in_methods: z.array(z.enum(["password"])).max(8)
+    sign_in_methods: z.array(z.enum(["password", "passkey"])).max(8)
   })
   .strict();
 
@@ -293,7 +299,7 @@ export const SecondFactorChallengeSchema = z
   .object({
     challenge: z.string().regex(/^lwsic_[A-Za-z0-9_-]{43}$/),
     expires_at: z.iso.datetime({ offset: true }),
-    methods: z.array(z.enum(["totp", "recovery_code"])).min(1).max(4),
+    methods: z.array(z.enum(["totp", "passkey", "recovery_code"])).min(1).max(4),
     status: z.literal("two_factor_required")
   })
   .strict();
@@ -306,6 +312,7 @@ export type SignInResult = { kind: "session"; session: AdminSession } | { challe
 export interface SecondFactorInput {
   challenge: string;
   code?: string;
+  passkey?: PasskeyAssertionJSON;
   recovery_code?: string;
 }
 
@@ -321,7 +328,7 @@ function invalidSession(status: number): AdminRequestError {
 
 async function postCredentials(
   endpoint: string,
-  input: BootstrapOwnerInput | AdministratorLoginInput | SecondFactorInput,
+  input: object,
   signal?: AbortSignal,
   fetcher: typeof fetch = globalThis.fetch
 ): Promise<{ payload: unknown; response: Response }> {
@@ -369,7 +376,7 @@ function sessionFrom(response: Response, payload: unknown): AdminSession {
 
 async function submitCredentials(
   endpoint: string,
-  input: BootstrapOwnerInput | AdministratorLoginInput | SecondFactorInput,
+  input: object,
   signal?: AbortSignal,
   fetcher: typeof fetch = globalThis.fetch
 ): Promise<AdminSession> {
@@ -389,9 +396,39 @@ export async function startAdministratorSignIn(input: AdministratorLoginInput, s
   return { kind: "session", session: sessionFrom(response, payload) };
 }
 
-/** Finishes a two-factor sign-in with an authenticator code or a recovery code. */
+/** Finishes a two-factor sign-in with an authenticator code, a passkey assertion or a recovery code. */
 export function completeSecondFactor(input: SecondFactorInput, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
   return submitCredentials(adminAuthEndpoints.secondFactor, input, signal, fetcher);
+}
+
+async function passkeyPrompt(endpoint: string, input: object, signal?: AbortSignal, fetcher?: typeof fetch): Promise<PasskeyAssertionJSON> {
+  const { payload, response } = await postCredentials(endpoint, input, signal, fetcher);
+  const options = PasskeyRequestOptionsSchema.safeParse(payload);
+  if (!options.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned invalid passkey options.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return getPasskey(options.data, signal);
+}
+
+/** Finishes a two-factor sign-in with one of the account's passkeys. */
+export async function completeSecondFactorWithPasskey(challenge: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const passkey = await passkeyPrompt(adminAuthEndpoints.passkeySecondFactorOptions, { challenge }, signal, fetcher);
+  return completeSecondFactor({ challenge, passkey }, signal, fetcher);
+}
+
+export type SecondFactorMethod = SecondFactorChallenge["methods"][number];
+
+/** How the operator answered the second-factor step; a passkey answer runs the browser prompt when sent. */
+export type SecondFactorAnswer = { code: string } | { recovery_code: string } | { passkey: true };
+
+export function finishSecondFactor(challenge: string, answer: SecondFactorAnswer, signal?: AbortSignal): Promise<AdminSession> {
+  return "passkey" in answer ? completeSecondFactorWithPasskey(challenge, signal) : completeSecondFactor({ challenge, ...answer }, signal);
+}
+
+/** Signs in with a passkey alone; the browser offers this site's passkeys. */
+export async function signInWithPasskey(signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const credential = await passkeyPrompt(adminAuthEndpoints.passkeySignInOptions, {}, signal, fetcher);
+  return submitCredentials(adminAuthEndpoints.passkeySignIn, { credential }, signal, fetcher);
 }
 
 /**
@@ -417,6 +454,14 @@ export async function fetchAdminSignInInfo(signal?: AbortSignal, fetcher: typeof
     return undefined;
   }
 }
+
+/** The sign-in information as a query; null when the server can't say, since queries can't hold undefined. */
+export const adminSignInInfoQueryOptions = queryOptions({
+  queryFn: async ({ signal }) => (await fetchAdminSignInInfo(signal)) ?? null,
+  queryKey: ["admin-sign-in-info"] as const,
+  retry: false,
+  staleTime: 60_000
+});
 
 export function bootstrapFirstOwner(
   input: BootstrapOwnerInput,
@@ -502,9 +547,18 @@ export async function switchAdminOrganization(organizationID: string, signal?: A
   return parsed.data;
 }
 
+const PASSKEY_PROMPT_PROBLEMS: Readonly<Record<PasskeyPromptError["reason"], AdminProblem>> = {
+  cancelled: { code: "passkey_cancelled", detail: "The passkey prompt was closed or timed out. Try again when you're ready.", retryable: true, status: 0, title: "Passkey not used" },
+  failed: { code: "passkey_failed", detail: "The browser couldn't complete the passkey prompt. Try again, or use another way to sign in.", retryable: true, status: 0, title: "Passkey didn't work" },
+  unsupported: { code: "passkey_unsupported", detail: "This browser or device can't use passkeys for this site.", retryable: false, status: 0, title: "Passkeys unavailable" }
+};
+
 export function problemFromError(error: unknown): AdminProblem {
   if (error instanceof AdminRequestError) {
     return error.problem;
+  }
+  if (error instanceof PasskeyPromptError) {
+    return PASSKEY_PROMPT_PROBLEMS[error.reason];
   }
   return {
     code: "request_failed",

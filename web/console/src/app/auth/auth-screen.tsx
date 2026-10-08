@@ -5,16 +5,20 @@ import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } fr
 import {
   type AdminProblem,
   type AdminSession,
+  adminSignInInfoQueryOptions,
   bootstrapFirstOwner,
-  completeSecondFactor,
-  fetchAdminSignInInfo,
+  finishSecondFactor,
   logoutAdministrator,
   problemFromError,
+  type SecondFactorAnswer,
+  type SecondFactorMethod,
+  signInWithPasskey,
   startAdministratorSignIn,
   switchAdminOrganization
 } from "../../api/auth";
 import { consoleContractVersion } from "../../api/console-compatibility";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
+import { passkeysAvailable } from "../../api/webauthn";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { PasswordField } from "../../components/password-field";
 import { ROLE_LABEL } from "../../pages/team/roles";
@@ -23,7 +27,7 @@ import { AuthProblem, PasswordInput } from "./auth-fields";
 import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
 import { acceptable, passwordStrength, type Strength } from "./password-strength";
-import { type SecondFactorAnswer, SecondFactorForm } from "./second-factor";
+import { SecondFactorForm } from "./second-factor";
 import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
 
@@ -77,17 +81,19 @@ function PauseNotice({ onElapsed, until }: { onElapsed: () => void; until: numbe
   );
 }
 
-function SignInView({ email, emailRef, endReason, failures, mismatch, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
+function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
   email: string;
   emailRef: RefObject<HTMLInputElement | null>;
   endReason?: string;
   failures: number;
   /** The server's advertised contract when it differs from this console's. */
   mismatch?: string;
+  /** Offered when the server accepts passkeys and this browser can use them. */
+  onPasskey?: () => void;
   onSetup: () => void;
   onSubmit: () => void;
   passwordRef: RefObject<HTMLInputElement | null>;
-  pending: boolean;
+  pending: "password" | "passkey" | undefined;
   problem?: AdminProblem;
   setEmail: (email: string) => void;
 }) {
@@ -103,17 +109,23 @@ function SignInView({ email, emailRef, endReason, failures, mismatch, onSetup, o
     <div className="lw-auth__body">
       {mismatch ? <Notice title="This console and server are from different releases." tone="warning">The console expects contract {consoleContractVersion}; the server reports {mismatch}. Sign-in may fail until an upgrade finishes; reload this page afterwards.</Notice> : null}
       {endReason ? <Notice title="Your session ended">{endReason}</Notice> : null}
-      <form aria-busy={pending} className="lw-auth__form" onSubmit={submit}>
+      <form aria-busy={Boolean(pending)} className="lw-auth__form" onSubmit={submit}>
         <Field id="login-email" label="Email address">
           <div className="lw-input-box">
-            <input autoComplete="username" className="lw-input" disabled={pending} id="login-email" maxLength={320} name="email" onChange={(event) => setEmail(event.target.value)} ref={emailRef} required spellCheck={false} type="email" value={email} />
+            <input autoComplete="username" className="lw-input" disabled={Boolean(pending)} id="login-email" maxLength={320} name="email" onChange={(event) => setEmail(event.target.value)} ref={emailRef} required spellCheck={false} type="email" value={email} />
           </div>
         </Field>
-        <PasswordInput disabled={pending} id="login-password" inputRef={passwordRef} />
+        <PasswordInput disabled={Boolean(pending)} id="login-password" inputRef={passwordRef} />
         {paused ? <PauseNotice key={pausedUntil} onElapsed={() => setElapsedFor(pausedUntil)} until={pausedUntil} /> : problem ? <AuthProblem problem={problem} /> : null}
         {failures >= PAUSE_NOTE_AFTER && !paused ? <p className="lw-auth__fine">After five failed attempts for one email address within five minutes, the server pauses sign-in for that address for up to five minutes.</p> : null}
-        <Button className="lw-auth__submit" disabled={paused} loading={pending} type="submit" variant="primary">{pending ? "Signing In…" : "Sign In"}</Button>
+        <Button className="lw-auth__submit" disabled={paused || pending === "passkey"} loading={pending === "password"} type="submit" variant="primary">{pending === "password" ? "Signing In…" : "Sign In"}</Button>
       </form>
+      {onPasskey ? (
+        <div className="lw-auth__alternative">
+          <span className="lw-auth__divider">or</span>
+          <Button className="lw-auth__submit" disabled={pending === "password"} icon="key" loading={pending === "passkey"} onClick={onPasskey}>Sign In with a Passkey</Button>
+        </div>
+      ) : null}
       <SignInHelp />
       <Button className="lw-auth__link" onClick={onSetup} size="sm" variant="ghost">Setting up a new server?</Button>
     </div>
@@ -268,7 +280,7 @@ function SetupDoneView({ onContinue }: { onContinue: (to?: "/setup") => void }) 
 export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, retrying }: { checking: boolean; endReason?: string; mode: "configured" | "signed-out" | "unknown"; onHoldChange: (held: boolean) => void; retry: () => void; retrying: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const info = useQuery({ queryFn: ({ signal }) => fetchAdminSignInInfo(signal), queryKey: ["admin-sign-in-info"], retry: false, staleTime: 60_000 });
+  const info = useQuery(adminSignInInfoQueryOptions);
   const [view, setView] = useState<View>(() => (lastSignedOutEmail() ? "signed-out" : "sign-in"));
   // An open setup leads with Set up Latchway until the operator chooses sign-in instead.
   const [preferSignIn, setPreferSignIn] = useState(false);
@@ -282,6 +294,7 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
   const passwordRef = useRef<HTMLInputElement>(null);
   // The second-factor challenge is short-lived and sensitive, so it lives in a ref, never in rendered state.
   const challenge = useRef<string | undefined>(undefined);
+  const [methods, setMethods] = useState<readonly SecondFactorMethod[]>([]);
 
   function show(next: View): void {
     setProblem(undefined);
@@ -317,6 +330,7 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
       setFailures(0);
       if (result.kind === "challenge") {
         challenge.current = result.challenge.challenge;
+        setMethods(result.challenge.methods);
         setPending(undefined);
         setView("two-factor");
         return;
@@ -327,6 +341,21 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
       if (found.code === "rate_limited" && found.retryAfterSeconds) pauseSignIn(address, found.retryAfterSeconds);
       if (found.code === "authentication_required") setFailures((count) => count + 1);
       passwordRef.current?.focus();
+    }
+  }
+
+  async function signInByPasskey(): Promise<void> {
+    setPending("passkey");
+    setProblem(undefined);
+    onHoldChange(true);
+    try {
+      const session = await signInWithPasskey();
+      clearInput(passwordRef.current);
+      setFailures(0);
+      setEmail(session.administrator.email);
+      afterSignIn(session);
+    } catch (error) {
+      fail(error);
     }
   }
 
@@ -345,7 +374,7 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
     setPending("two-factor");
     setProblem(undefined);
     try {
-      const session = await completeSecondFactor({ challenge: challenge.current, ...answer });
+      const session = await finishSecondFactor(challenge.current, answer);
       challenge.current = undefined;
       afterSignIn(session);
     } catch (error) {
@@ -443,7 +472,8 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
   }
 
   const mismatch = info.data && info.data.contract_version !== consoleContractVersion ? info.data.contract_version : undefined;
-  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in"} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const passkeySignIn = info.data?.sign_in_methods.includes("passkey") && passkeysAvailable() ? () => void signInByPasskey() : undefined;
+  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onPasskey={passkeySignIn} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in" ? "password" : pending === "passkey" ? "passkey" : undefined} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
   const current: View = view === "sign-in" && info.data?.setup_open && !preferSignIn ? "setup" : view;
 
   switch (current) {
@@ -474,8 +504,8 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
       );
     case "two-factor":
       return (
-        <AuthLayout description={`Two-factor sign-in is on for ${email.trim()}. Enter the code from your authenticator app.`} title="Verify it's you">
-          <SecondFactorForm idPrefix="sign-in" onCancel={cancelSecondFactor} onSubmit={(answer) => void verifySecondFactor(answer)} pending={pending === "two-factor"} problem={problem} />
+        <AuthLayout description={`Two-factor sign-in is on for ${email.trim()}. ${methods.includes("totp") ? "Enter the code from your authenticator app" : "Use one of your passkeys"} to finish signing in.`} title="Verify it's you">
+          <SecondFactorForm idPrefix="sign-in" methods={methods} onCancel={cancelSecondFactor} onSubmit={(answer) => void verifySecondFactor(answer)} pending={pending === "two-factor"} problem={problem} />
         </AuthLayout>
       );
     case "choose-org":

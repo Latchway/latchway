@@ -16,12 +16,19 @@ All notable project changes will be documented here. The format follows [Keep a 
   authenticator apps with single-use recovery codes, a `202` second-factor step
   at sign-in, an organization setting that requires it, and owner resets
   (also `latchway admin accounts reset-two-factor`).
+- Passkeys for administrators (ADR 0042, `admin_passkeys`): sign in with a
+  passkey alone, or use one as the second step after a password. Passkeys
+  count toward an organization's two-factor requirement; adding or removing one
+  needs the current password.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
 
 ### Changed
 
+- Removing the authenticator app (`POST /auth/two-factor/disable`) keeps any
+  passkeys, and recovery codes can be replaced with the password when there's
+  no authenticator app. An owner's two-factor reset also removes passkeys.
 - Passwords set by an owner (administrator creation or reset) must be changed
   at the administrator's next sign-in before anything else works.
 - A sign-in that names no organization uses the administrator's last one.

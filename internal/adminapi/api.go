@@ -205,6 +205,9 @@ func (api *API) Handler() http.Handler {
 	router.Post("/auth/bootstrap", api.bootstrap)
 	router.Post("/auth/login", api.login)
 	router.Post("/auth/login/two-factor", api.loginSecondFactor)
+	router.Post("/auth/login/two-factor/passkey-options", api.secondFactorPasskeyOptions)
+	router.Post("/auth/passkeys/sign-in-options", api.passkeySignInOptions)
+	router.Post("/auth/passkeys/sign-in", api.passkeySignIn)
 	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
@@ -220,6 +223,10 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/auth/two-factor/totp/confirm", api.confirmTOTPEnrollment)
 		protected.With(api.mutationProtection).Post("/auth/two-factor/recovery-codes", api.replaceRecoveryCodes)
 		protected.With(api.mutationProtection).Post("/auth/two-factor/disable", api.disableTwoFactor)
+		protected.Get("/auth/passkeys", api.listPasskeys)
+		protected.With(api.mutationProtection).Post("/auth/passkeys/registration-options", api.passkeyRegistrationOptions)
+		protected.With(api.mutationProtection).Post("/auth/passkeys", api.addPasskey)
+		protected.With(api.mutationProtection).Post("/auth/passkeys/{adminPasskeyID}/remove", api.removePasskey)
 		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/two-factor-requirement", api.setTwoFactorRequirement)
 		protected.Get("/organizations", api.organizations)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
@@ -445,7 +452,7 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
-	if factors.TOTPConfirmed {
+	if factors.Enabled {
 		// The password was right; the session waits for the second factor.
 		challenge, expiresAt, err := api.auth.CreateSignInChallenge(r.Context(), adminauth.SignInChallenge{
 			AdminUserID: adminUserID, OrganizationID: membership.OrganizationID, DeviceSummary: deviceSummary,
@@ -454,9 +461,17 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 			api.internal(w, r, err)
 			return
 		}
+		methods := make([]string, 0, 3)
+		if factors.TOTPConfirmed {
+			methods = append(methods, "totp")
+		}
+		if _, ok := api.relyingParty(); ok && factors.Passkeys > 0 {
+			methods = append(methods, "passkey")
+		}
+		methods = append(methods, "recovery_code")
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"status": "two_factor_required", "challenge": challenge, "expires_at": expiresAt,
-			"methods": []string{"totp", "recovery_code"},
+			"methods": methods,
 		})
 		return
 	}
@@ -1450,8 +1465,14 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.bootstrap_owner", "admin_request"
 	case strings.HasSuffix(path, "/auth/login"):
 		return "admin.login", "admin_request"
-	case strings.HasSuffix(path, "/auth/login/two-factor"):
+	case strings.HasSuffix(path, "/auth/login/two-factor") || strings.HasSuffix(path, "/auth/login/two-factor/passkey-options"):
 		return "admin.login_second_factor", "admin_request"
+	case strings.HasSuffix(path, "/auth/passkeys/sign-in") || strings.HasSuffix(path, "/auth/passkeys/sign-in-options"):
+		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/passkeys") || strings.HasSuffix(path, "/auth/passkeys/registration-options"):
+		return "admin.passkey_add", "admin_request"
+	case strings.Contains(path, "/auth/passkeys/") && strings.HasSuffix(path, "/remove"):
+		return "admin.passkey_remove", "admin_request"
 	case strings.HasSuffix(path, "/auth/password"):
 		return "admin.password_change", "admin_request"
 	case strings.HasSuffix(path, "/auth/organization"):
