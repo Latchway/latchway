@@ -145,7 +145,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove a member's authenticator and recovery codes and end their sessions.
+         * Remove a member's authenticator app, passkeys and recovery codes and end their sessions.
          * @description Requires `manage_owners`. Like a password reset it is refused when the
          *     member also belongs to another organization, because the second
          *     factor is global to the account.
@@ -381,9 +381,10 @@ export interface paths {
         put?: never;
         /**
          * Create a secure administrator cookie session.
-         * @description When the administrator has a confirmed second factor, a correct
-         *     password returns `202` with a short-lived challenge and no cookie; the
-         *     session is issued by `POST /auth/login/two-factor`.
+         * @description When the administrator has a second factor (an authenticator app or a
+         *     passkey), a correct password returns `202` with a short-lived
+         *     challenge and no cookie; the session is issued by
+         *     `POST /auth/login/two-factor`.
          */
         post: operations["adminLogin"];
         delete?: never;
@@ -402,12 +403,37 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Finish a sign-in with an authenticator code or a recovery code.
-         * @description Send exactly one of `code` or `recovery_code`. A challenge lasts five
-         *     minutes and ends after five wrong codes; wrong codes are also limited
-         *     per administrator across challenges. Authenticator codes work once.
+         * Finish a sign-in with an authenticator code, a passkey or a recovery code.
+         * @description Send exactly one of `code`, `passkey` or `recovery_code`. A challenge
+         *     lasts five minutes and ends after five failed attempts; failures are
+         *     also limited per administrator across challenges. Authenticator codes
+         *     work once. A passkey answers the prompt from
+         *     `POST /auth/login/two-factor/passkey-options` for the same challenge.
          */
         post: operations["adminLoginSecondFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/login/two-factor/passkey-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a passkey prompt for a sign-in whose password was correct.
+         * @description Returns WebAuthn request options limited to the administrator's
+         *     passkeys and tied to the sign-in challenge. Each prompt works once and
+         *     lasts five minutes. Returns `server_not_ready` when the console isn't
+         *     served from a domain name over HTTPS.
+         */
+        post: operations["adminLoginPasskeyOptions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -447,6 +473,123 @@ export interface paths {
          *     session cookie is issued in the same transaction.
          */
         post: operations["switchAdminOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the signed-in administrator's passkeys. */
+        get: operations["listOwnPasskeys"];
+        put?: never;
+        /**
+         * Register a passkey from the browser's response to the registration prompt.
+         * @description Console sessions only. Accepts ES256 credentials with user
+         *     verification; attestation statements are not evaluated. The first
+         *     second factor also issues ten recovery codes, returned once.
+         */
+        post: operations["addOwnPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/{adminPasskeyId}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove one of the signed-in administrator's passkeys.
+         * @description Console sessions only; requires the current password. Refused with
+         *     `conflict` when it is the last second factor and an organization the
+         *     administrator belongs to requires one. Removing the last second
+         *     factor also removes the recovery codes.
+         */
+        post: operations["removeOwnPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/registration-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check the password and start a passkey registration prompt.
+         * @description Console sessions only. Requires the current password (rate limited)
+         *     because a passkey can sign in on its own. Returns WebAuthn creation
+         *     options that require a discoverable credential, user verification and
+         *     ES256, and exclude passkeys already registered. Returns
+         *     `server_not_ready` when the console isn't served from a domain name
+         *     over HTTPS.
+         */
+        post: operations["startPasskeyRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a console session with a passkey.
+         * @description Verifies the passkey's signature, user verification and counter, then
+         *     signs in to `organization_id`, the last organization used, or the
+         *     first active membership. User verification on the authenticator stands
+         *     in for both the password and the second factor.
+         */
+        post: operations["adminPasskeySignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/sign-in-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a passwordless sign-in with a passkey.
+         * @description Public; any body is ignored. Returns WebAuthn request options with no
+         *     allowed-credential list, so the browser offers any of this site's
+         *     passkeys. Each prompt works once and lasts five minutes; a bounded
+         *     number may be pending at once (`rate_limited` beyond it).
+         */
+        post: operations["adminPasskeySignInOptions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -584,8 +727,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Turn off two-factor sign-in with the password and a current code.
-         * @description Refused with `conflict` while any organization the administrator belongs to requires two-factor sign-in.
+         * Remove the authenticator app with the password and a current code.
+         * @description Passkeys stay. Refused with `conflict` when no passkey remains and an
+         *     organization the administrator belongs to requires two-factor sign-in.
          */
         post: operations["disableOwnTwoFactor"];
         delete?: never;
@@ -603,7 +747,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Replace every recovery code after checking a current authenticator code. */
+        /** Replace every recovery code after checking a current authenticator code or the password. */
         post: operations["replaceRecoveryCodes"];
         delete?: never;
         options?: never;
@@ -1586,6 +1730,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddedPasskey: {
+            passkey: components["schemas"]["Passkey"];
+            /** @description Present when this passkey is the first second factor; shown once. */
+            recovery_codes?: string[];
+        };
+        AddPasskeyRequest: {
+            credential: components["schemas"]["PasskeyRegistration"];
+            name: string;
+        };
         Administrator: {
             /** Format: date-time */
             created_at: string;
@@ -1612,6 +1765,7 @@ export interface components {
         };
         /** @enum {string} */
         AdministratorRole: "owner" | "admin" | "operator" | "viewer";
+        AdminPasskeyID: string;
         AdminSession: {
             administrator: {
                 display_name: string;
@@ -1663,7 +1817,8 @@ export interface components {
             protocol_versions: number[];
             /** @description True while a bootstrap token is installed and unconsumed and no owner exists. */
             setup_open: boolean;
-            sign_in_methods: "password"[];
+            /** @description Includes `passkey` when the console is served from a domain name over HTTPS. */
+            sign_in_methods: ("password" | "passkey")[];
         };
         AdminUserID: string;
         ApiTokenMetadata: {
@@ -1787,6 +1942,7 @@ export interface components {
         };
         /** @description Stable operational reason code. Free-form user text and secret-bearing labels are never copied into the audit ledger. */
         AuditReason: string;
+        Base64URL: string;
         BootstrapRequest: {
             bootstrap_token: string;
             display_name: string;
@@ -3142,6 +3298,110 @@ export interface components {
             has_more: boolean;
             next_cursor?: string;
         };
+        Passkey: {
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["AdminPasskeyID"];
+            /** Format: date-time */
+            last_used_at?: string;
+            name: string;
+            /** @description True when the authenticator reports the passkey is backed up */
+            synced: boolean;
+        };
+        /** @description AuthenticationResponseJSON from the WebAuthn Level 3 JSON encoding. */
+        PasskeyAssertion: {
+            authenticatorAttachment?: string;
+            clientExtensionResults?: Record<string, never>;
+            id: components["schemas"]["Base64URL"];
+            rawId: components["schemas"]["Base64URL"];
+            response: {
+                authenticatorData: components["schemas"]["Base64URL"];
+                clientDataJSON: components["schemas"]["Base64URL"];
+                signature: components["schemas"]["Base64URL"];
+                userHandle?: components["schemas"]["Base64URL"];
+            };
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyCreationOptions: {
+            /** @description PublicKeyCredentialCreationOptions in the WebAuthn Level 3 JSON encoding. */
+            public_key: {
+                /** @constant */
+                attestation: "none";
+                authenticatorSelection: {
+                    /** @constant */
+                    requireResidentKey: true;
+                    /** @constant */
+                    residentKey: "required";
+                    /** @constant */
+                    userVerification: "required";
+                };
+                challenge: components["schemas"]["Base64URL"];
+                excludeCredentials: components["schemas"]["PasskeyDescriptor"][];
+                pubKeyCredParams: {
+                    /** @constant */
+                    alg: -7;
+                    /** @constant */
+                    type: "public-key";
+                }[];
+                rp: {
+                    id: string;
+                    name: string;
+                };
+                timeout: number;
+                user: {
+                    displayName: string;
+                    id: components["schemas"]["Base64URL"];
+                    name: string;
+                };
+            };
+        };
+        PasskeyDescriptor: {
+            id: components["schemas"]["Base64URL"];
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyList: {
+            items: components["schemas"]["Passkey"][];
+        };
+        PasskeyOptionsForSignInRequest: {
+            challenge: string;
+        };
+        /** @description RegistrationResponseJSON from the WebAuthn Level 3 JSON encoding. */
+        PasskeyRegistration: {
+            authenticatorAttachment?: string;
+            clientExtensionResults?: Record<string, never>;
+            id: components["schemas"]["Base64URL"];
+            rawId: components["schemas"]["Base64URL"];
+            response: {
+                attestationObject: components["schemas"]["Base64URL"];
+                authenticatorData?: components["schemas"]["Base64URL"];
+                clientDataJSON: components["schemas"]["Base64URL"];
+                publicKey?: components["schemas"]["Base64URL"];
+                publicKeyAlgorithm?: number;
+                transports?: string[];
+            };
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyRequestOptions: {
+            /** @description PublicKeyCredentialRequestOptions in the WebAuthn Level 3 JSON encoding. */
+            public_key: {
+                allowCredentials: components["schemas"]["PasskeyDescriptor"][];
+                challenge: components["schemas"]["Base64URL"];
+                rpId: string;
+                timeout: number;
+                /** @constant */
+                userVerification: "required";
+            };
+        };
+        PasskeySignInRequest: {
+            credential: components["schemas"]["PasskeyAssertion"];
+            organization_id?: components["schemas"]["OrganizationID"];
+        };
+        PasswordConfirmation: {
+            password: string;
+        };
         PlatformAttestation: {
             allowedOrigins?: string[];
             appAttest?: components["schemas"]["AppAttestConfiguration"];
@@ -3245,6 +3505,11 @@ export interface components {
         };
         RecoveryCodes: {
             recovery_codes: string[];
+        };
+        /** @description Exactly one of `code` or `password`. */
+        RecoveryCodesRequest: {
+            code?: string;
+            password?: string;
         };
         RequestDecisionStage: {
             /** Format: date-time */
@@ -3492,13 +3757,14 @@ export interface components {
             challenge: string;
             /** Format: date-time */
             expires_at: string;
-            methods: ("totp" | "recovery_code")[];
+            methods: ("totp" | "passkey" | "recovery_code")[];
             /** @constant */
             status: "two_factor_required";
         };
         SecondFactorRequest: {
             challenge: string;
             code?: string;
+            passkey?: components["schemas"]["PasskeyAssertion"];
             recovery_code?: string;
         };
         SecretID: string;
@@ -3689,7 +3955,8 @@ export interface components {
                 "admin_session_management",
                 "admin_event_stream",
                 "admin_account_self_service",
-                "admin_two_factor"
+                "admin_two_factor",
+                "admin_passkeys"
             ];
             server_version: string;
         };
@@ -3720,6 +3987,9 @@ export interface components {
             required: boolean;
         };
         TwoFactorStatus: {
+            /** @description True when an authenticator app or a passkey is set up. */
+            enabled: boolean;
+            passkeys: number;
             recovery_codes_remaining: number;
             required_by_organization: boolean;
             totp_enabled: boolean;
@@ -3985,6 +4255,7 @@ export interface components {
         };
     };
     parameters: {
+        AdminPasskeyID: components["schemas"]["AdminPasskeyID"];
         AdminSessionID: components["schemas"]["AdminSessionID"];
         AdminUserID: components["schemas"]["AdminUserID"];
         ApplicationID: components["schemas"]["ApplicationID"];
@@ -4689,6 +4960,33 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    adminLoginPasskeyOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyOptionsForSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description WebAuthn request options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyRequestOptions"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     adminLogout: {
         parameters: {
             query?: never;
@@ -4738,6 +5036,163 @@ export interface operations {
                     "application/json": components["schemas"]["AdminSession"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listOwnPasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Passkeys, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    addOwnPasskey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Passkey registered. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedPasskey"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeOwnPasskey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminPasskeyId: components["parameters"]["AdminPasskeyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordConfirmation"];
+            };
+        };
+        responses: {
+            /** @description Passkey removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    startPasskeyRegistration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordConfirmation"];
+            };
+        };
+        responses: {
+            /** @description WebAuthn creation options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyCreationOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminPasskeySignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeySignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminPasskeySignInOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebAuthn request options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyRequestOptions"];
+                };
+            };
+            429: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -4901,7 +5356,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authenticator and recovery codes removed. */
+            /** @description Authenticator removed */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -4924,7 +5379,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TotpCodeRequest"];
+                "application/json": components["schemas"]["RecoveryCodesRequest"];
             };
         };
         responses: {

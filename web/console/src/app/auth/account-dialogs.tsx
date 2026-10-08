@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useRef, useState } from "react";
 
-import { type AdminProblem, type AdminSession, completeSecondFactor, problemFromError, startAdministratorSignIn, switchAdminOrganization } from "../../api/auth";
+import { type AdminProblem, type AdminSession, finishSecondFactor, problemFromError, type SecondFactorAnswer, type SecondFactorMethod, startAdministratorSignIn, switchAdminOrganization } from "../../api/auth";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { ROLE_LABEL } from "../../pages/team/roles";
 import { Button, Field } from "../../ui";
 import { AccountDialogFrame, AuthProblem, PasswordInput } from "./auth-fields";
-import { type SecondFactorAnswer, SecondFactorForm } from "./second-factor";
+import { SecondFactorForm } from "./second-factor";
 
 /**
  * Signs in again as the same administrator into the given organization and replaces the console's session. A
@@ -18,6 +18,7 @@ function useSignInAgain(session: AdminSession) {
   const password = useRef<HTMLInputElement>(null);
   const challenge = useRef<string | undefined>(undefined);
   const [step, setStep] = useState<"password" | "two-factor">("password");
+  const [methods, setMethods] = useState<readonly SecondFactorMethod[]>([]);
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<AdminProblem>();
   function accept(next: AdminSession): AdminSession {
@@ -31,6 +32,7 @@ function useSignInAgain(session: AdminSession) {
       const result = await startAdministratorSignIn({ email: session.administrator.email, organization_id: organizationID, password: password.current?.value ?? "" });
       if (result.kind === "challenge") {
         challenge.current = result.challenge.challenge;
+        setMethods(result.challenge.methods);
         setStep("two-factor");
         return undefined;
       }
@@ -49,7 +51,7 @@ function useSignInAgain(session: AdminSession) {
     setPending(true);
     setProblem(undefined);
     try {
-      const next = await completeSecondFactor({ challenge: challenge.current, ...answer });
+      const next = await finishSecondFactor(challenge.current, answer);
       challenge.current = undefined;
       return accept(next);
     } catch (error) {
@@ -64,7 +66,7 @@ function useSignInAgain(session: AdminSession) {
       setPending(false);
     }
   }
-  return { password, pending, problem, step, submit, verify };
+  return { methods, password, pending, problem, step, submit, verify };
 }
 
 /**
@@ -91,7 +93,7 @@ export function ReauthDialog({ endReason, onClose, onSignedIn, onSomeoneElse, se
     >
       {again.step === "two-factor" ? (
         <div className="lw-confirm__body">
-          <SecondFactorForm idPrefix="reauth" onSubmit={(answer) => void again.verify(answer).then(finished)} pending={again.pending} problem={again.problem} />
+          <SecondFactorForm idPrefix="reauth" methods={again.methods} onSubmit={(answer) => void again.verify(answer).then(finished)} pending={again.pending} problem={again.problem} />
         </div>
       ) : (
         <form className="lw-confirm__body lw-auth__form" onSubmit={(event) => void submit(event)}>

@@ -70,9 +70,10 @@ paths:
       operationId: adminLogin
       summary: Create a secure administrator cookie session.
       description: |
-        When the administrator has a confirmed second factor, a correct
-        password returns `202` with a short-lived challenge and no cookie; the
-        session is issued by `POST /auth/login/two-factor`.
+        When the administrator has a second factor (an authenticator app or a
+        passkey), a correct password returns `202` with a short-lived
+        challenge and no cookie; the session is issued by
+        `POST /auth/login/two-factor`.
       security: []
       requestBody:
         required: true
@@ -100,11 +101,13 @@ paths:
     post:
       tags: [Authentication]
       operationId: adminLoginSecondFactor
-      summary: Finish a sign-in with an authenticator code or a recovery code.
+      summary: Finish a sign-in with an authenticator code, a passkey or a recovery code.
       description: |
-        Send exactly one of `code` or `recovery_code`. A challenge lasts five
-        minutes and ends after five wrong codes; wrong codes are also limited
-        per administrator across challenges. Authenticator codes work once.
+        Send exactly one of `code`, `passkey` or `recovery_code`. A challenge
+        lasts five minutes and ends after five failed attempts; failures are
+        also limited per administrator across challenges. Authenticator codes
+        work once. A passkey answers the prompt from
+        `POST /auth/login/two-factor/passkey-options` for the same challenge.
       security: []
       requestBody:
         required: true
@@ -122,6 +125,77 @@ paths:
               schema: { $ref: '#/components/schemas/AdminSession' }
         '401': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/login/two-factor/passkey-options:
+    post:
+      tags: [Authentication]
+      operationId: adminLoginPasskeyOptions
+      summary: Start a passkey prompt for a sign-in whose password was correct.
+      description: |
+        Returns WebAuthn request options limited to the administrator's
+        passkeys and tied to the sign-in challenge. Each prompt works once and
+        lasts five minutes. Returns `server_not_ready` when the console isn't
+        served from a domain name over HTTPS.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasskeyOptionsForSignInRequest' }
+      responses:
+        '200':
+          description: WebAuthn request options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyRequestOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/sign-in-options:
+    post:
+      tags: [Authentication]
+      operationId: adminPasskeySignInOptions
+      summary: Start a passwordless sign-in with a passkey.
+      description: |
+        Public; any body is ignored. Returns WebAuthn request options with no
+        allowed-credential list, so the browser offers any of this site's
+        passkeys. Each prompt works once and lasts five minutes; a bounded
+        number may be pending at once (`rate_limited` beyond it).
+      security: []
+      responses:
+        '200':
+          description: WebAuthn request options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyRequestOptions' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/sign-in:
+    post:
+      tags: [Authentication]
+      operationId: adminPasskeySignIn
+      summary: Create a console session with a passkey.
+      description: |
+        Verifies the passkey's signature, user verification and counter, then
+        signs in to `organization_id`, the last organization used, or the
+        first active membership. User verification on the authenticator stands
+        in for both the password and the second factor.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasskeySignInRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/auth/logout:
     post:
@@ -323,14 +397,14 @@ paths:
     post:
       tags: [Authentication]
       operationId: replaceRecoveryCodes
-      summary: Replace every recovery code after checking a current authenticator code.
+      summary: Replace every recovery code after checking a current authenticator code or the password.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/TotpCodeRequest' }
+            schema: { $ref: '#/components/schemas/RecoveryCodesRequest' }
       responses:
         '200':
           description: New recovery codes, shown once; earlier codes stop working.
@@ -342,8 +416,10 @@ paths:
     post:
       tags: [Authentication]
       operationId: disableOwnTwoFactor
-      summary: Turn off two-factor sign-in with the password and a current code.
-      description: Refused with `conflict` while any organization the administrator belongs to requires two-factor sign-in.
+      summary: Remove the authenticator app with the password and a current code.
+      description: |
+        Passkeys stay. Refused with `conflict` when no passkey remains and an
+        organization the administrator belongs to requires two-factor sign-in.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -352,7 +428,90 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/DisableTwoFactorRequest' }
       responses:
-        '204': { description: Authenticator and recovery codes removed. }
+        '204': { description: Authenticator removed, and the recovery codes too when no passkey remains. }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys:
+    get:
+      tags: [Authentication]
+      operationId: listOwnPasskeys
+      summary: List the signed-in administrator's passkeys.
+      responses:
+        '200':
+          description: Passkeys, oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyList' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Authentication]
+      operationId: addOwnPasskey
+      summary: Register a passkey from the browser's response to the registration prompt.
+      description: |
+        Console sessions only. Accepts ES256 credentials with user
+        verification; attestation statements are not evaluated. The first
+        second factor also issues ten recovery codes, returned once.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddPasskeyRequest' }
+      responses:
+        '201':
+          description: Passkey registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddedPasskey' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/registration-options:
+    post:
+      tags: [Authentication]
+      operationId: startPasskeyRegistration
+      summary: Check the password and start a passkey registration prompt.
+      description: |
+        Console sessions only. Requires the current password (rate limited)
+        because a passkey can sign in on its own. Returns WebAuthn creation
+        options that require a discoverable credential, user verification and
+        ES256, and exclude passkeys already registered. Returns
+        `server_not_ready` when the console isn't served from a domain name
+        over HTTPS.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordConfirmation' }
+      responses:
+        '200':
+          description: WebAuthn creation options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyCreationOptions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/{adminPasskeyId}/remove:
+    post:
+      tags: [Authentication]
+      operationId: removeOwnPasskey
+      summary: Remove one of the signed-in administrator's passkeys.
+      description: |
+        Console sessions only; requires the current password. Refused with
+        `conflict` when it is the last second factor and an organization the
+        administrator belongs to requires one. Removing the last second
+        factor also removes the recovery codes.
+      parameters:
+        - $ref: '#/components/parameters/AdminPasskeyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordConfirmation' }
+      responses:
+        '204': { description: Passkey removed. }
         '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/organizations:
@@ -988,7 +1147,7 @@ paths:
     post:
       tags: [Administrators]
       operationId: resetAdministratorTwoFactor
-      summary: Remove a member's authenticator and recovery codes and end their sessions.
+      summary: Remove a member's authenticator app, passkeys and recovery codes and end their sessions.
       description: |
         Requires `manage_owners`. Like a password reset it is refused when the
         member also belongs to another organization, because the second
@@ -2000,6 +2159,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/AdminSessionID' }
+    AdminPasskeyID:
+      name: adminPasskeyId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AdminPasskeyID' }
     OrganizationIDPath:
       name: organizationId
       in: path
@@ -2100,6 +2264,9 @@ components:
     AdminSessionID:
       type: string
       pattern: '^asn_[A-Za-z0-9_-]{16,128}$'
+    AdminPasskeyID:
+      type: string
+      pattern: '^apk_[A-Za-z0-9_-]{16,128}$'
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
@@ -2740,7 +2907,7 @@ components:
         methods:
           type: array
           uniqueItems: true
-          items: { type: string, enum: [totp, recovery_code] }
+          items: { type: string, enum: [totp, passkey, recovery_code] }
     SecondFactorRequest:
       type: object
       additionalProperties: false
@@ -2749,13 +2916,16 @@ components:
         challenge: { type: string, minLength: 16, maxLength: 128 }
         code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
         recovery_code: { type: string, minLength: 1, maxLength: 64, writeOnly: true }
+        passkey: { $ref: '#/components/schemas/PasskeyAssertion' }
     TwoFactorStatus:
       type: object
       additionalProperties: false
-      required: [totp_enabled, recovery_codes_remaining, required_by_organization]
+      required: [enabled, totp_enabled, passkeys, recovery_codes_remaining, required_by_organization]
       properties:
+        enabled: { type: boolean, description: True when an authenticator app or a passkey is set up. }
         totp_enabled: { type: boolean }
         totp_enabled_at: { type: string, format: date-time }
+        passkeys: { type: integer, minimum: 0 }
         recovery_codes_remaining: { type: integer, minimum: 0, maximum: 10 }
         required_by_organization: { type: boolean }
     TotpEnrollment:
@@ -2781,6 +2951,182 @@ components:
           minItems: 10
           maxItems: 10
           items: { type: string, pattern: '^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$' }
+    RecoveryCodesRequest:
+      type: object
+      additionalProperties: false
+      description: Exactly one of `code` or `password`.
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    PasswordConfirmation:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    Passkey:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, synced]
+      properties:
+        id: { $ref: '#/components/schemas/AdminPasskeyID' }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        synced: { type: boolean, description: True when the authenticator reports the passkey is backed up, as synced passkeys are. }
+    PasskeyList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Passkey' } }
+    AddedPasskey:
+      type: object
+      additionalProperties: false
+      required: [passkey]
+      properties:
+        passkey: { $ref: '#/components/schemas/Passkey' }
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          description: Present when this passkey is the first second factor; shown once.
+          items: { type: string, pattern: '^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$' }
+    Base64URL:
+      type: string
+      pattern: '^[A-Za-z0-9_-]*$'
+    PasskeyDescriptor:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: { type: string, const: public-key }
+        id: { $ref: '#/components/schemas/Base64URL' }
+    PasskeyCreationOptions:
+      type: object
+      additionalProperties: false
+      required: [public_key]
+      properties:
+        public_key:
+          type: object
+          description: PublicKeyCredentialCreationOptions in the WebAuthn Level 3 JSON encoding.
+          additionalProperties: false
+          required: [rp, user, challenge, pubKeyCredParams, timeout, excludeCredentials, authenticatorSelection, attestation]
+          properties:
+            rp:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id: { type: string }
+                name: { type: string }
+            user:
+              type: object
+              additionalProperties: false
+              required: [id, name, displayName]
+              properties:
+                id: { $ref: '#/components/schemas/Base64URL' }
+                name: { type: string }
+                displayName: { type: string }
+            challenge: { $ref: '#/components/schemas/Base64URL' }
+            pubKeyCredParams:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [type, alg]
+                properties:
+                  type: { type: string, const: public-key }
+                  alg: { type: integer, const: -7 }
+            timeout: { type: integer, minimum: 1 }
+            excludeCredentials: { type: array, items: { $ref: '#/components/schemas/PasskeyDescriptor' } }
+            authenticatorSelection:
+              type: object
+              additionalProperties: false
+              required: [residentKey, requireResidentKey, userVerification]
+              properties:
+                residentKey: { type: string, const: required }
+                requireResidentKey: { type: boolean, const: true }
+                userVerification: { type: string, const: required }
+            attestation: { type: string, const: none }
+    PasskeyRequestOptions:
+      type: object
+      additionalProperties: false
+      required: [public_key]
+      properties:
+        public_key:
+          type: object
+          description: PublicKeyCredentialRequestOptions in the WebAuthn Level 3 JSON encoding.
+          additionalProperties: false
+          required: [challenge, rpId, timeout, userVerification, allowCredentials]
+          properties:
+            challenge: { $ref: '#/components/schemas/Base64URL' }
+            rpId: { type: string }
+            timeout: { type: integer, minimum: 1 }
+            userVerification: { type: string, const: required }
+            allowCredentials: { type: array, items: { $ref: '#/components/schemas/PasskeyDescriptor' } }
+    PasskeyRegistration:
+      type: object
+      description: RegistrationResponseJSON from the WebAuthn Level 3 JSON encoding.
+      additionalProperties: false
+      required: [id, rawId, type, response]
+      properties:
+        id: { $ref: '#/components/schemas/Base64URL' }
+        rawId: { $ref: '#/components/schemas/Base64URL' }
+        type: { type: string, const: public-key }
+        authenticatorAttachment: { type: string }
+        clientExtensionResults: { type: object }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, attestationObject]
+          properties:
+            clientDataJSON: { $ref: '#/components/schemas/Base64URL' }
+            attestationObject: { $ref: '#/components/schemas/Base64URL' }
+            authenticatorData: { $ref: '#/components/schemas/Base64URL' }
+            transports: { type: array, items: { type: string } }
+            publicKey: { $ref: '#/components/schemas/Base64URL' }
+            publicKeyAlgorithm: { type: integer }
+    PasskeyAssertion:
+      type: object
+      description: AuthenticationResponseJSON from the WebAuthn Level 3 JSON encoding.
+      additionalProperties: false
+      required: [id, rawId, type, response]
+      properties:
+        id: { $ref: '#/components/schemas/Base64URL' }
+        rawId: { $ref: '#/components/schemas/Base64URL' }
+        type: { type: string, const: public-key }
+        authenticatorAttachment: { type: string }
+        clientExtensionResults: { type: object }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, authenticatorData, signature]
+          properties:
+            clientDataJSON: { $ref: '#/components/schemas/Base64URL' }
+            authenticatorData: { $ref: '#/components/schemas/Base64URL' }
+            signature: { $ref: '#/components/schemas/Base64URL' }
+            userHandle: { $ref: '#/components/schemas/Base64URL' }
+    AddPasskeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, credential]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        credential: { $ref: '#/components/schemas/PasskeyRegistration' }
+    PasskeySignInRequest:
+      type: object
+      additionalProperties: false
+      required: [credential]
+      properties:
+        credential: { $ref: '#/components/schemas/PasskeyAssertion' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    PasskeyOptionsForSignInRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge]
+      properties:
+        challenge: { type: string, minLength: 16, maxLength: 128 }
     DisableTwoFactorRequest:
       type: object
       additionalProperties: false
@@ -2810,7 +3156,8 @@ components:
         sign_in_methods:
           type: array
           uniqueItems: true
-          items: { type: string, enum: [password] }
+          items: { type: string, enum: [password, passkey] }
+          description: Includes `passkey` when the console is served from a domain name over HTTPS.
     AdminSessionMetadataPage:
       type: object
       additionalProperties: false
@@ -3776,8 +4123,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 16
-          maxItems: 16
+          minItems: 17
+          maxItems: 17
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -3796,6 +4143,7 @@ components:
             - { const: admin_event_stream }
             - { const: admin_account_self_service }
             - { const: admin_two_factor }
+            - { const: admin_passkeys }
           items: false
     DoctorCheck:
       type: object

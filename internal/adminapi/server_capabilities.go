@@ -21,6 +21,7 @@ const (
 	serverCapabilityAdminEventStream          serverCapability = "admin_event_stream"
 	serverCapabilityAdminAccountSelfService   serverCapability = "admin_account_self_service"
 	serverCapabilityAdminTwoFactor            serverCapability = "admin_two_factor"
+	serverCapabilityAdminPasskeys             serverCapability = "admin_passkeys"
 )
 
 // supportedServerCapabilities is intentionally ordered and closed. Append-only
@@ -42,6 +43,7 @@ var supportedServerCapabilities = [...]serverCapability{
 	serverCapabilityAdminEventStream,
 	serverCapabilityAdminAccountSelfService,
 	serverCapabilityAdminTwoFactor,
+	serverCapabilityAdminPasskeys,
 }
 
 func serverCapabilities() []serverCapability {

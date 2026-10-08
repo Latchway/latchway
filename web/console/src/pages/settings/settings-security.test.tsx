@@ -34,7 +34,7 @@ describe("Sign-in security", () => {
     const user = userEvent.setup();
     let required = false;
     adminRequestMock.mockImplementation((path: string, _schema: unknown, options: Options) => {
-      if (path === "/admin/v1/auth/two-factor") return Promise.resolve({ data: { recovery_codes_remaining: 10, required_by_organization: required, totp_enabled: true } });
+      if (path === "/admin/v1/auth/two-factor") return Promise.resolve({ data: { enabled: true, passkeys: 0, recovery_codes_remaining: 10, required_by_organization: required, totp_enabled: true } });
       if (path.startsWith("/admin/v1/administrators?")) return Promise.resolve({ data: { items: [member("adm_0123456789abcdef", "Owner", true), member("adm_1123456789abcdef", "Sam", false)], page: { has_more: false } } });
       if (path === "/admin/v1/organizations/org_0123456789abcdef/two-factor-requirement" && options?.method === "PUT") { required = Boolean(options.body?.required); return Promise.resolve({ data: { required } }); }
       if (path === "/admin/v1/system") return Promise.resolve({ data: compatibility.status });

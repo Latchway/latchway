@@ -56,6 +56,22 @@ type AdminMembership struct {
 	DisabledAt           pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 }
 
+// Administrator WebAuthn credentials: public keys only, never private material.
+type AdminPasskey struct {
+	AdminPasskeyID string             `db:"admin_passkey_id" json:"admin_passkey_id"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	CredentialID   []byte             `db:"credential_id" json:"credential_id"`
+	PublicKeyX     []byte             `db:"public_key_x" json:"public_key_x"`
+	PublicKeyY     []byte             `db:"public_key_y" json:"public_key_y"`
+	SignCount      int64              `db:"sign_count" json:"sign_count"`
+	Aaguid         []byte             `db:"aaguid" json:"aaguid"`
+	BackupEligible bool               `db:"backup_eligible" json:"backup_eligible"`
+	BackupState    bool               `db:"backup_state" json:"backup_state"`
+	Name           string             `db:"name" json:"name"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastUsedAt     pgtype.Timestamptz `db:"last_used_at" json:"last_used_at"`
+}
+
 type AdminPasswordCredential struct {
 	AdminUserID        string             `db:"admin_user_id" json:"admin_user_id"`
 	PasswordHash       string             `db:"password_hash" json:"password_hash"`
@@ -123,6 +139,18 @@ type AdminUser struct {
 	PasswordResetRequired bool               `db:"password_reset_required" json:"password_reset_required"`
 	// Organization of the administrator's most recent session; used only when a sign-in names no organization.
 	LastOrganizationID *string `db:"last_organization_id" json:"last_organization_id"`
+	WebauthnUserHandle []byte  `db:"webauthn_user_handle" json:"webauthn_user_handle"`
+}
+
+// Hashed, short-lived WebAuthn challenges for registration, passwordless sign-in and second factors.
+type AdminWebauthnChallenge struct {
+	ChallengeHash       []byte             `db:"challenge_hash" json:"challenge_hash"`
+	Purpose             string             `db:"purpose" json:"purpose"`
+	AdminUserID         *string            `db:"admin_user_id" json:"admin_user_id"`
+	SignInChallengeHash []byte             `db:"sign_in_challenge_hash" json:"sign_in_challenge_hash"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt           pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	ConsumedAt          pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
 }
 
 type AppAttestKeyCommitReceipt struct {

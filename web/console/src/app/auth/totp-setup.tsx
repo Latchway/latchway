@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { confirmTotpEnrollment, startTotpEnrollment, twoFactorStatusQueryOptions } from "../../api/account";
 import type { TotpEnrollment } from "../../api/admin";
@@ -22,7 +22,7 @@ export function RecoveryCodesReveal({ codes, onDone }: { codes: readonly string[
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const text = codes.join("\n");
   return (
-    <ConfirmDialog confirmDisabled={!saved} confirmLabel="Done" description="Each code signs you in once if you lose your authenticator. They won't be shown again." hideCancel onCancel={onDone} onConfirm={onDone} size="wide" title="Save your recovery codes">
+    <ConfirmDialog confirmDisabled={!saved} confirmLabel="Done" description="Each code works once as your second step if you lose your authenticator app or passkeys. They won't be shown again." hideCancel onCancel={onDone} onConfirm={onDone} size="wide" title="Save your recovery codes">
       <ol className="lw-recovery-codes">{codes.map((code) => <li key={code}><code>{code}</code></li>)}</ol>
       <div className="lw-row lw-row--wrap">
         <Button icon="copy" onClick={() => copy(text, setCopied)} size="sm">{copied === "copied" ? "Copied" : "Copy All"}</Button>
@@ -36,9 +36,10 @@ export function RecoveryCodesReveal({ codes, onDone }: { codes: readonly string[
 
 /**
  * Sets up an authenticator app: the server's key is shown as a QR code and as text, confirmed with a current code,
- * and answered with one-time recovery codes. The key is held only while this step is open.
+ * and answered with one-time recovery codes. The key is held only while this step is open. With autoStart the key is
+ * requested as soon as the step opens, for callers that already asked the operator to begin.
  */
-export function TotpSetup({ onCancel, onDone }: { onCancel?: () => void; onDone: () => void }) {
+export function TotpSetup({ autoStart = false, onCancel, onDone }: { autoStart?: boolean; onCancel?: () => void; onDone: () => void }) {
   const queryClient = useQueryClient();
   const [enrollment, setEnrollment] = useState<TotpEnrollment>();
   const [codes, setCodes] = useState<string[]>();
@@ -46,8 +47,11 @@ export function TotpSetup({ onCancel, onDone }: { onCancel?: () => void; onDone:
   const [problem, setProblem] = useState<AdminProblem>();
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const code = useRef<HTMLInputElement>(null);
+  // A second request would replace the key on the server while the first one is still shown.
+  const requested = useRef(false);
 
   async function start(): Promise<void> {
+    requested.current = true;
     setPending(true);
     setProblem(undefined);
     try {
@@ -58,6 +62,12 @@ export function TotpSetup({ onCancel, onDone }: { onCancel?: () => void; onDone:
       setPending(false);
     }
   }
+
+  useEffect(() => {
+    if (autoStart && !requested.current) void start();
+    // start() only runs once per mount; later renders must not request another key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function confirm(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

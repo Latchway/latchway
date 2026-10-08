@@ -2,6 +2,49 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 12: administrator passkeys (branch `console-api-completion`, unreleased)
+
+Server (ADR 0042, schema 36, capability `admin_passkeys`):
+
+- `internal/webauthn` verifies registration and assertion ceremonies for ES256
+  with user presence and verification required, exact origin and RP ID hash,
+  no cross-origin use, strict CBOR, and attestation `none`.
+  `internal/webauthn/webauthntest` is a software authenticator for tests.
+- `POST /auth/passkeys/registration-options` (password required) and
+  `POST /auth/passkeys` register a discoverable passkey; the first second
+  factor also returns recovery codes. `GET /auth/passkeys` lists them (name,
+  created, last used, synced). `POST /auth/passkeys/{id}/remove` needs the
+  password and refuses the last factor an organization requires.
+- Passwordless sign-in: `POST /auth/passkeys/sign-in-options` (at most 1,000
+  pending) and `POST /auth/passkeys/sign-in`. As a second factor: the `202`
+  lists `passkey`, `POST /auth/login/two-factor/passkey-options` starts a
+  prompt tied to the sign-in challenge, and `POST /auth/login/two-factor`
+  accepts `passkey`. Non-advancing signature counters are refused.
+- Passkeys count toward the organization requirement, the members'
+  `two_factor_enabled` flag and owner resets (which now remove them too).
+  `POST /auth/two-factor/disable` removes only the authenticator app;
+  recovery codes can be replaced with the password. `GET /auth/two-factor` adds
+  `enabled` and `passkeys`; `GET /auth/info` lists `passkey` when the public
+  origin is a domain name over HTTPS or localhost.
+
+Console: "Sign In with a Passkey" on the sign-in screen, a passkey option in
+the second-factor step (sign-in and re-sign-in), a Passkeys card on Your
+account (add with name and password, recovery codes when first, synced or
+device-only, last used, remove with password), a reworked Two-factor card
+(authenticator app and passkeys side by side; replacing codes takes the
+password without an app; setup starts immediately), and a passkey option on
+the forced enrollment screen. The sign-in information query no longer resolves
+to `undefined`. The live-stack run now reaches the console as `localhost`,
+registers a passkey with Chromium's virtual authenticator, signs in with it
+alone, and uses it as the second factor after a password.
+
+Validation: `go test ./...` against PostgreSQL 16 (WebAuthn verification,
+software-authenticator API tests including replay, counter, origin and
+unregistered-credential refusals), vet, gofmt; contract validation and
+generated references (98 operations); lint, typecheck, `check:api`,
+`pnpm test` (443 passed), Playwright, the live-stack run (passed), build and
+`verify:reproducible`.
+
 ## Console completion phase 11: administrator two-factor sign-in (branch `console-api-completion`, unreleased)
 
 Server (ADR 0041, schema 35, capability `admin_two_factor`):

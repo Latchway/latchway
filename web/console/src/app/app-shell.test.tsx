@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetConsoleSession, SESSION_ENDED_EVENT } from "../api/session";
+import { installPasskeyBrowser } from "../test/passkey-browser";
 import { rememberSignedOutEmail } from "./auth/auth-memory";
 
 import { commands, LEGACY_REDIRECT_PATHS } from "./navigation";
@@ -471,6 +472,104 @@ describe("AppShell", () => {
     await user.type(screen.getByLabelText("Authentication code"), "123456");
     await user.click(screen.getByRole("button", { name: "Verify" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+  });
+
+  it("signs in with a passkey alone when the server and browser support it", async () => {
+    const user = userEvent.setup();
+    const browser = installPasskeyBrowser();
+    let signedIn = false;
+    const options = { public_key: { allowCredentials: [], challenge: "B".repeat(43), rpId: "console.example.test", timeout: 300000, userVerification: "required" } };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedIn ? json(adminSession) : signedOutResponse();
+      if (url === "/admin/v1/auth/info") return json({ contract_version: "1.1.0", protocol_versions: [1, 2, 3], setup_open: false, sign_in_methods: ["password", "passkey"] });
+      if (url === "/admin/v1/auth/passkeys/sign-in-options") return json(options);
+      if (url === "/admin/v1/auth/passkeys/sign-in") {
+        const body = JSON.parse(String(init?.body)) as { credential: { rawId: string; response: { userHandle: string } } };
+        expect(body.credential.rawId).toBe("AQID-vv8");
+        expect(body.credential.response.userHandle).toBe("BAUG");
+        signedIn = true;
+        return json(adminSession, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole("/applications");
+
+    await user.click(await screen.findByRole("button", { name: "Sign In with a Passkey" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+    expect(browser.get.mock.calls[0]?.[0].publicKey?.rpId).toBe("console.example.test");
+    expect(fetchMock.mock.calls.some(([input]) => requestURL(input) === "/admin/v1/auth/login")).toBe(false);
+  });
+
+  it("keeps the sign-in screen and explains a cancelled passkey prompt", async () => {
+    const user = userEvent.setup();
+    const browser = installPasskeyBrowser();
+    browser.get.mockRejectedValueOnce(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedOutResponse();
+      if (url === "/admin/v1/auth/info") return json({ contract_version: "1.1.0", protocol_versions: [1, 2, 3], setup_open: false, sign_in_methods: ["password", "passkey"] });
+      if (url === "/admin/v1/auth/passkeys/sign-in-options") return json({ public_key: { allowCredentials: [], challenge: "B".repeat(43), rpId: "console.example.test", timeout: 300000, userVerification: "required" } });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole();
+
+    await user.click(await screen.findByRole("button", { name: "Sign In with a Passkey" }));
+    expect(await screen.findByText("Passkey not used")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Sign in to Latchway" })).toBeInTheDocument();
+  });
+
+  it("offers no passkey sign-in when the server doesn't accept passkeys", async () => {
+    installPasskeyBrowser();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedOutResponse();
+      if (url === "/admin/v1/auth/info") return json({ contract_version: "1.1.0", protocol_versions: [1, 2, 3], setup_open: false, sign_in_methods: ["password"] });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign in to Latchway" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Sign In with a Passkey" })).not.toBeInTheDocument();
+  });
+
+  it("finishes a password sign-in with a passkey as the second factor", async () => {
+    const user = userEvent.setup();
+    const browser = installPasskeyBrowser();
+    let signedIn = false;
+    const challenge = `lwsic_${"c".repeat(43)}`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedIn ? json(adminSession) : signedOutResponse();
+      if (url === "/admin/v1/auth/login") return json({ challenge, expires_at: "2026-10-08T10:05:00Z", methods: ["passkey", "recovery_code"], status: "two_factor_required" }, 202);
+      if (url === "/admin/v1/auth/login/two-factor/passkey-options") {
+        expect(JSON.parse(String(init?.body))).toEqual({ challenge });
+        return json({ public_key: { allowCredentials: [{ id: "AQID-vv8", type: "public-key" }], challenge: "D".repeat(43), rpId: "console.example.test", timeout: 300000, userVerification: "required" } });
+      }
+      if (url === "/admin/v1/auth/login/two-factor") {
+        const body = JSON.parse(String(init?.body)) as { challenge: string; passkey: { id: string } };
+        expect(body.challenge).toBe(challenge);
+        expect(body.passkey.id).toBe("AQID-vv8");
+        signedIn = true;
+        return json(adminSession, 200, { "X-CSRF-Token": "test-only-csrf-token-0123456789abcdef" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole("/applications");
+
+    await screen.findByRole("heading", { name: "Sign in to Latchway" });
+    await user.type(screen.getByLabelText("Email address"), "owner@example.test");
+    await user.type(screen.getByLabelText("Password", { exact: true }), "test-only-login-password");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Verify it's you" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Authentication code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use an authentication code" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use Your Passkey" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+    expect(Array.from(new Uint8Array(browser.get.mock.calls[0]?.[0].publicKey?.allowCredentials?.[0]?.id as ArrayBuffer))).toEqual([1, 2, 3, 250, 251, 252]);
   });
 
   it("requires setting up two-factor before the console when the organization requires it", async () => {

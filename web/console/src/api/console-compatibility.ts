@@ -42,7 +42,7 @@ export const requiredConsoleServerCapabilities = [
   "configuration_import_export",
   "admin_session_management"
 ] as const;
-export const optionalConsoleServerCapabilities = ["admin_event_stream", "admin_account_self_service"] as const;
+export const optionalConsoleServerCapabilities = ["admin_event_stream", "admin_account_self_service", "admin_two_factor", "admin_passkeys"] as const;
 
 export interface ConsoleCompatibility {
   contractCompatible: boolean;
