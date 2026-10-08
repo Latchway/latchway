@@ -139,16 +139,17 @@ const requestsRoute = createRoute({
   path: "/requests",
   validateSearch: parseRequestRouteSearch
 });
-const usageRoute = createRoute({ component: UsageAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/usage", validateSearch: parseAnalyticsRouteSearch });
-const costRoute = createRoute({ component: CostAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/cost", validateSearch: parseAnalyticsRouteSearch });
-const performanceRoute = createRoute({ component: PerformanceAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/performance", validateSearch: parseAnalyticsRouteSearch });
-const reliabilityRoute = createRoute({ component: ReliabilityAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/reliability", validateSearch: parseAnalyticsRouteSearch });
+const usageRoute = createRoute({ component: UsageAnalyticsPage, getParentRoute: () => rootRoute, path: "/usage", validateSearch: parseAnalyticsRouteSearch });
+const costRoute = createRoute({ component: CostAnalyticsPage, getParentRoute: () => rootRoute, path: "/cost", validateSearch: parseAnalyticsRouteSearch });
+const performanceRoute = createRoute({ component: PerformanceAnalyticsPage, getParentRoute: () => rootRoute, path: "/performance", validateSearch: parseAnalyticsRouteSearch });
+const reliabilityRoute = createRoute({ component: ReliabilityAnalyticsPage, getParentRoute: () => rootRoute, path: "/reliability", validateSearch: parseAnalyticsRouteSearch });
 
 /**
- * The five pre-redesign analytics pages became tabs of one Analytics page. Old links keep working: the workspace
- * selection carries over, and a period carries over only when it was a whole-day range the new page can show.
+ * The five pre-redesign analytics pages became tabs of one Analytics page; Usage and Cost kept their paths. Old links
+ * to the others keep working: the workspace selection carries over, and a period carries over only when it was a
+ * whole-day range the new page can show.
  */
-function legacyAnalyticsRoute(path: string, to: "/analytics/usage" | "/analytics/cost" | "/analytics/performance" | "/analytics/reliability") {
+function legacyAnalyticsRoute(path: string, to: "/usage" | "/cost" | "/performance" | "/reliability") {
   return createRoute({
     beforeLoad: ({ search }) => {
       const previous = search as Record<string, unknown>;
@@ -166,11 +167,9 @@ function legacyAnalyticsRoute(path: string, to: "/analytics/usage" | "/analytics
 }
 
 const legacyAnalyticsRoutes = [
-  legacyAnalyticsRoute("/usage", "/analytics/usage"),
-  legacyAnalyticsRoute("/cost", "/analytics/cost"),
-  legacyAnalyticsRoute("/latency", "/analytics/performance"),
-  legacyAnalyticsRoute("/errors", "/analytics/reliability"),
-  legacyAnalyticsRoute("/attestation-failures", "/analytics/reliability")
+  legacyAnalyticsRoute("/latency", "/performance"),
+  legacyAnalyticsRoute("/errors", "/reliability"),
+  legacyAnalyticsRoute("/attestation-failures", "/reliability")
 ];
 const changesRoute = createRoute({ component: DraftChangesPage, getParentRoute: () => rootRoute, path: "/changes" });
 const configurationRevisionsRoute = createRoute({ component: RevisionHistoryPage, getParentRoute: () => rootRoute, path: "/configuration-revisions", validateSearch: parseRevisionRouteSearch });
