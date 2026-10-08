@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install pinned actionlint
+        run: python3 scripts/install-actionlint.py
+      - name: Validate GitHub workflows
+        run: make check-workflows
+      - name: Validate normative contracts
+        run: python3 scripts/validate-contracts.py
+      - name: Prove deterministic contract bundle
+        run: |
+          python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a
+          python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-b
+          diff --recursive --brief /tmp/contract-a /tmp/contract-b
+
+  go:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+        env:
+          POSTGRES_DB: latchway
+          POSTGRES_USER: latchway
+          POSTGRES_PASSWORD: latchway-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U latchway -d latchway"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-ci@127.0.0.1:5432/latchway?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Check formatting
+        run: make fmt
+      - name: Verify sqlc output
+        run: make check-generated
+      - name: Vet
+        run: go vet ./...
+      - name: Unit and PostgreSQL integration tests
+        run: go test -count=1 ./...
+
+  console:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+        env:
+          POSTGRES_DB: latchway
+          POSTGRES_USER: latchway
+          POSTGRES_PASSWORD: latchway-console-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U latchway -d latchway"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-console-ci@127.0.0.1:5432/latchway?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: web/console/pnpm-lock.yaml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Install
+        working-directory: web/console
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: web/console
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Lint, contract types, typecheck, unit tests, build and browser tests
+        working-directory: web/console
+        run: pnpm check
+      - name: Prove the browser to Go to PostgreSQL first-run workflow
+        env:
+          LATCHWAY_CONSOLE_LIVE_E2E: "1"
+        run: go test -count=1 -run '^TestConsoleFirstRunAgainstLiveStack$' ./internal/livee2e
+      - name: Prove reproducible embedded assets
+        working-directory: web/console
+        run: pnpm verify:reproducible
+      - name: Embedded assets match the committed build
+        run: git diff --exit-code -- web/console/dist

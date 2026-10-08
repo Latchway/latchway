@@ -43,7 +43,7 @@ import { ConsoleCompatibilityProvider } from "./console-compatibility";
 import { useConsoleCompatibility } from "./console-compatibility-context";
 
 const compatibleStatus = {
-  contract_version: "1.0.0",
+  contract_version: "1.1.0",
   database_schema_version: "27",
   mutation_ready: true,
   protocol_versions: [1, 2],
@@ -290,6 +290,29 @@ describe("ConsoleCompatibilityProvider", () => {
       }
     }
   );
+
+  it("ignores focus moving between elements inside the page", async () => {
+    let wall = 4_000_000;
+    let monotonic = 40_000;
+    const date = vi.spyOn(Date, "now").mockImplementation(() => wall);
+    const performanceNow = vi.spyOn(performance, "now").mockImplementation(() => monotonic);
+    mocks.adminRequest.mockResolvedValue({ data: compatibleStatus });
+    try {
+      renderProvider();
+      expect(await screen.findByText("mutations open")).toBeInTheDocument();
+      const button = screen.getByRole("button", { name: "Refresh compatibility" });
+      fireEvent.blur(button);
+      wall += consoleCompatibilityBackgroundExpiry;
+      monotonic += consoleCompatibilityBackgroundExpiry;
+      fireEvent.focus(button);
+
+      expect(screen.getByText("mutations open")).toBeInTheDocument();
+      expect(mocks.adminRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      date.mockRestore();
+      performanceNow.mockRestore();
+    }
+  });
 
   it.each(["visibility", "focus"] as const)(
     "synchronously closes an expired %s grant and reopens only after a newly compatible response",

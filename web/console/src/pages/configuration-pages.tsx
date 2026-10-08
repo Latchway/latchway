@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 
 import {
   adminRequest,
@@ -19,6 +19,8 @@ import { SecretResourcePageSchema } from "../api/resources";
 import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { useDirtyEditProtection } from "../app/use-dirty-edit-protection";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
+import { Button, buttonClass, Card, cx, EmptyState, Icon, Notice, PageHeader } from "../ui";
+import { AccessRequired, ProblemNotice } from "./control-plane-pages";
 import {
   requireAndroidPackageName,
   requireAppleBundleID,
@@ -538,10 +540,6 @@ function safeCloudProjectNumber(form: FormData, name: string): number {
   catch { throw new Error(`${name} exceeds the Console's exact integer range.`); }
 }
 
-function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}{problem.operationId ? ` · Operation: ${problem.operationId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
-}
-
 function setupEvidenceProblem(error: unknown): AdminProblem | undefined {
   if (!(error instanceof Error) || ![
     "The active configuration changed before the bounded self-test started.",
@@ -560,11 +558,57 @@ function setupEvidenceProblem(error: unknown): AdminProblem | undefined {
 }
 
 function ValidationResult({ report }: { report?: ConfigurationValidation }) {
-  return report ? <section className={`validation-card ${report.valid ? "validation-card--valid" : "validation-card--invalid"}`}>
-    <h3>{report.valid ? "Configuration is valid" : "Configuration needs changes"}</h3>
-    <p>Checked {new Date(report.checked_at).toLocaleString()}</p>
-    {report.issues.length ? <ul>{report.issues.map((issue, index) => <li key={`${issue.path}-${issue.code}-${index}`}><strong>{issue.severity}: {issue.code}</strong> <code>{issue.path}</code> — {issue.message}</li>)}</ul> : <p>No validation issues.</p>}
-  </section> : null;
+  return report ? <Notice title={report.valid ? "Configuration is valid" : "Configuration needs changes"} tone={report.valid ? "success" : "danger"}>
+    Checked {new Date(report.checked_at).toLocaleString()}.
+    {report.issues.length ? <ul className="lw-issue-items">{report.issues.map((issue, index) => <li key={`${issue.path}-${issue.code}-${index}`}><strong>{issue.severity}: {issue.code}</strong> <code className="lw-code-inline">{issue.path}</code> — {issue.message}</li>)}</ul> : " No validation issues."}
+  </Notice> : null;
+}
+
+const PLAN_STEPS = [
+  { detail: "Names, slugs and environment kind", title: "App & environment" },
+  { detail: "Sign-in provider and platform proof", title: "Clients" },
+  { detail: "Provider endpoint and model", title: "AI connection" },
+  { detail: "Prices and hard token limits", title: "Pricing & limits" },
+  { detail: "Check and create", title: "Review" }
+] as const;
+
+const BUILD_STEPS = [
+  { anchor: "setup-credential", detail: "Server-held provider key", title: "Credential" },
+  { anchor: "setup-publish", detail: "Validate and activate", title: "Publish" },
+  { anchor: "setup-self-test", detail: "One bounded provider call", title: "Self-test" },
+  { anchor: "setup-snippets", detail: "SDK configuration", title: "Connect your app" },
+  { anchor: "setup-verify", detail: "A real client request", title: "Verify a request" }
+] as const;
+
+/** Non-secret form values for the summary column. Secret inputs are never read here. */
+interface SetupSummary {
+  application?: string;
+  environment?: string;
+  identity?: string;
+  model?: string;
+  platform?: string;
+  pricing?: string;
+  upstream?: string;
+}
+
+function readSetupSummary(form: HTMLFormElement): SetupSummary {
+  const value = (name: string): string => {
+    const element = form.elements.namedItem(name);
+    return element instanceof HTMLInputElement || element instanceof HTMLSelectElement ? element.value.trim() : "";
+  };
+  const upstreamHost = URL.canParse(value("upstream_url")) ? new URL(value("upstream_url")).host : value("upstream_url");
+  const kind = value("environment_kind");
+  const input = value("input_nano_usd_per_million");
+  const output = value("output_nano_usd_per_million");
+  return {
+    application: value("application_name") ? `${value("application_name")} (${value("application_slug") || "no slug"})` : undefined,
+    environment: value("environment_name") ? `${value("environment_name")} · ${kind}` : undefined,
+    identity: value("firebase_project") ? `Firebase · ${value("firebase_project")}` : undefined,
+    model: value("physical_model") || undefined,
+    platform: value("platform_scope") ? platformScopeLabel(value("platform_scope") as SetupPlatformScope) : undefined,
+    pricing: input && output ? `${Number(input).toLocaleString()} / ${Number(output).toLocaleString()} nano-USD per 1M in / out` : undefined,
+    upstream: upstreamHost ? `${upstreamHost} · ${value("upstream_authentication") === "none" ? "no auth" : "bearer secret"}` : undefined
+  };
 }
 
 function comparableDocument(text: string): string {
@@ -599,6 +643,9 @@ function ScopedSetupWizardPage() {
   const [upstreamSecretAction, setUpstreamSecretAction] = useState<WriteOnlySecretAction>("create");
   const [upstreamSecretResolution, setUpstreamSecretResolution] = useState<WriteOnlySecretResolution>();
   const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [evidenceBusy, setEvidenceBusy] = useState(false); const [actionResumeNotice, setResumeNotice] = useState<string>(); const [formDirty, setFormDirty] = useState(false); const [persistedDocument, setPersistedDocument] = useState<string>();
+  const [step, setStep] = useState(0);
+  const [summary, setSummary] = useState<SetupSummary>({});
+  const planForm = useRef<HTMLFormElement>(null);
   const organizationID = session.data?.session?.organization_id ?? "";
   const canConfigure = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
   const canManageSecrets = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("manage_secrets") ?? false);
@@ -677,23 +724,8 @@ function ScopedSetupWizardPage() {
   const verifiedRequest = observedRequest && matchingSetupRequest([observedRequest], workspace?.environmentID ?? "", requestTarget, active?.id);
   const verifiedTest = test?.config_revision_id === active?.id ? test : undefined;
   const snippets = workspace ? buildSetupSnippets(workspace) : [];
-  const completed = useMemo(() => [
-    true,
-    true,
-    Boolean(workspace),
-    Boolean(workspace),
-    activeConfigurationReady,
-    activeConfigurationReady,
-    Boolean(credentialReady),
-    activeConfigurationReady,
-    activeConfigurationReady,
-    activeConfigurationReady,
-    verifiedTest?.state === "passed",
-    activeConfigurationReady && snippets.length > 0,
-    Boolean(verifiedRequest)
-  ], [activeConfigurationReady, credentialReady, snippets.length, verifiedRequest, verifiedTest?.state, workspace]);
-  if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to continue setup.</h1></section>;
-  if (!workspace && selectedWorkspace?.environment && latestRevision.isPending) return <section className="empty-state" role="status"><h1>Resuming setup…</h1><p>Loading the latest server-owned revision without restoring credential values.</p></section>;
+  if (session.data?.mode !== "configured") return <AccessRequired />;
+  if (!workspace && selectedWorkspace?.environment && latestRevision.isPending) return <div className="lw-page-notice" role="status"><EmptyState icon="spinner" title="Resuming setup…" titleAs="h1">Loading the latest server-owned revision without restoring credential values.</EmptyState></div>;
 
   async function createWorkspace(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -919,35 +951,134 @@ function ScopedSetupWizardPage() {
     }
   }
 
-  return <div className="wizard-page">
-    <section className="page-heading"><div><p className="eyebrow">First-run workflow</p><h1>Configure your first client platform end to end.</h1><p>Choose only the application surface you are shipping. Every change below travels through the canonical Admin API; no database or configuration-file access is used.</p></div></section>
-    <ol className="wizard-progress" aria-label="Setup progress">{["Create owner", "Create organization", "Create application", "Create environment", "Identity provider", "Attestation & components", "Upstream credential", "Upstream target", "Feature and route", "Limits", "Self-test", "SDK snippets", "Verified sample request"].map((label, index) => <li className={completed[index] ? "wizard-progress__done" : ""} key={label}><span>{completed[index] ? "✓" : index + 1}</span>{label}</li>)}</ol>
-    <ProblemNotice problem={problem} />
-    {latestRevision.error ? <ProblemNotice problem={problemFromError(latestRevision.error)} /> : null}
-    {activeConfiguration.error ? <ProblemNotice problem={problemFromError(activeConfiguration.error)} /> : null}
-    {secrets.error ? <ProblemNotice problem={problemFromError(secrets.error)} /> : null}
-    {resumeNotice ? <p className="control-notice"><strong>Resumable setup</strong><span>{resumeNotice}</span></p> : null}
-    {!workspace ? <section className="wizard-card"><h2>Application, environment, identity, and client proof</h2><p>The owner and organization were created by secure bootstrap. Define one exact application surface and only the identifiers its verifier must pin.</p>
-      {canConfigure ? <form className="control-form" onChange={() => setFormDirty(true)} onSubmit={(event) => void createWorkspace(event)}>
-        <div className="form-field-grid"><label>Organization slug<input defaultValue={selectedWorkspace?.organization?.slug} name="organization_slug" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Application name<input defaultValue={selectedWorkspace?.application?.display_name} name="application_name" required /></label><label>Application slug<input defaultValue={selectedWorkspace?.application?.slug} name="application_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label></div>
-        <div className="form-field-grid"><label>Environment name<input defaultValue={selectedWorkspace?.environment?.display_name ?? "Production"} name="environment_name" required /></label><label>Environment slug<input defaultValue={selectedWorkspace?.environment?.slug ?? "production"} name="environment_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label><label>Environment kind<select value={environmentKindInput} onChange={(event) => setEnvironmentKindInput(event.target.value as NativeTemplateInput["environmentKind"])} name="environment_kind" required><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label><label>Firebase project ID<input name="firebase_project" pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" required /><small>This configures user authentication independently from client proof.</small></label><label>Platform scope<select name="platform_scope" onChange={(event) => setPlatformScope(event.target.value as (typeof selectablePlatformScopes)[number])} required value={platformScope}><option value="ios">iOS only (Swift)</option><option value="android">Android only (Kotlin)</option><option value="web">Web only (JavaScript)</option><option value="react_native_ios">React Native on iOS only</option><option value="react_native_android">React Native on Android only</option><option value="react_native_both">React Native on iOS and Android</option></select><small>The generated policy contains only these runtime platform keys. You can add another surface later through Client access.</small></label></div>
-        {platformScopeHasApple(platformScope) ? <fieldset><legend>Apple App Attest</legend><p>Select accepted Apple attestation environments separately from the build distribution categories.</p><div className="form-field-grid"><label>App ID prefix<input name="app_id_prefix" pattern="[A-Z0-9]{1,64}" required /></label><label>Bundle ID<input maxLength={255} minLength={3} name="bundle_id" pattern="[A-Za-z0-9](?:[A-Za-z0-9.-]{1,253}[A-Za-z0-9])" required /></label><ApplePolicyFields environmentKind={environmentKindInput} /><label>Allowed CFBundleVersion (build number)<input maxLength={128} name="bundle_version" pattern="[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?" placeholder="1" required /><small>Use the exact CFBundleVersion/CURRENT_PROJECT_VERSION, not CFBundleShortVersionString/MARKETING_VERSION.</small></label></div></fieldset> : null}
-        {platformScopeHasAndroid(platformScope) ? <fieldset><legend>Google Play Integrity</legend><PlayTestingField environmentKind={environmentKindInput} /><p>Pin the exact Android build. Use attached Google metadata only on a Google Cloud workload with the Play Integrity scope; Docker Compose and other hosts require a write-only service-account JSON secret.</p><div className="form-field-grid"><label>Package name<input maxLength={255} minLength={3} name="package_name" pattern="[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+" required /></label><label>Cloud project number<input max={Number.MAX_SAFE_INTEGER} min={100000} name="cloud_project" required type="number" /></label><label>Certificate SHA-256 digest (base64url)<input name="certificate_digest" pattern="[A-Za-z0-9_-]{43}=?" required /></label><label>Exact version code<input min={1} name="android_version_code" required type="number" /></label><label>Server credential source<select name="play_integrity_credential_source" onChange={(event) => setPlayIntegrityCredentialSource(event.target.value as "metadata" | "service_account")} required value={playIntegrityCredentialSource}><option value="metadata">Attached Google Cloud service identity</option><option value="service_account">Write-only service-account JSON secret</option></select></label>{playIntegrityCredentialSource === "service_account" ? <><label>Credential operation<select aria-label="Play credential operation" name="play_integrity_secret_action" onChange={(event) => setPlayIntegritySecretAction(event.target.value as WriteOnlySecretAction)} value={playIntegritySecretAction}><option value="create">Store new service-account JSON</option><option value="use_existing">Use existing named secret</option></select></label><label>Play credential secret name<input defaultValue="play_integrity_service_account" name="play_integrity_secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Google service-account JSON (write-only)<input autoComplete="new-password" disabled={playIntegritySecretAction === "use_existing" || !canManageSecrets} name="play_integrity_secret_value" required={playIntegritySecretAction === "create"} type="password" /></label></> : null}</div>{playIntegrityCredentialSource === "service_account" ? <small>Existing-secret mode confirms only exact metadata in the resolved environment; the Console never reads or infers the service-account JSON.</small> : null}</fieldset> : null}
-        {platformScope === "web" ? <fieldset><legend>Firebase App Check for Web</legend><p>This establishes browser risk verification, not native hardware-backed device proof.</p><div className="form-field-grid"><label>Exact browser origin<input defaultValue="https://app.example.com" name="web_origin" required type="url" /></label><label>Firebase project number<input inputMode="numeric" name="firebase_project_number" pattern="[1-9][0-9]{0,19}" required /></label><label>Firebase web app ID<input maxLength={256} minLength={5} name="firebase_app_id" pattern="[!-~]{5,256}" required /></label></div></fieldset> : null}
-        <fieldset><legend>Upstream target and authentication</legend><p>The production default keeps the provider credential server-side. Select no authentication only for a controlled upstream that genuinely requires none.</p><div className="form-field-grid"><label>Upstream HTTPS base URL<input defaultValue="https://api.openai.com/v1" name="upstream_url" pattern="https://.*" required type="url" /></label><label>Authentication mode<select name="upstream_authentication" onChange={(event) => setUpstreamAuthenticationMode(event.target.value as "bearer" | "none")} required value={upstreamAuthenticationMode}><option value="bearer">Bearer secret (recommended)</option><option value="none">No authentication (explicit test upstream)</option></select></label><label>Planned secret name<input defaultValue="primary_api_key" name="upstream_secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label></div></fieldset>
-        <fieldset><legend>Trusted input accounting</legend><p>Review these operator-owned bounds against the exact physical model before activation. The starter route accepts bounded text-only OpenAI Responses requests.</p><div className="form-field-grid"><label>Physical upstream model<input defaultValue="gpt-5-mini" name="physical_model" required /></label><label>Framing tokens per request<input defaultValue={8} min={0} name="maximum_framing_tokens_per_request" required type="number" /></label><label>Framing tokens per input item<input defaultValue={4} min={0} name="maximum_framing_tokens_per_message" required type="number" /></label><label>Maximum model context tokens<input defaultValue={128000} min={4096} name="maximum_context_tokens" required type="number" /></label></div></fieldset>
-        <fieldset><legend>Operator-reviewed pricing</legend><p>Enter the current nano-USD rates for the exact physical model. Latchway binds this revision to reservation and settlement evidence; it does not trust client-supplied prices. The resumable first-run self-test uses a fixed 10,000,000 nano-USD ($0.01) maximum total cost.</p><div className="form-field-grid"><label>Input price (nano-USD per million tokens)<input min={0} name="input_nano_usd_per_million" required type="number" /></label><label>Output price (nano-USD per million tokens)<input min={0} name="output_nano_usd_per_million" required type="number" /></label><label>Per-request price (nano-USD)<input defaultValue={0} min={0} name="request_nano_usd" required type="number" /></label></div></fieldset>
-        <fieldset><legend>Hard token limits</legend><p>These limits are enforced from the server-rewritten request and provider-reported settlement. The total-token calendar bound covers input plus output.</p><div className="form-field-grid"><label>Daily input-token maximum<input defaultValue={100000} min={1} name="daily_input_token_maximum" required type="number" /></label><label>Daily output-token maximum<input defaultValue={100000} min={1} name="daily_output_token_maximum" required type="number" /></label><label>Daily total-token maximum<input defaultValue={200000} min={1} name="daily_total_token_maximum" required type="number" /></label><label>Per-request input-token maximum<input defaultValue={20000} min={1} name="per_request_input_token_maximum" required type="number" /></label></div></fieldset>
-        {!canManageSecrets && firstRunNeedsSecretCapability ? <p className="control-notice"><strong>Secret management required</strong><span>Your current session cannot store the server-held credential required by this selection. Choose an explicit no-auth upstream and attached Google metadata where applicable, or use an administrator with <code>manage_secrets</code>.</span></p> : null}
-        <button className="primary-action" disabled={!canConfigure || busy || (!canManageSecrets && firstRunNeedsSecretCapability)} type="submit">{busy ? "Creating…" : "Create application and environment"}</button>
-      </form> : <p className="control-notice"><strong>Read-only safe mode</strong><span>First-run setup inputs are unavailable until Console compatibility and configuration authority are restored.</span></p>}</section> : <>
-      <section className="wizard-card"><h2>Write-only upstream credential</h2>{workspace.upstreamAuthentication === "bearer" ? <><p>The generated upstream requires this server-held secret. A new value is sent once and cleared immediately. Existing-secret mode confirms exact environment/name metadata without reading or inferring its value.</p>{canManageSecrets ? <form className="filter-bar" onChange={() => setFormDirty(true)} onSubmit={(event) => void createSecret(event)}><label>Credential operation<select aria-label="Upstream credential operation" name="secret_action" onChange={(event) => setUpstreamSecretAction(event.target.value as WriteOnlySecretAction)} value={upstreamSecretAction}><option value="create">Store new secret value</option><option value="use_existing">Use existing named secret</option></select></label><label>Secret name<input defaultValue={workspace.plannedSecretName} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Secret value<input autoComplete="off" disabled={upstreamSecretAction === "use_existing"} name="secret_value" required={upstreamSecretAction === "create"} type="password" /></label><button className="primary-action" disabled={busy || secrets.isPending || Boolean(secretName)} type="submit">{secretName ? "Credential added" : secrets.isPending ? "Checking credential…" : upstreamSecretAction === "create" ? "Add credential" : "Confirm existing credential"}</button></form> : <p className="control-notice"><strong>Secret input unavailable</strong><span>Write-only credential input is removed until Console compatibility and secret-management authority are restored.</span></p>}</> : <p className="control-notice">You explicitly selected a no-auth upstream. Do not use this mode for OpenAI or another target that requires a credential.</p>}</section>
-      {upstreamSecretResolution?.outcome === "confirmation_required" ? <section className="wizard-card"><h2>Confirm existing upstream credential metadata</h2><p><code>secret/{upstreamSecretResolution.metadata.name}</code> exists in environment <code>{upstreamSecretResolution.metadata.environment_id}</code>. The Console cannot read or infer its value.</p><p>{upstreamSecretResolution.reason === "create_response_indeterminate" ? "The create response was indeterminate. Confirm use only if this is the intended named credential; otherwise rotate it from Secrets." : "The name existed before a new value was sent. Confirm use only if this is the intended credential; otherwise rotate it from Secrets."}{upstreamSecretResolution.operationId ? ` Preserve operation ${upstreamSecretResolution.operationId} for audit correlation.` : ""}</p><button className="secondary-action" onClick={() => setUpstreamSecretAction("use_existing")} type="button">Use this existing named upstream secret on next review</button></section> : null}
-      {playIntegritySecretResolution?.outcome === "confirmation_required" ? <section className="wizard-card"><h2>Confirm existing Play Integrity credential metadata</h2><p><code>secret/{playIntegritySecretResolution.metadata.name}</code> exists in environment <code>{playIntegritySecretResolution.metadata.environment_id}</code>. The Console cannot read or infer its service-account JSON.</p><p>{playIntegritySecretResolution.reason === "create_response_indeterminate" ? "The create response was indeterminate. Confirm use only if this is the intended named credential; otherwise rotate it from Secrets." : "The name existed before a new value was sent. Confirm use only if this is the intended credential; otherwise rotate it from Secrets."}{playIntegritySecretResolution.operationId ? ` Preserve operation ${playIntegritySecretResolution.operationId} for audit correlation.` : ""}</p><button className="secondary-action" onClick={() => { setPlayIntegritySecretName(playIntegritySecretResolution.metadata.name); setPlayIntegritySecretResolution({ metadata: playIntegritySecretResolution.metadata, outcome: "existing" }); setResumeNotice(`Explicitly accepted existing Play Integrity metadata secret/${playIntegritySecretResolution.metadata.name}; no value was read or inferred.`); }} type="button">Use this existing named Play secret</button></section> : null}
-      <section className="wizard-card"><h2>Schema-backed full configuration document</h2><p>The generated document includes only the {platformScopeLabel(workspace.platformScope)} root Component Definition{platformScopePlatforms[workspace.platformScope].length > 1 ? "s" : ""}, exact platform identifiers, required verification policy, and assistant feature grant. Unselected platform evidence is absent. All identity, attestation, upstream, model, feature, route, pricing, session, privacy, and limit areas remain server validated.</p><textarea aria-label="Full configuration JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} rows={32} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={!canConfigure || busy || !credentialReady} onClick={() => void applyConfiguration(false)} type="button">Validate and plan only</button><button className="primary-action" disabled={!canConfigure || busy || !credentialReady} onClick={() => void applyConfiguration(true)} type="button">Validate and activate with ETag</button></div><ValidationResult report={validation} />{revision ? <p className="resource-result">Revision <code>{revision.id}</code> is <strong>{revision.state}</strong>.</p> : null}</section>
-      <section className="wizard-card"><h2>Bounded upstream self-test</h2><p>This sends one non-streaming and one streaming Responses request with a one-token server clamp, trusted input preflight, operator cost ceiling, provider usage reconciliation, and safe error normalization. The server binds every provider dispatch and persisted result to the exact requested active revision; surrounding reads also detect concurrent changes.</p><button className="primary-action" disabled={!canTest || busy || !credentialReady || !activeConfigurationReady} onClick={() => void runSelfTest()} type="button">Run bounded upstream self-test</button>{verifiedTest ? <p className="resource-result">Self-test <code>{verifiedTest.id}</code>: <strong>{verifiedTest.state}</strong></p> : null}</section>
-      <section className="wizard-card"><h2>Platform SDK snippets</h2><p>These snippets identify only your gateway and client-visible Latchway configuration; they contain no provider key. Use the generated application resource ID shown below, not the application slug.</p>{snippets.map((snippet) => <div key={snippet.label}><h3>{snippet.label}</h3><pre>{snippet.code}</pre></div>)}</section>
-      <section className="wizard-card"><h2>Send and verify a client request</h2><p>Completion is derived only from a succeeded, completed request in this server-owned environment whose feature, protocol, and configuration revision match unchanged active-configuration reads immediately before and after request inspection. The <code>latchway develop</code> sample runner and official SDK requests both create this durable, redaction-safe evidence.</p><div className="button-row"><button className="primary-action" disabled={!canInspect || evidenceBusy || !activeConfigurationReady || !requestTarget} onClick={() => void refreshVerifiedRequest()} type="button">{evidenceBusy ? "Checking durable requests…" : "Check durable client request"}</button><a className="secondary-action" href={`/upstreams${typeof window === "undefined" ? "" : window.location.search}`}>Open AI connections</a><a className="secondary-action" href={`/requests${typeof window === "undefined" ? "" : window.location.search}`}>Open request explorer</a></div>{!canInspect ? <p className="control-notice"><strong>Request inspection unavailable</strong><span>Your current capability set cannot read durable request metadata, so this step remains incomplete.</span></p> : null}{verifiedRequest ? <p className="resource-result">Verified durable request <code>{verifiedRequest.id}</code>: <strong>{verifiedRequest.status}</strong> for {verifiedRequest.feature} via {verifiedRequest.selected_physical_model ?? verifiedRequest.attempts.at(-1)?.model ?? "recorded model"}.</p> : null}</section>
-    </>}
+  /** Moves between plan steps. Leaving forward checks the current step's fields; the rail moves freely. */
+  function showStep(next: number, validate: boolean): void {
+    const form = planForm.current;
+    if (validate && form) {
+      const current = form.querySelector(`[data-step="${step}"]`);
+      const invalid = current ? Array.from(current.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")).find((field) => !field.checkValidity()) : undefined;
+      if (invalid) { invalid.reportValidity(); return; }
+    }
+    setStep(next);
+  }
+
+  function submitPlan(event: FormEvent<HTMLFormElement>): void {
+    const form = event.currentTarget;
+    const firstInvalid = PLAN_STEPS.findIndex((_, index) => Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[data-step="${index}"] input, [data-step="${index}"] select`)).some((field) => !field.checkValidity()));
+    if (firstInvalid >= 0) {
+      event.preventDefault();
+      setStep(firstInvalid);
+      window.setTimeout(() => Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[data-step="${firstInvalid}"] input, [data-step="${firstInvalid}"] select`)).find((field) => !field.checkValidity())?.reportValidity(), 0);
+      return;
+    }
+    void createWorkspace(event);
+  }
+
+  const buildDone = [Boolean(credentialReady), activeConfigurationReady, verifiedTest?.state === "passed", activeConfigurationReady && snippets.length > 0, Boolean(verifiedRequest)];
+  const summaryRows: Array<[string, string | undefined]> = workspace
+    ? [["Application", workspace.applicationSlug], ["Environment", workspace.environmentSlug], ["Platforms", platformScopeLabel(workspace.platformScope)], ["Credential", workspace.upstreamAuthentication === "none" ? "No authentication" : secretName ? `secret/${secretName}` : undefined], ["Live revision", activeConfigurationReady && revision ? `v${revision.version}` : undefined], ["Self-test", verifiedTest?.state], ["Client request", verifiedRequest?.id]]
+    : [["Application", summary.application], ["Environment", summary.environment], ["Sign-in", summary.identity], ["Platforms", summary.platform], ["AI connection", summary.upstream], ["Model", summary.model], ["Pricing", summary.pricing]];
+
+  return <div className="lw-page">
+    <PageHeader description="Create an application and environment, connect an AI provider, publish a first configuration and confirm a real client request. Everything goes through the Admin API." title="Set up an application" />
+    <div className="lw-setup">
+      <nav aria-label="Setup steps" className="lw-setup-steps">
+        <h2>Plan</h2>
+        <ol aria-label="Setup progress">
+          {PLAN_STEPS.map((item, index) => {
+            const done = Boolean(workspace);
+            return <li data-state={done ? "done" : index === step ? "current" : "todo"} key={item.title}>
+              <button aria-current={!workspace && index === step ? "step" : undefined} aria-label={`Step ${index + 1}: ${item.title}`} className={cx("lw-setup-step", !workspace && index === step && "is-current", done && "is-done")} disabled={Boolean(workspace)} onClick={() => showStep(index, false)} type="button">
+                <span className="lw-setup-step__n">{done ? <Icon name="check" size={12} /> : index + 1}</span>
+                <span className="lw-setup-step__t"><strong>{item.title}</strong><span>{item.detail}</span></span>
+              </button>
+            </li>;
+          })}
+        </ol>
+        <p className="lw-setup-steps__group">Build</p>
+        <ol aria-label="Build progress">
+          {BUILD_STEPS.map((item, index) => <li data-state={buildDone[index] ? "done" : "todo"} key={item.title}>
+            <a aria-disabled={!workspace} className={cx("lw-setup-step", buildDone[index] && "is-done")} href={workspace ? `#${item.anchor}` : undefined}>
+              <span className="lw-setup-step__n">{buildDone[index] ? <Icon name="check" size={12} /> : PLAN_STEPS.length + index + 1}</span>
+              <span className="lw-setup-step__t"><strong>{item.title}</strong><span>{item.detail}</span></span>
+            </a>
+          </li>)}
+        </ol>
+      </nav>
+
+      <div className="lw-setup-main">
+        <ProblemNotice problem={problem} />
+        {latestRevision.error ? <ProblemNotice problem={problemFromError(latestRevision.error)} /> : null}
+        {activeConfiguration.error ? <ProblemNotice problem={problemFromError(activeConfiguration.error)} /> : null}
+        {secrets.error ? <ProblemNotice problem={problemFromError(secrets.error)} /> : null}
+        {resumeNotice ? <Notice title="Resumable setup">{resumeNotice}</Notice> : null}
+        {!workspace ? canConfigure ? (
+          <form className="lw-form lw-setup-form" noValidate onChange={(event) => { setFormDirty(true); setSummary(readSetupSummary(event.currentTarget)); }} onSubmit={submitPlan} ref={planForm}>
+            <p className="lw-setup-form__title">Step {step + 1} of {PLAN_STEPS.length} · {PLAN_STEPS[step]?.title}</p>
+            <div data-step="0" hidden={step !== 0}>
+              <fieldset><legend>Application and environment</legend><p>The owner and organization already exist. Name the application your users install and the environment it talks to.</p>
+                <div className="lw-form-grid"><label>Organization slug<input defaultValue={selectedWorkspace?.organization?.slug} name="organization_slug" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Application name<input defaultValue={selectedWorkspace?.application?.display_name} name="application_name" required /></label><label>Application slug<input defaultValue={selectedWorkspace?.application?.slug} name="application_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label></div>
+                <div className="lw-form-grid"><label>Environment name<input defaultValue={selectedWorkspace?.environment?.display_name ?? "Production"} name="environment_name" required /></label><label>Environment slug<input defaultValue={selectedWorkspace?.environment?.slug ?? "production"} name="environment_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label><label>Environment kind<select value={environmentKindInput} onChange={(event) => setEnvironmentKindInput(event.target.value as NativeTemplateInput["environmentKind"])} name="environment_kind" required><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div>
+              </fieldset>
+            </div>
+            <div data-step="1" hidden={step !== 1}>
+              <fieldset><legend>Sign-in and client platforms</legend>
+                <div className="lw-form-grid"><label>Firebase project ID<input name="firebase_project" pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" required /><small>This configures user authentication independently from client proof.</small></label><label>Platform scope<select name="platform_scope" onChange={(event) => setPlatformScope(event.target.value as (typeof selectablePlatformScopes)[number])} required value={platformScope}><option value="ios">iOS only (Swift)</option><option value="android">Android only (Kotlin)</option><option value="web">Web only (JavaScript)</option><option value="react_native_ios">React Native on iOS only</option><option value="react_native_android">React Native on Android only</option><option value="react_native_both">React Native on iOS and Android</option></select><small>The generated policy contains only these runtime platform keys. You can add another surface later through Client Trust.</small></label></div>
+              </fieldset>
+              {platformScopeHasApple(platformScope) ? <fieldset><legend>Apple App Attest</legend><p>Select accepted Apple attestation environments separately from the build distribution categories.</p><div className="lw-form-grid"><label>App ID prefix<input name="app_id_prefix" pattern="[A-Z0-9]{1,64}" required /></label><label>Bundle ID<input maxLength={255} minLength={3} name="bundle_id" pattern="[A-Za-z0-9](?:[A-Za-z0-9.-]{1,253}[A-Za-z0-9])" required /></label><label>Allowed CFBundleVersion (build number)<input maxLength={128} name="bundle_version" pattern="[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?" placeholder="1" required /><small>Use the exact CFBundleVersion/CURRENT_PROJECT_VERSION, not CFBundleShortVersionString/MARKETING_VERSION.</small></label></div><ApplePolicyFields environmentKind={environmentKindInput} /></fieldset> : null}
+              {platformScopeHasAndroid(platformScope) ? <fieldset><legend>Google Play Integrity</legend><PlayTestingField environmentKind={environmentKindInput} /><p>Pin the exact Android build. Use attached Google metadata only on a Google Cloud workload with the Play Integrity scope; Docker Compose and other hosts require a write-only service-account JSON secret.</p><div className="lw-form-grid"><label>Package name<input maxLength={255} minLength={3} name="package_name" pattern="[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+" required /></label><label>Cloud project number<input max={Number.MAX_SAFE_INTEGER} min={100000} name="cloud_project" required type="number" /></label><label>Certificate SHA-256 digest (base64url)<input name="certificate_digest" pattern="[A-Za-z0-9_-]{43}=?" required /></label><label>Exact version code<input min={1} name="android_version_code" required type="number" /></label><label>Server credential source<select name="play_integrity_credential_source" onChange={(event) => setPlayIntegrityCredentialSource(event.target.value as "metadata" | "service_account")} required value={playIntegrityCredentialSource}><option value="metadata">Attached Google Cloud service identity</option><option value="service_account">Write-only service-account JSON secret</option></select></label>{playIntegrityCredentialSource === "service_account" ? <><label>Credential operation<select aria-label="Play credential operation" name="play_integrity_secret_action" onChange={(event) => setPlayIntegritySecretAction(event.target.value as WriteOnlySecretAction)} value={playIntegritySecretAction}><option value="create">Store new service-account JSON</option><option value="use_existing">Use existing named secret</option></select></label><label>Play credential secret name<input defaultValue="play_integrity_service_account" name="play_integrity_secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Google service-account JSON (write-only)<input autoComplete="new-password" disabled={playIntegritySecretAction === "use_existing" || !canManageSecrets} name="play_integrity_secret_value" required={playIntegritySecretAction === "create"} type="password" /></label></> : null}</div>{playIntegrityCredentialSource === "service_account" ? <small>Existing-secret mode confirms only exact metadata in the resolved environment; the Console never reads or infers the service-account JSON.</small> : null}</fieldset> : null}
+              {platformScope === "web" ? <fieldset><legend>Firebase App Check for Web</legend><p>This establishes browser risk verification, not native hardware-backed device proof.</p><div className="lw-form-grid"><label>Exact browser origin<input defaultValue="https://app.example.com" name="web_origin" required type="url" /></label><label>Firebase project number<input inputMode="numeric" name="firebase_project_number" pattern="[1-9][0-9]{0,19}" required /></label><label>Firebase web app ID<input maxLength={256} minLength={5} name="firebase_app_id" pattern="[!-~]{5,256}" required /></label></div></fieldset> : null}
+            </div>
+            <div data-step="2" hidden={step !== 2}>
+              <fieldset><legend>Upstream target and authentication</legend><p>The production default keeps the provider credential server-side. Select no authentication only for a controlled upstream that genuinely requires none.</p><div className="lw-form-grid"><label>Upstream HTTPS base URL<input defaultValue="https://api.openai.com/v1" name="upstream_url" pattern="https://.*" required type="url" /></label><label>Authentication mode<select name="upstream_authentication" onChange={(event) => setUpstreamAuthenticationMode(event.target.value as "bearer" | "none")} required value={upstreamAuthenticationMode}><option value="bearer">Bearer secret (recommended)</option><option value="none">No authentication (explicit test upstream)</option></select></label><label>Planned secret name<input defaultValue="primary_api_key" name="upstream_secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label></div></fieldset>
+              <fieldset><legend>Trusted input accounting</legend><p>Review these operator-owned bounds against the exact physical model before activation. The starter route accepts bounded text-only OpenAI Responses requests.</p><div className="lw-form-grid"><label>Physical upstream model<input defaultValue="gpt-5-mini" name="physical_model" required /></label><label>Framing tokens per request<input defaultValue={8} min={0} name="maximum_framing_tokens_per_request" required type="number" /></label><label>Framing tokens per input item<input defaultValue={4} min={0} name="maximum_framing_tokens_per_message" required type="number" /></label><label>Maximum model context tokens<input defaultValue={128000} min={4096} name="maximum_context_tokens" required type="number" /></label></div></fieldset>
+            </div>
+            <div data-step="3" hidden={step !== 3}>
+              <fieldset><legend>Operator-reviewed pricing</legend><p>Enter the current nano-USD rates for the exact physical model. Latchway binds this revision to reservation and settlement evidence; it does not trust client-supplied prices. The first-run self-test uses a fixed 10,000,000 nano-USD ($0.01) maximum total cost.</p><div className="lw-form-grid"><label>Input price (nano-USD per million tokens)<input min={0} name="input_nano_usd_per_million" required type="number" /></label><label>Output price (nano-USD per million tokens)<input min={0} name="output_nano_usd_per_million" required type="number" /></label><label>Per-request price (nano-USD)<input defaultValue={0} min={0} name="request_nano_usd" required type="number" /></label></div></fieldset>
+              <fieldset><legend>Hard token limits</legend><p>These limits are enforced from the server-rewritten request and provider-reported settlement. The total-token calendar bound covers input plus output.</p><div className="lw-form-grid"><label>Daily input-token maximum<input defaultValue={100000} min={1} name="daily_input_token_maximum" required type="number" /></label><label>Daily output-token maximum<input defaultValue={100000} min={1} name="daily_output_token_maximum" required type="number" /></label><label>Daily total-token maximum<input defaultValue={200000} min={1} name="daily_total_token_maximum" required type="number" /></label><label>Per-request input-token maximum<input defaultValue={20000} min={1} name="per_request_input_token_maximum" required type="number" /></label></div></fieldset>
+            </div>
+            <div data-step="4" hidden={step !== 4}>
+              <fieldset><legend>Review and create</legend><p>Creating resolves the application and environment by slug (reusing exact matches), stores any Play Integrity credential, and saves a validated draft revision. Nothing goes live until you publish it in the next part.</p>
+                <dl className="lw-effective__facts">{summaryRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? "Not set"}</dd></div>)}</dl>
+              </fieldset>
+              {!canManageSecrets && firstRunNeedsSecretCapability ? <Notice title="Secret management required" tone="warning">Your current session cannot store the server-held credential required by this selection. Choose an explicit no-auth upstream and attached Google metadata where applicable, or use an administrator with <code className="lw-code-inline">manage_secrets</code>.</Notice> : null}
+            </div>
+            <div className="lw-form-foot">
+              {step > 0 ? <Button key="back" onClick={() => showStep(step - 1, false)}>Back</Button> : <span />}
+              <div className="lw-form-foot__end">
+                {step < PLAN_STEPS.length - 1
+                  ? <Button key="continue" onClick={() => showStep(step + 1, true)} variant="primary">Continue</Button>
+                  : <Button key="create" disabled={!canConfigure || (!canManageSecrets && firstRunNeedsSecretCapability)} loading={busy} type="submit" variant="primary">{busy ? "Creating…" : "Create application and environment"}</Button>}
+              </div>
+            </div>
+          </form>
+        ) : <Notice icon="lock" title="Read-only safe mode" tone="warning">First-run setup inputs are unavailable until Console compatibility and configuration authority are restored.</Notice> : <>
+          <Card description={workspace.upstreamAuthentication === "bearer" ? "The generated upstream requires this server-held secret. A new value is sent once and cleared immediately. Existing-secret mode confirms exact environment/name metadata without reading or inferring its value." : undefined} title={<span id="setup-credential">Write-only upstream credential</span>}>
+            {workspace.upstreamAuthentication === "bearer" ? canManageSecrets ? <form className="lw-form" onChange={() => setFormDirty(true)} onSubmit={(event) => void createSecret(event)}><div className="lw-form-grid lw-form-grid--end"><label>Credential operation<select aria-label="Upstream credential operation" name="secret_action" onChange={(event) => setUpstreamSecretAction(event.target.value as WriteOnlySecretAction)} value={upstreamSecretAction}><option value="create">Store new secret value</option><option value="use_existing">Use existing named secret</option></select></label><label>Secret name<input defaultValue={workspace.plannedSecretName} name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Secret value<input autoComplete="off" disabled={upstreamSecretAction === "use_existing"} name="secret_value" required={upstreamSecretAction === "create"} type="password" /></label><Button disabled={busy || secrets.isPending || Boolean(secretName)} type="submit" variant="primary">{secretName ? "Credential added" : secrets.isPending ? "Checking credential…" : upstreamSecretAction === "create" ? "Add credential" : "Confirm existing credential"}</Button></div></form> : <Notice title="Secret input unavailable" tone="warning">Write-only credential input is removed until Console compatibility and secret-management authority are restored.</Notice> : <Notice title="No-auth upstream">You explicitly selected a no-auth upstream. Do not use this mode for OpenAI or another target that requires a credential.</Notice>}
+          </Card>
+          {upstreamSecretResolution?.outcome === "confirmation_required" ? <Notice action={<Button onClick={() => setUpstreamSecretAction("use_existing")} size="sm">Use this existing named upstream secret on next review</Button>} title="Confirm existing upstream credential metadata" tone="warning"><code className="lw-code-inline">secret/{upstreamSecretResolution.metadata.name}</code> exists in environment <code className="lw-code-inline">{upstreamSecretResolution.metadata.environment_id}</code>. The Console cannot read or infer its value. {upstreamSecretResolution.reason === "create_response_indeterminate" ? "The create response was indeterminate. Confirm use only if this is the intended named credential; otherwise rotate it from Secrets." : "The name existed before a new value was sent. Confirm use only if this is the intended credential; otherwise rotate it from Secrets."}{upstreamSecretResolution.operationId ? ` Preserve operation ${upstreamSecretResolution.operationId} for audit correlation.` : ""}</Notice> : null}
+          {playIntegritySecretResolution?.outcome === "confirmation_required" ? <Notice action={<Button onClick={() => { setPlayIntegritySecretName(playIntegritySecretResolution.metadata.name); setPlayIntegritySecretResolution({ metadata: playIntegritySecretResolution.metadata, outcome: "existing" }); setResumeNotice(`Explicitly accepted existing Play Integrity metadata secret/${playIntegritySecretResolution.metadata.name}; no value was read or inferred.`); }} size="sm">Use this existing named Play secret</Button>} title="Confirm existing Play Integrity credential metadata" tone="warning"><code className="lw-code-inline">secret/{playIntegritySecretResolution.metadata.name}</code> exists in environment <code className="lw-code-inline">{playIntegritySecretResolution.metadata.environment_id}</code>. The Console cannot read or infer its service-account JSON. {playIntegritySecretResolution.reason === "create_response_indeterminate" ? "The create response was indeterminate. Confirm use only if this is the intended named credential; otherwise rotate it from Secrets." : "The name existed before a new value was sent. Confirm use only if this is the intended credential; otherwise rotate it from Secrets."}{playIntegritySecretResolution.operationId ? ` Preserve operation ${playIntegritySecretResolution.operationId} for audit correlation.` : ""}</Notice> : null}
+          <Card description={`The generated document includes only the ${platformScopeLabel(workspace.platformScope)} root Component Definition${platformScopePlatforms[workspace.platformScope].length > 1 ? "s" : ""}, exact platform identifiers, required verification policy, and assistant feature grant. Unselected platform evidence is absent; every area remains server validated.`} footer={<div className="lw-row lw-row--wrap"><Button disabled={!canConfigure || busy || !credentialReady} onClick={() => void applyConfiguration(false)} size="sm">Validate and plan only</Button><Button disabled={!canConfigure || busy || !credentialReady} onClick={() => void applyConfiguration(true)} size="sm" variant="primary">Validate and activate with ETag</Button></div>} title={<span id="setup-publish">Configuration document</span>}>
+            <div className="lw-form lw-stack"><textarea aria-label="Full configuration JSON" className="lw-code-editor" onChange={(event) => setDocument(event.target.value)} rows={32} spellCheck={false} value={document} /><ValidationResult report={validation} />{revision ? <p className="lw-note">Revision <code className="lw-code-inline">{revision.id}</code> is <strong>{revision.state}</strong>.</p> : null}</div>
+          </Card>
+          <Card description="Sends one non-streaming and one streaming Responses request with a one-token clamp, trusted input preflight, an operator cost ceiling and usage reconciliation. The server binds every dispatch and result to the exact active revision." footer={<Button disabled={!canTest || busy || !credentialReady || !activeConfigurationReady} onClick={() => void runSelfTest()} size="sm" variant="primary">Run bounded upstream self-test</Button>} title={<span id="setup-self-test">Bounded upstream self-test</span>}>
+            {verifiedTest ? <p className="lw-note">Self-test <code className="lw-code-inline">{verifiedTest.id}</code>: <strong>{verifiedTest.state}</strong></p> : <p className="lw-note lw-secondary">{activeConfigurationReady ? "Ready to run against the active revision." : "Publish the configuration first."}</p>}
+          </Card>
+          <Card description="These snippets identify only your gateway and client-visible Latchway configuration; they contain no provider key. Use the generated application resource ID shown, not the application slug." title={<span id="setup-snippets">Platform SDK snippets</span>}>
+            <div className="lw-stack">{snippets.map((snippet) => <div className="lw-snippet" key={snippet.label}><h3>{snippet.label}</h3><pre>{snippet.code}</pre></div>)}</div>
+          </Card>
+          <Card description="Completion comes only from a succeeded, completed request in this environment whose feature, protocol and configuration revision match unchanged active-configuration reads before and after the check. The latchway develop sample runner and official SDK requests both create this evidence." footer={<div className="lw-row lw-row--wrap"><Button disabled={!canInspect || !activeConfigurationReady || !requestTarget} loading={evidenceBusy} onClick={() => void refreshVerifiedRequest()} size="sm" variant="primary">{evidenceBusy ? "Checking durable requests…" : "Check durable client request"}</Button><a className={buttonClass({ size: "sm" })} href={`/upstreams${window.location.search}`}>Open AI Connections</a><a className={buttonClass({ size: "sm" })} href={`/requests${window.location.search}`}>Open Requests</a></div>} title={<span id="setup-verify">Send and verify a client request</span>}>
+            {!canInspect ? <Notice title="Request inspection unavailable" tone="warning">Your current capability set cannot read durable request metadata, so this step remains incomplete.</Notice> : null}
+            {verifiedRequest ? <p className="lw-note">Verified durable request <code className="lw-code-inline">{verifiedRequest.id}</code>: <strong>{verifiedRequest.status}</strong> for {verifiedRequest.feature} via {verifiedRequest.selected_physical_model ?? verifiedRequest.attempts.at(-1)?.model ?? "recorded model"}.</p> : <p className="lw-note lw-secondary">No verified request yet.</p>}
+          </Card>
+        </>}
+      </div>
+
+      <aside aria-label="Setup summary" className="lw-setup-sum">
+        <h3>{workspace ? "Your setup" : "So far"}</h3>
+        <ul>{summaryRows.map(([label, value]) => <li className={cx("lw-setup-sum__row", value && "is-done")} key={label}><Icon name={value ? "check" : "minus"} size={12} /><span><strong>{label}</strong><br /><span className="lw-secondary">{value ?? "Not set"}</span></span></li>)}</ul>
+        <p className="lw-setup-sum__foot">Secret values never appear here. They're sent once and cleared.</p>
+      </aside>
+    </div>
   </div>;
 }

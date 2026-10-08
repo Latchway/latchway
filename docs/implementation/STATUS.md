@@ -1,6 +1,52 @@
 # Implementation status
 
-Status date: 2026-10-04
+Status date: 2026-10-08
+
+## Console redesign phase 9: Setup wizard, CI and cleanup (branch `console-api-completion`, unreleased)
+
+The Setup wizard (`/setup`) uses the design system's setup layout: a step
+rail, the current step and a running summary. Planning is five steps (App &
+environment, Clients, AI connection, Pricing & limits, Review) inside one
+form; Continue checks only the current step, the rail moves freely, and Create
+checks every step and opens the first one with a problem. The Play Integrity
+service-account JSON and the provider key stay write-only and are cleared as
+before. After creation the page shows Credential, Configuration document,
+Self-test, SDK snippets and Verify a request as cards the rail links to, each
+marked done from the same server evidence as before. The guided Add Connection
+and Add Platform forms, platform readiness cards, draft review, the shared
+problem notice, effective-configuration panel, workspace gates and the 404
+page moved to the UI kit; native label-wrapped controls keep their names and
+are styled by a `.lw-form` scope. The legacy `styles.css` is gone: its global
+rules moved to `ui/base.css`, and every page imports only the design-system
+styles.
+
+Pages load on first visit (36 lazy route components), so the entry bundle is
+390 KB instead of 1.25 MB. The compatibility guard now treats only the window
+losing or regaining focus as inactivity; focus moving between elements no
+longer closes a grant or calls `flushSync` during React commits.
+
+Fixed a release-blocking mismatch: the console required Admin contract 1.0.0
+while servers since 1.1.0 advertise `1.1.0`, so a real 1.1.x server left the
+embedded console in read-only safe mode. Mocked fixtures had hidden it; the
+live-stack run exposed it. The console now requires `1.1.0`, the fixtures
+follow, and `TestConsoleRequiresTheServerContract` fails if the console and
+`buildinfo.ContractVersion` drift again.
+
+`.github/workflows/ci.yml` runs on pull requests and `main`: workflow lint,
+contract validation and deterministic bundle; gofmt, sqlc drift, vet and
+`go test` against PostgreSQL; and the console's lint, contract types,
+typecheck, unit, build and browser tests, the live browser-to-Go-to-PostgreSQL
+first-run test, reproducible assets and a check that the committed `dist`
+matches. `make test-scripts` is not run: 133 of its Python tests still read
+release workflows removed in `02c3c24` (ci: simplify v1 publication), a
+pre-existing state this phase does not change. `credential_selftest.go` was
+reformatted for Go 1.27's gofmt.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (411 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed),
+the live-stack first run against a local PostgreSQL 16 gateway (passed), build,
+`verify:reproducible`, actionlint, `go test ./...` against PostgreSQL and
+`go test ./web/console/ ./internal/server/` passed.
 
 ## Console redesign phase 8: Authentication (branch `console-redesign`, unreleased)
 

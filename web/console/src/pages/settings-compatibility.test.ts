@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateSettingsCompatibility, requiredSettingsServerCapabilities } from "./settings-compatibility";
 
 const systemStatus = {
-  contract_version: "1.0.0",
+  contract_version: "1.1.0",
   database_schema_version: "27",
   mutation_ready: true,
   protocol_versions: [1, 2],

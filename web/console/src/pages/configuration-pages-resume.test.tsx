@@ -185,6 +185,7 @@ describe("resumable setup wizard", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><SetupWizardPage /></QueryClientProvider>);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Step 5: Review" }));
     const create = await screen.findByRole("button", { name: "Create application and environment" });
     expect(create).toBeDisabled();
     expect(screen.getByText("Secret management required")).toBeInTheDocument();
@@ -302,9 +303,9 @@ describe("resumable setup wizard", () => {
     render(<QueryClientProvider client={queryClient}><SetupWizardPage /></QueryClientProvider>);
 
     const secretInput = await fillFirstRunPlayServiceAccount("one-time-play-json");
-    fireEvent.submit(screen.getByRole("button", { name: "Create application and environment" }).closest("form") as HTMLFormElement);
+    fireEvent.submit(screen.getByLabelText("Organization slug").closest("form") as HTMLFormElement);
 
-    expect(await screen.findByRole("heading", { name: "Schema-backed full configuration document" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Configuration document" })).toBeInTheDocument();
     expect(secretInput).toHaveValue("");
     const retry = screen.getByRole("button", { name: "Validate and plan only" });
     await waitFor(() => expect(retry).toBeEnabled());
@@ -339,9 +340,9 @@ describe("resumable setup wizard", () => {
     render(<QueryClientProvider client={queryClient}><SetupWizardPage /></QueryClientProvider>);
 
     const secretInput = await fillFirstRunPlayServiceAccount("indeterminate-play-json");
-    fireEvent.submit(screen.getByRole("button", { name: "Create application and environment" }).closest("form") as HTMLFormElement);
+    fireEvent.submit(screen.getByLabelText("Organization slug").closest("form") as HTMLFormElement);
 
-    expect(await screen.findByRole("heading", { name: "Confirm existing Play Integrity credential metadata" })).toBeInTheDocument();
+    expect(await screen.findByText("Confirm existing Play Integrity credential metadata")).toBeInTheDocument();
     expect(secretInput).toHaveValue("");
     const validate = screen.getByRole("button", { name: "Validate and plan only" });
     expect(validate).toBeDisabled();
@@ -360,8 +361,8 @@ describe("resumable setup wizard", () => {
     render(<QueryClientProvider client={queryClient}><SetupWizardPage /></QueryClientProvider>);
 
     const secretInput = await fillFirstRunPlayServiceAccount("must-not-survive-template-validation");
-    fireEvent.change(screen.getByLabelText("Upstream HTTPS base URL"), { target: { value: "http://provider.example.test/v1" } });
-    fireEvent.submit(screen.getByRole("button", { name: "Create application and environment" }).closest("form") as HTMLFormElement);
+    fireEvent.change(screen.getByLabelText("Upstream HTTPS base URL"), { target: { value: "https://provider.example.test/v1?region=a" } });
+    fireEvent.submit(screen.getByLabelText("Organization slug").closest("form") as HTMLFormElement);
 
     expect(secretInput).toHaveValue("");
     expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -396,7 +397,7 @@ describe("resumable setup wizard", () => {
     fireEvent.change(credential, { target: { value: "indeterminate-upstream-value" } });
     fireEvent.submit(screen.getByRole("button", { name: "Add credential" }).closest("form") as HTMLFormElement);
 
-    expect(await screen.findByRole("heading", { name: "Confirm existing upstream credential metadata" })).toBeInTheDocument();
+    expect(await screen.findByText("Confirm existing upstream credential metadata")).toBeInTheDocument();
     expect(screen.getByText(/Preserve operation arq_00000000000000000000000000/)).toBeInTheDocument();
     expect(credential).toHaveValue("");
     expect(screen.getByLabelText("Upstream credential operation")).toHaveValue("create");
@@ -450,7 +451,7 @@ describe("resumable setup wizard", () => {
     expect(await screen.findByRole("button", { name: "Credential added" })).toBeDisabled();
     expect(screen.getByText(/Revision/).closest("p")).toHaveTextContent("active");
     expect(screen.getByLabelText("Secret value")).toHaveValue("");
-    expect(screen.getByRole("link", { name: "Open AI connections" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open AI Connections" })).toHaveAttribute(
       "href",
       expect.stringMatching(/^\/upstreams(?:\?|$)/)
     );
@@ -507,7 +508,7 @@ describe("resumable setup wizard", () => {
     await waitFor(() => expect(check).toBeEnabled());
     fireEvent.click(check);
     expect(await screen.findByText(/Verified durable request/)).toHaveTextContent("req_01J00000000000000000000000");
-    expect(screen.getByText("Verified sample request").closest("li")).toHaveClass("wizard-progress__done");
+    expect(screen.getByText("Verify a request").closest("li")).toHaveAttribute("data-state", "done");
     expect(mocks.adminRequest.mock.calls.find(([path]) => String(path).startsWith("/admin/v1/requests?"))?.[0]).toContain("environment_id=env_01J00000000000000000000000");
   });
 
@@ -542,7 +543,7 @@ describe("resumable setup wizard", () => {
 
     const check = await screen.findByRole("button", { name: "Check durable client request" });
     await waitFor(() => expect(check).toBeEnabled());
-    expect(screen.getByText("Verified sample request").closest("li")).not.toHaveClass("wizard-progress__done");
+    expect(screen.getByText("Verify a request").closest("li")).toHaveAttribute("data-state", "todo");
     fireEvent.click(check);
     expect(await screen.findByRole("alert")).toHaveTextContent("Verified client request not observed");
     expect(screen.queryByText(/Verified durable request/)).not.toBeInTheDocument();
@@ -580,7 +581,7 @@ describe("resumable setup wizard", () => {
 
     const check = await screen.findByRole("button", { name: "Check durable client request" });
     await waitFor(() => expect(check).toBeEnabled());
-    expect(screen.getByText("Verified sample request").closest("li")).not.toHaveClass("wizard-progress__done");
+    expect(screen.getByText("Verify a request").closest("li")).toHaveAttribute("data-state", "todo");
     fireEvent.click(check);
     expect(await screen.findByRole("alert")).toHaveTextContent("active revision rev_01J00000000000000000000000");
     expect(screen.queryByText(/Verified durable request/)).not.toBeInTheDocument();
@@ -630,8 +631,8 @@ describe("resumable setup wizard", () => {
 
     const revisionResult = await screen.findByText(/Revision/);
     expect(revisionResult.closest("p")).toHaveTextContent("valid");
-    for (const label of ["Identity provider", "Attestation & components", "Upstream target", "Feature and route", "Limits", "SDK snippets"]) {
-      expect(screen.getByText(label).closest("li")).not.toHaveClass("wizard-progress__done");
+    for (const label of ["Publish", "Connect your app"]) {
+      expect(screen.getByText(label).closest("li")).toHaveAttribute("data-state", "todo");
     }
     expect(screen.getByRole("button", { name: "Check durable client request" })).toBeDisabled();
     expect(mocks.adminRequest.mock.calls.some(([path]) => String(path).startsWith("/admin/v1/requests?"))).toBe(false);
@@ -714,7 +715,7 @@ describe("resumable setup wizard", () => {
 
     expect(await screen.findByText("Request inspection unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check durable client request" })).toBeDisabled();
-    expect(screen.getByText("Verified sample request").closest("li")).not.toHaveClass("wizard-progress__done");
+    expect(screen.getByText("Verify a request").closest("li")).toHaveAttribute("data-state", "todo");
     expect(mocks.adminRequest.mock.calls.some(([path]) => String(path).startsWith("/admin/v1/requests?"))).toBe(false);
   });
 
