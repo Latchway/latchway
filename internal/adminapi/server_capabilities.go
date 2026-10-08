@@ -25,6 +25,7 @@ const (
 	serverCapabilityAdminSSO                  serverCapability = "admin_sso"
 	serverCapabilityAdminInvitations          serverCapability = "admin_invitations"
 	serverCapabilityAdminApplicationRoles     serverCapability = "admin_application_roles"
+	serverCapabilityAdminUserInsights         serverCapability = "admin_user_insights"
 )
 
 // supportedServerCapabilities is intentionally ordered and closed. Append-only
@@ -50,6 +51,7 @@ var supportedServerCapabilities = [...]serverCapability{
 	serverCapabilityAdminSSO,
 	serverCapabilityAdminInvitations,
 	serverCapabilityAdminApplicationRoles,
+	serverCapabilityAdminUserInsights,
 }
 
 func serverCapabilities() []serverCapability {

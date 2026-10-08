@@ -7,8 +7,39 @@ import (
 	"github.com/latchway/latchway/internal/id"
 )
 
+var familySignals = map[string]bool{
+	"any": true, signalDebugTrust: true, signalTrustExpiring: true, signalTokenReuse: true,
+	signalWeakKeyStorage: true, signalFailedSessions: true,
+}
+
+func parseFamilyListFilter(r *http.Request) (familyListFilter, bool) {
+	query := r.URL.Query()
+	for _, key := range []string{"status", "platform", "signal", "sort", "include_total"} {
+		if len(query[key]) > 1 {
+			return familyListFilter{}, false
+		}
+	}
+	filter := familyListFilter{status: query.Get("status"), platform: query.Get("platform"), signal: query.Get("signal"), sort: query.Get("sort")}
+	if filter.status != "" && filter.status != "active" && filter.status != "suspended" && filter.status != "revoked" {
+		return familyListFilter{}, false
+	}
+	if filter.platform != "" && !operationalIdentifierPattern.MatchString(filter.platform) {
+		return familyListFilter{}, false
+	}
+	if filter.signal != "" && !familySignals[filter.signal] {
+		return familyListFilter{}, false
+	}
+	if _, _, ok := familyOrdering(filter.sort); !ok {
+		return familyListFilter{}, false
+	}
+	if value := query.Get("include_total"); value != "" && value != "true" {
+		return familyListFilter{}, false
+	}
+	return filter, true
+}
+
 func (api *API) installationFamilies(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "user_id", "cursor", "page_size") {
+	if !onlyQueryKeys(r, "environment_id", "user_id", "cursor", "page_size", "status", "platform", "signal", "sort", "include_total") {
 		api.writeProblem(w, r, invalidRequest("The installation-family list query is invalid."))
 		return
 	}
@@ -22,22 +53,36 @@ func (api *API) installationFamilies(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The application-user filter is invalid."))
 		return
 	}
+	filter, ok := parseFamilyListFilter(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The installation filters are invalid: status is active or revoked, signal is any or a signal name, and sort is oldest, newest or recently_seen."))
+		return
+	}
 	page, err := parseOperationalPage(r, id.InstallationFamily)
 	if err != nil {
 		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
 		return
 	}
 	items, err := api.operations.listInstallationFamilies(
-		r.Context(), mustPrincipal(r.Context()), environmentID, userID, page,
+		r.Context(), mustPrincipal(r.Context()), environmentID, userID, filter, page,
 	)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
 		return
 	}
 	items, pageDocument := buildPage(items, int(page.size), func(item installationFamilyDocument) cursorDocument {
-		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+		return cursorDocument{CreatedAt: familySortKey(filter.sort, item), ID: item.ID}
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+	document := map[string]any{"items": items, "page": pageDocument}
+	if r.URL.Query().Get("include_total") == "true" {
+		count, capped, err := api.operations.countInstallationFamilies(r.Context(), mustPrincipal(r.Context()), environmentID, userID, filter)
+		if err != nil {
+			api.handleOperationalError(w, r, err, "")
+			return
+		}
+		document["total"] = map[string]any{"count": count, "capped": capped}
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func (api *API) installationFamily(w http.ResponseWriter, r *http.Request) {

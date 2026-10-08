@@ -10,6 +10,7 @@ import {
   type UserOperationImpact
 } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
+import { applyUserBatch, previewUserBatch, type UserBatchImpact } from "../../api/user-insights";
 import { ConfirmDialog, type Impact, ImpactDialog } from "../../ui";
 import { ProblemNotice } from "../control-plane-pages";
 import { ACTION_TITLE } from "./users-model";
@@ -259,6 +260,102 @@ export function BulkSignInReview({ environmentID, onClose, onFinished, users }: 
       title={`Require sign-in for ${users.length} users?`}
     >
       {applicable < users.length ? <p className="lw-secondary lw-note">{users.length - applicable} selected users wouldn't change and will be skipped.</p> : null}
+    </ImpactDialog>
+  );
+}
+
+const BATCH_OUTCOME_TEXT = {
+  changed: "The user changed after the preview; review them on their own.",
+  done: "Done.",
+  failed: "The server couldn't apply it; check the audit log before retrying.",
+  forbidden: "Your role can't act on this user.",
+  not_found: "The user no longer exists in this environment."
+} as const;
+
+/**
+ * One reviewed action for up to 100 users through the server's batch: a preview gives each user's impact and token,
+ * and the batch skips anyone who changed since, reporting each outcome.
+ */
+export function BulkUserReview({ action, environmentID, onClose, onFinished, users }: { action: UserOperationAction; environmentID: string; onClose: () => void; onFinished: () => void; users: readonly ApplicationUser[] }) {
+  const [preview, setPreview] = useState<UserBatchImpact>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const [results, setResults] = useState<BulkResult[]>();
+  const [pending, setPending] = useState(false);
+  const started = useRef(false);
+  const copy = ACTION_COPY[action];
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    previewUserBatch(environmentID, action, users.map((user) => user.id)).then(setPreview, (error: unknown) => setProblem(problemFromError(error)));
+  }, [action, environmentID, users]);
+
+  async function run(reason: string): Promise<void> {
+    if (!preview) return;
+    setPending(true);
+    setProblem(undefined);
+    const items = preview.items.flatMap((item) => item.impact?.applicable ? [{ impact_token: item.impact.impact_token, user_id: item.user_id }] : []);
+    const skipped: BulkResult[] = preview.items.filter((item) => !item.impact?.applicable).map((item) => ({ id: item.user_id, outcome: "skipped", text: item.outcome === "not_found" ? BATCH_OUTCOME_TEXT.not_found : "Doesn't apply to this user's current state." }));
+    try {
+      const applied = items.length ? await applyUserBatch(environmentID, action, reason, items) : undefined;
+      const outcomes: BulkResult[] = (applied?.results ?? []).map((result) => ({
+        id: result.user_id,
+        outcome: result.outcome === "done" ? "done" : result.outcome === "failed" ? "failed" : "skipped",
+        text: result.outcome === "done" ? `Operation ${result.operation_id ?? ""}.` : BATCH_OUTCOME_TEXT[result.outcome]
+      }));
+      setResults([...outcomes, ...skipped]);
+      onFinished();
+    } catch (error) {
+      const failure = problemFromError(error);
+      if (failure.code === "operation_indeterminate") {
+        setResults(items.map((item) => ({ id: item.user_id, outcome: "unknown", text: "Outcome unknown. Check the audit log before retrying." })));
+        onFinished();
+      } else {
+        setProblem(failure);
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (results) {
+    const count = (outcome: BulkResult["outcome"]) => results.filter((result) => result.outcome === outcome).length;
+    return (
+      <ConfirmDialog confirmLabel="Done" description={`${count("done")} done · ${count("skipped")} skipped · ${count("unknown")} unknown · ${count("failed")} failed`} onCancel={onClose} onConfirm={onClose} size="wide" title={`${ACTION_TITLE[action]} finished`}>
+        <ul className="lw-bulk-results">
+          {results.map((result) => <li className={`is-${result.outcome}`} key={result.id}><code className="lw-mono lw-mono--sm">{result.id}</code><strong>{result.outcome === "done" ? "Done" : result.outcome === "skipped" ? "Skipped" : result.outcome === "unknown" ? "Unknown" : "Failed"}</strong><span>{result.text}</span></li>)}
+        </ul>
+      </ConfirmDialog>
+    );
+  }
+  if (!preview) {
+    return (
+      <ConfirmDialog confirmDisabled confirmLabel="Review" onCancel={onClose} onConfirm={onClose} title={`${ACTION_TITLE[action]} for ${users.length} users`}>
+        {problem ? <ProblemNotice problem={problem} /> : <p role="status">Previewing each user…</p>}
+      </ConfirmDialog>
+    );
+  }
+  const totals = preview.totals;
+  return (
+    <ImpactDialog
+      acknowledgement={copy.acknowledgement}
+      confirmLabel={`${copy.confirm} for ${preview.applicable}`}
+      description={`${copy.description} Each user is changed and audited separately.`}
+      facts={[["Applies to", `${preview.applicable} of ${users.length} selected users`], ["Undo", copy.undo]]}
+      impacts={[
+        { count: totals.active_installation_families, label: "installations" },
+        { count: totals.active_session_grants + totals.active_component_sessions, label: "sessions" },
+        { count: totals.active_refresh_tokens + totals.active_component_refresh_tokens, label: "refresh tokens" }
+      ]}
+      onCancel={onClose}
+      onConfirm={({ reason }) => void run(reason)}
+      pending={pending}
+      reasonHint="Only that a reason was given reaches the audit log; its text isn't stored."
+      targetId={`${users.length} users`}
+      title={`${ACTION_TITLE[action]} for ${users.length} users?`}
+    >
+      {preview.applicable < users.length ? <p className="lw-secondary lw-note">{users.length - preview.applicable} selected users wouldn&apos;t change and will be skipped.</p> : null}
+      {problem ? <ProblemNotice problem={problem} /> : null}
     </ImpactDialog>
   );
 }

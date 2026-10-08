@@ -376,39 +376,26 @@ type selfTestDocument struct {
 	Checks           []selfTestCheck `json:"checks"`
 }
 
-func (store *operationalStore) listUsers(
-	ctx context.Context,
-	principal adminauth.Principal,
-	environmentID string,
-	page operationalPage,
-) ([]useroverride.ApplicationUser, error) {
-	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.ApplicationUser) != nil {
-		return nil, errOperationalInvalid
-	}
-	if !validOperationalRead(principal) {
-		return nil, errOperationalForbidden
-	}
-	rows, err := store.pool.Query(ctx, `
-		SELECT u.application_user_id, e.environment_id, u.status,
-		       u.normalized_claims, u.created_at, u.last_seen_at,
-		       ARRAY(
-		           SELECT DISTINCT identity.provider_key
-		           FROM external_identities AS identity
-		           WHERE identity.organization_id = u.organization_id
-		             AND identity.application_id = u.application_id
-		             AND identity.application_user_id = u.application_user_id
-		           ORDER BY identity.provider_key
-		           LIMIT 65
-		       ) AS identity_providers,
-		       CASE WHEN override.user_override_id IS NULL THEN NULL ELSE
-		           jsonb_build_object(
-		               'id', override.user_override_id,
-		               'limit_plan', override.override_document->>'limit_plan',
-		               'reason', override.reason,
-		               'created_at', override.created_at,
-		               'expires_at', override.expires_at
-		           )
-		       END AS limit_override
+// userListFilter narrows and orders the users list. Every value is bound as a
+// parameter; only the closed sort names choose SQL text.
+type userListFilter struct {
+	status      string
+	hasOverride bool
+	provider    string
+	claimKey    string
+	claimValue  string
+	sort        string
+}
+
+const (
+	userSortOldest       = "oldest"
+	userSortNewest       = "newest"
+	userSortRecentlySeen = "recently_seen"
+	// userTotalCap bounds the work a total does; larger counts are reported as capped.
+	userTotalCap = 100_000
+)
+
+const userListFrom = `
 		FROM environments AS e
 		JOIN applications AS application
 		  ON application.organization_id = e.organization_id
@@ -432,10 +419,84 @@ func (store *operationalStore) listUsers(
 		) AS override ON true
 		WHERE e.organization_id = $1 AND e.environment_id = $2
 		  AND organization.status = 'active' AND u.status <> 'deleted'
-		  AND ($3::timestamptz IS NULL OR (u.created_at, u.application_user_id) > ($3, $4))
-		ORDER BY u.created_at, u.application_user_id
-		LIMIT $5
-	`, principal.OrganizationID, environmentID, nullableTime(page.after), nullableString(page.afterID), page.size+1)
+		  AND ($3::text IS NULL OR u.status = $3)
+		  AND (NOT $4::bool OR override.user_override_id IS NOT NULL)
+		  AND ($5::text IS NULL OR EXISTS (
+		      SELECT 1 FROM external_identities AS identity
+		      WHERE identity.organization_id = u.organization_id
+		        AND identity.application_id = u.application_id
+		        AND identity.application_user_id = u.application_user_id
+		        AND identity.provider_key = $5))
+		  AND ($6::text IS NULL OR u.normalized_claims ->> $6 = $7)`
+
+func (filter userListFilter) arguments(organizationID, environmentID string) []any {
+	return []any{organizationID, environmentID, nullableString(filter.status), filter.hasOverride,
+		nullableString(filter.provider), nullableString(filter.claimKey), nullableString(filter.claimValue)}
+}
+
+// userSortKey is the cursor position of a user under a sort.
+func userSortKey(sort string, item useroverride.ApplicationUser) time.Time {
+	if sort == userSortRecentlySeen {
+		if item.LastSeenAt == nil {
+			return time.Unix(0, 0).UTC()
+		}
+		return item.LastSeenAt.UTC()
+	}
+	return item.CreatedAt
+}
+
+func (store *operationalStore) listUsers(
+	ctx context.Context,
+	principal adminauth.Principal,
+	environmentID string,
+	filter userListFilter,
+	page operationalPage,
+) ([]useroverride.ApplicationUser, error) {
+	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.ApplicationUser) != nil {
+		return nil, errOperationalInvalid
+	}
+	if !validOperationalRead(principal) {
+		return nil, errOperationalForbidden
+	}
+	var position, order string
+	switch filter.sort {
+	case "", userSortOldest:
+		position, order = `(u.created_at, u.application_user_id) > ($8, $9)`, `u.created_at, u.application_user_id`
+	case userSortNewest:
+		position, order = `(u.created_at, u.application_user_id) < ($8, $9)`, `u.created_at DESC, u.application_user_id DESC`
+	case userSortRecentlySeen:
+		position, order = `(COALESCE(u.last_seen_at, 'epoch'::timestamptz), u.application_user_id) < ($8, $9)`,
+			`COALESCE(u.last_seen_at, 'epoch'::timestamptz) DESC, u.application_user_id DESC`
+	default:
+		return nil, errOperationalInvalid
+	}
+	arguments := append(filter.arguments(principal.OrganizationID, environmentID), nullableTime(page.after), nullableString(page.afterID), page.size+1)
+	rows, err := store.pool.Query(ctx, `
+		SELECT u.application_user_id, e.environment_id, u.status,
+		       u.normalized_claims, u.created_at, u.last_seen_at,
+		       ARRAY(
+		           SELECT DISTINCT identity.provider_key
+		           FROM external_identities AS identity
+		           WHERE identity.organization_id = u.organization_id
+		             AND identity.application_id = u.application_id
+		             AND identity.application_user_id = u.application_user_id
+		           ORDER BY identity.provider_key
+		           LIMIT 65
+		       ) AS identity_providers,
+		       CASE WHEN override.user_override_id IS NULL THEN NULL ELSE
+		           jsonb_build_object(
+		               'id', override.user_override_id,
+		               'limit_plan', override.override_document->>'limit_plan',
+		               'reason', override.reason,
+		               'created_at', override.created_at,
+		               'expires_at', override.expires_at
+		           )
+		       END AS limit_override
+		`+userListFrom+`
+		  AND ($8::timestamptz IS NULL OR `+position+`)
+		ORDER BY `+order+`
+		LIMIT $10
+	`, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("list application users: %w", err)
 	}
@@ -452,6 +513,24 @@ func (store *operationalStore) listUsers(
 		return nil, fmt.Errorf("iterate application users: %w", err)
 	}
 	return items, nil
+}
+
+// countUsers counts the users a filter matches, up to userTotalCap.
+func (store *operationalStore) countUsers(ctx context.Context, principal adminauth.Principal, environmentID string, filter userListFilter) (int64, bool, error) {
+	if !validOperationalRead(principal) {
+		return 0, false, errOperationalForbidden
+	}
+	arguments := append(filter.arguments(principal.OrganizationID, environmentID), userTotalCap+1)
+	var count int64
+	if err := store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (SELECT 1 `+userListFrom+` LIMIT $8) AS matched
+	`, arguments...).Scan(&count); err != nil {
+		return 0, false, fmt.Errorf("count application users: %w", err)
+	}
+	if count > userTotalCap {
+		return userTotalCap, true, nil
+	}
+	return count, false, nil
 }
 
 func (store *operationalStore) getUser(

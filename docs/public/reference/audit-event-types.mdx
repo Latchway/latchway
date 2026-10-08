@@ -103,7 +103,11 @@ admin.user_block
 admin.user_unblock
 admin.user_require_reauthentication
 admin.user_require_app_reverification
+admin.user_batch
 ```
+
+A batch of user actions records each user's own event above; `admin.user_batch`
+appears only when a whole batch request is refused.
 
 Secret events classify secret-bearing fields as sensitive and never include
 plaintext. User actions target opaque application-user IDs and record

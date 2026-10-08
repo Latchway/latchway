@@ -643,7 +643,7 @@ func TestFamilyAndComponentCommandsUseCanonicalAPIWithoutCredentialMaterial(t *t
 		"id":"` + familyID + `","user_id":"` + userID + `",
 		"environment_id":"` + controlTestEnvironment + `","platform":"ios","status":"active",
 		"root_component_id":"` + componentID + `","root_trust_source":"direct_attested",
-		"component_count":1,"request_count":1,
+		"component_count":1,"request_count":1,"signals":[],
 		"usage":{"logical_requests":1,"input_tokens":10,"output_tokens":20,"total_tokens":30,"cost_nano_usd":40},
 		"created_at":"2026-08-30T00:00:00Z","updated_at":"2026-08-30T00:00:00Z","last_seen_at":"2026-08-30T00:00:00Z"
 	}`

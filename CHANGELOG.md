@@ -32,6 +32,11 @@ All notable project changes will be documented here. The format follows [Keep a 
 - Application roles (ADR 0045, `admin_application_roles`): owners can make a
   member Admin or Operator in one application without changing their role
   elsewhere, and can preview the console as another role.
+- User and installation insights (ADR 0046, `admin_user_insights`): filters,
+  sorts and capped totals for users and installations, server-side
+  installation signals, per-user usage, impact previews for installation and
+  component actions, and batched user actions that skip anyone who changed
+  since the preview. `latchway` family lists show signals.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
