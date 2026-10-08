@@ -1465,6 +1465,12 @@ details.lw-auth__help:not([open]) { gap: 0; }
 .lw-console__main { flex: 1; min-width: 0; outline: none; }
 .lw-console__account { position: relative; display: inline-flex; }
 .lw-console__popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; }
+.lw-attn-btn { position: relative; }
+.lw-attn-btn__count { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); background: var(--orange); color: var(--accent-foreground); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.lw-attn-btn__count.is-critical { background: var(--destructive); }
+.lw-attn-pop { width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 560px); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--menu-background); box-shadow: var(--shadow-dialog); }
+.lw-attn-pop__head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 8px; font-size: 13px; line-height: 18px; border-bottom: 1px solid var(--border); }
+.lw-attn-pop__foot { padding: 10px 12px; font-size: 13px; border-top: 1px solid var(--border); }
 .lw-console__error { margin: 0; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--background-l3); color: var(--destructive); font-size: 13px; line-height: 18px; }
 .lw-console__scrim { display: none; }
 .lw-crumb-select { position: relative; display: inline-flex; flex: none; align-items: center; min-width: 0; }
@@ -1540,6 +1546,7 @@ a.lw-btn, a.lw-health, a.lw-tab, a.lw-menu__item, a.lw-side-item, .lw-console__h
 /* ---------- Console additions: Overview and Analytics ---------- */
 .lw-card-lede { margin: 0 0 12px; font-size: 13px; line-height: 18px; }
 .lw-an-empty { margin: 0; padding: 16px; }
+.lw-an-foot { flex: 1; margin: 0; }
 .lw-analytics .lw-an-bar, .lw-overview .lw-an-bar { background: var(--background-l2); }
 .lw-checklist-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 8px 24px; margin: 0; padding: 0; list-style: none; }
 .lw-checklist-steps li { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; }

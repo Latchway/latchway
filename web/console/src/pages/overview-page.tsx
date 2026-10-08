@@ -2,10 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { adminRequest, APITokenPageSchema, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
+import { adminRequest, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
 import { problemFromError } from "../api/auth";
-import { useSystemHealth } from "../api/health";
-import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { AnalyticsRouteSearchSchema } from "../app/route-search";
 import { useWorkspace } from "../app/workspace-context-value";
 import { AttentionList, buttonClass, Card, Icon, MetricTile, PageHeader, ProportionBar, RangePicker, StatStrip, VolumeChart } from "../ui";
@@ -28,11 +26,11 @@ import {
 import { useUsage } from "./analytics/use-usage";
 import { ProblemNotice } from "./control-plane-pages";
 import { ATTENTION_GROUPS, attentionItems } from "./overview/attention-model";
+import { useAttentionSources } from "./overview/use-attention";
 import { formatMs } from "./requests/request-format";
 
 function OperatingOverview() {
   const workspace = useWorkspace();
-  const { readiness } = useSystemHealth();
   const navigate = useNavigate();
   const environment = workspace.environment;
   const environmentID = environment?.id ?? "";
@@ -48,22 +46,13 @@ function OperatingOverview() {
     queryKey: ["environment", environment?.id ?? "none", "active-configuration", "overview"],
     retry: false
   });
-  const latestRevision = useQuery({
-    ...latestConfigurationRevisionQueryOptions(environmentID),
-    enabled: Boolean(environmentID)
-  });
   const recentRequests = useQuery({
     enabled: Boolean(environmentID),
     queryFn: async () => (await adminRequest(queryPath("/admin/v1/requests", { environment_id: environmentID, page_size: "1" }), RequestPageSchema)).data,
     queryKey: ["environment", environmentID || "none", "recent-request", "overview"],
     retry: false
   });
-  // Token metadata needs a capability some administrators lack; without it, token expiry simply isn't listed.
-  const apiTokens = useQuery({
-    queryFn: async () => (await adminRequest("/admin/v1/api-tokens", APITokenPageSchema)).data.items,
-    queryKey: ["api-tokens", "overview"],
-    retry: false
-  });
+  const sources = useAttentionSources(environmentID);
 
   const spec = configuration.data?.document.spec;
   const configObject = spec && typeof spec === "object" && !Array.isArray(spec) ? spec as Record<string, unknown> : undefined;
@@ -79,15 +68,7 @@ function OperatingOverview() {
   ];
   const completedSteps = setupSteps.filter((step) => step.complete).length;
 
-  const attention = attentionItems({
-    apiTokens: apiTokens.data,
-    application: workspace.application,
-    environment,
-    latestRevisionState: latestRevision.data?.items[0]?.state,
-    now,
-    readiness: readiness.data,
-    summary: usage.summary
-  });
+  const attention = attentionItems({ ...sources, application: workspace.application, environment, now, summary: usage.summary });
   const pressing = attention.filter((item) => item.severity !== "info").length;
   const summary = usage.summary;
   const analytics = summary?.analytics;
@@ -130,7 +111,7 @@ function OperatingOverview() {
 
         <Card flush icon="alert" meta={attention.length ? `${pressing} to look at · ${attention.length} in all` : "All clear"} title="Needs attention">
           <AttentionList
-            emptyText="Checked just now: configuration, usage, API tokens and gateway readiness look fine."
+            emptyText="Checked just now: configuration, usage, API tokens, gateway readiness and the server self-check look fine."
             groups={ATTENTION_GROUPS}
             items={attention.map((item) => ({
               ...item,

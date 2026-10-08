@@ -34,20 +34,31 @@ func (store *Store) RenameOrganization(ctx context.Context, principal adminauth.
 		return Organization{}, fmt.Errorf("begin organization rename: %w", err)
 	}
 	defer rollback(tx)
+	var current string
+	if err := tx.QueryRow(ctx, `
+		SELECT display_name FROM organizations
+		WHERE organization_id = $1 AND status = 'active'
+		FOR UPDATE
+	`, organizationID).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+		return Organization{}, ErrNotFound
+	} else if err != nil {
+		return Organization{}, fmt.Errorf("lock organization for rename: %w", err)
+	}
 	var item Organization
 	var createdAt pgtype.Timestamptz
 	if err := tx.QueryRow(ctx, `
-		UPDATE organizations SET display_name = $2, updated_at = $3
+		UPDATE organizations SET display_name = $2, updated_at = CASE WHEN display_name = $2 THEN updated_at ELSE $3 END
 		WHERE organization_id = $1 AND status = 'active'
 		RETURNING organization_id, slug, display_name, created_at
-	`, organizationID, name, store.now().UTC()).Scan(&item.ID, &item.Slug, &item.DisplayName, &createdAt); errors.Is(err, pgx.ErrNoRows) {
-		return Organization{}, ErrNotFound
-	} else if err != nil {
+	`, organizationID, name, store.now().UTC()).Scan(&item.ID, &item.Slug, &item.DisplayName, &createdAt); err != nil {
 		return Organization{}, mapWriteError("rename organization", err)
 	}
 	item.CreatedAt = createdAt.Time.UTC()
-	if err := store.audit(ctx, tx, principal, organizationID, "admin.organization_rename", "organization", organizationID, "", []string{"display_name"}); err != nil {
-		return Organization{}, err
+	// An unchanged name is a no-op: nothing to record.
+	if current != name {
+		if err := store.audit(ctx, tx, principal, organizationID, "admin.organization_rename", "organization", organizationID, "", []string{"display_name"}); err != nil {
+			return Organization{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Organization{}, fmt.Errorf("commit organization rename: %w", err)
@@ -69,21 +80,31 @@ func (store *Store) RenameApplication(ctx context.Context, principal adminauth.P
 		return Application{}, fmt.Errorf("begin application rename: %w", err)
 	}
 	defer rollback(tx)
+	var current string
+	if err := tx.QueryRow(ctx, `
+		SELECT display_name FROM applications
+		WHERE organization_id = $1 AND application_id = $2
+		FOR UPDATE
+	`, principal.OrganizationID, applicationID).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+		return Application{}, ErrNotFound
+	} else if err != nil {
+		return Application{}, fmt.Errorf("lock application for rename: %w", err)
+	}
 	var item Application
 	var disabledAt, createdAt pgtype.Timestamptz
 	if err := tx.QueryRow(ctx, `
-		UPDATE applications SET display_name = $3, updated_at = $4
+		UPDATE applications SET display_name = $3, updated_at = CASE WHEN display_name = $3 THEN updated_at ELSE $4 END
 		WHERE organization_id = $1 AND application_id = $2
 		RETURNING application_id, organization_id, slug, display_name, status, disabled_at, created_at
 	`, principal.OrganizationID, applicationID, name, store.now().UTC()).Scan(
 		&item.ID, &item.OrganizationID, &item.Slug, &item.DisplayName, &item.Status, &disabledAt, &createdAt,
-	); errors.Is(err, pgx.ErrNoRows) {
-		return Application{}, ErrNotFound
-	} else if err != nil {
+	); err != nil {
 		return Application{}, mapWriteError("rename application", err)
 	}
-	if err := store.audit(ctx, tx, principal, principal.OrganizationID, "admin.application_rename", "application", applicationID, "", []string{"display_name"}); err != nil {
-		return Application{}, err
+	if current != name {
+		if err := store.audit(ctx, tx, principal, principal.OrganizationID, "admin.application_rename", "application", applicationID, "", []string{"display_name"}); err != nil {
+			return Application{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Application{}, fmt.Errorf("commit application rename: %w", err)
@@ -105,12 +126,12 @@ func (store *Store) RenameEnvironment(ctx context.Context, principal adminauth.P
 		return Environment{}, fmt.Errorf("begin environment rename: %w", err)
 	}
 	defer rollback(tx)
-	var applicationID string
+	var applicationID, current string
 	if err := tx.QueryRow(ctx, `
-		SELECT application_id FROM environments
+		SELECT application_id, display_name FROM environments
 		WHERE organization_id = $1 AND environment_id = $2
 		FOR UPDATE
-	`, principal.OrganizationID, environmentID).Scan(&applicationID); errors.Is(err, pgx.ErrNoRows) {
+	`, principal.OrganizationID, environmentID).Scan(&applicationID, &current); errors.Is(err, pgx.ErrNoRows) {
 		return Environment{}, ErrNotFound
 	} else if err != nil {
 		return Environment{}, fmt.Errorf("lock environment for rename: %w", err)
@@ -121,7 +142,7 @@ func (store *Store) RenameEnvironment(ctx context.Context, principal adminauth.P
 	var item Environment
 	var disabledAt, createdAt pgtype.Timestamptz
 	if err := tx.QueryRow(ctx, `
-		UPDATE environments SET display_name = $3, updated_at = $4
+		UPDATE environments SET display_name = $3, updated_at = CASE WHEN display_name = $3 THEN updated_at ELSE $4 END
 		WHERE organization_id = $1 AND environment_id = $2
 		RETURNING environment_id, application_id, slug, display_name, kind, status, disabled_at, created_at
 	`, principal.OrganizationID, environmentID, name, store.now().UTC()).Scan(
@@ -129,8 +150,10 @@ func (store *Store) RenameEnvironment(ctx context.Context, principal adminauth.P
 	); err != nil {
 		return Environment{}, mapWriteError("rename environment", err)
 	}
-	if err := store.audit(ctx, tx, principal, principal.OrganizationID, "admin.environment_rename", "environment", environmentID, environmentID, []string{"display_name"}); err != nil {
-		return Environment{}, err
+	if current != name {
+		if err := store.audit(ctx, tx, principal, principal.OrganizationID, "admin.environment_rename", "environment", environmentID, environmentID, []string{"display_name"}); err != nil {
+			return Environment{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Environment{}, fmt.Errorf("commit environment rename: %w", err)

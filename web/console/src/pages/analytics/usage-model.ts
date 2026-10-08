@@ -227,3 +227,33 @@ export function cliCommands(environmentID: string, window: UsageWindow, breakdow
     `  --start ${iso(window.start)} --end ${iso(window.end)} --interval ${window.interval} --output json`
   ].join("\n");
 }
+
+/** The current UTC calendar month up to now, and the month before it. Providers bill by UTC month. */
+export interface MonthWindows {
+  /** Exclusive end of this month. */
+  monthEnd: number;
+  now: number;
+  previousStart: number;
+  start: number;
+}
+
+export function monthWindows(now: number): MonthWindows {
+  const date = new Date(now);
+  const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+  return { monthEnd: Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1), now, previousStart: Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1), start };
+}
+
+/** Projections wait for a full day of the month, so one busy hour can't set the pace. */
+export const PROJECTION_MINIMUM_MS = 86_400_000;
+
+/**
+ * Month-end cost if the rest of the month runs at this month's pace so far: integer nano-USD, or null before a full
+ * day has passed or without a recorded cost. Exact integer arithmetic; a straight line, not a forecast.
+ */
+export function projectMonthEnd(costNano: number | null, months: MonthWindows): number | null {
+  const elapsed = months.now - months.start;
+  if (costNano === null || elapsed < PROJECTION_MINIMUM_MS) return null;
+  const span = BigInt(months.monthEnd - months.start);
+  const projected = (BigInt(costNano) * span + BigInt(elapsed) / 2n) / BigInt(elapsed);
+  return Number(projected);
+}

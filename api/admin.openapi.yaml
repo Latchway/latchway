@@ -3392,6 +3392,9 @@ components:
         page: { $ref: '#/components/schemas/PageInfo' }
     Environment:
       type: object
+      description: >-
+        An environment. `active_revision_id` names the live configuration revision and appears only in environment
+        lists, for environments with one; responses to environment mutations omit it.
       additionalProperties: false
       required: [id, application_id, slug, display_name, kind, status, created_at]
       properties:

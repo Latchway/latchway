@@ -8,8 +8,10 @@ import {
   cliCommands,
   formatAxisMoney,
   formatCount,
+  monthWindows,
   percentChange,
   periodOf,
+  projectMonthEnd,
   periodPatch,
   pointChange,
   previousWindow,
@@ -121,5 +123,44 @@ describe("attention", () => {
 
   it("is empty when nothing needs attention", () => {
     expect(attentionItems({ environment: { ...environment, active_revision_id: "rev_0123456789abcdef" }, now: NOW, summary: summaryFixture() })).toEqual([]);
+  });
+});
+
+describe("month-end projection", () => {
+  it("uses UTC calendar months, including across a year end", () => {
+    expect(monthWindows(Date.parse("2026-10-08T12:00:00Z"))).toEqual({ monthEnd: Date.parse("2026-11-01T00:00:00Z"), now: Date.parse("2026-10-08T12:00:00Z"), previousStart: Date.parse("2026-09-01T00:00:00Z"), start: Date.parse("2026-10-01T00:00:00Z") });
+    const january = monthWindows(Date.parse("2027-01-15T00:00:00Z"));
+    expect([january.previousStart, january.start, january.monthEnd]).toEqual([Date.parse("2026-12-01T00:00:00Z"), Date.parse("2027-01-01T00:00:00Z"), Date.parse("2027-02-01T00:00:00Z")]);
+  });
+
+  it("extends this month's pace to its end in exact integer nano-USD", () => {
+    // 7.5 of 31 days elapsed: $3 so far projects to $12.40.
+    expect(projectMonthEnd(3_000_000_000, monthWindows(Date.parse("2026-10-08T12:00:00Z")))).toBe(12_400_000_000);
+    expect(Number.isInteger(projectMonthEnd(1, monthWindows(Date.parse("2026-10-03T07:00:00Z"))))).toBe(true);
+    // Large totals stay exact past 2^53 intermediate products.
+    expect(projectMonthEnd(9_000_000_000_000_000, monthWindows(Date.parse("2026-10-16T12:00:00Z")))).toBe(18_000_000_000_000_000);
+  });
+
+  it("waits for a full day and never projects a missing cost", () => {
+    expect(projectMonthEnd(5_000, monthWindows(Date.parse("2026-10-01T23:59:00Z")))).toBeNull();
+    expect(projectMonthEnd(null, monthWindows(Date.parse("2026-10-20T00:00:00Z")))).toBeNull();
+    expect(projectMonthEnd(0, monthWindows(Date.parse("2026-10-20T00:00:00Z")))).toBe(0);
+  });
+});
+
+describe("self-check attention", () => {
+  const now = Date.parse("2026-10-08T12:00:00Z");
+  const sample = (state: "healthy" | "degraded" | "unhealthy", minutesAgo: number) => ({ failed_checks: state === "unhealthy" ? ["worker_heartbeat"] : [], overall_state: state, sampled_at: new Date(now - minutesAgo * 60_000).toISOString(), warning_checks: state === "healthy" ? [] : ["usage_settlement_backlog"] });
+
+  it("lists a recent unhealthy or degraded sample with the checks by name", () => {
+    const [item] = attentionItems({ healthSample: sample("unhealthy", 4), now });
+    expect(item).toMatchObject({ group: "gateway", id: "self-check", severity: "critical", title: "The server's self-check is unhealthy", to: "/system-health" });
+    expect(item?.detail).toBe("Needs attention: Background workers, Usage settlement.");
+    expect(attentionItems({ healthSample: sample("degraded", 4), now })[0]?.severity).toBe("warning");
+  });
+
+  it("ignores healthy and stale samples", () => {
+    expect(attentionItems({ healthSample: sample("healthy", 1), now })).toEqual([]);
+    expect(attentionItems({ healthSample: sample("unhealthy", 20), now })).toEqual([]);
   });
 });

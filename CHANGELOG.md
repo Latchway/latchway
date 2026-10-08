@@ -59,6 +59,9 @@ All notable project changes will be documented here. The format follows [Keep a 
   display-name renames for organizations, applications and environments.
   `latchway status history`, `usage connections`, `verify runs`, and
   `applications rename` / `environments rename`.
+- Analytics (ADR 0051): a month-to-date card with a straight-line month-end
+  projection, per-AI-connection breakdowns, errors by code, a warning when
+  usage totals are still settling, and a header attention indicator.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
@@ -78,6 +81,11 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Fixed
 
+- Environment lists include `active_revision_id`, which the Admin contract
+  declared but the server never sent; the console showed every environment as
+  unconfigured on Overview and in Settings.
+- Reloading an Analytics page in the embedded console rendered a blank page;
+  Analytics now lives at `/usage`, `/cost`, `/performance` and `/reliability`.
 - The embedded console required Admin contract 1.0.0 while 1.1.x servers
   advertise 1.1.0, leaving it in read-only safe mode.
 - A configuration draft that had been validated couldn't be edited again, so
