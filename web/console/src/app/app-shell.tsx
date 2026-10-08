@@ -14,6 +14,7 @@ import { consoleSessionQueryOptions, forgetConsoleSession, SESSION_ENDED_EVENT, 
 import { Button, buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type MenuEntry, type StatusItem, StatusRail, useFocusTrap } from "../ui";
 import { ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
 import { ChoosePasswordScreen } from "./auth/choose-password";
+import { TwoFactorEnrollmentScreen } from "./auth/two-factor-enrollment";
 import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
 import { AuthScreen } from "./auth/auth-screen";
 import { ENDING_SOON_MS, sessionEndText } from "./auth/session-model";
@@ -270,6 +271,9 @@ function AppShellContent() {
   }
   if (adminSession.password_reset_required && !expired) {
     return <ChoosePasswordScreen onSignOut={() => void logout()} session={adminSession} />;
+  }
+  if (adminSession.two_factor_enrollment_required && !expired) {
+    return <TwoFactorEnrollmentScreen onSignOut={() => void logout()} session={adminSession} />;
   }
 
   const statusItems: StatusItem[] = [];

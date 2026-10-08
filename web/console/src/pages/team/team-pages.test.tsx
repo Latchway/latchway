@@ -126,6 +126,29 @@ describe("Members", () => {
   });
 });
 
+describe("Two-factor", () => {
+  it("shows who has two-factor on and lets an owner reset it after confirming", async () => {
+    const user = userEvent.setup();
+    server();
+    const base = adminRequestMock.getMockImplementation();
+    adminRequestMock.mockImplementation((path: string, schema: unknown, options: Options) => {
+      if (path.startsWith("/admin/v1/administrators?")) return Promise.resolve({ data: { items: [owner, { ...jo, two_factor_enabled: true }], page: { has_more: false } } });
+      if (path === `/admin/v1/administrators/${jo.id}/reset-two-factor`) return Promise.resolve({ data: { ...jo, two_factor_enabled: false } });
+      return base?.(path, schema, options);
+    });
+    renderWithWorkspace(<MembersPage />);
+    const row = (await screen.findByText("Jo Admin")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("On")).toBeInTheDocument();
+    await user.click(row);
+    const drawer = await screen.findByRole("complementary", { name: "Jo Admin" });
+    await user.click(within(drawer).getByRole("button", { name: "Reset Two-Factor" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Reset Jo Admin's two-factor sign-in?" });
+    expect(dialog).toHaveTextContent("confirming who's asking");
+    await user.click(within(dialog).getByRole("button", { name: "Reset Two-Factor" }));
+    await waitFor(() => expect(mutationsOf(adminRequestMock)).toEqual([`POST /admin/v1/administrators/${jo.id}/reset-two-factor`]));
+  });
+});
+
 describe("API tokens", () => {
   it("reveals a new token once, unlocks Done only after it's saved, and never re-shows it after a read-only spell", async () => {
     const user = userEvent.setup();

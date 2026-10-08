@@ -451,6 +451,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_session_management",
 	"admin_event_stream",
 	"admin_account_self_service",
+	"admin_two_factor",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {

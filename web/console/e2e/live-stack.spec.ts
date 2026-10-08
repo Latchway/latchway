@@ -1,4 +1,18 @@
 import { expect, test } from "@playwright/test";
+import { createHmac } from "node:crypto";
+
+/** RFC 6238 code an authenticator app would show for this base32 key at the given time. */
+function totp(base32: string, at: number): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const character of base32) bits += alphabet.indexOf(character).toString(2).padStart(5, "0");
+  const key = Buffer.from(bits.match(/.{8}/g)?.map((byte) => Number.parseInt(byte, 2)) ?? []);
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 30_000)));
+  const digest = createHmac("sha1", key).update(counter).digest();
+  const offset = (digest[digest.length - 1] ?? 0) & 0x0f;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
 
 const liveStackBaseURL = process.env.LATCHWAY_CONSOLE_LIVE_E2E_BASE_URL;
 const bootstrapToken = process.env.LATCHWAY_CONSOLE_LIVE_E2E_BOOTSTRAP_TOKEN;
@@ -118,5 +132,29 @@ test.describe("real first-run control plane", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
     await expect(page.getByText("This session", { exact: true })).toBeVisible();
     await expect(page.getByText(/on (macOS|Linux|Windows)|^(Chrome|Firefox|Safari)/).first()).toBeVisible();
+
+    // Two-factor sign-in against the real server: enroll, sign out, sign back in with a code.
+    await page.getByRole("button", { name: "Set Up Two-Factor" }).click();
+    await page.getByRole("button", { name: "Set Up Authenticator" }).click();
+    const key = ((await page.locator("code.lw-totp-key").textContent()) ?? "").replace(/\s/g, "");
+    const enrolledAt = Date.now();
+    await page.getByLabel("Authentication code").fill(totp(key, enrolledAt));
+    await page.getByRole("button", { name: "Turn On Two-Factor" }).click();
+    const reveal = page.getByRole("alertdialog", { name: "Save your recovery codes" });
+    await expect(reveal.locator("li")).toHaveCount(10);
+    await reveal.getByRole("checkbox").check();
+    await reveal.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByText("10 of 10")).toBeVisible();
+
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await page.getByRole("button", { name: "Sign In Again" }).click();
+    await page.getByLabel("Password", { exact: true }).fill("operator chosen live passphrase 2026");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Verify it's you" })).toBeVisible();
+    // The enrollment spent its time step; the next one is accepted within the server's one-step skew.
+    await page.getByLabel("Authentication code").fill(totp(key, enrolledAt + 30_000));
+    await page.getByRole("button", { name: "Verify" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
   });
 });

@@ -1706,3 +1706,9 @@ a.lw-setup-step { text-decoration: none; }
 a.lw-setup-step[aria-disabled="true"] { cursor: default; opacity: 0.55; }
 .lw-form [data-step] { display: flex; flex-direction: column; gap: var(--space-6); }
 .lw-form [data-step][hidden] { display: none; }
+.lw-qr { flex: none; border-radius: var(--radius-lg); box-shadow: 0 0 0 1px var(--border); }
+.lw-totp-setup { display: flex; flex-wrap: wrap; gap: var(--space-6); align-items: flex-start; }
+.lw-totp-setup > form { flex: 1; min-width: min(100%, 280px); }
+.lw-totp-key { letter-spacing: 0.04em; word-break: break-all; }
+.lw-recovery-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 0; padding: 12px 16px 12px 36px; border-radius: var(--radius-lg); background: var(--background-l1); font-family: var(--font-mono); font-size: 14px; }
+@media (max-width: 480px) { .lw-recovery-codes { grid-template-columns: minmax(0, 1fr); } }

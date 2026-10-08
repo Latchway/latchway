@@ -85,6 +85,7 @@ export const AdministratorSchema = z
     organization_id: OpaqueID,
     password_reset_required: z.boolean(),
     role: z.enum(["owner", "admin", "operator", "viewer"]),
+    two_factor_enabled: z.boolean().optional(),
     status: z.enum(["active", "disabled"]),
     updated_at: Instant
   })
@@ -143,7 +144,7 @@ export const APITokenMetadataSchema = z
   })
   .strict();
 
-export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "other"]);
+export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "two_factor_reset", "other"]);
 
 export const OwnAdminSessionSchema = z
   .object({
@@ -162,6 +163,23 @@ export const OwnAdminSessionSchema = z
 export const OwnAdminSessionListSchema = z.object({ items: z.array(OwnAdminSessionSchema).max(100) }).strict();
 
 export const SignedOutSessionsSchema = z.object({ signed_out_sessions: z.number().int().min(0) }).strict();
+
+export const TwoFactorStatusSchema = z
+  .object({
+    recovery_codes_remaining: z.number().int().min(0).max(10),
+    required_by_organization: z.boolean(),
+    totp_enabled: z.boolean(),
+    totp_enabled_at: OptionalInstant
+  })
+  .strict();
+
+export const TotpEnrollmentSchema = z
+  .object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), uri: z.string().startsWith("otpauth://totp/").max(1024) })
+  .strict();
+
+export const RecoveryCodesSchema = z.object({ recovery_codes: z.array(z.string().regex(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/)).length(10) }).strict();
+
+export const TwoFactorRequirementSchema = z.object({ required: z.boolean() }).strict();
 
 export const APITokenPageSchema = z
   .object({ items: z.array(APITokenMetadataSchema) })
@@ -1463,6 +1481,8 @@ export type AdminSessionMetadata = z.infer<typeof AdminSessionMetadataSchema>;
 export type AdminSessionMetadataPage = z.infer<typeof AdminSessionMetadataPageSchema>;
 export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
 export type OwnAdminSession = z.infer<typeof OwnAdminSessionSchema>;
+export type TwoFactorStatus = z.infer<typeof TwoFactorStatusSchema>;
+export type TotpEnrollment = z.infer<typeof TotpEnrollmentSchema>;
 export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;
 export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;

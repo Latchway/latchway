@@ -25,8 +25,9 @@ type Options = { body?: Record<string, unknown>; method?: string } | undefined;
 
 const session = (id: string, extra: Record<string, unknown>) => ({ created_at: "2026-10-08T08:00:00Z", current: false, expires_at: "2026-10-08T20:00:00Z", id, last_seen_at: "2026-10-08T09:00:00Z", organization_id: "org_0123456789abcdef", status: "active", ...extra });
 
-function server() {
+function server(twoFactor = { recovery_codes_remaining: 2, required_by_organization: false, totp_enabled: true, totp_enabled_at: "2026-10-01T00:00:00Z" }) {
   const state = {
+    twoFactor,
     sessions: [
       session("asn_0123456789abcdef", { current: true, device_summary: "Chrome on macOS" }),
       session("asn_1123456789abcdef", { device_summary: "Safari on iOS" }),
@@ -35,6 +36,11 @@ function server() {
   };
   adminRequestMock.mockImplementation((path: string, _schema: unknown, options: Options) => {
     if (path === "/admin/v1/auth/sessions") return Promise.resolve({ data: { items: state.sessions } });
+    if (path === "/admin/v1/auth/two-factor") return Promise.resolve({ data: state.twoFactor });
+    if (path === "/admin/v1/auth/two-factor/disable" && options?.method === "POST") {
+      state.twoFactor = { recovery_codes_remaining: 0, required_by_organization: false, totp_enabled: false, totp_enabled_at: undefined as unknown as string };
+      return Promise.resolve({ data: undefined });
+    }
     if (path.startsWith("/admin/v1/organizations")) return Promise.resolve({ data: { items: [{ created_at: "2026-10-01T00:00:00Z", display_name: "Example Org", id: "org_0123456789abcdef", slug: "example" }], page: { has_more: false } } });
     if (path === "/admin/v1/auth/password" && options?.method === "POST") {
       if (options.body?.current_password !== "test-only-current-pass") return Promise.reject(Object.assign(new Error("wrong"), { problem: undefined }));
@@ -53,7 +59,7 @@ describe("AccountPage", () => {
   beforeEach(() => {
     adminRequestMock.mockReset();
     compatibility.mutationAllowed = true;
-    compatibility.status = { server_capabilities: ["admin_account_self_service"] };
+    compatibility.status = { server_capabilities: ["admin_account_self_service", "admin_two_factor"] };
   });
 
   it("shows the profile and your sessions with devices and end reasons", async () => {
@@ -106,5 +112,28 @@ describe("AccountPage", () => {
     renderWithWorkspace(<AccountPage />);
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     expect(screen.getByText("Password changes are unavailable.")).toBeInTheDocument();
+  });
+
+  it("warns about few recovery codes and turns two-factor off with the password and a code", async () => {
+    const user = userEvent.setup();
+    server();
+    renderWithWorkspace(<AccountPage />);
+    expect(await screen.findByText("2 of 10")).toBeInTheDocument();
+    expect(screen.getByText(/running low on recovery codes/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn Off" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Turn off two-factor sign-in?" });
+    await user.type(within(dialog).getByLabelText("Password", { exact: true }), "test-only-current-pass");
+    await user.type(within(dialog).getByLabelText("Authentication code"), "123456");
+    await user.click(within(dialog).getByRole("button", { name: "Turn Off" }));
+    await waitFor(() => expect(mutationsOf(adminRequestMock)).toEqual(["POST /admin/v1/auth/two-factor/disable"]));
+    const call = adminRequestMock.mock.calls.find(([path]) => path === "/admin/v1/auth/two-factor/disable");
+    expect((call?.[2] as Options)?.body).toEqual({ code: "123456", password: "test-only-current-pass" });
+    expect(await screen.findByRole("button", { name: "Set Up Two-Factor" })).toBeInTheDocument();
+  });
+
+  it("can't turn two-factor off while the organization requires it", async () => {
+    server({ recovery_codes_remaining: 10, required_by_organization: true, totp_enabled: true, totp_enabled_at: "2026-10-01T00:00:00Z" });
+    renderWithWorkspace(<AccountPage />);
+    expect(await screen.findByRole("button", { name: "Turn Off" })).toBeDisabled();
   });
 });

@@ -135,6 +135,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/administrators/{adminUserId}/reset-two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a member's authenticator and recovery codes and end their sessions.
+         * @description Requires `manage_owners`. Like a password reset it is refused when the
+         *     member also belongs to another organization, because the second
+         *     factor is global to the account.
+         */
+        post: operations["resetAdministratorTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/administrators/{adminUserId}/role": {
         parameters: {
             query?: never;
@@ -357,8 +379,35 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a secure administrator cookie session. */
+        /**
+         * Create a secure administrator cookie session.
+         * @description When the administrator has a confirmed second factor, a correct
+         *     password returns `202` with a short-lived challenge and no cookie; the
+         *     session is issued by `POST /auth/login/two-factor`.
+         */
         post: operations["adminLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/login/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish a sign-in with an authenticator code or a recovery code.
+         * @description Send exactly one of `code` or `recovery_code`. A challenge lasts five
+         *     minutes and ends after five wrong codes; wrong codes are also limited
+         *     per administrator across challenges. Authenticator codes work once.
+         */
+        post: operations["adminLoginSecondFactor"];
         delete?: never;
         options?: never;
         head?: never;
@@ -502,6 +551,100 @@ export interface paths {
         put?: never;
         /** Sign out every other console session of the signed-in administrator. */
         post: operations["revokeOtherOwnAdminSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report the signed-in administrator's second factor. */
+        get: operations["getOwnTwoFactorStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn off two-factor sign-in with the password and a current code.
+         * @description Refused with `conflict` while any organization the administrator belongs to requires two-factor sign-in.
+         */
+        post: operations["disableOwnTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace every recovery code after checking a current authenticator code. */
+        post: operations["replaceRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start setting up an authenticator app.
+         * @description Console sessions only. Returns a new key and its `otpauth://` link
+         *     once; the key is sealed server-side and unusable until confirmed.
+         *     Replaces an earlier unconfirmed key; refuses while a confirmed one
+         *     exists.
+         */
+        post: operations["startTotpEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/totp/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm the authenticator with a current code and receive recovery codes. */
+        post: operations["confirmTotpEnrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -926,6 +1069,29 @@ export interface paths {
         put?: never;
         /** Create an organization. */
         post: operations["createOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/two-factor-requirement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Require, or stop requiring, a second factor for every member.
+         * @description Requires `manage_owners` in that organization. While required, a
+         *     member's console session without a confirmed second factor may only
+         *     set one up, change its password, read its session and system status,
+         *     and sign out. API tokens are not affected.
+         */
+        put: operations["setOrganizationTwoFactorRequirement"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1435,6 +1601,8 @@ export interface components {
             role: components["schemas"]["AdministratorRole"];
             /** @enum {string} */
             status: "active" | "disabled";
+            /** @description True when the account has a confirmed authenticator. */
+            two_factor_enabled: boolean;
             /** Format: date-time */
             updated_at: string;
         };
@@ -1463,6 +1631,8 @@ export interface components {
             organization_id: components["schemas"]["OrganizationID"];
             /** @description True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes. */
             password_reset_required: boolean;
+            /** @description True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. */
+            two_factor_enrollment_required: boolean;
         };
         AdminSessionID: string;
         AdminSessionMetadata: {
@@ -2431,6 +2601,10 @@ export interface components {
             /** @description Bounded operator explanation used only to establish that a reason was supplied; its value is never persisted in audit data. */
             reason: string;
         };
+        DisableTwoFactorRequest: {
+            code: string;
+            password: string;
+        };
         DoctorCheck: {
             id: string;
             remediation?: string;
@@ -3069,6 +3243,9 @@ export interface components {
             /** @constant */
             source: "openrouter_usage_cost";
         };
+        RecoveryCodes: {
+            recovery_codes: string[];
+        };
         RequestDecisionStage: {
             /** Format: date-time */
             completed_at: string;
@@ -3311,6 +3488,19 @@ export interface components {
             responseHeader?: components["schemas"]["Duration"];
             total?: components["schemas"]["Duration"];
         };
+        SecondFactorChallenge: {
+            challenge: string;
+            /** Format: date-time */
+            expires_at: string;
+            methods: ("totp" | "recovery_code")[];
+            /** @constant */
+            status: "two_factor_required";
+        };
+        SecondFactorRequest: {
+            challenge: string;
+            code?: string;
+            recovery_code?: string;
+        };
         SecretID: string;
         SecretMetadata: {
             algorithm: string;
@@ -3405,7 +3595,7 @@ export interface components {
             page: components["schemas"]["PageInfo"];
         };
         /** @enum {string} */
-        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "other";
+        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "two_factor_reset" | "other";
         SessionPolicy: {
             accessTokenTtl?: components["schemas"]["Duration"];
             challengeTtl?: components["schemas"]["Duration"];
@@ -3498,7 +3688,8 @@ export interface components {
                 "configuration_import_export",
                 "admin_session_management",
                 "admin_event_stream",
-                "admin_account_self_service"
+                "admin_account_self_service",
+                "admin_two_factor"
             ];
             server_version: string;
         };
@@ -3510,11 +3701,30 @@ export interface components {
             total?: components["schemas"]["Duration"];
         };
         TokenID: string;
+        TotpCodeRequest: {
+            code: string;
+        };
+        TotpEnrollment: {
+            /** @description Base32 key for manual entry; shown once. */
+            secret: string;
+            /** @description otpauth link with the same key; shown once. */
+            uri: string;
+        };
         /** @enum {string} */
         TrustLevel: "none" | "identity_only" | "web_risk_verified" | "app_verified" | "device_verified" | "strong_device_verified" | "debug";
         TurnstileConfiguration: {
             allowedHostnames: string[];
             expectedAction: string;
+        };
+        TwoFactorRequirement: {
+            required: boolean;
+        };
+        TwoFactorStatus: {
+            recovery_codes_remaining: number;
+            required_by_organization: boolean;
+            totp_enabled: boolean;
+            /** Format: date-time */
+            totp_enabled_at?: string;
         };
         Upstream: {
             authentication: components["schemas"]["UpstreamAuthentication"];
@@ -3792,6 +4002,7 @@ export interface components {
         InstallationFamilyID: components["schemas"]["InstallationFamilyID"];
         InstallationID: components["schemas"]["InstallationID"];
         OrganizationFilter: components["schemas"]["OrganizationID"];
+        OrganizationIDPath: components["schemas"]["OrganizationID"];
         PageSize: number;
         RequestResourceID: components["schemas"]["RequestID"];
         RevisionID: components["schemas"]["RevisionID"];
@@ -3997,6 +4208,32 @@ export interface operations {
                 };
             };
             409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    resetAdministratorTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Second factor removed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Administrator"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };
@@ -4409,6 +4646,44 @@ export interface operations {
                     "application/json": components["schemas"]["AdminSession"];
                 };
             };
+            /** @description Password accepted; a second factor is required. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecondFactorChallenge"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminLoginSecondFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecondFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
             401: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
@@ -4584,6 +4859,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getOwnTwoFactorStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Second-factor status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    disableOwnTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisableTwoFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticator and recovery codes removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    replaceRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description New recovery codes, shown once; earlier codes stop working. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startTotpEnrollment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment key, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TotpEnrollment"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmTotpEnrollment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Two-factor sign-in is on; ten single-use recovery codes, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -5301,6 +5705,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setOrganizationTwoFactorRequirement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorRequirement"];
+            };
+        };
+        responses: {
+            /** @description Requirement saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorRequirement"];
                 };
             };
             default: components["responses"]["Problem"];

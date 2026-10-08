@@ -364,7 +364,7 @@
     },
     {
       "path": "reference/admin-api.mdx",
-      "sha256": "4cc59099782cc58ea214d364a585f86c4ff4fb9b9511a46e994f020b8e054d22"
+      "sha256": "caf5914e93036c88789d90a13ba1893687050fdfe619353dc811e0996d41318e"
     },
     {
       "path": "reference/client-api.mdx",
@@ -386,7 +386,7 @@
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "8e1dab93866f485b045a19d1d88ce387d5e7779f901692fbff01092205e7b483"
+      "sha256": "aa99db3d0a1f62a8a17777e0549cd0f1f9d9efaf421b918d49a167d36f72f86b"
     },
     {
       "path": "api/client.openapi.yaml",
