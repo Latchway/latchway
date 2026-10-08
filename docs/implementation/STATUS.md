@@ -2,6 +2,53 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 13: administrator single sign-on (branch `console-api-completion`, unreleased)
+
+Server (ADR 0043, schema 37, capability `admin_sso`):
+
+- `internal/oidc`: discovery (same issuer, HTTPS endpoints, code flow, PKCE
+  S256, RS256/ES256), authorization URLs with state, nonce and PKCE, the code
+  exchange with `client_secret_post`, and ID token verification against the
+  issuer's JWKS (signature, issuer, audience, authorized party, expiry, issue
+  time, nonce). Requests use the public-destination upstream transport.
+  `internal/oidc/oidctest` is an in-memory provider for tests.
+- `GET`/`PUT`/`DELETE /organizations/{id}/sso` (owners): the provider with
+  discovered endpoints, a sealed client secret (organization-bound derived key,
+  never returned), allowed email domains, an optional provisioning role,
+  enabled and require_sso. Disabling or removing ends single sign-on sessions;
+  requiring it ends members' other sessions (`sso_changed`).
+- `POST /auth/sso/start` (by organization slug; browser-binding cookie; at most
+  500 pending per organization) and `GET /auth/sso/callback` (single-use state,
+  PKCE, ID token checks; links by provider-verified email in allowed domains or
+  provisions a membership; redirects to `/` or `/?sso_error=`).
+- Sessions record `sign_in_method` (`password`, `passkey`, `sso`). Single
+  sign-on sessions aren't held to the two-factor requirement or a pending
+  password change and can't switch organization. Requiring SSO refuses member
+  password and passkey sign-in; owners keep theirs. `GET /auth/info` lists
+  `sso` when any organization has it on. Members carry `sso_linked`; the CLI
+  adds an SSO column. Owner password resets now create a password for accounts
+  that have none.
+
+Console: Sign In with SSO (organization name, then the identity provider), the
+returned failure reason on the sign-in screen (read once and removed from the
+address), single sign-on re-sign-in in the session-ended dialog, an explanation
+instead of switching for SSO sessions, a Single sign-on card in Settings ›
+General for owners (redirect URI to copy, write-only client secret, domains,
+account creation role, offer and require toggles with confirmation of the
+sessions that end, remove), an SSO badge on Team › Members, and "Signed in
+with" on Your account.
+
+Validation: `go test ./...` against PostgreSQL 16 (OIDC unit tests including
+expired, wrong-audience, replayed-nonce and `alg: none` tokens; the full
+start/callback flow against the in-memory provider with linking,
+provisioning, domain, unverified-email, replay, other-browser and IdP-error
+cases, require_sso, the two-factor exemption, session endings and removal),
+vet, gofmt; contract validation and generated references (103 operations);
+lint, typecheck, `check:api`, `pnpm test` (452 passed), Playwright, the
+live-stack run, build and `verify:reproducible`. The live-stack run doesn't
+cover single sign-on because its transport refuses loopback identity
+providers by design.
+
 ## Console completion phase 12: administrator passkeys (branch `console-api-completion`, unreleased)
 
 Server (ADR 0042, schema 36, capability `admin_passkeys`):

@@ -20,12 +20,19 @@ All notable project changes will be documented here. The format follows [Keep a 
   passkey alone, or use one as the second step after a password. Passkeys
   count toward an organization's two-factor requirement; adding or removing one
   needs the current password.
+- Single sign-on for administrators with OpenID Connect (ADR 0043, `admin_sso`):
+  one identity provider per organization, linking by verified email, optional
+  account creation with a chosen role, and an option to require it for members
+  other than owners. Team member lists and `latchway admin accounts list` show
+  who signs in with SSO.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
 
 ### Changed
 
+- An owner's password reset now also works for accounts created by single
+  sign-on, which have no password until then.
 - Removing the authenticator app (`POST /auth/two-factor/disable`) keeps any
   passkeys, and recovery codes can be replaced with the password when there's
   no authenticator app. An owner's two-factor reset also removes passkeys.

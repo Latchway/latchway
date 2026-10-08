@@ -27,6 +27,7 @@ import (
 	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/oidc"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/useroverride"
@@ -48,6 +49,7 @@ type API struct {
 	overrides       *useroverride.Store
 	secretManager   secretManager
 	factors         factorSealer
+	oidc            *oidc.Client
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -157,7 +159,7 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		secretManager: manager,
 		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
-		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
+		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute), oidc: &oidc.Client{},
 		operations: newOperationalStore(pool), policyResolver: policyResolver, role: "all",
 		eventStream: defaultAdminEventStreamSettings(),
 	}
@@ -208,6 +210,8 @@ func (api *API) Handler() http.Handler {
 	router.Post("/auth/login/two-factor/passkey-options", api.secondFactorPasskeyOptions)
 	router.Post("/auth/passkeys/sign-in-options", api.passkeySignInOptions)
 	router.Post("/auth/passkeys/sign-in", api.passkeySignIn)
+	router.Post("/auth/sso/start", api.startSSO)
+	router.Get("/auth/sso/callback", api.ssoCallback)
 	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
@@ -228,6 +232,9 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/auth/passkeys", api.addPasskey)
 		protected.With(api.mutationProtection).Post("/auth/passkeys/{adminPasskeyID}/remove", api.removePasskey)
 		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/two-factor-requirement", api.setTwoFactorRequirement)
+		protected.Get("/organizations/{organizationID}/sso", api.getSSOProvider)
+		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/sso", api.putSSOProvider)
+		protected.With(api.mutationProtection).Delete("/organizations/{organizationID}/sso", api.removeSSOProvider)
 		protected.Get("/organizations", api.organizations)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
@@ -446,6 +453,9 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.loginLimiter.success(key)
+	if api.refuseWhenSSORequired(w, r, membership.OrganizationID, membership.Role) {
+		return
+	}
 	deviceSummary := adminauth.DeviceSummaryFromUserAgent(r.UserAgent())
 	factors, err := api.auth.TwoFactorStatus(r.Context(), adminUserID, "")
 	if err != nil {
@@ -480,7 +490,7 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
-	api.issueSignInSession(w, r, view, membership, deviceSummary, auditRequestID)
+	api.issueSignInSession(w, r, view, membership, deviceSummary, auditRequestID, adminauth.SignInPassword)
 }
 
 func (api *API) session(w http.ResponseWriter, r *http.Request) {
@@ -1122,13 +1132,17 @@ func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth
 			capabilities = append(capabilities, string(capability))
 		}
 	}
-	return map[string]any{
+	document := map[string]any{
 		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true, "display_name": view.DisplayName},
 		"organization_id": principal.OrganizationID, "memberships": view.Memberships,
 		"capabilities": capabilities, "expires_at": expiresAt,
 		"password_reset_required":        principal.PasswordResetRequired,
 		"two_factor_enrollment_required": principal.TwoFactorEnrollmentRequired,
 	}
+	if principal.Method == adminauth.AuthenticationSession && principal.SignInMethod != "" {
+		document["sign_in_method"] = principal.SignInMethod
+	}
+	return document
 }
 
 func selectMembership(memberships []controlplane.Membership, organizationID string) (controlplane.Membership, bool) {
@@ -1489,6 +1503,12 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.two_factor_reset", "admin_request"
 	case strings.HasSuffix(path, "/two-factor-requirement"):
 		return "admin.organization_security_update", "admin_request"
+	case strings.HasSuffix(path, "/auth/sso/start"):
+		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/sso") && method == http.MethodDelete:
+		return "admin.sso_remove", "admin_request"
+	case strings.HasSuffix(path, "/sso"):
+		return "admin.sso_configure", "admin_request"
 	case strings.HasSuffix(path, "/auth/logout"):
 		return "admin.logout", "admin_request"
 	case strings.HasSuffix(path, "/organizations"):

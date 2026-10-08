@@ -4,9 +4,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { leaveForMock } = vi.hoisted(() => ({ leaveForMock: vi.fn() }));
+vi.mock("./auth/leave-for", () => ({ leaveFor: leaveForMock }));
+
 import { forgetConsoleSession, SESSION_ENDED_EVENT } from "../api/session";
 import { installPasskeyBrowser } from "../test/passkey-browser";
 import { rememberSignedOutEmail } from "./auth/auth-memory";
+import { captureSSOReturn, forgetSSOReturn } from "./auth/sso-return";
 
 import { commands, LEGACY_REDIRECT_PATHS } from "./navigation";
 import { createAppRouter } from "./router";
@@ -570,6 +574,72 @@ describe("AppShell", () => {
     await user.click(screen.getByRole("button", { name: "Use Your Passkey" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
     expect(Array.from(new Uint8Array(browser.get.mock.calls[0]?.[0].publicKey?.allowCredentials?.[0]?.id as ArrayBuffer))).toEqual([1, 2, 3, 250, 251, 252]);
+  });
+
+  it("starts single sign-on with the organization's name and leaves for the identity provider", async () => {
+    const user = userEvent.setup();
+    leaveForMock.mockReset();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedOutResponse();
+      if (url === "/admin/v1/auth/info") return json({ contract_version: "1.1.0", protocol_versions: [1, 2, 3], setup_open: false, sign_in_methods: ["password", "sso"] });
+      if (url === "/admin/v1/auth/sso/start") {
+        if (JSON.parse(String(init?.body)).organization_slug !== "acme") return problemResponse(404, "resource_not_found", "Not found", "Single sign-on isn't set up for that organization. Check the name, or sign in with your email.");
+        return json({ authorization_url: "https://login.example.com/authorize?client_id=latchway&state=s" });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    await user.click(await screen.findByRole("button", { name: "Sign In with SSO" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Sign in with SSO" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Organization"), "nobody");
+    await user.click(screen.getByRole("button", { name: "Continue to Your Identity Provider" }));
+    expect(await screen.findByText(/isn't set up for that organization/)).toBeInTheDocument();
+    expect(leaveForMock).not.toHaveBeenCalled();
+    await user.clear(screen.getByLabelText("Organization"));
+    await user.type(screen.getByLabelText("Organization"), " acme ");
+    await user.click(screen.getByRole("button", { name: "Continue to Your Identity Provider" }));
+    await waitFor(() => expect(leaveForMock).toHaveBeenCalledWith("https://login.example.com/authorize?client_id=latchway&state=s"));
+  });
+
+  it("explains why single sign-on didn't finish when the provider sends the browser back", async () => {
+    window.history.replaceState(null, "", "/?sso_error=domain");
+    captureSSOReturn();
+    expect(window.location.search).toBe("");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return signedOutResponse();
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole();
+
+    expect(await screen.findByText("Single sign-on didn't finish")).toBeInTheDocument();
+    expect(screen.getByText(/isn't in a domain this organization allows/)).toBeInTheDocument();
+    forgetSSOReturn();
+  });
+
+  it("signs a single sign-on session in again through the identity provider", async () => {
+    const user = userEvent.setup();
+    leaveForMock.mockReset();
+    let ended = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return ended ? signedOutResponse() : json({ ...adminSession, sign_in_method: "sso" });
+      if (url.startsWith("/admin/v1/organizations")) return json({ items: [{ created_at: "2026-08-01T00:00:00Z", display_name: "Acme", id: adminSession.organization_id, slug: "acme" }], page: { has_more: false } });
+      if (url === "/admin/v1/auth/sso/start") return json({ authorization_url: "https://login.example.com/authorize?state=again" });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole("/applications");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Applications" })).toBeInTheDocument();
+    ended = true;
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+    const dialog = await screen.findByRole("dialog", { name: "Your session ended" });
+    expect(within(dialog).queryByLabelText("Password")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Sign In with SSO" }));
+    await waitFor(() => expect(leaveForMock).toHaveBeenCalledWith("https://login.example.com/authorize?state=again"));
   });
 
   it("requires setting up two-factor before the console when the organization requires it", async () => {

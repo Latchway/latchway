@@ -102,6 +102,8 @@ type AdminSession struct {
 	RevokeReason   *string            `db:"revoke_reason" json:"revoke_reason"`
 	// Coarse browser and operating-system summary for the session owner and owners; never a raw User-Agent or network address.
 	DeviceSummary *string `db:"device_summary" json:"device_summary"`
+	// How the session was signed in; single sign-on sessions rely on the identity provider for further factors.
+	SignInMethod string `db:"sign_in_method" json:"sign_in_method"`
 }
 
 // Pending second-factor sign-ins after a correct password; hashed, short-lived and attempt-bounded.
@@ -113,6 +115,28 @@ type AdminSignInChallenge struct {
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	ExpiresAt      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
 	FailedAttempts int16              `db:"failed_attempts" json:"failed_attempts"`
+	ConsumedAt     pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+}
+
+// Links an identity provider subject to an administrator within one organization.
+type AdminSsoIdentity struct {
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	Issuer         string             `db:"issuer" json:"issuer"`
+	Subject        string             `db:"subject" json:"subject"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastUsedAt     pgtype.Timestamptz `db:"last_used_at" json:"last_used_at"`
+}
+
+// Pending single sign-on logins between the redirect and the callback; single use and short-lived.
+type AdminSsoState struct {
+	StateHash      []byte             `db:"state_hash" json:"state_hash"`
+	BrowserHash    []byte             `db:"browser_hash" json:"browser_hash"`
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	Nonce          string             `db:"nonce" json:"nonce"`
+	CodeVerifier   string             `db:"code_verifier" json:"code_verifier"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
 	ConsumedAt     pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
 }
 
@@ -659,6 +683,25 @@ type Organization struct {
 	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	// When true, members without a confirmed second factor may only enroll one after signing in.
 	RequireTwoFactor bool `db:"require_two_factor" json:"require_two_factor"`
+}
+
+// One OpenID Connect provider per organization; the client secret is sealed and never returned.
+type OrganizationSsoProvider struct {
+	OrganizationID        string             `db:"organization_id" json:"organization_id"`
+	Issuer                string             `db:"issuer" json:"issuer"`
+	AuthorizationEndpoint string             `db:"authorization_endpoint" json:"authorization_endpoint"`
+	TokenEndpoint         string             `db:"token_endpoint" json:"token_endpoint"`
+	JwksUri               string             `db:"jwks_uri" json:"jwks_uri"`
+	ClientID              string             `db:"client_id" json:"client_id"`
+	SecretKeyID           string             `db:"secret_key_id" json:"secret_key_id"`
+	SecretNonce           []byte             `db:"secret_nonce" json:"secret_nonce"`
+	SecretCiphertext      []byte             `db:"secret_ciphertext" json:"secret_ciphertext"`
+	AllowedEmailDomains   []string           `db:"allowed_email_domains" json:"allowed_email_domains"`
+	ProvisionRole         *string            `db:"provision_role" json:"provision_role"`
+	Enabled               bool               `db:"enabled" json:"enabled"`
+	RequireSso            bool               `db:"require_sso" json:"require_sso"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 type QuotaBucket struct {

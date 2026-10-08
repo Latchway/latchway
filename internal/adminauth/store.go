@@ -659,9 +659,10 @@ func (store *Store) insertPreparedSession(
 			created_at,
 			expires_at,
 			last_seen_at,
-			device_summary
+			device_summary,
+			sign_in_method
 		)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $7, $9
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $7, $9, $10
 		FROM admin_users AS u
 		JOIN admin_memberships AS m
 			ON m.admin_user_id = u.admin_user_id
@@ -671,7 +672,7 @@ func (store *Store) insertPreparedSession(
 		  AND m.status = 'active'
 	`, issued.SessionID, input.OrganizationID, input.AdminUserID, prepared.sessionToken.Hash.Bytes(),
 		prepared.sessionToken.Secret.Hint(), prepared.csrfToken.Hash.Bytes(), prepared.createdAt,
-		issued.ExpiresAt, nullableString(input.DeviceSummary))
+		issued.ExpiresAt, nullableString(input.DeviceSummary), string(input.SignInMethod.orDefault()))
 	if err != nil {
 		return fmt.Errorf("insert admin session: %w", err)
 	}
@@ -708,9 +709,11 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		  AND m.admin_user_id = s.admin_user_id
 		  AND m.status = 'active'
 		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id, s.expires_at,
-		          u.password_reset_required,
+		          u.password_reset_required AND s.sign_in_method <> 'sso',
 		          COALESCE((SELECT o.require_two_factor FROM organizations AS o WHERE o.organization_id = s.organization_id), false)
-		            AND NOT `+confirmedSecondFactorSQL+`
+		            AND s.sign_in_method <> 'sso'
+		            AND NOT `+confirmedSecondFactorSQL+`,
+		          s.sign_in_method
 	`, hash.Bytes(), now).Scan(
 		&principal.OrganizationID,
 		&principal.AdminUserID,
@@ -719,6 +722,7 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		&principal.CredentialExpiresAt,
 		&principal.PasswordResetRequired,
 		&principal.TwoFactorEnrollmentRequired,
+		&principal.SignInMethod,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Principal{}, ErrAdminAuthentication

@@ -287,6 +287,7 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
             { label: "Email", value: member.email },
             { label: "Role", value: ROLE_LABEL[member.role] },
             ...(member.two_factor_enabled === undefined ? [] : [{ label: "Two-factor", value: member.two_factor_enabled ? "On" : "Off" }]),
+            ...(member.sso_linked === undefined ? [] : [{ label: "Single sign-on", value: member.sso_linked ? "Linked" : "Not linked" }]),
             { label: "Added", value: when(member.created_at) },
             { label: "Updated", value: when(member.updated_at) },
             { label: "Member ID", value: <span className="lw-mono lw-mono--sm">{member.id}</span> }
@@ -370,7 +371,12 @@ function MembersView() {
     { header: "Member", key: "member", render: (member) => <span className="lw-rq-model"><span>{member.display_name}{member.id === me.id ? <span className="lw-faint"> (you)</span> : null}</span><span className="lw-faint">{member.email}</span></span> },
     { header: "Role", key: "role", render: (member) => <Badge color={member.role === "owner" ? "accent" : undefined} variant="soft">{ROLE_LABEL[member.role]}</Badge> },
     { header: "Status", key: "status", render: statusBadge },
-    { header: "Two-factor", key: "two-factor", render: (member) => member.two_factor_enabled === undefined ? <span className="lw-faint">—</span> : member.two_factor_enabled ? <Badge color="success" variant="soft">On</Badge> : <span className="lw-note lw-secondary">Off</span> },
+    { header: "Two-factor", key: "two-factor", render: (member) => (
+      <span className="lw-row lw-row--wrap">
+        {member.two_factor_enabled === undefined ? <span className="lw-faint">—</span> : member.two_factor_enabled ? <Badge color="success" variant="soft">On</Badge> : <span className="lw-note lw-secondary">Off</span>}
+        {member.sso_linked ? <Badge title="Signs in with the organization's identity provider" variant="soft">SSO</Badge> : null}
+      </span>
+    ) },
     { header: "Added", key: "added", render: (member) => <span className="lw-note">{new Date(member.created_at).toLocaleDateString()}</span> }
   ];
 

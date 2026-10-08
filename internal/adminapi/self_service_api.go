@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ var sessionEndProblems = map[adminauth.SessionEndReason]problem.Error{
 	adminauth.SessionEndOrganizationSwitch: {Code: "session_revoked", Detail: "This session was replaced when you switched organization."},
 	adminauth.SessionEndAccessDisabled:     {Code: "session_revoked", Detail: "Your account or membership in this organization was disabled."},
 	adminauth.SessionEndTwoFactorReset:     {Code: "session_revoked", Detail: "An owner reset your two-factor sign-in. Sign in with your password and set it up again if your organization requires it."},
+	adminauth.SessionEndSSOChanged:         {Code: "session_revoked", Detail: "An owner changed your organization's single sign-on. Sign in again."},
 	adminauth.SessionEndOther:              {Code: "session_revoked", Detail: "This session ended."},
 }
 
@@ -68,11 +70,18 @@ func (api *API) authInfo(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
+	methods := api.signInMethods()
+	if sso, err := api.auth.AnySSOEnabled(r.Context()); err != nil {
+		api.internal(w, r, err)
+		return
+	} else if sso && api.factors != nil {
+		methods = append(methods, "sso")
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"contract_version":  buildinfo.ContractVersion,
 		"protocol_versions": buildinfo.SupportedProtocolVersions(),
 		"setup_open":        open,
-		"sign_in_methods":   api.signInMethods(),
+		"sign_in_methods":   methods,
 	})
 }
 
@@ -98,6 +107,10 @@ func (api *API) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stored, err := api.auth.PasswordCredentialByAdminUserID(r.Context(), principal.AdminUserID)
+	if errors.Is(err, adminauth.ErrAdminNotFound) {
+		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "Your account has no password because it was created by single sign-on. An owner can set one for you."})
+		return
+	}
 	if err != nil {
 		api.handleAdminAuthError(w, r, err)
 		return
@@ -164,6 +177,13 @@ func (api *API) switchOrganization(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("This session already uses that organization."))
 		return
 	}
+	if principal.SignInMethod == adminauth.SignInSSO {
+		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "A single sign-on session stays in the organization it signed in to. Sign out and sign in to the other organization."})
+		return
+	}
+	if api.refuseWhenSSORequired(w, r, membership.OrganizationID, membership.Role) {
+		return
+	}
 	requestID, err := newMutationOperationID(r.Context())
 	if err != nil {
 		api.internal(w, r, err)
@@ -180,7 +200,7 @@ func (api *API) switchOrganization(w http.ResponseWriter, r *http.Request) {
 	switched := adminauth.Principal{
 		OrganizationID: membership.OrganizationID, AdminUserID: principal.AdminUserID,
 		Role: membership.Role, Method: adminauth.AuthenticationSession,
-		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
+		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt, SignInMethod: principal.SignInMethod,
 	}
 	if err := api.fillSessionFlags(r, &switched); err != nil {
 		api.internal(w, r, err)
