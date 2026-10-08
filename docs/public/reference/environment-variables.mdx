@@ -33,6 +33,11 @@ immutable PostgreSQL-backed environment revisions, not process variables.
 | `LATCHWAY_DB_COMPLETION_CONNECTIONS` | One quarter of `LATCHWAY_DB_MAX_CONNECTIONS`, rounded up; `5` when the aggregate default is `20` | Integer reserved inside the aggregate ceiling for terminal quota-lifecycle work. It must be at least 1 and strictly less than `LATCHWAY_DB_MAX_CONNECTIONS`; the remainder serves regular work. It is never additive. |
 | `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Empty unless bootstrapping | When present, 32–2048 bytes. High-entropy, one-time first-owner input. Remove it after bootstrap; retaining it cannot reopen a consumed flow. |
 | `LATCHWAY_ADMIN_SESSION_LIFETIME` | `12h` | Go duration from 5 minutes through 30 days. A shorter value reduces browser-session lifetime. |
+| `LATCHWAY_SMTP_HOST` | Empty | SMTP relay for invitation emails. Empty turns email off; invitations are still shared as links. |
+| `LATCHWAY_SMTP_PORT` | `587`, or `465` with implicit TLS | Relay port, 1–65535. |
+| `LATCHWAY_SMTP_TLS` | `starttls` | `starttls` (the relay must offer it), `implicit`, or `none`, which is accepted only for a relay on localhost. |
+| `LATCHWAY_SMTP_USERNAME` / `LATCHWAY_SMTP_PASSWORD` | Empty | Set both or neither. The password is a deployment secret; it is used only for SMTP authentication over TLS (or to a localhost relay) and never logged. |
+| `LATCHWAY_SMTP_FROM` | Required with a host | Sender address, optionally with a name, such as `Latchway <noreply@example.com>`. |
 
 Whitespace-only values are treated as absent for variables with defaults. An
 invalid value fails configuration loading rather than falling back silently.

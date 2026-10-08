@@ -43,6 +43,7 @@ const (
 	AdminBootstrapToken Prefix = "abt"
 	AdminRequest        Prefix = "arq"
 	AdminPasskey        Prefix = "apk"
+	AdminInvitation     Prefix = "ain"
 	ConfigRevision      Prefix = "rev"
 	SecretRecord        Prefix = "sec"
 	GatewaySigningKey   Prefix = "gsk"

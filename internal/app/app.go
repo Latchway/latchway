@@ -20,6 +20,7 @@ import (
 	"github.com/latchway/latchway/internal/dataplane"
 	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/identity"
+	"github.com/latchway/latchway/internal/mail"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/secrets"
@@ -197,8 +198,7 @@ func newAPIRuntime(
 			_ = targetCache.Close()
 		}
 	}()
-	adminAPI, err := adminapi.New(
-		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
+	adminOptions := []adminapi.Option{
 		adminapi.WithRole(string(cfg.Role)),
 		adminapi.WithSystemReadiness(func(checkCtx context.Context) bool {
 			return server.ReadinessReady(checkCtx, pool, readinessChecks)
@@ -213,7 +213,15 @@ func newAPIRuntime(
 			},
 			ConfigurationCache: configurationStore.ActiveSnapshotCacheStatus,
 		}),
-	)
+	}
+	if cfg.SMTP.Host != "" {
+		sender, mailErr := mail.NewSMTPSender(cfg.SMTP)
+		if mailErr != nil {
+			return nil, nil, fmt.Errorf("construct invitation email sender: %w", mailErr)
+		}
+		adminOptions = append(adminOptions, adminapi.WithMailer(sender))
+	}
+	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager, adminOptions...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
 	}

@@ -2,6 +2,41 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 14: member invitations (branch `console-api-completion`, unreleased)
+
+Server (ADR 0044, schema 38, capability `admin_invitations`):
+
+- `GET`/`POST /organizations/{id}/invitations`, `…/{invitation}/revoke` and
+  `…/{invitation}/renew` (owners). Links are `/invitation#lwinv_…`, shown
+  once; tokens are stored as domain-separated hashes, last seven days, work
+  once, and are replaced by a newer invitation for the same address.
+  Inviting a current member, or a non-owner while single sign-on is
+  required, is refused.
+- `POST /auth/invitations/preview` and `/auth/invitations/accept` (public;
+  accept creates the account with the chosen password and signs in) and
+  `POST /auth/invitations/claim` (signed in, invited address only).
+- `internal/mail`: an SMTP sender (STARTTLS or implicit TLS; plaintext only to
+  localhost; header-injection checks) configured by `LATCHWAY_SMTP_HOST`,
+  `_PORT`, `_TLS`, `_USERNAME`, `_PASSWORD` and `_FROM`. Delivery results are
+  recorded on the invitation; the link is always returned.
+
+Console: Invite Member on Team › Members (email option when the server has a
+relay, role cards, one-time link reveal with copy), an Invitations card (status,
+New Link, Revoke), the `/invitation#…` link captured at startup and removed
+from the address, a "You're invited" screen for new accounts (name, password
+with strength meter) and, for existing accounts, sign in first and then a
+"Join an organization" dialog that claims the invitation and switches the
+session.
+
+Validation: `go test ./...` against PostgreSQL 16 (SMTP sender against an
+in-process relay; config loading; the full invitation lifecycle with
+replacement, renewal, revocation, email success and failure, acceptance,
+reuse, claiming across organizations and refusals), vet, gofmt; contract
+validation and generated references (110 operations); lint, typecheck,
+`check:api`, `pnpm test` (461 passed), Playwright, the live-stack run (now
+also invites an address and accepts the link in a second browser), build and
+`verify:reproducible`.
+
 ## Console completion phase 13: administrator single sign-on (branch `console-api-completion`, unreleased)
 
 Server (ADR 0043, schema 37, capability `admin_sso`):

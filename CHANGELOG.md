@@ -25,6 +25,10 @@ All notable project changes will be documented here. The format follows [Keep a 
   account creation with a chosen role, and an option to require it for members
   other than owners. Team member lists and `latchway admin accounts list` show
   who signs in with SSO.
+- Member invitations (ADR 0044, `admin_invitations`): owners send one-time
+  links, optionally by email through a configured SMTP relay
+  (`LATCHWAY_SMTP_*`); new people choose their own password, and existing
+  accounts accept after signing in.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.

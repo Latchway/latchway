@@ -3,12 +3,15 @@ import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import {
+  acceptInvitation,
   type AdminProblem,
   type AdminSession,
   adminSignInInfoQueryOptions,
   bootstrapFirstOwner,
   finishSecondFactor,
+  type InvitationPreview,
   logoutAdministrator,
+  previewInvitation,
   problemFromError,
   type SecondFactorAnswer,
   type SecondFactorMethod,
@@ -27,6 +30,7 @@ import { Badge, Button, Field, Icon, Input, Notice, Segmented } from "../../ui";
 import { AuthProblem, PasswordInput } from "./auth-fields";
 import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
+import { forgetInvitation, pendingInvitation } from "./invitation-link";
 import { leaveFor } from "./leave-for";
 import { acceptable, passwordStrength, type Strength } from "./password-strength";
 import { SecondFactorForm } from "./second-factor";
@@ -34,7 +38,7 @@ import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
 import { forgetSSOReturn, ssoReturnMessage } from "./sso-return";
 
-type View = "sign-in" | "sso" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
+type View = "sign-in" | "invitation" | "sso" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
 
 /** Failed attempts before the console mentions the server's pause, ahead of the pause itself. */
 const PAUSE_NOTE_AFTER = 3;
@@ -87,6 +91,86 @@ function PauseNotice({ onElapsed, until }: { onElapsed: () => void; until: numbe
 function SSOReturnNotice() {
   const message = ssoReturnMessage();
   return message ? <Notice title="Single sign-on didn't finish" tone="warning">{message}</Notice> : null;
+}
+
+const ROLE_ARTICLE: Readonly<Record<InvitationPreview["role"], string>> = { admin: "an Admin", operator: "an Operator", owner: "an Owner", viewer: "a Viewer" };
+
+/**
+ * Accepting an invitation link while signed out. A new address chooses a name and password here; an address that
+ * already has an account signs in first and is offered the invitation inside the console.
+ */
+function InvitationView({ onAccepted, onSignIn }: { onAccepted: (session: AdminSession) => void; onSignIn: (email: string) => void }) {
+  const invitation = pendingInvitation();
+  const [preview, setPreview] = useState<InvitationPreview>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const [pending, setPending] = useState(false);
+  const [strength, setStrength] = useState<Strength>();
+  const password = useRef<HTMLInputElement>(null);
+  const name = useRef<HTMLInputElement>(null);
+  const token = invitation && "token" in invitation ? invitation.token : undefined;
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    previewInvitation(token, controller.signal).then(setPreview, (error: unknown) => {
+      if (!controller.signal.aborted) setProblem(problemFromError(error));
+    });
+    return () => controller.abort();
+  }, [token]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!token) return;
+    if (!acceptable(passwordStrength(password.current?.value ?? ""))) {
+      setProblem({ code: "request_invalid", detail: "Choose a password rated Good or Strong: at least 12 characters with some variety, or a longer passphrase.", retryable: false, status: 0, title: "Choose a stronger password" });
+      password.current?.focus();
+      return;
+    }
+    setPending(true);
+    setProblem(undefined);
+    try {
+      const session = await acceptInvitation(token, name.current?.value ?? "", password.current);
+      forgetInvitation();
+      onAccepted(session);
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setStrength(undefined);
+      setPending(false);
+    }
+  }
+
+  if (!token) {
+    return <Notice title="This invitation link is incomplete" tone="warning">Open the whole link from the invitation, or ask an owner to send it again.</Notice>;
+  }
+  if (!preview) {
+    return problem ? <AuthProblem problem={problem} /> : <span aria-live="polite" className="lw-auth__fine">Checking the invitation…</span>;
+  }
+  const summary = <p className="lw-auth__lead">{preview.invited_by} invited you to join <strong>{preview.organization_name}</strong> as {ROLE_ARTICLE[preview.role]}.</p>;
+  if (preview.account_exists) {
+    return (
+      <div className="lw-auth__body">
+        {summary}
+        <p className="lw-auth__fine">{preview.email} already has a Latchway account. Sign in to it, and you&apos;ll be asked to join {preview.organization_name}.</p>
+        <Button className="lw-auth__submit" onClick={() => onSignIn(preview.email)} variant="primary">Sign In to Accept</Button>
+      </div>
+    );
+  }
+  return (
+    <form aria-busy={pending} className="lw-auth__form" onSubmit={(event) => void submit(event)}>
+      {summary}
+      <Field id="invitation-email" label="Email address">
+        <div className="lw-input-box" data-disabled=""><input autoComplete="username" className="lw-input" id="invitation-email" readOnly value={preview.email} /></div>
+      </Field>
+      <Field id="invitation-name" label="Your name">
+        <div className="lw-input-box"><input autoComplete="name" className="lw-input" defaultValue={preview.display_name ?? ""} disabled={pending} id="invitation-name" maxLength={200} ref={name} required /></div>
+      </Field>
+      <PasswordField id="invitation-password" inputRef={password} label="Choose a password" name="new_password" onValueChange={(value) => setStrength(value ? passwordStrength(value) : undefined)} />
+      <StrengthMeter strength={strength} />
+      {problem ? <AuthProblem problem={problem} /> : null}
+      <Button className="lw-auth__submit" loading={pending} type="submit" variant="primary">Join {preview.organization_name}</Button>
+      <p className="lw-auth__fine">The invitation expires {new Date(preview.expires_at).toLocaleString()}.</p>
+    </form>
+  );
 }
 
 function SingleSignOnView({ onBack, onSubmit, pending, problem }: { onBack: () => void; onSubmit: (slug: string) => void; pending: boolean; problem?: AdminProblem }) {
@@ -317,7 +401,7 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const info = useQuery(adminSignInInfoQueryOptions);
-  const [view, setView] = useState<View>(() => (lastSignedOutEmail() ? "signed-out" : "sign-in"));
+  const [view, setView] = useState<View>(() => (pendingInvitation() ? "invitation" : lastSignedOutEmail() ? "signed-out" : "sign-in"));
   // An open setup leads with Set up Latchway until the operator chooses sign-in instead.
   const [preferSignIn, setPreferSignIn] = useState(false);
   const [email, setEmail] = useState(() => lastSignedOutEmail() ?? "");
@@ -552,6 +636,15 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
           <p className="lw-auth__fine">Need an account? Ask an owner to add you from Team › Members.</p>
         </AuthLayout>
       );
+    case "invitation": {
+      const invited = pendingInvitation();
+      return (
+        <AuthLayout description="An owner invited you to their Latchway organization." title="You're invited">
+          <InvitationView onAccepted={(session) => enter(session)} onSignIn={(address) => { setEmail(address); setPreferSignIn(true); show("sign-in"); }} />
+          {invited && "invalid" in invited ? <Button className="lw-auth__link" onClick={() => { forgetInvitation(); show("sign-in"); }} size="sm" variant="ghost">Go to sign in</Button> : null}
+        </AuthLayout>
+      );
+    }
     case "sso":
       return (
         <AuthLayout description="You'll continue at your organization's identity provider and come back here signed in." title="Sign in with SSO">

@@ -252,6 +252,74 @@ paths:
           headers:
             Location: { schema: { type: string } }
             Set-Cookie: { schema: { type: string } }
+  /admin/v1/auth/invitations/preview:
+    post:
+      tags: [Authentication]
+      operationId: previewInvitation
+      summary: Show the holder of an invitation link what they're invited to.
+      description: Public. Unknown, used, revoked, replaced and expired tokens all answer `resource_not_found`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationTokenRequest' }
+      responses:
+        '200':
+          description: The invitation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationPreview' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/invitations/accept:
+    post:
+      tags: [Authentication]
+      operationId: acceptInvitation
+      summary: Accept an invitation by creating the invited account, and sign in.
+      description: |
+        Public, for addresses without an account: creates it with the chosen
+        name and password and its membership, then opens a console session.
+        An address that already has an account gets `conflict` and claims the
+        invitation after signing in.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInvitationRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/invitations/claim:
+    post:
+      tags: [Authentication]
+      operationId: claimInvitation
+      summary: Add the signed-in administrator to the organization they were invited to.
+      description: Console sessions only, and only for the invited address. The session stays where it is; switch organization to use the new membership.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationTokenRequest' }
+      responses:
+        '200':
+          description: The joined organization.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimedInvitation' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/auth/logout:
     post:
       tags: [Authentication]
@@ -1251,6 +1319,88 @@ paths:
         - $ref: '#/components/parameters/CSRFToken'
       responses:
         '204': { description: Removed. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations:
+    get:
+      tags: [Organizations]
+      operationId: listInvitations
+      summary: List the organization's recent invitations.
+      description: Requires `manage_owners`. Newest first, at most 200. Tokens and links are never listed.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+      responses:
+        '200':
+          description: Invitations and whether this server can email them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationList' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Organizations]
+      operationId: createInvitation
+      summary: Invite an email address to the organization.
+      description: |
+        Requires `manage_owners`. Returns the invitation link once; its token
+        is stored only as a hash, sits in the URL fragment, works once and
+        expires after seven days. A new invitation replaces any open one for
+        the same address. With `send_email`, the server also emails the link
+        through its configured relay (`conflict` when none is configured); a
+        failed delivery is recorded and the link is still returned. Refused
+        for members other than owners while the organization requires single
+        sign-on.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInvitationRequest' }
+      responses:
+        '201':
+          description: The invitation and its link, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationLink' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations/{invitationId}/revoke:
+    post:
+      tags: [Organizations]
+      operationId: revokeInvitation
+      summary: Stop an open invitation from being used.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/InvitationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Revoked invitation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invitation' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations/{invitationId}/renew:
+    post:
+      tags: [Organizations]
+      operationId: renewInvitation
+      summary: Give an open or expired invitation a new link and seven more days.
+      description: The earlier link stops working. Optionally emails the new link.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/InvitationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenewInvitationRequest' }
+      responses:
+        '200':
+          description: The invitation and its new link, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationLink' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/administrators/{adminUserId}/reset-two-factor:
     post:
@@ -2268,6 +2418,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/AdminSessionID' }
+    InvitationID:
+      name: invitationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/InvitationID' }
     AdminPasskeyID:
       name: adminPasskeyId
       in: path
@@ -2376,6 +2531,9 @@ components:
     AdminPasskeyID:
       type: string
       pattern: '^apk_[A-Za-z0-9_-]{16,128}$'
+    InvitationID:
+      type: string
+      pattern: '^ain_[A-Za-z0-9_-]{16,128}$'
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
@@ -3236,6 +3394,85 @@ components:
       properties:
         credential: { $ref: '#/components/schemas/PasskeyAssertion' }
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    Invitation:
+      type: object
+      additionalProperties: false
+      required: [id, email, role, status, invited_by, created_at, expires_at, email_status]
+      properties:
+        id: { $ref: '#/components/schemas/InvitationID' }
+        email: { type: string, maxLength: 320 }
+        display_name: { type: string, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        invited_by: { type: string, maxLength: 200 }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        email_status: { type: string, enum: [not_requested, sent, failed] }
+        email_sent_at: { type: string, format: date-time }
+    InvitationList:
+      type: object
+      additionalProperties: false
+      required: [items, email_delivery]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Invitation' } }
+        email_delivery: { type: boolean, description: True when the server has an SMTP relay for invitation emails. }
+    InvitationLink:
+      type: object
+      additionalProperties: false
+      required: [invitation, url]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        url: { type: string, maxLength: 2200, description: 'The invitation link, shown once; the token is in the fragment.' }
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        display_name: { type: string, maxLength: 200 }
+        send_email: { type: boolean }
+    RenewInvitationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        send_email: { type: boolean }
+    InvitationTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, pattern: '^lwinv_[A-Za-z0-9_-]{43}$', writeOnly: true }
+    InvitationPreview:
+      type: object
+      additionalProperties: false
+      required: [organization_id, organization_name, email, role, invited_by, expires_at, account_exists]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        organization_name: { type: string, maxLength: 200 }
+        email: { type: string, maxLength: 320 }
+        display_name: { type: string, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        invited_by: { type: string, maxLength: 200 }
+        expires_at: { type: string, format: date-time }
+        account_exists: { type: boolean, description: True when the address already has an account, which claims the invitation after signing in. }
+    AcceptInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [token, display_name, password]
+      properties:
+        token: { type: string, pattern: '^lwinv_[A-Za-z0-9_-]{43}$', writeOnly: true }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    ClaimedInvitation:
+      type: object
+      additionalProperties: false
+      required: [organization_id, role]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
     SSOStartRequest:
       type: object
       additionalProperties: false
@@ -4295,8 +4532,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 18
-          maxItems: 18
+          minItems: 19
+          maxItems: 19
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -4317,6 +4554,7 @@ components:
             - { const: admin_two_factor }
             - { const: admin_passkeys }
             - { const: admin_sso }
+            - { const: admin_invitations }
           items: false
     DoctorCheck:
       type: object
