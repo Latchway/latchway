@@ -3,15 +3,18 @@ import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 
 import {
+  AddedPasskeySchema,
   adminRequest,
   AdministratorSchema,
   OwnAdminSessionListSchema,
+  PasskeyListSchema,
   RecoveryCodesSchema,
   SignedOutSessionsSchema,
   TotpEnrollmentSchema,
   TwoFactorRequirementSchema,
   TwoFactorStatusSchema
 } from "./admin";
+import { createPasskey, PasskeyCreationOptionsSchema } from "./webauthn";
 
 /** Sends a password change; both values are read from their inputs and cleared whatever happens. */
 export async function changeOwnPassword(current: HTMLInputElement | null, next: HTMLInputElement | null): Promise<number> {
@@ -54,14 +57,41 @@ export async function confirmTotpEnrollment(code: HTMLInputElement | null): Prom
   return (await adminRequest("/admin/v1/auth/two-factor/totp/confirm", RecoveryCodesSchema, { body: { code: value }, method: "POST" })).data.recovery_codes;
 }
 
-/** Replaces every recovery code after checking a current authenticator code. */
-export async function replaceRecoveryCodes(code: HTMLInputElement | null): Promise<string[]> {
-  const value = code?.value.trim() ?? "";
-  if (code) code.value = "";
-  return (await adminRequest("/admin/v1/auth/two-factor/recovery-codes", RecoveryCodesSchema, { body: { code: value }, method: "POST" })).data.recovery_codes;
+/** Replaces every recovery code after checking a current authenticator code or, without an authenticator app, the password. */
+export async function replaceRecoveryCodes(proof: { code: HTMLInputElement | null } | { password: HTMLInputElement | null }): Promise<string[]> {
+  const input = "code" in proof ? proof.code : proof.password;
+  const value = "code" in proof ? (input?.value.trim() ?? "") : (input?.value ?? "");
+  if (input) input.value = "";
+  const body = "code" in proof ? { code: value } : { password: value };
+  return (await adminRequest("/admin/v1/auth/two-factor/recovery-codes", RecoveryCodesSchema, { body, method: "POST" })).data.recovery_codes;
 }
 
-/** Turns off two-factor sign-in with the password and a current code, both read from and cleared in their inputs. */
+export const passkeysQueryOptions = queryOptions({
+  queryFn: async ({ signal }) => (await adminRequest("/admin/v1/auth/passkeys", PasskeyListSchema, { signal })).data,
+  queryKey: ["account", "passkeys"] as const,
+  staleTime: 15_000
+});
+
+/**
+ * Adds a passkey: the password (read from its input and cleared) starts the browser's prompt, and the prompt's answer
+ * registers it. The first second factor also returns one-time recovery codes.
+ */
+export async function addPasskey(password: HTMLInputElement | null, name: string) {
+  const value = password?.value ?? "";
+  if (password) password.value = "";
+  const options = (await adminRequest("/admin/v1/auth/passkeys/registration-options", PasskeyCreationOptionsSchema, { body: { password: value }, method: "POST" })).data;
+  const credential = await createPasskey(options);
+  return (await adminRequest("/admin/v1/auth/passkeys", AddedPasskeySchema, { body: { credential, name: name.trim() }, method: "POST" })).data;
+}
+
+/** Removes one of your passkeys after checking the password, which is read from its input and cleared. */
+export async function removePasskey(passkeyID: string, password: HTMLInputElement | null): Promise<void> {
+  const value = password?.value ?? "";
+  if (password) password.value = "";
+  await adminRequest(`/admin/v1/auth/passkeys/${passkeyID}/remove`, z.undefined(), { body: { password: value }, method: "POST" });
+}
+
+/** Removes the authenticator app with the password and a current code, both read from and cleared in their inputs. */
 export async function disableTwoFactor(password: HTMLInputElement | null, code: HTMLInputElement | null): Promise<void> {
   const body = { code: code?.value.trim() ?? "", password: password?.value ?? "" };
   try {

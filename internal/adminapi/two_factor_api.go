@@ -83,9 +83,20 @@ func (api *API) secondFactorLimiterKey(adminUserID string) [sha256.Size]byte {
 }
 
 type loginSecondFactorRequest struct {
-	Challenge    string `json:"challenge"`
-	Code         string `json:"code"`
-	RecoveryCode string `json:"recovery_code"`
+	Challenge    string               `json:"challenge"`
+	Code         string               `json:"code"`
+	RecoveryCode string               `json:"recovery_code"`
+	Passkey      *assertionCredential `json:"passkey"`
+}
+
+func (request loginSecondFactorRequest) methods() int {
+	count := 0
+	for _, present := range []bool{request.Code != "", request.RecoveryCode != "", request.Passkey != nil} {
+		if present {
+			count++
+		}
+	}
+	return count
 }
 
 // loginSecondFactor finishes a sign-in that a correct password started.
@@ -95,8 +106,8 @@ func (api *API) loginSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request, err := decodeJSON[loginSecondFactorRequest](r)
-	if err != nil || request.Challenge == "" || (request.Code == "") == (request.RecoveryCode == "") {
-		api.writeProblem(w, r, invalidRequest("Send the sign-in challenge with exactly one of a verification code or a recovery code."))
+	if err != nil || request.Challenge == "" || request.methods() != 1 {
+		api.writeProblem(w, r, invalidRequest("Send the sign-in challenge with exactly one of a verification code, a recovery code or a passkey."))
 		return
 	}
 	challenge, err := api.auth.PendingSignInChallenge(r.Context(), request.Challenge)
@@ -119,9 +130,12 @@ func (api *API) loginSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var verified bool
-	if request.Code != "" {
+	switch {
+	case request.Code != "":
 		_, verified, err = api.verifyTOTP(r, challenge.AdminUserID, request.Code, true)
-	} else {
+	case request.Passkey != nil:
+		verified, err = api.verifySecondFactorPasskey(r, request.Challenge, challenge.AdminUserID, request.Passkey)
+	default:
 		verified, err = api.auth.UseRecoveryCode(r.Context(), challenge.AdminUserID, challenge.OrganizationID, adminauth.HashRecoveryCode(request.RecoveryCode), requestID)
 	}
 	if err != nil {
@@ -189,7 +203,7 @@ func (api *API) fillSessionFlags(r *http.Request, principal *adminauth.Principal
 		return err
 	}
 	principal.PasswordResetRequired = state.PasswordResetRequired
-	principal.TwoFactorEnrollmentRequired = status.RequiredByOrganization && !status.TOTPConfirmed
+	principal.TwoFactorEnrollmentRequired = status.RequiredByOrganization && !status.Enabled
 	return nil
 }
 
@@ -255,6 +269,11 @@ func (api *API) totpIssuer() string {
 
 type totpCodeRequest struct {
 	Code string `json:"code"`
+}
+
+type recoveryCodesRequest struct {
+	Code     string `json:"code"`
+	Password string `json:"password"`
 }
 
 func (api *API) newRecoveryCodes(w http.ResponseWriter, r *http.Request) ([]string, [][sha256.Size]byte, bool) {
@@ -323,12 +342,15 @@ func (api *API) replaceRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Only a console session can replace recovery codes."})
 		return
 	}
-	request, err := decodeJSON[totpCodeRequest](r)
-	if err != nil || request.Code == "" {
-		api.writeProblem(w, r, invalidRequest("Enter a current code from your authenticator."))
+	request, err := decodeJSON[recoveryCodesRequest](r)
+	if err != nil || (request.Code == "") == (request.Password == "") {
+		api.writeProblem(w, r, invalidRequest("Enter a current code from your authenticator app, or your password."))
 		return
 	}
-	if !api.checkCurrentTOTP(w, r, principal.AdminUserID, request.Code) {
+	if request.Code != "" && !api.checkCurrentTOTP(w, r, principal.AdminUserID, request.Code) {
+		return
+	}
+	if request.Password != "" && !api.confirmOwnPassword(w, r, principal, request.Password) {
 		return
 	}
 	codes, hashes, ok := api.newRecoveryCodes(w, r)
@@ -341,6 +363,10 @@ func (api *API) replaceRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := api.auth.ReplaceRecoveryCodes(r.Context(), principal, hashes, requestID); err != nil {
+		if errors.Is(err, adminauth.ErrAdminConflict) {
+			api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "Set up an authenticator app or a passkey before creating recovery codes."})
+			return
+		}
 		api.handleAdminAuthError(w, r, err)
 		return
 	}
@@ -376,7 +402,7 @@ type disableTwoFactorRequest struct {
 func (api *API) disableTwoFactor(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r.Context())
 	if principal.Method != adminauth.AuthenticationSession {
-		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Only a console session can turn off two-factor sign-in."})
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Only a console session can remove its authenticator app."})
 		return
 	}
 	request, err := decodeJSON[disableTwoFactorRequest](r)
@@ -406,7 +432,7 @@ func (api *API) disableTwoFactor(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := api.auth.DisableTwoFactor(r.Context(), principal, requestID); err != nil {
 		if errors.Is(err, adminauth.ErrTwoFactorRequired) {
-			api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "An organization you belong to requires two-factor sign-in, so it can't be turned off."})
+			api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "An organization you belong to requires two-factor sign-in. Add a passkey before removing your authenticator app."})
 			return
 		}
 		api.handleAdminAuthError(w, r, err)
@@ -468,9 +494,11 @@ func twoFactorEnrollmentAllows(r *http.Request) bool {
 		return true
 	}
 	switch {
-	case r.Method == http.MethodGet && path == "/auth/two-factor":
+	case r.Method == http.MethodGet && (path == "/auth/two-factor" || path == "/auth/passkeys"):
 		return true
 	case r.Method == http.MethodPost && (path == "/auth/two-factor/totp" || path == "/auth/two-factor/totp/confirm"):
+		return true
+	case r.Method == http.MethodPost && (path == "/auth/passkeys/registration-options" || path == "/auth/passkeys"):
 		return true
 	default:
 		return false

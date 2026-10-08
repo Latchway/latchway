@@ -134,8 +134,7 @@ test.describe("real first-run control plane", () => {
     await expect(page.getByText(/on (macOS|Linux|Windows)|^(Chrome|Firefox|Safari)/).first()).toBeVisible();
 
     // Two-factor sign-in against the real server: enroll, sign out, sign back in with a code.
-    await page.getByRole("button", { name: "Set Up Two-Factor" }).click();
-    await page.getByRole("button", { name: "Set Up Authenticator" }).click();
+    await page.getByRole("button", { name: "Set Up Authenticator App" }).click();
     const key = ((await page.locator("code.lw-totp-key").textContent()) ?? "").replace(/\s/g, "");
     const enrolledAt = Date.now();
     await page.getByLabel("Authentication code").fill(totp(key, enrolledAt));
@@ -155,6 +154,37 @@ test.describe("real first-run control plane", () => {
     // The enrollment spent its time step; the next one is accepted within the server's one-step skew.
     await page.getByLabel("Authentication code").fill(totp(key, enrolledAt + 30_000));
     await page.getByRole("button", { name: "Verify" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
+
+    // Passkeys against the real server, with Chromium's virtual platform authenticator standing in for Touch ID.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("WebAuthn.enable");
+    await cdp.send("WebAuthn.addVirtualAuthenticator", {
+      options: { automaticPresenceSimulation: true, hasResidentKey: true, hasUserVerification: true, isUserVerified: true, protocol: "ctap2", transport: "internal" }
+    });
+    await page.getByRole("button", { name: "Add Passkey" }).click();
+    const add = page.getByRole("alertdialog", { name: "Add a passkey" });
+    await add.getByLabel("Name").fill("Virtual authenticator");
+    await add.getByLabel("Current password").fill("operator chosen live passphrase 2026");
+    await add.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("cell", { name: "Virtual authenticator" })).toBeVisible();
+
+    // A passkey alone signs back in: no password, no authenticator code.
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await page.getByRole("button", { name: "Sign In Again" }).click();
+    await page.getByRole("button", { name: "Sign In with a Passkey" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
+    await expect(page.getByRole("row", { name: /Virtual authenticator/ })).not.toContainText("Never");
+
+    // And it answers the second step after a password, too.
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await page.getByRole("button", { name: "Sign In Again" }).click();
+    await page.getByLabel("Password", { exact: true }).fill("operator chosen live passphrase 2026");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Verify it's you" })).toBeVisible();
+    await page.getByRole("button", { name: "Use Your Passkey" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
   });
 });

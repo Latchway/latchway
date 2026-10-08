@@ -209,7 +209,7 @@ func newAdminAccountResetCommand(opts *options, root *controlCommandOptions) *co
 func newAdminAccountResetTwoFactorCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset-two-factor ADMIN_USER_ID",
-		Short: "Remove an administrator's authenticator and recovery codes and end their console sessions",
+		Short: "Remove an administrator's authenticator app, passkeys and recovery codes and end their console sessions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if id.Validate(args[0], id.AdminUser) != nil {

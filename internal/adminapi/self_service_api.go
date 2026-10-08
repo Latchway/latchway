@@ -72,7 +72,7 @@ func (api *API) authInfo(w http.ResponseWriter, r *http.Request) {
 		"contract_version":  buildinfo.ContractVersion,
 		"protocol_versions": buildinfo.SupportedProtocolVersions(),
 		"setup_open":        open,
-		"sign_in_methods":   []string{"password"},
+		"sign_in_methods":   api.signInMethods(),
 	})
 }
 

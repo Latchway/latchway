@@ -113,7 +113,7 @@ func (store *Store) ListAdministrators(
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
-		       EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = u.admin_user_id AND f.confirmed_at IS NOT NULL),
+		       `+hasSecondFactorSQL("u.admin_user_id")+`,
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at
@@ -542,7 +542,7 @@ func readAdministratorTx(ctx context.Context, tx pgx.Tx, organizationID, adminUs
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
-		       EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = u.admin_user_id AND f.confirmed_at IS NOT NULL),
+		       `+hasSecondFactorSQL("u.admin_user_id")+`,
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at

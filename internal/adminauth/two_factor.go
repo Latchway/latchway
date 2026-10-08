@@ -22,9 +22,16 @@ var (
 	ErrSignInChallengeInvalid = errors.New("sign-in challenge is invalid")
 )
 
+// hasSecondFactorSQL is true when the administrator named by the SQL
+// expression adminUserID has a confirmed authenticator app or a passkey.
+func hasSecondFactorSQL(adminUserID string) string {
+	return `(EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = ` + adminUserID + ` AND f.confirmed_at IS NOT NULL)` +
+		` OR EXISTS (SELECT 1 FROM admin_passkeys AS p WHERE p.admin_user_id = ` + adminUserID + `))`
+}
+
 // confirmedSecondFactorSQL is true when the session's administrator (`s`) has a
-// confirmed second factor.
-const confirmedSecondFactorSQL = `EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = s.admin_user_id AND f.confirmed_at IS NOT NULL)`
+// second factor.
+var confirmedSecondFactorSQL = hasSecondFactorSQL("s.admin_user_id")
 
 const (
 	signInChallengeAttempts = 5
@@ -41,8 +48,11 @@ type SealedFactor struct {
 
 // TwoFactorStatus is an administrator's second-factor state.
 type TwoFactorStatus struct {
+	// Enabled is true when any second factor is set up.
+	Enabled                bool       `json:"enabled"`
 	TOTPConfirmed          bool       `json:"totp_enabled"`
 	TOTPConfirmedAt        *time.Time `json:"totp_enabled_at,omitempty"`
+	Passkeys               int        `json:"passkeys"`
 	RecoveryCodesRemaining int        `json:"recovery_codes_remaining"`
 	// RequiredByOrganization is filled for the organization of the session.
 	RequiredByOrganization bool `json:"required_by_organization"`
@@ -57,13 +67,15 @@ func (store *Store) TwoFactorStatus(ctx context.Context, adminUserID, organizati
 	var status TwoFactorStatus
 	err := store.pool.QueryRow(ctx, `
 		SELECT (SELECT confirmed_at FROM admin_totp_factors WHERE admin_user_id = $1),
+		       (SELECT count(*) FROM admin_passkeys WHERE admin_user_id = $1),
 		       (SELECT count(*) FROM admin_recovery_codes WHERE admin_user_id = $1 AND used_at IS NULL),
 		       COALESCE((SELECT require_two_factor FROM organizations WHERE organization_id = NULLIF($2, '')), false)
-	`, adminUserID, organizationID).Scan(&status.TOTPConfirmedAt, &status.RecoveryCodesRemaining, &status.RequiredByOrganization)
+	`, adminUserID, organizationID).Scan(&status.TOTPConfirmedAt, &status.Passkeys, &status.RecoveryCodesRemaining, &status.RequiredByOrganization)
 	if err != nil {
 		return TwoFactorStatus{}, fmt.Errorf("read two-factor status: %w", err)
 	}
 	status.TOTPConfirmed = status.TOTPConfirmedAt != nil
+	status.Enabled = status.TOTPConfirmed || status.Passkeys > 0
 	return status, nil
 }
 
@@ -207,7 +219,7 @@ func (store *Store) UseRecoveryCode(ctx context.Context, adminUserID, organizati
 }
 
 // ReplaceRecoveryCodes issues a fresh set of recovery codes for an
-// administrator with a confirmed authenticator key.
+// administrator with a second factor.
 func (store *Store) ReplaceRecoveryCodes(ctx context.Context, principal Principal, recoveryHashes [][sha256.Size]byte, requestID string) error {
 	if id.Validate(principal.AdminUserID, id.AdminUser) != nil || len(recoveryHashes) == 0 || validateRequestID(requestID) != nil {
 		return ErrInvalidAdminInput
@@ -219,10 +231,8 @@ func (store *Store) ReplaceRecoveryCodes(ctx context.Context, principal Principa
 	}
 	defer rollback(tx)
 	var confirmed bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM admin_totp_factors WHERE admin_user_id = $1 AND confirmed_at IS NOT NULL)
-	`, principal.AdminUserID).Scan(&confirmed); err != nil {
-		return fmt.Errorf("check authenticator key: %w", err)
+	if err := tx.QueryRow(ctx, `SELECT `+hasSecondFactorSQL("$1"), principal.AdminUserID).Scan(&confirmed); err != nil {
+		return fmt.Errorf("check second factor: %w", err)
 	}
 	if !confirmed {
 		return ErrAdminConflict
@@ -254,8 +264,9 @@ func replaceRecoveryCodesTx(ctx context.Context, tx pgx.Tx, adminUserID string, 
 	return nil
 }
 
-// DisableTwoFactor removes the administrator's own second factor and recovery
-// codes. It refuses while any of their organizations requires one.
+// DisableTwoFactor removes the administrator's own authenticator app. When no
+// passkey remains it also removes the recovery codes, and it refuses then if
+// any of their organizations requires a second factor.
 func (store *Store) DisableTwoFactor(ctx context.Context, principal Principal, requestID string) error {
 	if id.Validate(principal.AdminUserID, id.AdminUser) != nil || validateRequestID(requestID) != nil {
 		return ErrInvalidAdminInput
@@ -266,29 +277,24 @@ func (store *Store) DisableTwoFactor(ctx context.Context, principal Principal, r
 		return fmt.Errorf("begin two-factor removal: %w", err)
 	}
 	defer rollback(tx)
-	var required bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM admin_memberships AS m JOIN organizations AS o ON o.organization_id = m.organization_id
-			WHERE m.admin_user_id = $1 AND m.status = 'active' AND o.require_two_factor
-		)
-	`, principal.AdminUserID).Scan(&required); err != nil {
-		return fmt.Errorf("check two-factor requirement: %w", err)
-	}
-	if required {
-		return ErrTwoFactorRequired
-	}
-	tag, err := tx.Exec(ctx, `DELETE FROM admin_totp_factors WHERE admin_user_id = $1`, principal.AdminUserID)
+	tag, err := tx.Exec(ctx, `DELETE FROM admin_totp_factors WHERE admin_user_id = $1 AND confirmed_at IS NOT NULL`, principal.AdminUserID)
 	if err != nil {
 		return fmt.Errorf("remove authenticator key: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return ErrAdminNotFound
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM admin_recovery_codes WHERE admin_user_id = $1`, principal.AdminUserID); err != nil {
-		return fmt.Errorf("remove recovery codes: %w", err)
+	var passkeys bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM admin_passkeys WHERE admin_user_id = $1)`, principal.AdminUserID).Scan(&passkeys); err != nil {
+		return fmt.Errorf("check passkeys: %w", err)
 	}
-	changes := []AuditChange{mustSensitiveAuditChange("totp_key", AuditRevoke), mustSensitiveAuditChange("recovery_codes", AuditRevoke)}
+	if err := enforceRemainingFactorTx(ctx, tx, principal.AdminUserID); err != nil {
+		return err
+	}
+	changes := []AuditChange{mustSensitiveAuditChange("totp_key", AuditRevoke)}
+	if !passkeys {
+		changes = append(changes, mustSensitiveAuditChange("recovery_codes", AuditRevoke))
+	}
 	if err := store.insertAdministratorAudit(ctx, tx, principal, "admin.two_factor_disable", principal.AdminUserID, requestID, now, changes); err != nil {
 		return err
 	}
@@ -298,8 +304,8 @@ func (store *Store) DisableTwoFactor(ctx context.Context, principal Principal, r
 	return nil
 }
 
-// ResetAdministratorTwoFactor lets an owner remove another member's second
-// factor and recovery codes, ending that member's sessions in the
+// ResetAdministratorTwoFactor lets an owner remove another member's
+// authenticator app, passkeys and recovery codes, ending that member's sessions in the
 // organization. Like a password reset it refuses accounts that also belong to
 // other organizations, because the factor is global to the account.
 func (store *Store) ResetAdministratorTwoFactor(ctx context.Context, principal Principal, targetAdminUserID, requestID string) (Administrator, error) {
@@ -331,11 +337,15 @@ func (store *Store) ResetAdministratorTwoFactor(ctx context.Context, principal P
 	if otherMemberships != 0 {
 		return Administrator{}, ErrAdminConflict
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM admin_totp_factors WHERE admin_user_id = $1`, targetAdminUserID)
+	totp, err := tx.Exec(ctx, `DELETE FROM admin_totp_factors WHERE admin_user_id = $1`, targetAdminUserID)
 	if err != nil {
 		return Administrator{}, fmt.Errorf("remove authenticator key: %w", err)
 	}
-	if tag.RowsAffected() != 1 {
+	passkeys, err := tx.Exec(ctx, `DELETE FROM admin_passkeys WHERE admin_user_id = $1`, targetAdminUserID)
+	if err != nil {
+		return Administrator{}, fmt.Errorf("remove passkeys: %w", err)
+	}
+	if totp.RowsAffected() == 0 && passkeys.RowsAffected() == 0 {
 		return Administrator{}, ErrAdminNotFound
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM admin_recovery_codes WHERE admin_user_id = $1`, targetAdminUserID); err != nil {
@@ -347,11 +357,17 @@ func (store *Store) ResetAdministratorTwoFactor(ctx context.Context, principal P
 	`, principal.OrganizationID, targetAdminUserID, now, revokeReasonTwoFactor); err != nil {
 		return Administrator{}, fmt.Errorf("revoke administrator sessions: %w", err)
 	}
-	changes := []AuditChange{
-		mustSensitiveAuditChange("totp_key", AuditRevoke),
+	changes := make([]AuditChange, 0, 4)
+	if totp.RowsAffected() != 0 {
+		changes = append(changes, mustSensitiveAuditChange("totp_key", AuditRevoke))
+	}
+	if passkeys.RowsAffected() != 0 {
+		changes = append(changes, mustSensitiveAuditChange("passkeys", AuditRevoke))
+	}
+	changes = append(changes,
 		mustSensitiveAuditChange("recovery_codes", AuditRevoke),
 		mustSensitiveAuditChange("session_tokens", AuditRevoke),
-	}
+	)
 	if err := store.insertAdministratorAudit(ctx, tx, principal, "admin.two_factor_reset", targetAdminUserID, requestID, now, changes); err != nil {
 		return Administrator{}, err
 	}

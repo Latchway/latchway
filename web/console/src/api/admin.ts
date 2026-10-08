@@ -166,6 +166,9 @@ export const SignedOutSessionsSchema = z.object({ signed_out_sessions: z.number(
 
 export const TwoFactorStatusSchema = z
   .object({
+    /** An authenticator app or a passkey is set up. */
+    enabled: z.boolean(),
+    passkeys: z.number().int().min(0).max(1000),
     recovery_codes_remaining: z.number().int().min(0).max(10),
     required_by_organization: z.boolean(),
     totp_enabled: z.boolean(),
@@ -173,11 +176,28 @@ export const TwoFactorStatusSchema = z
   })
   .strict();
 
+export const PasskeySchema = z
+  .object({
+    created_at: z.iso.datetime({ offset: true }),
+    id: z.string().regex(/^apk_[A-Za-z0-9_-]{16,128}$/),
+    last_used_at: OptionalInstant,
+    name: z.string().min(1).max(64),
+    /** The authenticator reports the passkey is backed up, as synced passkeys are. */
+    synced: z.boolean()
+  })
+  .strict();
+
+export const PasskeyListSchema = z.object({ items: z.array(PasskeySchema).max(1000) }).strict();
+
 export const TotpEnrollmentSchema = z
   .object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), uri: z.string().startsWith("otpauth://totp/").max(1024) })
   .strict();
 
-export const RecoveryCodesSchema = z.object({ recovery_codes: z.array(z.string().regex(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/)).length(10) }).strict();
+const RecoveryCodeList = z.array(z.string().regex(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/)).length(10);
+
+export const RecoveryCodesSchema = z.object({ recovery_codes: RecoveryCodeList }).strict();
+
+export const AddedPasskeySchema = z.object({ passkey: PasskeySchema, recovery_codes: RecoveryCodeList.optional() }).strict();
 
 export const TwoFactorRequirementSchema = z.object({ required: z.boolean() }).strict();
 
@@ -1482,6 +1502,7 @@ export type AdminSessionMetadataPage = z.infer<typeof AdminSessionMetadataPageSc
 export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
 export type OwnAdminSession = z.infer<typeof OwnAdminSessionSchema>;
 export type TwoFactorStatus = z.infer<typeof TwoFactorStatusSchema>;
+export type Passkey = z.infer<typeof PasskeySchema>;
 export type TotpEnrollment = z.infer<typeof TotpEnrollmentSchema>;
 export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;

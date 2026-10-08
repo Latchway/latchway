@@ -224,10 +224,10 @@ The current local server source advertises a stable ordered
 `openai_responses`, `openai_chat`, `openai_embeddings`,
 `anthropic_messages`, `opaque_http`, `configuration_import_export`,
 `admin_session_management`, `admin_event_stream`,
-`admin_account_self_service`, and `admin_two_factor`. The Console Settings
-surface requires protocol 2 and every listed capability except
-`admin_event_stream`, `admin_account_self_service` and `admin_two_factor` before
-enabling mutations. Missing protocol or
+`admin_account_self_service`, `admin_two_factor`, and `admin_passkeys`. The
+Console Settings surface requires protocol 2 and every listed capability except
+`admin_event_stream`, `admin_account_self_service`, `admin_two_factor` and
+`admin_passkeys` before enabling mutations. Missing protocol or
 required capabilities activates read-only safe mode. `admin_event_stream` is
 optional: older servers retain polling and manual refresh instead of being
 treated as mutation-incompatible. `admin_account_self_service` (draft Admin
@@ -235,6 +235,10 @@ bundle edition 1.1.3, ADR 0040) is optional too: without it the console hides
 own-password change, own sessions and organization switching.
 `admin_two_factor` (ADR 0041) is optional in the same way: without it the
 console hides two-factor setup and the organization requirement.
+`admin_passkeys` (ADR 0042) is optional too: without it the console hides
+passkey sign-in and the Passkeys card. With it, the console still offers
+passkeys only when `GET /auth/info` lists `passkey` (the public origin is a
+domain name over HTTPS, or localhost) and the browser supports WebAuthn.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the
