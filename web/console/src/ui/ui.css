@@ -1742,3 +1742,20 @@ a.lw-setup-step[aria-disabled="true"] { cursor: default; opacity: 0.55; }
 .lw-merge__side.is-chosen { box-shadow: 0 0 0 2px var(--accent-primary); }
 .lw-merge__head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
 .lw-merge__value { max-height: 180px; margin: 0; overflow: auto; font-size: 12px; }
+
+/* Policies: limit impact and plan share. */
+.lw-impact { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 16px; }
+.lw-share { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.lw-share__row { display: grid; grid-template-columns: minmax(80px, 140px) 1fr auto; align-items: center; gap: 8px; font-size: 13px; }
+.lw-share__plan { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lw-share__bar { display: block; height: 6px; border-radius: var(--radius-full); background: var(--item-selection); overflow: hidden; }
+.lw-share__bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-primary); }
+.lw-share__value { color: var(--foreground-secondary); white-space: nowrap; }
+
+/* Simulator: attempt plans and limit usage. */
+.lw-attempts { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.lw-attempt { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 8px; padding: 6px 8px; border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--border); }
+.lw-attempt > :last-child { grid-column: 2; }
+.lw-attempt--succeeded { box-shadow: 0 0 0 1px var(--accent-primary); }
+.lw-limit-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; }
+.lw-limit-usage .lw-share__bar { width: 120px; }

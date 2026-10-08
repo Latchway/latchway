@@ -226,13 +226,13 @@ The current local server source advertises a stable ordered
 `admin_session_management`, `admin_event_stream`,
 `admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
 `admin_sso`, `admin_invitations`, `admin_application_roles`,
-`admin_user_insights`, `admin_request_search`, and
-`admin_configuration_drafts`. The Console Settings surface requires protocol 2
+`admin_user_insights`, `admin_request_search`, `admin_configuration_drafts`,
+and `admin_policy_insights`. The Console Settings surface requires protocol 2
 and every listed capability except `admin_event_stream`,
 `admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
 `admin_sso`, `admin_invitations`, `admin_application_roles`,
-`admin_user_insights`, `admin_request_search` and
-`admin_configuration_drafts` before enabling mutations. Missing protocol or
+`admin_user_insights`, `admin_request_search`, `admin_configuration_drafts`
+and `admin_policy_insights` before enabling mutations. Missing protocol or
 required capabilities activates read-only safe mode. `admin_event_stream` is
 optional: older servers retain polling and manual refresh instead of being
 treated as mutation-incompatible. `admin_account_self_service` (draft Admin
@@ -261,7 +261,11 @@ Without `admin_configuration_drafts` (ADR 0048) the console carries a
 validated draft into a new draft before editing (those servers refuse to edit
 it), resets rather than discards a draft, and hides edit history, publish
 notes, the merge dialog and Copy From Environment; the CLI's
-`config history|discard|promote` and `--note` need the capability.
+`config history|discard|promote` and `--note` need the capability. Without
+`admin_policy_insights` (ADR 0049) the console says it can't show limit
+impact, overrides for a plan or plan share, works out connection outages in
+the browser (and says so), sends one simulation per grid cell, and hides saved
+scenarios and per-limit usage; `routes simulate --fail` needs the capability.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the

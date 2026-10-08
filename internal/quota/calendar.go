@@ -202,3 +202,31 @@ func floorDivision(value, divisor int64) int64 {
 	}
 	return quotient
 }
+
+// CalendarPeriod is one calendar window of a limit, as [Start, End).
+type CalendarPeriod struct {
+	Start time.Time
+	End   time.Time
+}
+
+// CalendarPeriods lists the calendar windows of a limit's window and timezone
+// that overlap [start, end), in order, using the same alignment as
+// enforcement. It refuses more than maximum periods.
+func CalendarPeriods(window, timezone string, start, end time.Time, maximum int) ([]CalendarPeriod, error) {
+	if !start.Before(end) || maximum < 1 {
+		return nil, ErrInvalidInput
+	}
+	periods := make([]CalendarPeriod, 0, min(maximum, 64))
+	for cursor := start; cursor.Before(end); {
+		period, err := calendarWindowIn(cursor, window, timezone)
+		if err != nil {
+			return nil, err
+		}
+		if len(periods) == maximum {
+			return nil, ErrInvalidInput
+		}
+		periods = append(periods, CalendarPeriod{Start: period.start, End: period.end})
+		cursor = period.end
+	}
+	return periods, nil
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -82,6 +83,7 @@ type routeSimulationResultCLI struct {
 	FallbackSequence        []routeSimulationCandidateCLI  `json:"fallback_sequence,omitempty"`
 	PricingConfidence       string                         `json:"pricing_confidence,omitempty"`
 	Reservation             *routeSimulationReservationCLI `json:"reservation,omitempty"`
+	AttemptPlan             *routeSimulationAttemptPlanCLI `json:"attempt_plan,omitempty"`
 	Warnings                []string                       `json:"warnings,omitempty"`
 	Explanation             []string                       `json:"explanation"`
 }
@@ -99,6 +101,7 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 	var authenticated, streaming bool
 	var requestedInput, requestedOutput, rewrittenRequestBytes, framingUnitCount int64
 	var imageUnits, toolCalls, expandedSchemaBytes int64
+	var failures []string
 	command := &cobra.Command{
 		Use: "simulate REVISION_ID", Short: "Run the exact production resolver against a valid or active revision", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -146,6 +149,13 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 				"principal": map[string]any{"authenticated": authenticated, "claims": claims},
 				"request":   requestFacts,
 			}
+			if len(failures) != 0 {
+				parsed, err := parseSimulationFailures(failures)
+				if err != nil {
+					return err
+				}
+				request["failures"] = parsed
+			}
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
 				return err
@@ -171,6 +181,7 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 	command.Flags().Int64Var(&expandedSchemaBytes, "expanded-schema-bytes", 0, "hypothetical additional local schema expansion bytes for Chat or Responses (maximum 4 MiB)")
 	command.Flags().Int64Var(&imageUnits, "image-units", 0, "hypothetical exact structured image count used by per-request guards")
 	command.Flags().Int64Var(&toolCalls, "tool-calls", 0, "hypothetical exact structured tool-call count used by per-request guards")
+	command.Flags().StringArrayVar(&failures, "fail", nil, "make a route fail: ROUTE=CONDITION or ROUTE=CONDITION:ATTEMPTS (repeatable)")
 	_ = command.MarkFlagRequired("feature")
 	_ = command.MarkFlagRequired("platform")
 	return command
@@ -283,6 +294,26 @@ func printRouteSimulation(opts *options, result routeSimulationResultCLI) error 
 			return err
 		}
 	}
+	if plan := result.AttemptPlan; plan != nil {
+		rows := make([][]string, 0, len(plan.Attempts))
+		for _, attempt := range plan.Attempts {
+			delay := ""
+			if attempt.RetryDelayMaxMS != nil {
+				delay = strconv.FormatInt(*attempt.RetryDelayMaxMS, 10) + "ms"
+			}
+			rows = append(rows, []string{strconv.FormatInt(attempt.Number, 10), attempt.Route, attempt.Upstream, attempt.Outcome, attempt.Condition, attempt.Next, delay})
+		}
+		if err := printControlTable(opts, []string{"ATTEMPT", "ROUTE", "UPSTREAM", "OUTCOME", "CONDITION", "NEXT", "DELAY"}, rows); err != nil {
+			return err
+		}
+		summary := "served by " + plan.ServedByRoute
+		if plan.Outcome != "served" {
+			summary = "fails with " + plan.FailureCondition
+		}
+		if _, err := fmt.Fprintf(opts.stdout, "attempt plan: %s\n", summary); err != nil {
+			return err
+		}
+	}
 	if len(result.Explanation) != 0 {
 		if _, err := fmt.Fprintf(opts.stdout, "explanation: %s\n", strings.Join(result.Explanation, " ")); err != nil {
 			return err
@@ -293,4 +324,53 @@ func printRouteSimulation(opts *options, result routeSimulationResultCLI) error 
 		return err
 	}
 	return nil
+}
+
+type routeSimulationAttemptPlanCLI struct {
+	Attempts []struct {
+		Number          int64  `json:"number"`
+		Route           string `json:"route"`
+		Upstream        string `json:"upstream"`
+		Model           string `json:"model"`
+		Outcome         string `json:"outcome"`
+		Condition       string `json:"condition,omitempty"`
+		Next            string `json:"next,omitempty"`
+		RetryDelayMaxMS *int64 `json:"retry_delay_max_ms,omitempty"`
+	} `json:"attempts"`
+	Outcome          string   `json:"outcome"`
+	ServedByRoute    string   `json:"served_by_route,omitempty"`
+	FailureCondition string   `json:"failure_condition,omitempty"`
+	Assumptions      []string `json:"assumptions"`
+}
+
+var simulationConditions = []string{
+	"connect_error", "timeout_before_headers", "first_byte_timeout", "status_408", "status_429",
+	"status_500", "status_502", "status_503", "status_504", "non_retryable",
+}
+
+// parseSimulationFailures reads --fail ROUTE=CONDITION[:ATTEMPTS] values.
+func parseSimulationFailures(values []string) ([]map[string]any, error) {
+	if len(values) > 16 {
+		return nil, errors.New("at most 16 --fail values")
+	}
+	result := make([]map[string]any, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		route, rest, found := strings.Cut(value, "=")
+		condition, rawAttempts, limited := strings.Cut(rest, ":")
+		if !found || !secretNamePattern.MatchString(route) || seen[route] || !slices.Contains(simulationConditions, condition) {
+			return nil, fmt.Errorf("--fail %q must be ROUTE=CONDITION[:ATTEMPTS] with a known condition, once per route", value)
+		}
+		seen[route] = true
+		failure := map[string]any{"route": route, "condition": condition}
+		if limited {
+			attempts, err := strconv.ParseInt(rawAttempts, 10, 64)
+			if err != nil || attempts < 1 || attempts > 32 {
+				return nil, fmt.Errorf("--fail %q attempts must be 1 to 32", value)
+			}
+			failure["attempts"] = attempts
+		}
+		result = append(result, failure)
+	}
+	return result, nil
 }

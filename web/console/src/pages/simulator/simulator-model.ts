@@ -61,8 +61,26 @@ export interface SimulationInput {
   trustLevel: TrustLevel;
 }
 
-export function simulationBody(input: SimulationInput) {
+/** A simulated failure: attempts on `route` fail with `condition` (every attempt unless `attempts` is set). */
+export interface SimulatedFailure {
+  attempts?: number;
+  condition: string;
+  route: string;
+}
+
+/** How a connection marked down fails, in the server's attempt-outcome vocabulary. */
+export const FAILURE_CONDITIONS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "connect_error", label: "Can't connect" },
+  { id: "timeout_before_headers", label: "Times out" },
+  { id: "status_429", label: "Rate limited (429)" },
+  { id: "status_503", label: "Unavailable (503)" },
+  { id: "status_500", label: "Server error (500)" },
+  { id: "non_retryable", label: "Rejects the request" }
+];
+
+export function simulationBody(input: SimulationInput, failures?: readonly SimulatedFailure[]) {
   return {
+    ...(failures?.length ? { failures: [...failures] } : {}),
     feature: input.feature,
     platform: input.platform,
     principal: { authenticated: input.authenticated, claims: input.claims },
@@ -71,8 +89,36 @@ export function simulationBody(input: SimulationInput) {
   };
 }
 
-export async function simulate(revisionID: string, input: SimulationInput): Promise<RouteSimulation> {
-  const result = (await adminRequest(`/admin/v1/config-revisions/${revisionID}/simulate`, RouteSimulationSchema, { body: simulationBody(input), method: "POST" })).data;
+/** The failures for every route in the plan that runs on a connection marked down. */
+export function failuresFor(result: RouteSimulation, down: ReadonlySet<string>, condition: string): SimulatedFailure[] {
+  const routes = new Map<string, SimulatedFailure>();
+  for (const step of result.fallback_sequence ?? []) {
+    if (down.has(step.upstream) && !routes.has(step.route)) routes.set(step.route, { condition, route: step.route });
+  }
+  return [...routes.values()];
+}
+
+/** A scenario's stored input back as Simulator inputs; claims keep only the values the inputs can show. */
+export function inputFromScenario(stored: { feature: string; platform: Platform; principal: { authenticated: boolean; claims: Record<string, unknown> }; request: Partial<RequestSize> & { app_version?: string; streaming: boolean }; trust_level: TrustLevel }): SimulationInput {
+  const claims: Record<string, string | boolean> = {};
+  for (const [key, value] of Object.entries(stored.principal.claims)) {
+    if (typeof value === "string" || typeof value === "boolean") claims[key] = value;
+  }
+  const { app_version: appVersion, streaming, ...size } = stored.request;
+  return {
+    ...(appVersion ? { appVersion } : {}),
+    authenticated: stored.principal.authenticated,
+    claims,
+    feature: stored.feature,
+    platform: stored.platform,
+    size: { expanded_schema_bytes: 0, framing_unit_count: 0, image_units: 0, requested_input_tokens: 0, requested_output_max: 0, rewritten_request_bytes: 0, tool_calls: 0, ...size },
+    streaming,
+    trustLevel: stored.trust_level
+  };
+}
+
+export async function simulate(revisionID: string, input: SimulationInput, failures?: readonly SimulatedFailure[]): Promise<RouteSimulation> {
+  const result = (await adminRequest(`/admin/v1/config-revisions/${revisionID}/simulate`, RouteSimulationSchema, { body: simulationBody(input, failures), method: "POST" })).data;
   // A result for another revision or feature is never shown as this one's.
   if (result.revision_id !== revisionID || result.feature !== input.feature) throw new Error("The simulation result didn't match the selected revision and feature.");
   return result;

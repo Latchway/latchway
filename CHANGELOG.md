@@ -48,6 +48,11 @@ All notable project changes will be documented here. The format follows [Keep a 
   note, can be brought up to date with a reviewed three-way merge, and can be
   started from another environment's live configuration.
   `latchway config history|discard|promote` and `config apply --note`.
+- Policy insights and simulation (ADR 0049, `admin_policy_insights`,
+  schema 41): per-user usage distributions against a limit, an override list,
+  plan share by feature, current limit usage for a user, failure simulation
+  with the data plane's retry and fallback rules, batch simulation and saved
+  scenarios. `latchway routes simulate --fail`.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.

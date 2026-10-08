@@ -7,7 +7,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
@@ -21,7 +20,7 @@ const (
 	fallbackTimeoutBeforeHeaders = "timeout_before_headers"
 	fallbackFirstByteTimeout     = "first_byte_timeout"
 	maximumRouteAttempts         = int64(8)
-	maximumLogicalAttempts       = int64(32)
+	maximumLogicalAttempts       = configuration.MaximumLogicalAttempts
 	maximumRetryBackoff          = 60 * time.Second
 )
 
@@ -80,13 +79,11 @@ func isUpstreamTimeout(err error) bool {
 }
 
 func routeAllowsFallback(route configuration.Route, condition string) bool {
-	return condition != "" && slices.Contains(route.FallbackOn, condition)
+	return route.FallsBackOn(condition)
 }
 
 func routeAllowsRetry(route configuration.Route, condition string, attempts int64) bool {
-	policy := route.RetryPolicy
-	return policy != nil && condition != "" && attempts >= 1 &&
-		attempts < policy.MaxAttempts && slices.Contains(policy.RetryOn, condition)
+	return route.RetriesOn(condition, attempts)
 }
 
 // opaqueReplayAllowed prevents a transport ambiguity from replaying an unsafe
@@ -108,17 +105,7 @@ func routeRetryBackoff(logicalRequestID string, route configuration.Route, retry
 	if policy == nil || logicalRequestID == "" || retryOrdinal < 1 || !validRetryPolicy(policy) {
 		return 0, false
 	}
-	base := policy.InitialBackoff
-	for ordinal := int64(1); ordinal < retryOrdinal && base < policy.MaximumBackoff; ordinal++ {
-		if base > policy.MaximumBackoff/2 {
-			base = policy.MaximumBackoff
-			break
-		}
-		base *= 2
-	}
-	if base > policy.MaximumBackoff {
-		base = policy.MaximumBackoff
-	}
+	base := policy.BackoffCeiling(retryOrdinal)
 	baseMilliseconds := int64(base / time.Millisecond)
 	jitterMilliseconds := int64(math.Floor(float64(baseMilliseconds) * policy.JitterRatio))
 	if jitterMilliseconds == 0 {

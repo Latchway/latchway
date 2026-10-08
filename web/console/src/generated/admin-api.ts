@@ -339,6 +339,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/applications/{applicationId}/simulation-scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an application's saved simulator inputs.
+         * @description Newest first, at most 200. Needs activate_configuration in the application.
+         */
+        get: operations["listSimulationScenarios"];
+        put?: never;
+        /**
+         * Save a simulator input under a name.
+         * @description The input is validated like a simulation and stored without application or environment. The audit event records that it was set, not its values.
+         */
+        post: operations["createSimulationScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/audit-events": {
         parameters: {
             query?: never;
@@ -1211,6 +1235,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/config-revisions/{revisionId}/simulate-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run up to 50 simulations against one revision.
+         * @description Each item succeeds or fails on its own; a failed item carries a problem code and detail.
+         */
+        post: operations["simulateConfigurationRevisionBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/config-revisions/{revisionId}/validate": {
         parameters: {
             query?: never;
@@ -1738,8 +1782,8 @@ export interface paths {
         /**
          * Count requests by each filterable value.
          * @description Counts the requests started in the half-open `[start, end)` range (at most 90 days) by
-         *     outcome, feature, failure code, AI connection, model, route, platform, component kind and
-         *     trust source, most common first. Every value is one the matching request-list filter accepts.
+         *     outcome, feature, failure code, AI connection, model, route, platform, component kind, trust
+         *     source and selected limit plan, most common first. Every value is one the matching request-list filter accepts.
          *     Connection, model and route count the selected values; the list filters also match retried
          *     attempts, so a filter can return more requests than its count. Facets ignore other filters.
          */
@@ -1910,6 +1954,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/simulation-scenarios/{scenarioId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a saved scenario's name and input. */
+        put: operations["replaceSimulationScenario"];
+        post?: never;
+        /** Delete a saved scenario. */
+        delete: operations["deleteSimulationScenario"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/system": {
         parameters: {
             query?: never;
@@ -1967,6 +2029,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/usage/distribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-user usage in each limit window, summarized, and how many would exceed a maximum.
+         * @description Sums one metric per subject (the scope's dimensions) in each calendar window of `window` and
+         *     `timezone`, aligned exactly as quota enforcement aligns them, over a range of at most 90 days
+         *     and 2,000 windows. Each subject's busiest window feeds the percentiles, a 1-2-5 histogram and,
+         *     with `maximum`, the count of subjects and users that would have exceeded it. No user or
+         *     subject identifiers are returned.
+         */
+        get: operations["getUsageDistribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -1999,6 +2085,26 @@ export interface paths {
          * @description The half-open `[start, end)` range may produce at most 10,000 UTC buckets.
          */
         get: operations["getUsageTimeseries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/user-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List limit-plan overrides, current and ended.
+         * @description Newest first. `active` is unrevoked and unexpired; `ended` is revoked or expired.
+         */
+        get: operations["listUserOverrides"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3621,6 +3727,17 @@ export interface components {
             scope: components["schemas"]["Identifier"][];
             source: string;
             timezone?: string;
+            /** @description Current quota state for the user's current installation; omitted when a limit depends on the route. */
+            usage?: {
+                maximum?: number;
+                /** Format: date-time */
+                observed_at: string;
+                remaining?: number;
+                reserved?: number;
+                /** Format: date-time */
+                resets_at?: string;
+                used?: number;
+            };
             window?: string;
         };
         EffectiveOutput: {
@@ -4287,6 +4404,7 @@ export interface components {
                 component_kind: components["schemas"]["RequestFacet"];
                 error_code: components["schemas"]["RequestFacet"];
                 feature: components["schemas"]["RequestFacet"];
+                limit_plan: components["schemas"]["RequestFacet"];
                 model: components["schemas"]["RequestFacet"];
                 platform: components["schemas"]["RequestFacet"];
                 route: components["schemas"]["RequestFacet"];
@@ -4294,6 +4412,7 @@ export interface components {
                 trust_source: components["schemas"]["RequestFacet"];
                 upstream: components["schemas"]["RequestFacet"];
             };
+            feature?: components["schemas"]["Identifier"];
             /** @description Requests started in the range. */
             requests: number;
             /** Format: date-time */
@@ -4361,9 +4480,58 @@ export interface components {
             weight: number;
             when: components["schemas"]["CELExpression"];
         };
+        RouteSimulationAttemptPlan: {
+            assumptions: string[];
+            attempts: {
+                condition?: string;
+                model: components["schemas"]["Identifier"];
+                /** @enum {string} */
+                next?: "retry" | "fallback" | "stop";
+                number: number;
+                /** @enum {string} */
+                outcome: "succeeded" | "failed";
+                /** @description Exponential backoff before the retry; runtime jitter only lowers it. */
+                retry_delay_max_ms?: number;
+                route: components["schemas"]["Identifier"];
+                upstream: components["schemas"]["Identifier"];
+            }[];
+            failure_condition?: string;
+            /** @enum {string} */
+            outcome: "served" | "failed";
+            served_by_route?: components["schemas"]["Identifier"];
+        };
+        RouteSimulationBatchRequest: {
+            requests: components["schemas"]["RouteSimulationRequest"][];
+        };
+        RouteSimulationBatchResult: {
+            items: {
+                index: number;
+                problem?: {
+                    code: string;
+                    detail: string;
+                };
+                result?: components["schemas"]["RouteSimulationResult"];
+            }[];
+        };
+        RouteSimulationFailure: {
+            /** @description Fail only the first this many attempts on the route; omitted or zero fails every attempt. */
+            attempts?: number;
+            /**
+             * @description An attempt outcome a retry or fallback policy can name, or `non_retryable` for any other failure.
+             * @enum {string}
+             */
+            condition: "connect_error" | "timeout_before_headers" | "first_byte_timeout" | "status_408" | "status_429" | "status_500" | "status_502" | "status_503" | "status_504" | "non_retryable";
+            route: components["schemas"]["Identifier"];
+        };
         RouteSimulationRequest: {
             application_id?: components["schemas"]["ApplicationID"];
             environment_id?: components["schemas"]["EnvironmentID"];
+            /**
+             * @description Makes attempts on a route fail, to see what the data plane does next: retry on the same
+             *     route when its retry policy names the condition, fall back when its fallback policy does,
+             *     otherwise stop. Routes must be in the request's route plan and appear once.
+             */
+            failures?: components["schemas"]["RouteSimulationFailure"][];
             feature: components["schemas"]["Identifier"];
             /** @enum {string} */
             platform: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
@@ -4382,6 +4550,11 @@ export interface components {
                 expanded_schema_bytes: number;
                 /** @description Hypothetical exact adapter framing-unit count used for conservative trusted-input projection. */
                 framing_unit_count?: number;
+                /**
+                 * @description For opaque HTTP features, the request method. Only GET is replayed on routes that don't allow unsafe-method retries; omitted means not GET.
+                 * @enum {string}
+                 */
+                http_method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
                 /** @description Hypothetical exact structured image count used by a hard per-request guard. */
                 image_units?: number;
                 /** @description Bounded untrusted simulation value exposed to CEL as request.estimated_input_tokens; never reservation, quota, accounting, pricing, or context-window authority. */
@@ -4401,6 +4574,7 @@ export interface components {
         RouteSimulationResult: {
             allowed: boolean;
             application_id: components["schemas"]["ApplicationID"];
+            attempt_plan?: components["schemas"]["RouteSimulationAttemptPlan"];
             environment_id: components["schemas"]["EnvironmentID"];
             /** @enum {string} */
             environment_kind: "development" | "staging" | "production";
@@ -4636,6 +4810,26 @@ export interface components {
         SignedOutSessions: {
             signed_out_sessions: number;
         };
+        SimulationScenario: {
+            application_id: components["schemas"]["ApplicationID"];
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            id: string;
+            input: components["schemas"]["RouteSimulationRequest"];
+            name: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
+            version: number;
+        };
+        SimulationScenarioRequest: {
+            input: components["schemas"]["RouteSimulationRequest"];
+            /** @description Unique in the application; no leading or trailing spaces or line breaks. */
+            name: string;
+            /** @description Required when replacing; the version that was loaded. */
+            version?: number;
+        };
         Spec: {
             attestationPolicies: components["schemas"]["AttestationPolicy"][];
             /** @default [] */
@@ -4765,7 +4959,8 @@ export interface components {
                 "admin_application_roles",
                 "admin_user_insights",
                 "admin_request_search",
-                "admin_configuration_drafts"
+                "admin_configuration_drafts",
+                "admin_policy_insights"
             ];
             server_version: string;
         };
@@ -5068,11 +5263,65 @@ export interface components {
             operation_id: string;
             user: components["schemas"]["ApplicationUser"];
         };
+        UserOverride: {
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: date-time */
+            expires_at?: string;
+            id: string;
+            limit_plan: components["schemas"]["Identifier"];
+            reason: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+            user_id: components["schemas"]["UserID"];
+        };
         UserOverrideID: string;
+        UserOverridePage: {
+            items: components["schemas"]["UserOverride"][];
+            page: components["schemas"]["PageInfo"];
+        };
         UserPage: {
             items: components["schemas"]["ApplicationUser"][];
             page: components["schemas"]["PageInfo"];
             total?: components["schemas"]["ListTotal"];
+        };
+        UserUsageDistribution: {
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            feature?: components["schemas"]["Identifier"];
+            histogram: {
+                from: number;
+                subjects: number;
+                /** @description Exclusive upper bound; omitted for the last bucket. */
+                to?: number;
+            }[];
+            limit_plan?: components["schemas"]["Identifier"];
+            maximum?: number;
+            /** @enum {string} */
+            metric: "logical_requests" | "upstream_attempts" | "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens" | "cache_write_tokens" | "cost_nano_usd";
+            /** @description Subjects whose busiest window exceeded maximum. */
+            over_subjects?: number;
+            over_users?: number;
+            /** @description Each subject's busiest window, summarized. */
+            peaks: {
+                max: number;
+                p50: number;
+                p90: number;
+                p99: number;
+            };
+            periods: number;
+            scope: ("user" | "feature" | "installation")[];
+            /** Format: date-time */
+            start: string;
+            /** @description Distinct scope values with usage in the range. */
+            subjects: number;
+            timezone: string;
+            users: number;
+            window: string;
         };
         ValidationIssue: {
             code: string;
@@ -5709,6 +5958,62 @@ export interface operations {
                     "application/json": components["schemas"]["Environment"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listSimulationScenarios: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved scenarios. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SimulationScenario"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createSimulationScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved scenario. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationScenario"];
+                };
+            };
+            409: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -6906,6 +7211,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    simulateConfigurationRevisionBatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteSimulationBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description One item per request, in order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteSimulationBatchResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     validateConfigurationRevision: {
         parameters: {
             query?: never;
@@ -7756,6 +8091,8 @@ export interface operations {
             query: {
                 end: string;
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                /** @description Count only requests for this feature, for example to see how its limit-plan rules split traffic. */
+                feature?: components["schemas"]["Identifier"];
                 limit?: number;
                 start: string;
             };
@@ -8040,6 +8377,64 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    replaceSimulationScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Replaced scenario with the next version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationScenario"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteSimulationScenario: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getSystemStatus: {
         parameters: {
             query?: never;
@@ -8104,6 +8499,40 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getUsageDistribution: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                feature?: components["schemas"]["Identifier"];
+                /** @description Only requests that selected this limit plan. */
+                limit_plan?: components["schemas"]["Identifier"];
+                maximum?: number;
+                metric: "logical_requests" | "upstream_attempts" | "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens" | "cache_write_tokens" | "cost_nano_usd";
+                /** @description Comma-separated, from user, feature and installation. Defaults to user. */
+                scope?: string;
+                start: string;
+                timezone?: string;
+                window: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage distribution. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserUsageDistribution"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getUsageSummary: {
         parameters: {
             query: {
@@ -8152,6 +8581,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageTimeseries"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listUserOverrides: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                limit_plan?: components["schemas"]["Identifier"];
+                page_size?: components["parameters"]["PageSize"];
+                status?: "active" | "ended";
+                user_id?: components["schemas"]["UserID"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOverridePage"];
                 };
             };
             default: components["responses"]["Problem"];

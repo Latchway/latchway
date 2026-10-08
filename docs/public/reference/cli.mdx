@@ -108,7 +108,16 @@ latchway routes simulate rev_... \
   --platform react_native_ios \
   --trust-level app_verified \
   --claims-file normalized-claims.json
+latchway routes simulate rev_... --feature assistant --platform ios \
+  --fail primary=status_503 --fail backup=timeout_before_headers:1
 ```
+
+`--fail ROUTE=CONDITION[:ATTEMPTS]` makes attempts on a route fail so the
+output shows the server's attempt plan: retries the route's retry policy
+allows, fallbacks its `fallbackOn` allows, and where the app gets an error.
+Conditions are `connect_error`, `timeout_before_headers`,
+`first_byte_timeout`, `status_408`, `status_429`, `status_500`, `status_502`,
+`status_503`, `status_504`, or `non_retryable` for any other failure.
 
 Configuration input accepts one bounded YAML 1.2 or JSON object. Duplicate
 keys, aliases, anchors, merge keys, custom tags, timestamps, non-finite

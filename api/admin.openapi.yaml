@@ -1083,6 +1083,101 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RouteSimulationResult' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/simulate-batch:
+    post:
+      tags: [Configuration]
+      operationId: simulateConfigurationRevisionBatch
+      summary: Run up to 50 simulations against one revision.
+      description: Each item succeeds or fails on its own; a failed item carries a problem code and detail.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteSimulationBatchRequest' }
+      responses:
+        '200':
+          description: One item per request, in order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteSimulationBatchResult' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}/simulation-scenarios:
+    get:
+      tags: [Configuration]
+      operationId: listSimulationScenarios
+      summary: List an application's saved simulator inputs.
+      description: Newest first, at most 200. Needs activate_configuration in the application.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+      responses:
+        '200':
+          description: Saved scenarios.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SimulationScenario' } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Configuration]
+      operationId: createSimulationScenario
+      summary: Save a simulator input under a name.
+      description: The input is validated like a simulation and stored without application or environment. The audit event records that it was set, not its values.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulationScenarioRequest' }
+      responses:
+        '201':
+          description: Saved scenario.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulationScenario' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/simulation-scenarios/{scenarioId}:
+    put:
+      tags: [Configuration]
+      operationId: replaceSimulationScenario
+      summary: Replace a saved scenario's name and input.
+      parameters:
+        - { name: scenarioId, in: path, required: true, schema: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulationScenarioRequest' }
+      responses:
+        '200':
+          description: Replaced scenario with the next version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulationScenario' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Configuration]
+      operationId: deleteSimulationScenario
+      summary: Delete a saved scenario.
+      parameters:
+        - { name: scenarioId, in: path, required: true, schema: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Deleted. }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/config-revisions/{revisionId}/activate:
     post:
       tags: [Configuration]
@@ -2299,8 +2394,8 @@ paths:
       summary: Count requests by each filterable value.
       description: |
         Counts the requests started in the half-open `[start, end)` range (at most 90 days) by
-        outcome, feature, failure code, AI connection, model, route, platform, component kind and
-        trust source, most common first. Every value is one the matching request-list filter accepts.
+        outcome, feature, failure code, AI connection, model, route, platform, component kind, trust
+        source and selected limit plan, most common first. Every value is one the matching request-list filter accepts.
         Connection, model and route count the selected values; the list filters also match retried
         attempts, so a filter can return more requests than its count. Facets ignore other filters.
       parameters:
@@ -2308,6 +2403,11 @@ paths:
         - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - name: feature
+          in: query
+          required: false
+          description: Count only requests for this feature, for example to see how its limit-plan rules split traffic.
+          schema: { $ref: '#/components/schemas/Identifier' }
       responses:
         '200':
           description: Request counts by value.
@@ -2347,6 +2447,55 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EffectiveConfiguration' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/distribution:
+    get:
+      tags: [Usage]
+      operationId: getUsageDistribution
+      summary: Per-user usage in each limit window, summarized, and how many would exceed a maximum.
+      description: |
+        Sums one metric per subject (the scope's dimensions) in each calendar window of `window` and
+        `timezone`, aligned exactly as quota enforcement aligns them, over a range of at most 90 days
+        and 2,000 windows. Each subject's busiest window feeds the percentiles, a 1-2-5 histogram and,
+        with `maximum`, the count of subjects and users that would have exceeded it. No user or
+        subject identifiers are returned.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [logical_requests, upstream_attempts, input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, cache_write_tokens, cost_nano_usd] } }
+        - { name: window, in: query, required: true, schema: { type: string, pattern: '^[1-9][0-9]*(m|h|d|w|mo)$' } }
+        - { name: timezone, in: query, required: false, schema: { type: string, maxLength: 64, default: UTC } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: feature, in: query, required: false, schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: limit_plan, in: query, required: false, description: Only requests that selected this limit plan., schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: scope, in: query, required: false, description: 'Comma-separated, from user, feature and installation. Defaults to user.', schema: { type: string, maxLength: 64 } }
+        - { name: maximum, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: Usage distribution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserUsageDistribution' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/user-overrides:
+    get:
+      tags: [Users]
+      operationId: listUserOverrides
+      summary: List limit-plan overrides, current and ended.
+      description: Newest first. `active` is unrevoked and unexpired; `ended` is revoked or expired.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, required: false, schema: { type: string, enum: [active, ended] } }
+        - { name: limit_plan, in: query, required: false, schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: user_id, in: query, required: false, schema: { $ref: '#/components/schemas/UserID' } }
+      responses:
+        '200':
+          description: Override page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOverridePage' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/usage/summary:
     get:
@@ -3217,11 +3366,23 @@ components:
         trust_level:
           type: string
           enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+        failures:
+          type: array
+          maxItems: 16
+          description: |
+            Makes attempts on a route fail, to see what the data plane does next: retry on the same
+            route when its retry policy names the condition, fall back when its fallback policy does,
+            otherwise stop. Routes must be in the request's route plan and appear once.
+          items: { $ref: '#/components/schemas/RouteSimulationFailure' }
         request:
           type: object
           additionalProperties: false
           properties:
             streaming: { type: boolean, default: false }
+            http_method:
+              type: string
+              enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+              description: For opaque HTTP features, the request method. Only GET is replayed on routes that don't allow unsafe-method retries; omitted means not GET.
             app_version: { type: string, maxLength: 128 }
             requested_input_tokens:
               type: integer
@@ -3401,8 +3562,157 @@ components:
                   units: { type: integer, minimum: 0 }
                   applicable: { type: boolean }
                   durable: { type: boolean }
+        attempt_plan: { $ref: '#/components/schemas/RouteSimulationAttemptPlan' }
         warnings: { type: array, maxItems: 16, items: { type: string, maxLength: 1024 } }
         explanation: { type: array, items: { type: string, maxLength: 1024 } }
+    RouteSimulationFailure:
+      type: object
+      additionalProperties: false
+      required: [route, condition]
+      properties:
+        route: { $ref: '#/components/schemas/Identifier' }
+        condition:
+          type: string
+          enum: [connect_error, timeout_before_headers, first_byte_timeout, status_408, status_429, status_500, status_502, status_503, status_504, non_retryable]
+          description: An attempt outcome a retry or fallback policy can name, or `non_retryable` for any other failure.
+        attempts: { type: integer, minimum: 0, maximum: 32, description: Fail only the first this many attempts on the route; omitted or zero fails every attempt. }
+    RouteSimulationAttemptPlan:
+      type: object
+      additionalProperties: false
+      required: [attempts, outcome, assumptions]
+      properties:
+        attempts:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [number, route, upstream, model, outcome]
+            properties:
+              number: { type: integer, minimum: 1, maximum: 32 }
+              route: { $ref: '#/components/schemas/Identifier' }
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              model: { $ref: '#/components/schemas/Identifier' }
+              outcome: { type: string, enum: [succeeded, failed] }
+              condition: { type: string, maxLength: 64 }
+              next: { type: string, enum: [retry, fallback, stop] }
+              retry_delay_max_ms: { type: integer, minimum: 0, maximum: 60000, description: Exponential backoff before the retry; runtime jitter only lowers it. }
+        outcome: { type: string, enum: [served, failed] }
+        served_by_route: { $ref: '#/components/schemas/Identifier' }
+        failure_condition: { type: string, maxLength: 64 }
+        assumptions: { type: array, maxItems: 8, items: { type: string, maxLength: 512 } }
+    RouteSimulationBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [requests]
+      properties:
+        requests: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/RouteSimulationRequest' } }
+    RouteSimulationBatchResult:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [index]
+            properties:
+              index: { type: integer, minimum: 0, maximum: 49 }
+              result: { $ref: '#/components/schemas/RouteSimulationResult' }
+              problem:
+                type: object
+                additionalProperties: false
+                required: [code, detail]
+                properties:
+                  code: { type: string, pattern: '^[a-z][a-z0-9_]{0,99}$' }
+                  detail: { type: string, maxLength: 1024 }
+    SimulationScenario:
+      type: object
+      additionalProperties: false
+      required: [id, application_id, name, input, version, created_by, created_at, updated_by, updated_at]
+      properties:
+        id: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        input: { $ref: '#/components/schemas/RouteSimulationRequest' }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_by: { type: string }
+        updated_at: { type: string, format: date-time }
+    SimulationScenarioRequest:
+      type: object
+      additionalProperties: false
+      required: [name, input]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: Unique in the application; no leading or trailing spaces or line breaks. }
+        input: { $ref: '#/components/schemas/RouteSimulationRequest' }
+        version: { type: integer, minimum: 1, description: Required when replacing; the version that was loaded. }
+    UserOverride:
+      type: object
+      additionalProperties: false
+      required: [id, user_id, limit_plan, reason, status, created_by, created_at]
+      properties:
+        id: { type: string, pattern: '^uov_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        status: { type: string, enum: [active, expired, revoked] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    UserOverridePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/UserOverride' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    UserUsageDistribution:
+      type: object
+      additionalProperties: false
+      required: [environment_id, metric, window, timezone, start, end, scope, periods, subjects, users, peaks, histogram]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        metric: { type: string, enum: [logical_requests, upstream_attempts, input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, cache_write_tokens, cost_nano_usd] }
+        window: { type: string, pattern: '^[1-9][0-9]*(m|h|d|w|mo)$' }
+        timezone: { type: string, maxLength: 64 }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        scope: { type: array, minItems: 1, maxItems: 3, items: { type: string, enum: [user, feature, installation] } }
+        periods: { type: integer, minimum: 1, maximum: 2000 }
+        subjects: { type: integer, minimum: 0, description: Distinct scope values with usage in the range. }
+        users: { type: integer, minimum: 0 }
+        peaks:
+          type: object
+          additionalProperties: false
+          required: [p50, p90, p99, max]
+          description: Each subject's busiest window, summarized.
+          properties:
+            p50: { type: integer, minimum: 0 }
+            p90: { type: integer, minimum: 0 }
+            p99: { type: integer, minimum: 0 }
+            max: { type: integer, minimum: 0 }
+        histogram:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, subjects]
+            properties:
+              from: { type: integer, minimum: 0 }
+              to: { type: integer, minimum: 1, description: Exclusive upper bound; omitted for the last bucket. }
+              subjects: { type: integer, minimum: 1 }
+        maximum: { type: integer, minimum: 0 }
+        over_subjects: { type: integer, minimum: 0, description: Subjects whose busiest window exceeded maximum. }
+        over_users: { type: integer, minimum: 0 }
     WriteSecretRequest:
       type: object
       additionalProperties: false
@@ -4273,6 +4583,18 @@ components:
         cost_retry_treatment: { type: string, enum: [actual_attempts, initial_attempt_only] }
         hard: { type: boolean, const: true }
         source: { type: string, minLength: 1, maxLength: 512 }
+        usage:
+          type: object
+          additionalProperties: false
+          required: [observed_at]
+          description: Current quota state for the user's current installation; omitted when a limit depends on the route.
+          properties:
+            maximum: { type: integer, minimum: 0 }
+            used: { type: integer, minimum: 0 }
+            reserved: { type: integer, minimum: 0 }
+            remaining: { type: integer, minimum: 0 }
+            resets_at: { type: string, format: date-time }
+            observed_at: { type: string, format: date-time }
     EffectiveRoute:
       type: object
       additionalProperties: false
@@ -4825,13 +5147,14 @@ components:
       required: [environment_id, start, end, requests, facets]
       properties:
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        feature: { $ref: '#/components/schemas/Identifier' }
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         requests: { type: integer, minimum: 0, description: Requests started in the range. }
         facets:
           type: object
           additionalProperties: false
-          required: [status, feature, error_code, upstream, model, route, platform, component_kind, trust_source]
+          required: [status, feature, error_code, upstream, model, route, platform, component_kind, trust_source, limit_plan]
           properties:
             status: { $ref: '#/components/schemas/RequestFacet' }
             feature: { $ref: '#/components/schemas/RequestFacet' }
@@ -4842,6 +5165,7 @@ components:
             platform: { $ref: '#/components/schemas/RequestFacet' }
             component_kind: { $ref: '#/components/schemas/RequestFacet' }
             trust_source: { $ref: '#/components/schemas/RequestFacet' }
+            limit_plan: { $ref: '#/components/schemas/RequestFacet' }
     UsageFraction:
       type: object
       additionalProperties: false
@@ -5136,8 +5460,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 23
-          maxItems: 23
+          minItems: 24
+          maxItems: 24
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -5163,6 +5487,7 @@ components:
             - { const: admin_user_insights }
             - { const: admin_request_search }
             - { const: admin_configuration_drafts }
+            - { const: admin_policy_insights }
           items: false
     DoctorCheck:
       type: object

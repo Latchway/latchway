@@ -49,6 +49,8 @@ import {
   userSpendLimit
 } from "./limit-model";
 import { parseRules, replacePlanInExpression, rulesSentence } from "./plan-rules";
+import { POLICY_INSIGHTS } from "../../api/policy-insights";
+import { LimitImpact, OverrideList, PlanOverrides, PlanShare } from "./policy-insights";
 import { type PlanSelection, PlanRulesEditor } from "./plan-rules-editor";
 
 const plansCollection = configurationAreas.limits.collections[0]!;
@@ -87,7 +89,14 @@ interface PlanDraftState {
   limits: JSONRecord[];
 }
 
+/** Whether the server offers limit impact, override lists, plan share and the simulator extras. */
+function usePolicyInsights(): boolean {
+  const compatibility = useConsoleCompatibility();
+  return compatibility.status?.server_capabilities.includes(POLICY_INSIGHTS) ?? false;
+}
+
 function PlanDrawer({ draft, onClose, onSaved, row }: { draft: EnvironmentDraft; onClose: () => void; onSaved: (id: string) => void; row?: ResourceRow }) {
+  const insights = usePolicyInsights();
   const published = Boolean(row?.live);
   const removing = row?.state === "removing";
   const [state, setState] = useState<PlanDraftState>(() => ({
@@ -181,7 +190,7 @@ function PlanDrawer({ draft, onClose, onSaved, row }: { draft: EnvironmentDraft;
           ))}
           {error ? <Notice title="Not saved" tone="danger">{error}</Notice> : null}
           {draft.problem ? <ProblemNotice problem={draft.problem} /> : null}
-          <p className="lw-secondary lw-note">How many users a limit would stop isn't shown: the Admin API has no per-user usage aggregates yet.</p>
+          {insights && draft.environment ? <LimitImpact environmentID={draft.environment.id} limits={state.limits} plan={published && !isNew ? row?.key : undefined} /> : <p className="lw-secondary lw-note">This server doesn&apos;t count how many users a limit would stop.</p>}
         </div>
       </DetailPanel>
       {removingPlan && row ? <RemovePlanDialog draft={draft} onClose={() => setRemovingPlan(false)} onRemoved={onClose} row={row} /> : null}
@@ -190,6 +199,7 @@ function PlanDrawer({ draft, onClose, onSaved, row }: { draft: EnvironmentDraft;
 }
 
 function RemovePlanDialog({ draft, onClose, onRemoved, row }: { draft: EnvironmentDraft; onClose: () => void; onRemoved: () => void; row: ResourceRow }) {
+  const insights = usePolicyInsights();
   const users = featuresByPlan(draft.document).get(row.key) ?? [];
   const others = (draft.document ? identifierValues(draft.document, "limitPlans") : []).filter((plan) => plan !== row.key);
   const [targets, setTargets] = useState<Record<string, string>>(() => Object.fromEntries(users.map((feature) => [feature, others[0] ?? ""])));
@@ -229,7 +239,7 @@ function RemovePlanDialog({ draft, onClose, onRemoved, row }: { draft: Environme
           </ul>
         </div>
       ) : null}
-      <Notice tone="warning">Users with a plan override for {row.key} can't be listed: the Admin API has no override list. Check them under Overrides before publishing.</Notice>
+      {insights && draft.environment ? <PlanOverrides environmentID={draft.environment.id} plan={row.key} /> : <Notice tone="warning">This server can&apos;t list users with an override to {row.key}. Check them under Overrides before publishing.</Notice>}
       <Field id="remove-plan-confirm" label={<>Type <code className="lw-code-inline">{row.key}</code> to confirm</>}>
         <Input autoComplete="off" id="remove-plan-confirm" mono onChange={(event) => setTyped(event.target.value)} spellCheck={false} value={typed} />
       </Field>
@@ -295,6 +305,7 @@ function LimitPlansView() {
 // ─── Plan by feature ────────────────────────────────────────────────────────
 
 function PlanSelectionDrawer({ draft, feature, onClose }: { draft: EnvironmentDraft; feature: JSONRecord; onClose: () => void }) {
+  const insights = usePolicyInsights();
   const expression = featureExpression(feature);
   const plans = draft.document ? identifierValues(draft.document, "limitPlans") : [];
   const [selection, setSelection] = useState<PlanSelection>({ expression, problems: [] });
@@ -313,7 +324,7 @@ function PlanSelectionDrawer({ draft, feature, onClose }: { draft: EnvironmentDr
         <PlanRulesEditor expression={expression} idPrefix="plan-selection" onChange={setSelection} plans={plans} />
         {error ? <Notice title="Not saved" tone="danger">{error}</Notice> : null}
         {draft.problem ? <ProblemNotice problem={draft.problem} /> : null}
-        <p className="lw-secondary lw-note">Each rule's share of requests isn't shown: the Admin API has no projection of plan selection over traffic.</p>
+        {insights && draft.environment ? <PlanShare environmentID={draft.environment.id} feature={String(feature.id)} /> : <p className="lw-secondary lw-note">This server doesn&apos;t count how traffic splits across plans.</p>}
         <div className="lw-row"><Button onClick={onClose}>Cancel</Button><Button disabled={!draft.canConfigure} loading={draft.busy} type="submit" variant="primary">Save to Draft</Button></div>
       </form>
     </DetailPanel>
@@ -476,6 +487,7 @@ function OverridesView() {
   const [clearing, setClearing] = useState(false);
   const [clearProblem, setClearProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
+  const insights = usePolicyInsights();
   const user = useQuery({
     enabled: Boolean(search.user && environmentID && canInspect),
     queryFn: async () => {
@@ -521,7 +533,7 @@ function OverridesView() {
       <div className="lw-body lw-stack">
         {!canInspect ? <Notice title="Capability required" tone="info">Looking up users needs the <code className="lw-code-inline">inspect_users</code> capability.</Notice> : (
           <form className="lw-row lw-row--wrap" onSubmit={go}>
-            <Field error={goError} hint="The Admin API can't list users with overrides, so open one by ID (from Users & Installs or a request)." id="override-user" label="User ID">
+            <Field error={goError} hint={insights ? "Open any user by ID, or pick one from the list below." : "This server can't list users with overrides, so open one by ID (from Users & Installs or a request)."} id="override-user" label="User ID">
               <Input id="override-user" mono onChange={(event) => setTyped(event.target.value)} placeholder="usr_…" spellCheck={false} value={typed} />
             </Field>
             <Button type="submit">Open</Button>
@@ -551,6 +563,7 @@ function OverridesView() {
             {canApply ? <OverrideForm draft={draft} key={`${current.id}:${override?.id ?? "none"}`} onApplied={(updated, text) => { setMessage({ text, userID: updated.id }); void user.refetch(); }} user={current} /> : <Notice title="View only" tone="info">Applying an override needs the <code className="lw-code-inline">activate_configuration</code> capability and an active application and environment.</Notice>}
           </div>
         ) : null}
+        {insights && canInspect && environmentID ? <Card icon="policies" title="All overrides"><OverrideList environmentID={environmentID} onOpenUser={(userID) => { setTyped(userID); setMessage(undefined); workspace.updateSearch({ user: userID }, { replace: false }); }} selectedUser={search.user} /></Card> : null}
       </div>
       {clearing && current ? (
         <ConfirmDialog confirmLabel="Clear Override" description="The user's claims pick the plan again. Clearing doesn't bring back any earlier override." destructive onCancel={() => setClearing(false)} onConfirm={() => void clear()} pending={busy} title={`Clear the override for ${current.id}?`}>

@@ -88,6 +88,9 @@ admin.configuration_rollback
 admin.configuration_revision_discard
 admin.configuration_revision_rebase
 admin.configuration_promote
+admin.simulation_scenario_create
+admin.simulation_scenario_update
+admin.simulation_scenario_delete
 ```
 
 Planning is non-dispatching and redaction-safe. Its action name can appear for
@@ -96,7 +99,8 @@ change. Discard marks a never-activated draft as discarded without deleting
 it, rebase records that a draft moved onto the live revision, and promotion
 names the draft created from another environment's live revision. A publish
 note is marked as a sensitive `activation_note` field; its text is kept on the
-revision, never in the audit event.
+revision, never in the audit event. Saved simulation scenarios mark their input as
+sensitive; scenario names and test claim values stay on the scenario.
 
 ## Secret and user actions
 
