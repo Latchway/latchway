@@ -2,6 +2,48 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 18: configuration draft lifecycle (branch `console-api-completion`, unreleased)
+
+Server (ADR 0048, schema 40, capability `admin_configuration_drafts`; amends
+ADR 0009):
+
+- Fixes a refused second save: a validated, never-activated draft is editable
+  again and returns to draft. The redesigned console validated after every
+  save, so its next save on the same draft got a 409 shown as "The draft is
+  out of date". The console also works around it on older servers.
+- `POST /config-revisions/{id}/discard`: a retained, immutable `discarded`
+  tombstone.
+- `config_revision_edits` (append-only) and `GET /config-revisions/{id}/edits`;
+  revisions expose `updated_at`, `updated_by`, `base_revision_id`,
+  `description`, `activation_note`, `discarded_at` and `discarded_by`.
+- Activation takes an optional publish note.
+- `GET /config-revisions/{id}/rebase-preview` and `POST .../rebase`: a
+  three-way merge by path with explicit resolution of every conflict.
+- `POST /environments/{id}/config-revisions/promote`: copies another
+  environment's live configuration into a new draft, keeping the target's
+  sign-in providers, attestation policies, components and AI connections and
+  listing source-only entries for review.
+
+CLI: `config history`, `config discard`, `config promote`, and
+`config apply --note`; revision output accepts the new fields.
+
+Console: Discard Draft (server-side), edit history on Draft and in revision
+details, last-edited author, publish notes in the publish dialog and History,
+a stale-draft notice with a side-by-side merge dialog, Copy From Environment
+with a review summary, and a discarded status. Against older servers it
+carries a validated draft into a fresh one instead of patching it.
+
+Validation: `go test ./...` against PostgreSQL 16 (store lifecycle: edit after
+validation, history, discard of draft and validated revisions, trigger
+refusals, publish note immutability, rebase conflicts and resolution, stale
+live refusal, promotion with pending-draft, viewer and empty-source refusals;
+HTTP API: bodies, ETags, audit events; three-way merge and promotion unit
+tests; migrations to schema 40), CLI tests, vet, gofmt, sqlc regenerated;
+contract validation and generated references; lint, typecheck, `check:api`,
+`pnpm test` (484 passed), Playwright (46 passed, 1 skipped), the live-stack
+run (two consecutive saves, edit history and discard against the real
+server), build and `verify:reproducible`.
+
 ## Console completion phase 17: request search, totals and facets (branch `console-api-completion`, unreleased)
 
 Server (ADR 0047, capability `admin_request_search`, no schema change):

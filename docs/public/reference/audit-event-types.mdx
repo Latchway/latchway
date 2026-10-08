@@ -85,11 +85,18 @@ admin.configuration_revision_validate
 admin.configuration_plan
 admin.configuration_activate
 admin.configuration_rollback
+admin.configuration_revision_discard
+admin.configuration_revision_rebase
+admin.configuration_promote
 ```
 
 Planning is non-dispatching and redaction-safe. Its action name can appear for
 a rejected mutation; activation and rollback name the effective pointer
-change.
+change. Discard marks a never-activated draft as discarded without deleting
+it, rebase records that a draft moved onto the live revision, and promotion
+names the draft created from another environment's live revision. A publish
+note is marked as a sensitive `activation_note` field; its text is kept on the
+revision, never in the audit event.
 
 ## Secret and user actions
 

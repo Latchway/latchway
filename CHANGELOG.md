@@ -42,6 +42,12 @@ All notable project changes will be documented here. The format follows [Keep a 
   a capped total, and `GET /requests/facets` counts the values behind each
   filter. `latchway requests list` takes every filter and `--total`, and
   `latchway requests facets` prints the counts.
+- Configuration draft lifecycle (ADR 0048, `admin_configuration_drafts`,
+  schema 40): drafts stay editable after validation until activated, can be
+  discarded (kept in history), record who changed which paths, take a publish
+  note, can be brought up to date with a reviewed three-way merge, and can be
+  started from another environment's live configuration.
+  `latchway config history|discard|promote` and `config apply --note`.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
@@ -63,6 +69,10 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 - The embedded console required Admin contract 1.0.0 while 1.1.x servers
   advertise 1.1.0, leaving it in read-only safe mode.
+- A configuration draft that had been validated couldn't be edited again, so
+  the console's second save on a draft failed as "out of date". Servers now
+  keep never-activated drafts editable, and the console carries the draft into
+  a new one on older servers.
 
 ## [1.1.7] - 2026-09-23
 

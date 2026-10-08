@@ -874,6 +874,39 @@ paths:
               schema: { $ref: '#/components/schemas/ConfigurationRevision' }
         '422': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/config-revisions/promote:
+    post:
+      tags: [Configuration]
+      operationId: promoteConfiguration
+      summary: Start a draft from another environment's live configuration.
+      description: |
+        Creates a draft in this environment from the live revision of another environment of the
+        same application. Features, models, input accounting, pricing, limit plans, session and
+        privacy settings come from the source. Sign-in providers, attestation policies, component
+        definitions and AI connections this environment already has are kept; entries only the
+        source has are copied and listed under `review`, because they may point at the source's
+        projects, app identifiers, origins, base URLs or secret references. Metadata always names
+        this environment. Refused with `conflict` while this environment has an unpublished,
+        undiscarded draft.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromoteConfigurationRequest' }
+      responses:
+        '201':
+          description: Promoted draft and where each part came from.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationPromotion' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/config-revisions/{revisionId}:
     get:
       tags: [Configuration]
@@ -893,7 +926,8 @@ paths:
     patch:
       tags: [Configuration]
       operationId: replaceDraftConfiguration
-      summary: Replace the document of a mutable draft using optimistic concurrency.
+      summary: Replace the document of a never-activated draft using optimistic concurrency.
+      description: A validated revision that was never activated returns to draft; activated and discarded revisions are immutable. Each replacement is recorded in the edit history.
       parameters:
         - $ref: '#/components/parameters/RevisionID'
         - $ref: '#/components/parameters/IfMatch'
@@ -911,6 +945,91 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/edits:
+    get:
+      tags: [Configuration]
+      operationId: listConfigurationRevisionEdits
+      summary: List who changed a revision, when, and which paths.
+      description: Newest first, at most 200 edits. Paths only; values are never recorded. Edits made before the server recorded history are absent.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+      responses:
+        '200':
+          description: Edit history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevisionEdits' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/discard:
+    post:
+      tags: [Configuration]
+      operationId: discardConfigurationRevision
+      summary: Discard a never-activated draft, keeping it in history.
+      description: The revision becomes `discarded`; its document stays readable, and it can no longer be edited, validated, simulated or activated.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Discarded revision.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/rebase-preview:
+    get:
+      tags: [Configuration]
+      operationId: previewConfigurationRebase
+      summary: Preview bringing a draft up to date with the live revision.
+      description: |
+        Compares the draft and the live revision with the revision the draft started from. Lists the
+        paths each side changed and the paths both changed differently. Paths only; read the three
+        revisions to show values.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+      responses:
+        '200':
+          description: Merge preview.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationMergePreview' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/rebase:
+    post:
+      tags: [Configuration]
+      operationId: rebaseConfigurationRevision
+      summary: Bring a draft up to date with the live revision.
+      description: |
+        Merges the live revision's changes into the draft and moves its base to `live_revision_id`,
+        which must still be live. Objects merge by key and lists of identified entries by `id`;
+        reordered lists, sensitive values and other values are taken whole. `resolutions` must name
+        `draft` or `live` for every conflicting path and nothing else. The draft returns to `draft`.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RebaseConfigurationRequest' }
+      responses:
+        '200':
+          description: Rebased draft.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
@@ -969,10 +1088,16 @@ paths:
       tags: [Configuration]
       operationId: activateConfigurationRevision
       summary: Atomically activate a fully valid immutable revision.
+      description: An optional body records a publish note on the revision. Without a body the revision activates without one.
       parameters:
         - $ref: '#/components/parameters/RevisionID'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActivateConfigurationRequest' }
       responses:
         '200':
           description: Activated revision.
@@ -2936,17 +3061,101 @@ components:
     ConfigurationRevision:
       type: object
       additionalProperties: false
-      required: [id, environment_id, state, version, document, created_at, created_by]
+      required: [id, environment_id, state, version, document, created_at, created_by, updated_at, updated_by]
       properties:
         id: { $ref: '#/components/schemas/RevisionID' }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
-        state: { type: string, enum: [draft, valid, active, superseded, invalid] }
+        state: { type: string, enum: [draft, valid, active, superseded, invalid, discarded] }
         version: { type: integer, minimum: 1 }
         document: { $ref: './config.schema.json' }
         validation: { $ref: '#/components/schemas/ValidationReport' }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
+        updated_at: { type: string, format: date-time, description: Time of the latest recorded edit, or creation. }
+        updated_by: { type: string, description: Author of the latest recorded edit, or the creator. }
+        base_revision_id: { $ref: '#/components/schemas/RevisionID', description: The live revision this draft started from. }
+        description: { type: string, maxLength: 512 }
         activated_at: { type: string, format: date-time }
+        activation_note: { type: string, minLength: 1, maxLength: 500, description: Publish note recorded at activation. }
+        discarded_at: { type: string, format: date-time }
+        discarded_by: { type: string }
+    ConfigurationChange:
+      type: object
+      additionalProperties: false
+      required: [operation, path]
+      properties:
+        operation: { type: string, enum: [add, remove, replace] }
+        path: { type: string, maxLength: 1024 }
+        summary: { type: string, maxLength: 1024 }
+    ConfigurationRevisionEdit:
+      type: object
+      additionalProperties: false
+      required: [version, kind, edited_at, edited_by, change_count, changes]
+      properties:
+        version: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [created, edited, rebased, promoted] }
+        edited_at: { type: string, format: date-time }
+        edited_by: { type: string }
+        change_count: { type: integer, minimum: 0, description: 'Every changed path; `changes` lists at most 100.' }
+        changes: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+    ConfigurationRevisionEdits:
+      type: object
+      additionalProperties: false
+      required: [revision_id, items, truncated]
+      properties:
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ConfigurationRevisionEdit' } }
+        truncated: { type: boolean }
+    ConfigurationMergePreview:
+      type: object
+      additionalProperties: false
+      required: [revision_id, live_revision_id, up_to_date, draft_changes, live_changes, conflicts]
+      properties:
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        base_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        live_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        up_to_date: { type: boolean }
+        draft_changes: { type: array, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+        live_changes: { type: array, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+        conflicts: { type: array, items: { type: string, maxLength: 1024 } }
+    RebaseConfigurationRequest:
+      type: object
+      additionalProperties: false
+      required: [live_revision_id]
+      properties:
+        live_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        resolutions:
+          type: object
+          maxProperties: 1000
+          additionalProperties: { type: string, enum: [draft, live] }
+    ActivateConfigurationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 500, description: Publish note; empty means none. }
+    PromoteConfigurationRequest:
+      type: object
+      additionalProperties: false
+      required: [source_environment_id]
+      properties:
+        source_environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        description: { type: string, maxLength: 512 }
+    ConfigurationPromotion:
+      type: object
+      additionalProperties: false
+      required: [revision, promotion]
+      properties:
+        revision: { $ref: '#/components/schemas/ConfigurationRevision' }
+        promotion:
+          type: object
+          additionalProperties: false
+          required: [source_environment_id, source_revision_id, copied, kept, review]
+          properties:
+            source_environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+            source_revision_id: { $ref: '#/components/schemas/RevisionID' }
+            copied: { type: array, items: { type: string }, description: Spec sections taken from the source. }
+            kept: { type: array, items: { type: string }, description: Paths kept from this environment. }
+            review: { type: array, items: { type: string }, description: Entries copied from the source that may point at its infrastructure. }
     ConfigurationRevisionPage:
       type: object
       additionalProperties: false
@@ -4927,8 +5136,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 22
-          maxItems: 22
+          minItems: 23
+          maxItems: 23
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -4953,6 +5162,7 @@ components:
             - { const: admin_application_roles }
             - { const: admin_user_insights }
             - { const: admin_request_search }
+            - { const: admin_configuration_drafts }
           items: false
     DoctorCheck:
       type: object

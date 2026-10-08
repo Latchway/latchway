@@ -257,7 +257,12 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/environments/{environmentID}/config", api.activeConfiguration)
 		protected.Get("/environments/{environmentID}/config-revisions", api.configurationRevisions)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions", api.createConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions/promote", api.promoteConfiguration)
 		protected.Get("/config-revisions/{revisionID}", api.configurationRevision)
+		protected.Get("/config-revisions/{revisionID}/edits", api.configurationRevisionEdits)
+		protected.Get("/config-revisions/{revisionID}/rebase-preview", api.configurationRebasePreview)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/rebase", api.rebaseConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/discard", api.discardConfigurationRevision)
 		protected.With(api.mutationProtection).Patch("/config-revisions/{revisionID}", api.replaceDraftConfiguration)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/validate", api.validateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
@@ -824,8 +829,13 @@ func (api *API) activateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	options, ok := activationOptions(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The publish note must be 1 to 500 characters without control characters other than line breaks."))
+		return
+	}
 	revision, err := api.configurations.ActivateRevision(
-		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag,
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag, options...,
 	)
 	if err != nil {
 		api.handleConfigurationError(w, r, err)
@@ -1560,6 +1570,12 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.environment_enable", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
 		return "admin.configuration_revision_create", "admin_request"
+	case strings.HasSuffix(path, "/config-revisions/promote"):
+		return "admin.configuration_promote", "admin_request"
+	case strings.Contains(path, "/config-revisions/") && strings.HasSuffix(path, "/discard"):
+		return "admin.configuration_revision_discard", "admin_request"
+	case strings.Contains(path, "/config-revisions/") && strings.HasSuffix(path, "/rebase"):
+		return "admin.configuration_revision_rebase", "admin_request"
 	case strings.Contains(path, "/config-revisions/") && method == http.MethodPatch:
 		return "admin.configuration_revision_update", "admin_request"
 	case strings.HasSuffix(path, "/validate"):
