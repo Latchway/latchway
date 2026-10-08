@@ -1402,6 +1402,59 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/InvitationLink' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/application-roles:
+    get:
+      tags: [Administrators]
+      operationId: listApplicationRoles
+      summary: List every application role in the organization.
+      description: Requires `manage_owners`. An application role raises a member's organization role in one application; it never lowers it.
+      responses:
+        '200':
+          description: Application roles.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationRoleList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/application-roles/{applicationId}:
+    put:
+      tags: [Administrators]
+      operationId: setApplicationRole
+      summary: Raise a member's role in one application.
+      description: |
+        Requires `manage_owners`. The role must be higher than the member's
+        organization role (`conflict` otherwise, and always for owners).
+        Application-scoped actions (configuration, environments, secrets,
+        self-tests, installation and user actions) use the higher role for
+        that application; organization-wide actions keep the organization
+        role. Raising the organization role later drops grants it supersedes.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplicationRoleRequest' }
+      responses:
+        '200':
+          description: The application role.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationRoleGrant' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Administrators]
+      operationId: removeApplicationRole
+      summary: Return a member to their organization role in one application.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Removed. }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/administrators/{adminUserId}/reset-two-factor:
     post:
       tags: [Administrators]
@@ -2618,6 +2671,16 @@ components:
           type: string
           enum: [password, passkey, sso]
           description: How a console session was signed in; absent for API tokens.
+        application_roles:
+          type: array
+          description: Roles that raise this administrator's organization role in single applications. `capabilities` reflects the organization role; an application's capabilities follow the higher of the two.
+          items:
+            type: object
+            additionalProperties: false
+            required: [application_id, role]
+            properties:
+              application_id: { $ref: '#/components/schemas/ApplicationID' }
+              role: { type: string, enum: [admin, operator] }
         memberships:
           type: array
           items:
@@ -3473,6 +3536,29 @@ components:
       properties:
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
         role: { $ref: '#/components/schemas/AdministratorRole' }
+    ApplicationRoleGrant:
+      type: object
+      additionalProperties: false
+      required: [admin_user_id, application_id, role, granted_by, created_at, updated_at]
+      properties:
+        admin_user_id: { $ref: '#/components/schemas/AdminUserID' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        role: { type: string, enum: [admin, operator] }
+        granted_by: { type: string, maxLength: 200 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ApplicationRoleList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/ApplicationRoleGrant' } }
+    ApplicationRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [admin, operator] }
     SSOStartRequest:
       type: object
       additionalProperties: false
@@ -4532,8 +4618,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 19
-          maxItems: 19
+          minItems: 20
+          maxItems: 20
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -4555,6 +4641,7 @@ components:
             - { const: admin_passkeys }
             - { const: admin_sso }
             - { const: admin_invitations }
+            - { const: admin_application_roles }
           items: false
     DoctorCheck:
       type: object

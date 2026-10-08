@@ -214,6 +214,11 @@ func (api *API) fillSessionFlags(r *http.Request, principal *adminauth.Principal
 	if err != nil {
 		return err
 	}
+	roles, err := api.auth.ApplicationRolesFor(r.Context(), principal.OrganizationID, principal.AdminUserID)
+	if err != nil {
+		return err
+	}
+	*principal = principal.WithApplicationRoles(roles)
 	// A single sign-on session relies on the identity provider for further factors and needs no password.
 	sso := principal.SignInMethod == adminauth.SignInSSO
 	principal.PasswordResetRequired = state.PasswordResetRequired && !sso

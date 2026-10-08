@@ -627,7 +627,9 @@ func (store *operationalStore) setUserBlocked(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return useroverride.ApplicationUser{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return useroverride.ApplicationUser{}, err
+	} else if !allowed {
 		return useroverride.ApplicationUser{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -953,7 +955,7 @@ func (store *operationalStore) revokeInstallation(
 	if id.Validate(installationID, id.Installation) != nil || id.Validate(requestID, id.AdminRequest) != nil {
 		return installationDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationDocument{}, errOperationalForbidden
 	}
 	reason = strings.TrimSpace(reason)
@@ -984,6 +986,9 @@ func (store *operationalStore) revokeInstallation(
 	}
 	if status != "active" && status != "revoked" {
 		return installationDocument{}, errOperationalCorrupt
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationDocument{}, err
@@ -2470,7 +2475,9 @@ func (store *operationalStore) startSelfTest(
 		id.Validate(input.RequestID, id.AdminRequest) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, input.Environment); err != nil {
+		return selfTestDocument{}, err
+	} else if !allowed {
 		return selfTestDocument{}, errOperationalForbidden
 	}
 	switch input.Kind {
@@ -2604,7 +2611,9 @@ func (store *operationalStore) getSelfTest(
 	if id.Validate(environmentID, id.Environment) != nil || id.Validate(selfTestID, id.Prefix("tst")) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, environmentID); err != nil {
+		return selfTestDocument{}, err
+	} else if !allowed {
 		return selfTestDocument{}, errOperationalForbidden
 	}
 	var payload []byte
@@ -2711,4 +2720,27 @@ func rollbackOperational(tx pgx.Tx) {
 	rollbackContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = tx.Rollback(rollbackContext)
+}
+
+// allowedInEnvironment checks a capability for the application an environment
+// belongs to, so application roles count. An unknown environment is simply not
+// allowed; the caller reports it like any other refusal.
+func (store *operationalStore) allowedInEnvironment(ctx context.Context, principal adminauth.Principal, capability adminauth.Capability, environmentID string) (bool, error) {
+	if principal.Allows(capability, adminauth.AuthorizationContext{}) {
+		return true, nil
+	}
+	if !principal.AllowsSomewhere(capability, adminauth.AuthorizationContext{}) {
+		return false, nil
+	}
+	var applicationID string
+	err := store.pool.QueryRow(ctx, `
+		SELECT application_id FROM environments WHERE organization_id = $1 AND environment_id = $2
+	`, principal.OrganizationID, environmentID).Scan(&applicationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("resolve environment application: %w", err)
+	}
+	return principal.AllowsIn(capability, applicationID, adminauth.AuthorizationContext{}), nil
 }

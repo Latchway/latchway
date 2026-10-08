@@ -735,6 +735,9 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		return Principal{}, fmt.Errorf("read admin session role: %w", err)
 	}
 	principal.Method = AuthenticationSession
+	if principal.applicationRoles, err = loadApplicationRoles(ctx, store.pool, principal.OrganizationID, principal.AdminUserID); err != nil {
+		return Principal{}, err
+	}
 	return principal, nil
 }
 
@@ -951,8 +954,16 @@ func (store *Store) CreateAPIToken(
 		PromptBodiesAllowedByPolicy: true,
 		AdminPromptBodiesEnabled:    true,
 	}
+	applicationRoles, err := loadApplicationRoles(ctx, tx, input.OrganizationID, input.AdminUserID)
+	if err != nil {
+		return IssuedAPIToken{}, err
+	}
+	holder := Principal{Role: role}.WithApplicationRoles(applicationRoles)
 	for _, capability := range values {
-		if !role.Allows(capability, maximumContext) || !creator.Allows(capability, maximumContext) {
+		// The holder may have the capability only in some applications; every
+		// use of the token is checked against the target application.
+		// A creator other than the holder is an owner (checked above), who may grant anything the holder has.
+		if !holder.AllowsSomewhere(capability, maximumContext) {
 			return IssuedAPIToken{}, fmt.Errorf("%w: scope %s exceeds role %s", ErrInvalidAdminInput, capability, role)
 		}
 	}
@@ -1076,6 +1087,9 @@ func (store *Store) AuthenticateAPIToken(ctx context.Context, plaintext string) 
 	}
 	principal.Method = AuthenticationAPIToken
 	principal.scope = &scope
+	if principal.applicationRoles, err = loadApplicationRoles(ctx, store.pool, principal.OrganizationID, principal.AdminUserID); err != nil {
+		return Principal{}, err
+	}
 	return principal, nil
 }
 

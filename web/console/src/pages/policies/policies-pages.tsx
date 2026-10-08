@@ -1,4 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 import { z } from "zod";
@@ -462,14 +463,13 @@ function OverrideForm({ draft, onApplied, user }: { draft: EnvironmentDraft; onA
 
 function OverridesView() {
   const workspace = useWorkspace();
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const draft = useEnvironmentDraft();
   const search = OverrideRouteSearchSchema.parse(workspace.search);
   const environmentID = workspace.environment?.id ?? "";
-  const capabilities = session.data?.session?.capabilities ?? [];
-  const canInspect = capabilities.includes("inspect_users");
-  const canApply = compatibility.mutationAllowed && capabilities.includes("activate_configuration") && workspace.application?.status !== "disabled" && workspace.environment?.status !== "disabled";
+  const { can } = useCapabilities();
+  const canInspect = can("inspect_users");
+  const canApply = compatibility.mutationAllowed && can("activate_configuration") && workspace.application?.status !== "disabled" && workspace.environment?.status !== "disabled";
   const [typed, setTyped] = useState(search.user ?? "");
   const [goError, setGoError] = useState<string>();
   const [message, setMessage] = useState<{ text: string; userID: string }>();

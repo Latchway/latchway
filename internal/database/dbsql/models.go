@@ -34,6 +34,17 @@ type AdminApiToken struct {
 	RevokeReason         *string            `db:"revoke_reason" json:"revoke_reason"`
 }
 
+// Per-application roles that raise, never lower, a member's organization role.
+type AdminApplicationRole struct {
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	AdminUserID          string             `db:"admin_user_id" json:"admin_user_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	Role                 string             `db:"role" json:"role"`
+	GrantedByAdminUserID string             `db:"granted_by_admin_user_id" json:"granted_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type AdminBootstrapToken struct {
 	AdminBootstrapTokenID string             `db:"admin_bootstrap_token_id" json:"admin_bootstrap_token_id"`
 	Generation            int16              `db:"generation" json:"generation"`

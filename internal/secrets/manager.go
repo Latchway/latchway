@@ -154,8 +154,12 @@ func (manager *Manager) List(ctx context.Context, principal adminauth.Principal,
 		return nil, fmt.Errorf("begin secret metadata list: %w", err)
 	}
 	defer rollbackManager(tx)
-	if _, err := resolveSecretEnvironment(ctx, tx, principal.OrganizationID, environmentID, false); err != nil {
+	listed, err := resolveSecretEnvironment(ctx, tx, principal.OrganizationID, environmentID, false)
+	if err != nil {
 		return nil, err
+	}
+	if !allowedIn(principal, listed.ApplicationID) {
+		return nil, ErrForbidden
 	}
 
 	var before any
@@ -222,6 +226,9 @@ func (manager *Manager) Create(ctx context.Context, principal adminauth.Principa
 	if err != nil {
 		return Metadata{}, err
 	}
+	if !allowedIn(principal, environment.ApplicationID) {
+		return Metadata{}, ErrForbidden
+	}
 	now, err := secretDatabaseTime(ctx, tx)
 	if err != nil {
 		return Metadata{}, err
@@ -287,6 +294,9 @@ func (manager *Manager) Rotate(ctx context.Context, principal adminauth.Principa
 	environment, name, err := lockSecretEnvironment(ctx, tx, principal.OrganizationID, input.SecretID)
 	if err != nil {
 		return Metadata{}, err
+	}
+	if !allowedIn(principal, environment.ApplicationID) {
+		return Metadata{}, ErrForbidden
 	}
 	current, err := currentSecretMetadata(ctx, tx, environment, name, true)
 	if err != nil {
@@ -355,6 +365,9 @@ func (manager *Manager) Destroy(ctx context.Context, principal adminauth.Princip
 	if err != nil {
 		return err
 	}
+	if !allowedIn(principal, environment.ApplicationID) {
+		return ErrForbidden
+	}
 	current, currentErr := currentSecretMetadata(ctx, tx, environment, name, true)
 	if currentErr != nil && !errors.Is(currentErr, ErrNotFound) {
 		return currentErr
@@ -413,7 +426,12 @@ func (manager *Manager) authorized(ctx context.Context, principal adminauth.Prin
 	return manager != nil && manager.managerMaterial != nil && manager.pool != nil && manager.provider != nil &&
 		ctx != nil && id.Validate(principal.OrganizationID, id.Organization) == nil &&
 		id.Validate(principal.AdminUserID, id.AdminUser) == nil &&
-		principal.Allows(adminauth.ManageSecrets, adminauth.AuthorizationContext{})
+		principal.AllowsSomewhere(adminauth.ManageSecrets, adminauth.AuthorizationContext{})
+}
+
+// allowedIn is the exact check once the secret's application is known.
+func allowedIn(principal adminauth.Principal, applicationID string) bool {
+	return principal.AllowsIn(adminauth.ManageSecrets, applicationID, adminauth.AuthorizationContext{})
 }
 
 func (page PageRequest) validate() error {

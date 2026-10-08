@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -60,14 +61,14 @@ function RevokeReview({ environmentID, installation, onClose, onDone }: { enviro
 }
 
 function OlderInstallsView() {
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const queryClient = useQueryClient();
   const environmentID = workspace.environment?.id ?? "";
   const search = InstallationRouteSearchSchema.parse(workspace.search);
   const linkSearch = { application: search.application, environment: search.environment, organization: search.organization };
-  const canRevoke = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("revoke_installations") ?? false);
+  const { can } = useCapabilities();
+  const canRevoke = compatibility.mutationAllowed && can("revoke_installations");
   const [reviewing, setReviewing] = useState<Installation>();
   const [outcome, setOutcome] = useState<string>();
   const [now] = useState(() => Date.now());

@@ -71,7 +71,7 @@ func (store *operationalStore) createSelfTestSchedule(
 	}
 	if principal.Method != adminauth.AuthenticationAPIToken ||
 		id.Validate(principal.CredentialID, id.AdminAPIToken) != nil ||
-		!principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+		!principal.AllowsSomewhere(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
 		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	credentialID := principal.CredentialID
@@ -98,6 +98,9 @@ func (store *operationalStore) createSelfTestSchedule(
 	}
 	if err != nil {
 		return selfTestScheduleDocument{}, fmt.Errorf("resolve scheduled self-test environment: %w", err)
+	}
+	if !principal.AllowsIn(adminauth.RunSelfTests, applicationID, adminauth.AuthorizationContext{}) {
+		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	prepared, err := store.selfSchedules.Prepare(ctx, credentialSelfTestInput{
 		Scope: configuration.TenantScope{
@@ -241,7 +244,9 @@ func (store *operationalStore) listSelfTestSchedules(
 	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.SelfTestSchedule) != nil {
 		return nil, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, environmentID); err != nil {
+		return nil, err
+	} else if !allowed {
 		return nil, errOperationalForbidden
 	}
 	rows, err := store.pool.Query(ctx, selfTestScheduleSelect+`
@@ -276,7 +281,7 @@ func (store *operationalStore) getSelfTestSchedule(
 	if id.Validate(scheduleID, id.SelfTestSchedule) != nil {
 		return selfTestScheduleDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
 		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	item, err := scanSelfTestSchedule(store.pool.QueryRow(ctx, selfTestScheduleSelect+`
@@ -284,6 +289,9 @@ func (store *operationalStore) getSelfTestSchedule(
 	`, principal.OrganizationID, scheduleID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return selfTestScheduleDocument{}, errOperationalNotFound
+	}
+	if err == nil && !principal.AllowsIn(adminauth.RunSelfTests, item.ApplicationID, adminauth.AuthorizationContext{}) {
+		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	return item, err
 }
@@ -297,7 +305,7 @@ func (store *operationalStore) disableSelfTestSchedule(
 	if id.Validate(scheduleID, id.SelfTestSchedule) != nil || id.Validate(requestID, id.AdminRequest) != nil {
 		return selfTestScheduleDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
 		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -318,6 +326,11 @@ func (store *operationalStore) disableSelfTestSchedule(
 	}
 	if err != nil {
 		return selfTestScheduleDocument{}, fmt.Errorf("lock self-test schedule: %w", err)
+	}
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, environmentID); err != nil {
+		return selfTestScheduleDocument{}, err
+	} else if !allowed {
+		return selfTestScheduleDocument{}, errOperationalForbidden
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE self_test_schedules

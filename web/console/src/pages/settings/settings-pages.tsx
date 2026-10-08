@@ -1,4 +1,5 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 
@@ -28,10 +29,10 @@ function scoped(previous: Record<string, unknown>) {
 
 /** Owners require, or stop requiring, a second factor for every member of this organization. */
 function SignInSecurityCard({ organizationID }: { organizationID: string }) {
-  const session = useConsoleSession();
+  const { can } = useCapabilities();
   const compatibility = useConsoleCompatibility();
   const queryClient = useQueryClient();
-  const owner = session.data?.session?.capabilities.includes("manage_owners") ?? false;
+  const owner = can("manage_owners");
   const status = useQuery(twoFactorStatusQueryOptions);
   const members = useQuery({ enabled: owner, queryFn: async () => (await adminRequest(queryPath("/admin/v1/administrators", { page_size: "200" }), AdministratorPageSchema)).data.items, queryKey: ["team", "members", "security"], retry: false });
   const [confirm, setConfirm] = useState<boolean>();
@@ -75,6 +76,7 @@ function SignInSecurityCard({ organizationID }: { organizationID: string }) {
 function GeneralView() {
   const workspace = useOptionalWorkspace();
   const session = useConsoleSession();
+  const { can } = useCapabilities();
   const organizations = useQuery({ ...organizationsQueryOptions(), enabled: !workspace?.organization });
   const compatibility = useConsoleCompatibility();
   const status = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/system", SystemStatusSchema)).data, queryKey: ["system", "status"], retry: false });
@@ -123,7 +125,7 @@ function GeneralView() {
           <Link className="lw-link lw-note" search={scoped} to="/system-health">Open System Health</Link>
         </Card>
         {organization && compatibility.status?.server_capabilities.includes("admin_two_factor") ? <SignInSecurityCard organizationID={organization.id} /> : null}
-        {organization && compatibility.status?.server_capabilities.includes("admin_sso") && session.data?.session?.capabilities.includes("manage_owners") ? <SingleSignOnCard organizationID={organization.id} /> : null}
+        {organization && compatibility.status?.server_capabilities.includes("admin_sso") && can("manage_owners") ? <SingleSignOnCard organizationID={organization.id} /> : null}
         <Card icon="lock" title="Data handling">
           <ul className="lw-issue-list lw-note">
             <li><strong>Prompts and responses: never stored.</strong> There&apos;s no setting; a configuration that tries to store them is refused when published.</li>
@@ -229,6 +231,7 @@ type Lifecycle = { application: ApplicationResource; enable: boolean; environmen
 
 function ApplicationsView() {
   const session = useConsoleSession();
+  const { can } = useCapabilities();
   const compatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const queryClient = useQueryClient();
@@ -242,7 +245,7 @@ function ApplicationsView() {
   const [problem, setProblem] = useState<AdminProblem>();
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const canManage = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
+  const canManage = compatibility.mutationAllowed && can("activate_configuration");
 
   async function refresh(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ["organization", organizationID, "applications"] });

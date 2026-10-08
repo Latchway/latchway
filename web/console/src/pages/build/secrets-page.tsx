@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { type FormEvent, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -101,11 +102,11 @@ function SecretDrawer({ environmentID, existing, onClose, onDone, rotate }: { en
 
 function SecretsView() {
   const workspace = useWorkspace();
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const draft = useEnvironmentDraft();
   const environmentID = workspace.environment?.id ?? "";
-  const canInspect = session.data?.session?.capabilities.includes("manage_secrets") ?? false;
+  const { can } = useCapabilities();
+  const canInspect = can("manage_secrets");
   const canManage = canInspect && compatibility.mutationAllowed && workspace.application?.status !== "disabled" && workspace.environment?.status !== "disabled";
   const [now] = useState(wallClock);
   const [adding, setAdding] = useState(false);

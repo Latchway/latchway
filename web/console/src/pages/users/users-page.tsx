@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 
@@ -294,7 +295,6 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
 }
 
 function UsersView() {
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const queryClient = useQueryClient();
@@ -302,7 +302,8 @@ function UsersView() {
   const environmentID = environment?.id ?? "";
   const search = UserRouteSearchSchema.parse(workspace.search);
   const linkSearch = { application: search.application, environment: search.environment, organization: search.organization };
-  const canMutate = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("revoke_installations") ?? false);
+  const { can } = useCapabilities();
+  const canMutate = compatibility.mutationAllowed && can("revoke_installations");
   const [review, setReview] = useState<{ action: UserOperationAction; user: ApplicationUser }>();
   const [outcome, setOutcome] = useState<{ message: string; userID: string }>();
   const [selected, setSelected] = useState<string[]>([]);
