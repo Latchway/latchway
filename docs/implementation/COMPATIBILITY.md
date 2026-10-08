@@ -273,6 +273,13 @@ keeps no history and shows no connection table, Self-tests explains that runs
 are found only by ID, and Settings offers no renames; the CLI's
 `status history`, `usage connections`, `verify runs` and `rename` commands
 need the capability.
+The console's Analytics breakdowns by AI connection need
+`admin_operations_history` and its error-code counts need
+`admin_request_search`; without them each card says the server can't break
+usage down that way. Environment lists from servers before 1.2.0 carry no
+`active_revision_id`, so on those servers Overview and Settings can't tell
+whether an environment has a live configuration. Environment mutation
+responses never carry it, so released CLIs keep decoding them strictly.
 
 The console requires Admin contract `1.1.0`, the client contract every 1.1.x
 server advertises. Earlier console builds required `1.0.0`, which put the

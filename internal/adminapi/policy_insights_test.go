@@ -486,6 +486,20 @@ func assertOperationsHistory(t *testing.T, ctx context.Context, pool *pgxpool.Po
 			t.Fatalf("rename %s with a line break status=%d", path, invalid.Code)
 		}
 	}
+	var activeRevisionID string
+	if err := pool.QueryRow(ctx, `SELECT config_revision_id FROM active_config_revisions WHERE environment_id = $1`, environmentID).Scan(&activeRevisionID); err != nil {
+		t.Fatal(err)
+	}
+	listed := performGET(handler, "/admin/v1/applications/"+applicationID+"/environments", cookie)
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"active_revision_id":"`+activeRevisionID+`"`)) {
+		t.Fatalf("environment list status/body=%d %s", listed.Code, listed.Body.String())
+	}
+	// Mutation responses leave it out, so CLIs that decode them strictly keep
+	// working. Renaming to the current name changes nothing and records nothing.
+	if renamed := performJSON(t, handler, http.MethodPatch, "/admin/v1/environments/"+environmentID, map[string]string{"display_name": "Operations Production"}, cookie, csrf, "https://console.example.test"); renamed.Code != http.StatusOK ||
+		bytes.Contains(renamed.Body.Bytes(), []byte("active_revision_id")) {
+		t.Fatalf("environment rename status/body=%d %s", renamed.Code, renamed.Body.String())
+	}
 	for _, action := range []string{"admin.organization_rename", "admin.application_rename", "admin.environment_rename"} {
 		if count := auditActionCount(t, ctx, pool, action); count != 1 {
 			t.Fatalf("%s audit events = %d", action, count)

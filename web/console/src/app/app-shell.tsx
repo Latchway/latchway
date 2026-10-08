@@ -22,6 +22,7 @@ import { pendingInvitation } from "./auth/invitation-link";
 import { ChoosePasswordScreen } from "./auth/choose-password";
 import { TwoFactorEnrollmentScreen } from "./auth/two-factor-enrollment";
 import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
+import { AttentionButton } from "./attention-button";
 import { AuthScreen } from "./auth/auth-screen";
 import { ENDING_SOON_MS, sessionEndText } from "./auth/session-model";
 import { useConsoleCompatibility } from "./console-compatibility-context";
@@ -400,6 +401,7 @@ function AppShellContent() {
             <span>Search</span>
             <kbd className="lw-kbd">{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
           </button>
+          {configured ? <AttentionButton /> : null}
           <Link aria-label={`${healthLabel}. Open system health.`} className={cx("lw-health", overallState !== "available" && `lw-health--${overallState}`)} search={scopeSearch} to="/system-health">
             <span aria-hidden="true" className="lw-badge__dot" />
             <span className="lw-health__text">{healthLabel}</span>

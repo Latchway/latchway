@@ -1,9 +1,11 @@
 import type { APITokenMetadata, UsageSummary } from "../../api/admin";
 import type { HealthResult } from "../../api/health";
+import type { HealthHistory } from "../../api/operations-history";
 import type { ApplicationResource, EnvironmentResource } from "../../api/resources";
 import type { ConsoleRoute } from "../../app/navigation";
 import type { Severity } from "../../ui";
 import { recorded } from "../analytics/usage-model";
+import { checkName } from "../operate/health-model";
 
 export type AttentionGroup = "environment" | "organization" | "gateway";
 
@@ -29,6 +31,8 @@ export interface AttentionInputs {
   application?: ApplicationResource;
   apiTokens?: readonly APITokenMetadata[];
   environment?: EnvironmentResource;
+  /** The newest five-minute sample of the server self-check, when the server keeps them. */
+  healthSample?: HealthHistory["samples"][number];
   latestRevisionState?: string;
   now: number;
   readiness?: HealthResult;
@@ -38,8 +42,10 @@ export interface AttentionInputs {
 const FAILURE_RATE_WARNING_PPM = 50_000;
 const FAILURE_RATE_MIN_REQUESTS = 20;
 const TOKEN_EXPIRY_WINDOW_MS = 14 * 86_400_000;
+/** Three sampling intervals: an older sample says nothing about now. */
+const HEALTH_SAMPLE_MAX_AGE_MS = 15 * 60_000;
 
-export function attentionItems({ apiTokens, application, environment, latestRevisionState, now, readiness, summary }: AttentionInputs): AttentionSource[] {
+export function attentionItems({ apiTokens, application, environment, healthSample, latestRevisionState, now, readiness, summary }: AttentionInputs): AttentionSource[] {
   const items: AttentionSource[] = [];
   const scope = application && environment ? `${application.display_name} · ${environment.display_name}` : "This environment";
 
@@ -70,6 +76,18 @@ export function attentionItems({ apiTokens, application, environment, latestRevi
     if (remaining < 0 || remaining > TOKEN_EXPIRY_WINDOW_MS) continue;
     const days = Math.ceil(remaining / 86_400_000);
     items.push({ actionLabel: "Open API Tokens", detail: "Automation using it stops when it expires. Create a replacement before then.", group: "organization", id: `token-${token.id}`, severity: days <= 1 ? "critical" : "warning", title: `API token "${token.name}" expires ${days <= 1 ? "within a day" : `in ${days} days`}`, to: "/api-tokens" });
+  }
+  if (healthSample && healthSample.overall_state !== "healthy" && now - Date.parse(healthSample.sampled_at) <= HEALTH_SAMPLE_MAX_AGE_MS) {
+    const checks = [...healthSample.failed_checks, ...healthSample.warning_checks].map(checkName);
+    items.push({
+      actionLabel: "Open System Health",
+      detail: checks.length ? `Needs attention: ${checks.join(", ")}.` : "Open System Health for the checks.",
+      group: "gateway",
+      id: "self-check",
+      severity: healthSample.overall_state === "unhealthy" ? "critical" : "warning",
+      title: `The server's self-check is ${healthSample.overall_state}`,
+      to: "/system-health"
+    });
   }
   if (readiness && readiness.state !== "available") {
     const failing = readiness.checks.filter((check) => check.state !== "available");

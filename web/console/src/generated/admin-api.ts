@@ -3914,6 +3914,7 @@ export interface components {
             sticky_by?: string;
             upstream: components["schemas"]["Identifier"];
         };
+        /** @description An environment. `active_revision_id` names the live configuration revision and appears only in environment lists, for environments with one; responses to environment mutations omit it. */
         Environment: {
             active_revision_id?: components["schemas"]["RevisionID"];
             application_id: components["schemas"]["ApplicationID"];

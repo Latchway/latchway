@@ -2,6 +2,42 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 21: analytics projection and attention (branch `console-api-completion`, unreleased)
+
+Server (ADR 0051): environment lists include `active_revision_id`, which the
+contract declared but the server never sent, so Overview's setup checklist,
+its "No active configuration" item and Settings' live revision column now
+reflect real configuration. Mutation responses still omit it for released
+CLIs. Renaming to the current name is a no-op without an audit event.
+
+Console:
+
+- Cost: this UTC month so far, a straight-line month-end projection in exact
+  integer nano-USD (after the first full day), and last month.
+- Cost, Performance and Reliability: per-AI-connection tables from
+  `/usage/connections`; Reliability counts requests by error code from request
+  facets, replacing the "not in the usage API yet" notice.
+- A warning on every Analytics tab when usage is waiting for settlement, no
+  worker is running, or reconciliation is stale (from the server self-check).
+- A header attention button: the count of pressing items from Overview's
+  model (with the last day of usage and the newest health sample) and a
+  popover listing them.
+- Analytics moved to single-segment paths (`/usage`, `/cost`, `/performance`,
+  `/reliability`; separate commit): reloading `/analytics/*` in the embedded
+  console rendered a blank page because assets load by relative URL. A test
+  keeps every route one segment deep.
+
+The earlier note that the month-end projection, per-connection breakdowns,
+per-provider health, settlement-lag warnings and the header attention
+indicator are not built yet no longer applies.
+
+Validation: `go test ./...` against PostgreSQL 16 (environment list with and
+without an active revision, mutation responses without it, no-op renames),
+contract validation and generated references; lint, typecheck, `check:api`,
+`pnpm test` (526 passed), Playwright (46 passed, 1 skipped), the live-stack
+run, build and `verify:reproducible`; a manual pass over `latchway develop` in
+light and dark themes and at phone width.
+
 ## Console completion phase 20: operations history and renames (branch `console-api-completion`, unreleased)
 
 Server (ADR 0050, schema 42, capability `admin_operations_history`):

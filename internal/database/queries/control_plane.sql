@@ -75,11 +75,16 @@ INSERT INTO environments (
 RETURNING environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at;
 
 -- name: ListEnvironments :many
-SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at
-FROM environments
-WHERE organization_id = $1
-  AND application_id = $2
-ORDER BY created_at, environment_id;
+SELECT environment.environment_id, environment.organization_id, environment.application_id, environment.slug,
+       environment.display_name, environment.kind, environment.status, environment.disabled_at, environment.created_at,
+       environment.updated_at, active.config_revision_id AS active_revision_id
+FROM environments AS environment
+LEFT JOIN active_config_revisions AS active
+  ON active.organization_id = environment.organization_id
+ AND active.environment_id = environment.environment_id
+WHERE environment.organization_id = $1
+  AND environment.application_id = $2
+ORDER BY environment.created_at, environment.environment_id;
 
 -- name: AdminSessionView :many
 SELECT
