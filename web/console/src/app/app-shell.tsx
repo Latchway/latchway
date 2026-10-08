@@ -13,6 +13,8 @@ import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, forgetConsoleSession, SESSION_ENDED_EVENT, useConsoleSession } from "../api/session";
 import { Button, buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type MenuEntry, type StatusItem, StatusRail, useFocusTrap } from "../ui";
 import { ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { InvitationClaimDialog } from "./auth/invitation-claim";
+import { pendingInvitation } from "./auth/invitation-link";
 import { ChoosePasswordScreen } from "./auth/choose-password";
 import { TwoFactorEnrollmentScreen } from "./auth/two-factor-enrollment";
 import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
@@ -139,6 +141,8 @@ function AppShellContent() {
   // Keeps the sign-in screen up through steps that already hold a session (choosing an organization, setup done).
   const [authHeld, setAuthHeld] = useState(false);
   const [dialog, setDialog] = useState<"switch" | "reauth">();
+  // An invitation link opened in this tab is offered once a session exists; the token itself stays out of state.
+  const [invitationOpen, setInvitationOpen] = useState(() => Boolean(pendingInvitation()));
   const [endingSoonFor, setEndingSoonFor] = useState<string>();
   const [dismissedFor, setDismissedFor] = useState<string>();
   const { liveness, readiness } = useSystemHealth();
@@ -262,6 +266,7 @@ function AppShellContent() {
 
   function switched(): void {
     setDialog(undefined);
+    setInvitationOpen(false);
     queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== consoleSessionQueryOptions.queryKey[0] });
     void navigate({ search: {}, to: "/" });
   }
@@ -427,6 +432,8 @@ function AppShellContent() {
         <ReauthDialog endReason={expired ? session.data?.endReason : undefined} onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
       ) : dialog === "switch" ? (
         <SwitchOrganizationDialog onClose={() => setDialog(undefined)} onSwitched={switched} session={adminSession} />
+      ) : invitationOpen && pendingInvitation() ? (
+        <InvitationClaimDialog onClose={() => setInvitationOpen(false)} onSignOut={() => void logout()} onSwitched={switched} session={adminSession} />
       ) : null}
     </div>
   );

@@ -160,3 +160,39 @@ func TestValidateRejectsUnsafeCompletionPartition(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadReadsTheInvitationRelay(t *testing.T) {
+	t.Setenv("LATCHWAY_DATABASE_URL", "postgres://localhost/latchway")
+	t.Setenv("LATCHWAY_SMTP_HOST", "smtp.example.test")
+	t.Setenv("LATCHWAY_SMTP_TLS", "implicit")
+	t.Setenv("LATCHWAY_SMTP_USERNAME", "relay")
+	t.Setenv("LATCHWAY_SMTP_PASSWORD", "test-only-relay-password")
+	t.Setenv("LATCHWAY_SMTP_FROM", "Latchway <noreply@example.test>")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SMTP.Host != "smtp.example.test" || cfg.SMTP.Port != 465 || cfg.SMTP.TLS != "implicit" || cfg.SMTP.From != "Latchway <noreply@example.test>" {
+		t.Fatalf("smtp=%+v", cfg.SMTP)
+	}
+}
+
+func TestLoadRefusesAnIncompleteOrPlaintextRelay(t *testing.T) {
+	for name, environment := range map[string]map[string]string{
+		"from without host": {"LATCHWAY_SMTP_FROM": "noreply@example.test"},
+		"host without from": {"LATCHWAY_SMTP_HOST": "smtp.example.test"},
+		"plaintext remote":  {"LATCHWAY_SMTP_HOST": "smtp.example.test", "LATCHWAY_SMTP_FROM": "noreply@example.test", "LATCHWAY_SMTP_TLS": "none"},
+		"non-numeric port":  {"LATCHWAY_SMTP_HOST": "smtp.example.test", "LATCHWAY_SMTP_FROM": "noreply@example.test", "LATCHWAY_SMTP_PORT": "submission"},
+		"password, no user": {"LATCHWAY_SMTP_HOST": "smtp.example.test", "LATCHWAY_SMTP_FROM": "noreply@example.test", "LATCHWAY_SMTP_PASSWORD": "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("LATCHWAY_DATABASE_URL", "postgres://localhost/latchway")
+			for key, value := range environment {
+				t.Setenv(key, value)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}

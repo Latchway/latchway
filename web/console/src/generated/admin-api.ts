@@ -370,6 +370,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation by creating the invited account, and sign in.
+         * @description Public, for addresses without an account: creates it with the chosen
+         *     name and password and its membership, then opens a console session.
+         *     An address that already has an account gets `conflict` and claims the
+         *     invitation after signing in.
+         */
+        post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/invitations/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the signed-in administrator to the organization they were invited to.
+         * @description Console sessions only, and only for the invited address. The session stays where it is; switch organization to use the new membership.
+         */
+        post: operations["claimInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/invitations/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show the holder of an invitation link what they're invited to.
+         * @description Public. Unknown, used, revoked, replaced and expired tokens all answer `resource_not_found`.
+         */
+        post: operations["previewInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1272,6 +1335,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/organizations/{organizationId}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's recent invitations.
+         * @description Requires `manage_owners`. Newest first, at most 200. Tokens and links are never listed.
+         */
+        get: operations["listInvitations"];
+        put?: never;
+        /**
+         * Invite an email address to the organization.
+         * @description Requires `manage_owners`. Returns the invitation link once; its token
+         *     is stored only as a hash, sits in the URL fragment, works once and
+         *     expires after seven days. A new invitation replaces any open one for
+         *     the same address. With `send_email`, the server also emails the link
+         *     through its configured relay (`conflict` when none is configured); a
+         *     failed delivery is recorded and the link is still returned. Refused
+         *     for members other than owners while the organization requires single
+         *     sign-on.
+         */
+        post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/invitations/{invitationId}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an open or expired invitation a new link and seven more days.
+         * @description The earlier link stops working. Optionally emails the new link.
+         */
+        post: operations["renewInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/invitations/{invitationId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop an open invitation from being used. */
+        post: operations["revokeInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/organizations/{organizationId}/sso": {
         parameters: {
             query?: never;
@@ -1817,6 +1948,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptInvitationRequest: {
+            display_name: string;
+            password: string;
+            token: string;
+        };
         AddedPasskey: {
             passkey: components["schemas"]["Passkey"];
             /** @description Present when this passkey is the first second factor; shown once. */
@@ -2053,6 +2189,10 @@ export interface components {
         ChangeOwnPasswordRequest: {
             current_password: string;
             new_password: string;
+        };
+        ClaimedInvitation: {
+            organization_id: components["schemas"]["OrganizationID"];
+            role: components["schemas"]["AdministratorRole"];
         };
         ClaimMapping: {
             [key: string]: components["schemas"]["CELExpression"];
@@ -2813,6 +2953,13 @@ export interface components {
             kind: "development" | "staging" | "production";
             slug: components["schemas"]["Identifier"];
         };
+        CreateInvitationRequest: {
+            display_name?: string;
+            /** Format: email */
+            email: string;
+            role: components["schemas"]["AdministratorRole"];
+            send_email?: boolean;
+        };
         CreateNamedResource: {
             display_name: string;
             slug: components["schemas"]["Identifier"];
@@ -3243,6 +3390,53 @@ export interface components {
             items: components["schemas"]["Installation"][];
             page: components["schemas"]["PageInfo"];
         };
+        Invitation: {
+            /** Format: date-time */
+            accepted_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            display_name?: string;
+            email: string;
+            /** Format: date-time */
+            email_sent_at?: string;
+            /** @enum {string} */
+            email_status: "not_requested" | "sent" | "failed";
+            /** Format: date-time */
+            expires_at: string;
+            id: components["schemas"]["InvitationID"];
+            invited_by: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            role: components["schemas"]["AdministratorRole"];
+            /** @enum {string} */
+            status: "pending" | "accepted" | "revoked" | "expired";
+        };
+        InvitationID: string;
+        InvitationLink: {
+            invitation: components["schemas"]["Invitation"];
+            /** @description The invitation link, shown once; the token is in the fragment. */
+            url: string;
+        };
+        InvitationList: {
+            /** @description True when the server has an SMTP relay for invitation emails. */
+            email_delivery: boolean;
+            items: components["schemas"]["Invitation"][];
+        };
+        InvitationPreview: {
+            /** @description True when the address already has an account */
+            account_exists: boolean;
+            display_name?: string;
+            email: string;
+            /** Format: date-time */
+            expires_at: string;
+            invited_by: string;
+            organization_id: components["schemas"]["OrganizationID"];
+            organization_name: string;
+            role: components["schemas"]["AdministratorRole"];
+        };
+        InvitationTokenRequest: {
+            token: string;
+        };
         Limit: ({
             /** @enum {unknown} */
             algorithm?: "calendar" | "token_bucket" | "concurrency" | "per_request";
@@ -3604,6 +3798,9 @@ export interface components {
         RecoveryCodesRequest: {
             code?: string;
             password?: string;
+        };
+        RenewInvitationRequest: {
+            send_email?: boolean;
         };
         RequestDecisionStage: {
             /** Format: date-time */
@@ -4089,7 +4286,8 @@ export interface components {
                 "admin_account_self_service",
                 "admin_two_factor",
                 "admin_passkeys",
-                "admin_sso"
+                "admin_sso",
+                "admin_invitations"
             ];
             server_version: string;
         };
@@ -4405,6 +4603,7 @@ export interface components {
         InstallationFamilyFilter: components["schemas"]["InstallationFamilyID"];
         InstallationFamilyID: components["schemas"]["InstallationFamilyID"];
         InstallationID: components["schemas"]["InstallationID"];
+        InvitationID: components["schemas"]["InvitationID"];
         OrganizationFilter: components["schemas"]["OrganizationID"];
         OrganizationIDPath: components["schemas"]["OrganizationID"];
         PageSize: number;
@@ -5023,6 +5222,89 @@ export interface operations {
                     "application/json": components["schemas"]["AdminSignInInfo"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    claimInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The joined organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimedInvitation"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreview"];
+                };
+            };
+            404: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -6345,6 +6627,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitations and whether this server can email them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation and its link, shown once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationLink"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    renewInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                invitationId: components["parameters"]["InvitationID"];
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenewInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation and its new link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationLink"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                invitationId: components["parameters"]["InvitationID"];
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked invitation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
                 };
             };
             default: components["responses"]["Problem"];

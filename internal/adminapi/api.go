@@ -27,6 +27,7 @@ import (
 	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/mail"
 	"github.com/latchway/latchway/internal/oidc"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
@@ -50,6 +51,7 @@ type API struct {
 	secretManager   secretManager
 	factors         factorSealer
 	oidc            *oidc.Client
+	mailer          mail.Sender
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -212,6 +214,8 @@ func (api *API) Handler() http.Handler {
 	router.Post("/auth/passkeys/sign-in", api.passkeySignIn)
 	router.Post("/auth/sso/start", api.startSSO)
 	router.Get("/auth/sso/callback", api.ssoCallback)
+	router.Post("/auth/invitations/preview", api.previewInvitation)
+	router.Post("/auth/invitations/accept", api.acceptInvitation)
 	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
@@ -235,6 +239,11 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/organizations/{organizationID}/sso", api.getSSOProvider)
 		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/sso", api.putSSOProvider)
 		protected.With(api.mutationProtection).Delete("/organizations/{organizationID}/sso", api.removeSSOProvider)
+		protected.Get("/organizations/{organizationID}/invitations", api.listInvitations)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations", api.createInvitation)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations/{invitationID}/revoke", api.revokeInvitation)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations/{invitationID}/renew", api.renewInvitation)
+		protected.With(api.mutationProtection).Post("/auth/invitations/claim", api.claimInvitation)
 		protected.Get("/organizations", api.organizations)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
@@ -1505,6 +1514,14 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.organization_security_update", "admin_request"
 	case strings.HasSuffix(path, "/auth/sso/start"):
 		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/invitations/accept") || strings.HasSuffix(path, "/auth/invitations/claim") || strings.HasSuffix(path, "/auth/invitations/preview"):
+		return "admin.invitation_accept", "admin_request"
+	case strings.Contains(path, "/invitations/") && strings.HasSuffix(path, "/revoke"):
+		return "admin.invitation_revoke", "admin_request"
+	case strings.Contains(path, "/invitations/") && strings.HasSuffix(path, "/renew"):
+		return "admin.invitation_renew", "admin_request"
+	case strings.HasSuffix(path, "/invitations"):
+		return "admin.invitation_create", "admin_request"
 	case strings.HasSuffix(path, "/sso") && method == http.MethodDelete:
 		return "admin.sso_remove", "admin_request"
 	case strings.HasSuffix(path, "/sso"):

@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { captureInvitationLink } from "./app/auth/invitation-link";
 import { captureSSOReturn } from "./app/auth/sso-return";
 import { createAppRouter } from "./app/router";
 import { applyStoredTheme } from "./app/theme";
@@ -22,6 +23,7 @@ const queryClient = new QueryClient({
 });
 applyStoredTheme();
 captureSSOReturn();
+captureInvitationLink();
 const router = createAppRouter();
 const container = document.querySelector<HTMLDivElement>("#root");
 

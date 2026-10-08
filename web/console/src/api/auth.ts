@@ -6,6 +6,8 @@ import { getPasskey, type PasskeyAssertionJSON, PasskeyPromptError, PasskeyReque
 export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
   info: "/admin/v1/auth/info",
+  invitationAccept: "/admin/v1/auth/invitations/accept",
+  invitationPreview: "/admin/v1/auth/invitations/preview",
   login: "/admin/v1/auth/login",
   secondFactor: "/admin/v1/auth/login/two-factor",
   logout: "/admin/v1/auth/logout",
@@ -426,6 +428,38 @@ export type SecondFactorAnswer = { code: string } | { recovery_code: string } | 
 
 export function finishSecondFactor(challenge: string, answer: SecondFactorAnswer, signal?: AbortSignal): Promise<AdminSession> {
   return "passkey" in answer ? completeSecondFactorWithPasskey(challenge, signal) : completeSecondFactor({ challenge, ...answer }, signal);
+}
+
+export const InvitationPreviewSchema = z
+  .object({
+    account_exists: z.boolean(),
+    display_name: z.string().min(1).max(200).optional(),
+    email: z.string().min(3).max(320),
+    expires_at: z.iso.datetime({ offset: true }),
+    invited_by: z.string().max(200),
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    organization_name: z.string().max(200),
+    role: z.enum(["owner", "admin", "operator", "viewer"])
+  })
+  .strict();
+
+export type InvitationPreview = z.infer<typeof InvitationPreviewSchema>;
+
+/** What an invitation link is for; anyone holding the link may ask. */
+export async function previewInvitation(token: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<InvitationPreview> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.invitationPreview, { token }, signal, fetcher);
+  const parsed = InvitationPreviewSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid invitation.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return parsed.data;
+}
+
+/** Creates the invited account; the password is read from its input and cleared whatever happens. */
+export async function acceptInvitation(token: string, displayName: string, password: HTMLInputElement | null, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const value = password?.value ?? "";
+  if (password) password.value = "";
+  return submitCredentials(adminAuthEndpoints.invitationAccept, { display_name: displayName.trim(), password: value, token }, signal, fetcher);
 }
 
 const SSOStartSchema = z.object({ authorization_url: z.string().startsWith("https://").max(8192) }).strict();

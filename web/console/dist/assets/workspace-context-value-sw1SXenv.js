@@ -1,0 +1,1 @@
+import{Gn as e,Un as t}from"./control-plane-pages-Dwu9ss91.js";var n=e(t(),1),r=(0,n.createContext)(void 0);function i(){return(0,n.useContext)(r)}function a(){let e=i();if(!e)throw Error(`Workspace context is unavailable.`);return e}export{i as n,a as r,r as t};
