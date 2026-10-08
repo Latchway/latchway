@@ -851,13 +851,19 @@ describe("AppShell", () => {
     expect([...destinations].sort()).toEqual(pages.sort());
   });
 
+  it("keeps every page one path segment deep, since the embedded build loads its assets by relative URL", () => {
+    // A reload of /a/b would fetch /a/assets/… and render nothing; the CSP's base-uri 'none' rules out a <base> tag.
+    const paths = Object.keys(createAppRouter({ history: createMemoryHistory() }).routesByPath);
+    expect(paths.filter((path) => path.split("/").filter(Boolean).length > 1)).toEqual([]);
+  });
+
   it.each([
     ["/usage", "Usage"],
     ["/cost", "Cost"],
     ["/latency", "Performance"],
     ["/errors", "Reliability"],
     ["/attestation-failures", "Reliability"]
-  ])("redirects the retired %s page to the %s tab of Analytics", async (path, tab) => {
+  ])("opens %s, including a pre-redesign link, on the %s tab of Analytics", async (path, tab) => {
     installConfiguredFetch();
     renderConsole(`${path}?environment_id=env_0123456789abcdef&interval=hour`);
     const sectionTabs = await screen.findByRole("navigation", { name: "Analytics pages" });

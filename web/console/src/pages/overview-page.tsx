@@ -95,7 +95,7 @@ function OperatingOverview() {
   const cost = summary ? recorded(summary.values, "cost_nano_usd") : null;
   const previousCost = usage.previous ? recorded(usage.previous.values, "cost_nano_usd") : undefined;
   const periodName = period.id === "custom" ? "period" : period.id;
-  const openAnalytics = (to: "/analytics/usage" | "/analytics/cost" | "/analytics/performance" | "/analytics/reliability") => void navigate({ search: (previous) => previous, to });
+  const openAnalytics = (to: "/usage" | "/cost" | "/performance" | "/reliability") => void navigate({ search: (previous) => previous, to });
   const points = buckets(usage.window, usage.series).map((bucket) => ({ label: bucket.label, title: bucket.title, values: { requests: bucket.values?.logical_requests ?? 0 } }));
   const topFeatures = [...(analytics?.by_feature.items ?? [])].sort((a, b) => b.request_count - a.request_count).slice(0, 5);
   const modelTotal = analytics?.by_model.items.reduce((sum, item) => sum + item.request_count, 0) ?? 0;
@@ -144,10 +144,10 @@ function OperatingOverview() {
         {analytics && summary ? (
           <Card flush>
             <StatStrip>
-              <MetricTile color="var(--accent-subtle)" delta={percentChange(analytics.request_count, before?.request_count)} footnote={before ? `vs previous ${periodName}` : "Logical requests"} label="Requests" onClick={() => openAnalytics("/analytics/usage")} value={formatCount(analytics.request_count)} />
-              <MetricTile color="var(--destructive)" delta={pointChange(analytics.failure_rate, before?.failure_rate)} deltaUnit=" pts" footnote={`${analytics.failure_rate.numerator.toLocaleString()} failed requests`} higherIsBetter={false} label="Failed" onClick={() => openAnalytics("/analytics/reliability")} value={ratePercent(analytics.failure_rate, 2)} />
-              <MetricTile delta={before?.time_to_first_token.samples ? percentChange(analytics.time_to_first_token.p95_ms, before.time_to_first_token.p95_ms) : undefined} footnote={`${analytics.time_to_first_token.samples.toLocaleString()} streaming requests`} higherIsBetter={false} label="p95 first token" onClick={() => openAnalytics("/analytics/performance")} value={analytics.time_to_first_token.samples ? formatMs(analytics.time_to_first_token.p95_ms) : "—"} />
-              <MetricTile color="var(--orange)" delta={percentChange(cost, previousCost)} footnote="At your configured prices" higherIsBetter={false} label="Cost" onClick={() => openAnalytics("/analytics/cost")} value={formatMoney(cost)} />
+              <MetricTile color="var(--accent-subtle)" delta={percentChange(analytics.request_count, before?.request_count)} footnote={before ? `vs previous ${periodName}` : "Logical requests"} label="Requests" onClick={() => openAnalytics("/usage")} value={formatCount(analytics.request_count)} />
+              <MetricTile color="var(--destructive)" delta={pointChange(analytics.failure_rate, before?.failure_rate)} deltaUnit=" pts" footnote={`${analytics.failure_rate.numerator.toLocaleString()} failed requests`} higherIsBetter={false} label="Failed" onClick={() => openAnalytics("/reliability")} value={ratePercent(analytics.failure_rate, 2)} />
+              <MetricTile delta={before?.time_to_first_token.samples ? percentChange(analytics.time_to_first_token.p95_ms, before.time_to_first_token.p95_ms) : undefined} footnote={`${analytics.time_to_first_token.samples.toLocaleString()} streaming requests`} higherIsBetter={false} label="p95 first token" onClick={() => openAnalytics("/performance")} value={analytics.time_to_first_token.samples ? formatMs(analytics.time_to_first_token.p95_ms) : "—"} />
+              <MetricTile color="var(--orange)" delta={percentChange(cost, previousCost)} footnote="At your configured prices" higherIsBetter={false} label="Cost" onClick={() => openAnalytics("/cost")} value={formatMoney(cost)} />
             </StatStrip>
             <VolumeChart
               bars={["requests"]}

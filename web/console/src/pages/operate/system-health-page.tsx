@@ -199,7 +199,7 @@ function HealthView() {
         {report ? <><h2 className="lw-section-title">Gateway <span className="lw-faint lw-note">From the server&apos;s self-check</span></h2><Gateway now={now} report={report} server={status.data} /></> : null}
         <Card icon="connections" title="AI providers">
           {history && workspace?.environment ? <ConnectionHealthTable environmentID={workspace.environment.id} environmentName={workspace.environment.display_name} /> : null}
-          <p className="lw-note">Latchway doesn&apos;t ping providers. Their health comes from the attempts your requests made: see errors, timeouts and latency per model on <Link className="lw-link" search={scoped} to="/analytics/reliability">Analytics › Reliability</Link>{report?.checks.some((check) => check.id === "ai_connection_health") ? <>, and the server&apos;s <code className="lw-code-inline">ai_connection_health</code> check below</> : null}.</p>
+          <p className="lw-note">Latchway doesn&apos;t ping providers. Their health comes from the attempts your requests made: see errors, timeouts and latency per model on <Link className="lw-link" search={scoped} to="/reliability">Analytics › Reliability</Link>{report?.checks.some((check) => check.id === "ai_connection_health") ? <>, and the server&apos;s <code className="lw-code-inline">ai_connection_health</code> check below</> : null}.</p>
         </Card>
         {report ? (
           <Card actions={<Segmented items={[{ id: "open", label: "Not passed" }, { id: "all", label: "All" }]} label="Checks" onChange={setFilter} value={filter} />} icon="check" meta={`${report.checks.length}`} title="All checks">
