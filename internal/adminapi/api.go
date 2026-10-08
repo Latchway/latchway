@@ -251,6 +251,9 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations/{invitationID}/renew", api.renewInvitation)
 		protected.With(api.mutationProtection).Post("/auth/invitations/claim", api.claimInvitation)
 		protected.Get("/organizations", api.organizations)
+		protected.With(api.mutationProtection).Patch("/organizations/{organizationID}", api.renameOrganization)
+		protected.With(api.mutationProtection).Patch("/applications/{applicationID}", api.renameApplication)
+		protected.With(api.mutationProtection).Patch("/environments/{environmentID}", api.renameEnvironment)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
 		protected.With(api.mutationProtection).Post("/applications", api.createApplication)
@@ -280,6 +283,7 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Delete("/simulation-scenarios/{scenarioID}", api.deleteSimulationScenario)
 		protected.Get("/user-overrides", api.userOverrides)
 		protected.Get("/usage/distribution", api.usageDistribution)
+		protected.Get("/usage/connections", api.usageConnections)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
 		protected.Get("/secrets", api.secrets)
@@ -341,9 +345,11 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/self-test-schedules/{scheduleID}", api.selfTestSchedule)
 		protected.With(api.mutationProtection).Delete("/self-test-schedules/{scheduleID}", api.disableSelfTestSchedule)
 		protected.With(api.mutationProtection).Post("/self-tests", api.startSelfTest)
+		protected.Get("/self-tests", api.selfTests)
 		protected.Get("/self-tests/{selfTestID}", api.selfTest)
 		protected.Get("/system", api.systemStatus)
 		protected.Get("/system/doctor", api.systemDoctor)
+		protected.Get("/system/health-history", api.systemHealthHistory)
 		protected.Get("/system/support-bundle", api.systemSupportBundle)
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -1583,6 +1589,12 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.environment_enable", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
 		return "admin.configuration_revision_create", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/organizations/"):
+		return "admin.organization_rename", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/applications/"):
+		return "admin.application_rename", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/environments/"):
+		return "admin.environment_rename", "admin_request"
 	case strings.HasSuffix(path, "/simulation-scenarios") && method == http.MethodPost:
 		return "admin.simulation_scenario_create", "admin_request"
 	case strings.Contains(path, "/simulation-scenarios/") && method == http.MethodPut:

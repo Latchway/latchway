@@ -115,7 +115,13 @@ of silently rebinding.
 latchway verify schedule list --environment env_...
 latchway verify schedule get sts_...
 latchway verify schedule disable sts_...
+latchway verify runs --environment env_... --schedule sts_...
 ```
+
+`verify runs` (and `GET /admin/v1/self-tests`) lists an environment's runs,
+newest first, filtered by schedule or state. It needs `run_self_tests` in the
+environment and a server that advertises `admin_operations_history`; older
+servers return a run only by its ID.
 
 Self-tests are bounded canaries, not load generators. Protected release evidence
 must still run against the exact candidate image and retain authenticated

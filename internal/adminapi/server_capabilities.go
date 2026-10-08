@@ -29,6 +29,7 @@ const (
 	serverCapabilityAdminRequestSearch        serverCapability = "admin_request_search"
 	serverCapabilityAdminConfigurationDrafts  serverCapability = "admin_configuration_drafts"
 	serverCapabilityAdminPolicyInsights       serverCapability = "admin_policy_insights"
+	serverCapabilityAdminOperationsHistory    serverCapability = "admin_operations_history"
 )
 
 // supportedServerCapabilities is intentionally ordered and closed. Append-only
@@ -58,6 +59,7 @@ var supportedServerCapabilities = [...]serverCapability{
 	serverCapabilityAdminRequestSearch,
 	serverCapabilityAdminConfigurationDrafts,
 	serverCapabilityAdminPolicyInsights,
+	serverCapabilityAdminOperationsHistory,
 }
 
 func serverCapabilities() []serverCapability {

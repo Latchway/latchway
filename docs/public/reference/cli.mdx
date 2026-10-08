@@ -64,6 +64,7 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway readiness` | Probe the remote unauthenticated readiness contract |
 | `latchway version` | Print build, contract, and protocol metadata |
 | `latchway status` | Read authenticated remote system status |
+| `latchway status history` | Read the server self-check sampled every five minutes |
 
 The local `doctor` command uses one transient database connection and does not
 represent the serving process's pool allocation. Use `readiness` or the Admin
@@ -87,6 +88,8 @@ latchway applications disable app_... --reason 'contain compromised release'
 latchway applications enable app_...
 latchway environments disable env_... --reason 'isolate production traffic'
 latchway environments enable env_...
+latchway applications rename app_... --name 'Mobile App'
+latchway environments rename env_... --name 'Production (EU)'
 
 latchway --output json config pull --environment env_...
 latchway config pull --environment env_... --format yaml > environment.yaml
@@ -133,6 +136,12 @@ for future enrollment; it never revives a revoked credential. Disabled scopes
 remain available to authorized forensic request, usage, audit, user,
 installation, family, and configuration reads, while execution and mutations
 fail closed.
+
+`rename` changes only an application's or environment's display name (1 to
+200 characters, needing `activate_configuration` in the application). Slugs
+never change, so configuration, URLs and scripts keep working. Nothing can be
+deleted: request, usage and audit history must stay attached, so disable a
+scope to retire it.
 
 Secret values can come from stdin, a regular file, a file descriptor, or a
 named environment variable. They are not accepted as command arguments or
@@ -231,6 +240,7 @@ latchway requests inspect req_...
 latchway requests facets --environment env_...
 latchway usage summary --environment env_...
 latchway usage timeseries --environment env_... --interval hour
+latchway usage connections --environment env_... --interval day
 latchway audit --organization org_...
 ```
 
@@ -245,6 +255,14 @@ modify them.
 a count of every match, capped at 100,000. `requests facets` counts requests
 in a range of at most 90 days (24 hours by default) by each filterable value.
 Both need a server that advertises `admin_request_search`.
+
+`usage connections` summarizes each AI connection's upstream attempts from
+what requests recorded: outcomes, 429 and 5xx counts, how often a failure
+moved to another attempt, first-byte latency, the commonest failure and cost.
+It covers at most 90 days, or 14 days with `--interval hour`. `status history`
+prints the worker's five-minute health samples (24 hours by default, at most
+7 days), and `verify runs` lists recent self-test runs. All three need a server
+that advertises `admin_operations_history`.
 
 Family renewal expires root trust and refresh credentials before future
 refresh or provisioning; it does not revoke already-issued access grants before
@@ -337,6 +355,7 @@ latchway verify schedule create \
 latchway verify schedule list --environment env_...
 latchway verify schedule get sts_...
 latchway verify schedule disable sts_...
+latchway verify runs --environment env_... --state failed
 ```
 
 ## Completion and exit behavior
