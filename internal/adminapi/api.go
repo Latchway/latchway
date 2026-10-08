@@ -203,10 +203,16 @@ func (api *API) Handler() http.Handler {
 	router.Use(api.auditMetadata)
 	router.Post("/auth/bootstrap", api.bootstrap)
 	router.Post("/auth/login", api.login)
+	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
 		protected.Get("/auth/session", api.session)
 		protected.With(api.mutationProtection).Post("/auth/logout", api.logout)
+		protected.With(api.mutationProtection).Post("/auth/password", api.changeOwnPassword)
+		protected.With(api.mutationProtection).Post("/auth/organization", api.switchOrganization)
+		protected.Get("/auth/sessions", api.ownSessions)
+		protected.With(api.mutationProtection).Post("/auth/sessions/revoke-others", api.revokeOtherOwnSessions)
+		protected.With(api.mutationProtection).Post("/auth/sessions/{adminSessionID}/revoke", api.revokeOwnSession)
 		protected.Get("/organizations", api.organizations)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
@@ -407,7 +413,18 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
-	membership, ok := selectMembership(view.Memberships, request.OrganizationID)
+	signIn, err := api.auth.SignInState(r.Context(), adminUserID)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	requestedOrganization := request.OrganizationID
+	if requestedOrganization == "" && signIn.LastOrganizationID != "" {
+		if _, ok := selectMembership(view.Memberships, signIn.LastOrganizationID); ok {
+			requestedOrganization = signIn.LastOrganizationID
+		}
+	}
+	membership, ok := selectMembership(view.Memberships, requestedOrganization)
 	if !ok {
 		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
 		return
@@ -420,6 +437,7 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 	issued, err := api.auth.CreateSession(r.Context(), adminauth.CreateSessionInput{
 		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
 		Lifetime: api.sessionLifetime, RequestID: auditRequestID,
+		DeviceSummary: adminauth.DeviceSummaryFromUserAgent(r.UserAgent()),
 	})
 	if err != nil {
 		api.internal(w, r, err)
@@ -431,6 +449,7 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
 		Role: membership.Role, Method: adminauth.AuthenticationSession,
 		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
+		PasswordResetRequired: signIn.PasswordResetRequired,
 	}))
 }
 
@@ -799,7 +818,16 @@ func (api *API) requireETag(w http.ResponseWriter, r *http.Request) (string, boo
 }
 
 func (api *API) apiTokens(w http.ResponseWriter, r *http.Request) {
-	items, err := api.auth.ListAPITokens(r.Context(), mustPrincipal(r.Context()))
+	scope, scoped := r.URL.Query()["scope"]
+	if !onlyQueryKeys(r, "scope") || (scoped && (len(scope) != 1 || scope[0] != "organization")) {
+		api.writeProblem(w, r, invalidRequest("The API token query is invalid."))
+		return
+	}
+	list := api.auth.ListAPITokens
+	if scoped {
+		list = api.auth.ListOrganizationAPITokens
+	}
+	items, err := list(r.Context(), mustPrincipal(r.Context()))
 	if err != nil {
 		api.handleAdminAuthError(w, r, err)
 		return
@@ -989,7 +1017,15 @@ func (api *API) authenticate(next http.Handler) http.Handler {
 			err = adminauth.ErrAdminAuthentication
 		}
 		if err != nil {
+			if cookieErr == nil && bearer == "" {
+				api.writeProblem(w, r, api.sessionFailureProblem(r, cookie.Value))
+				return
+			}
 			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Administrator authentication is required."})
+			return
+		}
+		if principal.PasswordResetRequired && !passwordChangeAllows(r) {
+			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Choose a new password before using the console."})
 			return
 		}
 		auditContext, auditErr := adminauth.ResolveAuditMetadata(r.Context(), principal.Method)
@@ -1053,9 +1089,10 @@ func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth
 		}
 	}
 	return map[string]any{
-		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true},
+		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true, "display_name": view.DisplayName},
 		"organization_id": principal.OrganizationID, "memberships": view.Memberships,
 		"capabilities": capabilities, "expires_at": expiresAt,
+		"password_reset_required": principal.PasswordResetRequired,
 	}
 }
 

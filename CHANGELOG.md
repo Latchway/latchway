@@ -4,6 +4,29 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Administrator account self-service (ADR 0040, Admin bundle edition 1.1.3,
+  `admin_account_self_service`): change your own password, list and sign out
+  your own console sessions, switch organization without signing in again,
+  and see why a console session ended. Owners can list every administrator's
+  API tokens with their last use, and session lists show a coarse device
+  summary. `GET /admin/v1/auth/info` reports what the sign-in screen needs.
+- The redesigned admin console, including a stepped Setup wizard.
+- A pull-request CI workflow covering contracts, Go with PostgreSQL, the
+  console and the live first-run test.
+
+### Changed
+
+- Passwords set by an owner (administrator creation or reset) must be changed
+  at the administrator's next sign-in before anything else works.
+- A sign-in that names no organization uses the administrator's last one.
+
+### Fixed
+
+- The embedded console required Admin contract 1.0.0 while 1.1.x servers
+  advertise 1.1.0, leaving it in read-only safe mode.
+
 ## [1.1.7] - 2026-09-23
 
 ### Added

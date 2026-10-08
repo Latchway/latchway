@@ -90,7 +90,7 @@ class ContractDocumentVersionTests(unittest.TestCase):
     def test_current_documents_use_their_own_coordinates(self) -> None:
         manifest = MODULE.load_document(ROOT / "api/protocol-version.json")
         bundle_version, client_version = MODULE.contract_document_versions(manifest)
-        self.assertEqual((bundle_version, client_version), ("1.1.2", "1.1.0"))
+        self.assertEqual((bundle_version, client_version), ("1.1.3", "1.1.0"))
         for filename, expected in (
             ("client.openapi.yaml", client_version),
             ("admin.openapi.yaml", bundle_version),

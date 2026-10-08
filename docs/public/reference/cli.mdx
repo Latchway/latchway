@@ -156,11 +156,17 @@ latchway admin api-tokens create \
 latchway admin api-tokens revoke tok_...
 ```
 
+A password set with `accounts create` or `accounts reset-password` is
+temporary: the administrator must choose their own at their next console
+sign-in before anything else works. The CLI authenticates with API tokens and
+cannot change its holder's own password; use the console's Your account page.
+
 Administrator-session commands require an API token scoped with
 `manage_owners`. List output is bounded metadata only: session and
-administrator IDs, administrator email, lifecycle timestamps, status, and the
-`current` flag. It excludes credentials, token hints or hashes, CSRF and
-network metadata, and revocation reasons. API-token-authenticated CLI requests
+administrator IDs, administrator email, a coarse "Browser on OS" device summary,
+lifecycle timestamps, status, and the `current` flag. It excludes credentials,
+token hints or hashes, CSRF material, raw User-Agent strings, network
+addresses, and revocation reasons. API-token-authenticated CLI requests
 always receive `current: false`. Revocation is immediate and deliberately has
 no `--reason` option because the server owns the persisted reason; retrying a
 successful same-organization revocation is idempotent.

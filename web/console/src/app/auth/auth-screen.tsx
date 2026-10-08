@@ -1,24 +1,28 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import {
   type AdminProblem,
   type AdminSession,
   bootstrapFirstOwner,
+  fetchAdminSignInInfo,
   loginAdministrator,
   logoutAdministrator,
-  problemFromError
+  problemFromError,
+  switchAdminOrganization
 } from "../../api/auth";
-import { overallHealthState, useSystemHealth } from "../../api/health";
+import { consoleContractVersion } from "../../api/console-compatibility";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { PasswordField } from "../../components/password-field";
 import { ROLE_LABEL } from "../../pages/team/roles";
-import { Button, Field, Icon, Input, Logo, Notice, Segmented } from "../../ui";
+import { Badge, Button, Field, Icon, Input, Notice, Segmented } from "../../ui";
 import { AuthProblem, PasswordInput } from "./auth-fields";
+import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
-import { acceptable, passwordStrength, STRENGTH_TEXT, type Strength } from "./password-strength";
+import { acceptable, passwordStrength, type Strength } from "./password-strength";
+import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
 
 type View = "sign-in" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
@@ -33,67 +37,6 @@ function formText(form: HTMLFormElement, name: string): string {
 
 function clearInput(input: HTMLInputElement | null): void {
   if (input) input.value = "";
-}
-
-function BrandArt() {
-  return (
-    <svg aria-hidden="true" className="lw-auth__art" viewBox="0 0 520 300">
-      <rect className="is-tint" height="300" rx="24" width="520" />
-      <rect className="is-ink" height="44" rx="12" width="184" x="40" y="48" />
-      <rect className="is-pill-b" height="12" rx="6" width="96" x="60" y="64" />
-      <rect className="is-accent" height="44" rx="12" width="184" x="40" y="128" />
-      <rect className="is-pill-a" height="12" rx="6" width="120" x="60" y="144" />
-      <rect className="is-ink" height="44" rx="12" width="184" x="40" y="208" />
-      <rect className="is-pill-b" height="12" rx="6" width="72" x="60" y="224" />
-      <rect className="is-accent" height="8" rx="4" width="72" x="240" y="146" />
-      <rect className="is-accent" height="156" rx="20" width="160" x="320" y="72" />
-      <rect className="is-pill-a" height="12" rx="6" width="96" x="344" y="100" />
-      <rect className="is-pill-a" height="12" rx="6" width="64" x="344" y="124" />
-      <rect className="is-prod" height="28" rx="14" width="112" x="344" y="176" />
-      <rect className="is-pill-c" height="8" rx="4" width="48" x="260" y="70" />
-      <rect className="is-pill-c" height="8" rx="4" width="48" x="260" y="230" />
-    </svg>
-  );
-}
-
-/** What the browser can see about this server before sign-in: its host and the public health endpoints. */
-function ServerFacts() {
-  const { liveness, readiness } = useSystemHealth();
-  const state = overallHealthState(liveness.data, readiness.data);
-  const version = liveness.data?.version ?? readiness.data?.version;
-  const status = state === "available" ? "Reachable and ready" : state === "degraded" ? "Reachable, not ready" : state === "unavailable" ? "Not reachable" : "Checking…";
-  return (
-    <section aria-label="This server" className="lw-auth__facts">
-      <strong>This server</strong>
-      <dl>
-        <div><dt>Host</dt><dd>{window.location.host}</dd></div>
-        <div><dt>Version</dt><dd>{version ?? (state === "unavailable" ? "Unknown" : "Not reported before sign-in")}</dd></div>
-        <div><dt>Status</dt><dd>{state === "loading" ? null : <span aria-hidden="true" className={state === "available" ? "lw-auth__dot" : "lw-auth__dot is-down"} />}{status}</dd></div>
-      </dl>
-    </section>
-  );
-}
-
-function AuthLayout({ children, description, title }: { children: ReactNode; description?: ReactNode; title: string }) {
-  return (
-    <div className="lw-auth">
-      <div className="lw-auth__panel">
-        <main className="lw-auth__main" id="main-content">
-          <div className="lw-auth__head">
-            <Logo />
-            <h1>{title}</h1>
-            {description ? <p>{description}</p> : null}
-          </div>
-          <div className="lw-auth__body">{children}</div>
-        </main>
-        <p className="lw-auth__foot">Latchway console · Your session cookie stays on this server.</p>
-      </div>
-      <aside aria-label="About this server" className="lw-auth__brand">
-        <BrandArt />
-        <ServerFacts />
-      </aside>
-    </div>
-  );
 }
 
 function SignInHelp() {
@@ -132,11 +75,13 @@ function PauseNotice({ onElapsed, until }: { onElapsed: () => void; until: numbe
   );
 }
 
-function SignInView({ email, emailRef, failures, hidden, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
+function SignInView({ email, emailRef, endReason, failures, mismatch, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
   email: string;
   emailRef: RefObject<HTMLInputElement | null>;
+  endReason?: string;
   failures: number;
-  hidden: boolean;
+  /** The server's advertised contract when it differs from this console's. */
+  mismatch?: string;
   onSetup: () => void;
   onSubmit: () => void;
   passwordRef: RefObject<HTMLInputElement | null>;
@@ -153,7 +98,9 @@ function SignInView({ email, emailRef, failures, hidden, onSetup, onSubmit, pass
     onSubmit();
   }
   return (
-    <div className="lw-auth__body" hidden={hidden}>
+    <div className="lw-auth__body">
+      {mismatch ? <Notice title="This console and server are from different releases." tone="warning">The console expects contract {consoleContractVersion}; the server reports {mismatch}. Sign-in may fail until an upgrade finishes; reload this page afterwards.</Notice> : null}
+      {endReason ? <Notice title="Your session ended">{endReason}</Notice> : null}
       <form aria-busy={pending} className="lw-auth__form" onSubmit={submit}>
         <Field id="login-email" label="Email address">
           <div className="lw-input-box">
@@ -184,6 +131,7 @@ function ChooseOrganizationView({ onBack, onChoose, pending, problem, session }:
             <button aria-busy={pending === membership.organization_id} className="lw-orglist__item" disabled={Boolean(pending)} onClick={() => onChoose(membership.organization_id)} type="button">
               <span aria-hidden="true" className="lw-orglist__tile">{name.slice(0, 1).toUpperCase()}</span>
               <span className="lw-orglist__text"><strong>{name}</strong><span>{ROLE_LABEL[membership.role]}{organization ? ` · ${organization.slug}` : ""}</span></span>
+              {membership.organization_id === session.organization_id ? <Badge title="Your last organization, or your first membership">Default</Badge> : null}
               <Icon name={pending === membership.organization_id ? "spinner" : "chevronRight"} spin={pending === membership.organization_id} />
             </button>
           </li>
@@ -194,22 +142,6 @@ function ChooseOrganizationView({ onBack, onChoose, pending, problem, session }:
     {problem ? <AuthProblem problem={problem} /> : null}
     <Button className="lw-auth__link" disabled={Boolean(pending)} onClick={onBack} size="sm" variant="ghost">Sign in as someone else</Button>
   </>;
-}
-
-const STRENGTH_BARS: Readonly<Record<Strength, number>> = { good: 2, strong: 3, "too-short": 0, weak: 1 };
-const STRENGTH_COLOR: Readonly<Record<Strength, string>> = { good: "var(--success)", strong: "var(--success)", "too-short": "var(--foreground-secondary)", weak: "var(--destructive)" };
-
-function StrengthMeter({ strength }: { strength?: Strength }) {
-  const filled = strength ? STRENGTH_BARS[strength] : 0;
-  const color = strength ? STRENGTH_COLOR[strength] : "var(--foreground-secondary)";
-  return (
-    <div className="lw-strength">
-      <div aria-hidden="true" className="lw-strength__bars">
-        {[0, 1, 2].map((bar) => <span key={bar} style={{ background: bar < filled ? color : "var(--border)" }} />)}
-      </div>
-      <span aria-live="polite" className="lw-strength__label" style={{ color }}>{strength ? `Strength: ${STRENGTH_TEXT[strength]}` : "Use at least 12 characters; Good or better is required."}</span>
-    </div>
-  );
 }
 
 function SetupView({ onCancel, onSubmit, pending, problem }: { onCancel: () => void; onSubmit: (form: HTMLFormElement, password: HTMLInputElement | null) => void; pending: boolean; problem?: AdminProblem }) {
@@ -331,10 +263,13 @@ function SetupDoneView({ onContinue }: { onContinue: (to?: "/setup") => void }) 
  * Passwords and the bootstrap token stay in their inputs and are cleared as soon as a request finishes; the parent
  * keeps this screen up while `onHoldChange(true)` so a background session refresh can't skip a step.
  */
-export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { checking: boolean; mode: "configured" | "signed-out" | "unknown"; onHoldChange: (held: boolean) => void; retry: () => void; retrying: boolean }) {
+export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, retrying }: { checking: boolean; endReason?: string; mode: "configured" | "signed-out" | "unknown"; onHoldChange: (held: boolean) => void; retry: () => void; retrying: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const info = useQuery({ queryFn: ({ signal }) => fetchAdminSignInInfo(signal), queryKey: ["admin-sign-in-info"], retry: false, staleTime: 60_000 });
   const [view, setView] = useState<View>(() => (lastSignedOutEmail() ? "signed-out" : "sign-in"));
+  // An open setup leads with Set up Latchway until the operator chooses sign-in instead.
+  const [preferSignIn, setPreferSignIn] = useState(false);
   const [email, setEmail] = useState(() => lastSignedOutEmail() ?? "");
   const [pending, setPending] = useState<string>();
   const [problem, setProblem] = useState<AdminProblem>();
@@ -374,9 +309,9 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     onHoldChange(true);
     try {
       const session = await loginAdministrator({ email: address, password });
+      clearInput(passwordRef.current);
       setFailures(0);
       if (session.memberships.length > 1) {
-        // The password stays in its (now hidden) input so choosing another organization can sign in to it.
         setChosen(session);
         setPending(undefined);
         setView("choose-org");
@@ -400,14 +335,11 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     setPending(organizationID);
     setProblem(undefined);
     try {
-      // End the session the first sign-in opened before opening one for the chosen organization.
-      await logoutAdministrator();
-      const session = await loginAdministrator({ email: email.trim(), organization_id: organizationID, password: passwordRef.current?.value ?? "" });
-      enter(session);
+      // The server replaces the session it just issued with one for the chosen organization.
+      enter(await switchAdminOrganization(organizationID));
     } catch (error) {
-      fail(error);
-      setChosen(undefined);
-      setView("sign-in");
+      setProblem(problemFromError(error));
+      setPending(undefined);
     }
   }
 
@@ -470,9 +402,11 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     );
   }
 
-  const signInView = <SignInView email={email} emailRef={emailRef} failures={failures} hidden={view === "choose-org"} onSetup={() => show("setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in"} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const mismatch = info.data && info.data.contract_version !== consoleContractVersion ? info.data.contract_version : undefined;
+  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in"} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const current: View = view === "sign-in" && info.data?.setup_open && !preferSignIn ? "setup" : view;
 
-  switch (view) {
+  switch (current) {
     case "signed-out":
       return (
         <AuthLayout description={email ? `${email} signed out of this server.` : "You signed out of this server."} title="You're signed out">
@@ -482,7 +416,7 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     case "setup":
       return (
         <AuthLayout description="Create the first owner and organization for a new server. You need the one-time bootstrap token from the server's environment." title="Set up Latchway">
-          <SetupView onCancel={() => show("sign-in")} onSubmit={(form, password) => void createOwner(form, password)} pending={pending === "setup"} problem={problem} />
+          <SetupView onCancel={() => { setPreferSignIn(true); show("sign-in"); }} onSubmit={(form, password) => void createOwner(form, password)} pending={pending === "setup"} problem={problem} />
         </AuthLayout>
       );
     case "setup-done":
@@ -501,7 +435,6 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     case "choose-org":
       return (
         <AuthLayout description={`${email.trim()} belongs to more than one organization. Each session works in one; you can switch later from your account menu.`} title="Choose an organization">
-          {signInView}
           {chosen ? <ChooseOrganizationView onBack={() => void signInAsSomeoneElse()} onChoose={(id) => void chooseOrganization(id)} pending={pending} problem={problem} session={chosen} /> : null}
         </AuthLayout>
       );

@@ -31,6 +31,7 @@ import {
 } from "./route-search";
 
 // Pages load on first visit so the sign-in screen and shell stay small.
+const AccountPage = lazyRouteComponent(() => import("../pages/account/account-page"), "AccountPage");
 const SystemHealthPage = lazyRouteComponent(() => import("../pages/operate/system-health-page"), "SystemHealthPage");
 const SelfTestsPage = lazyRouteComponent(() => import("../pages/operate/self-tests-page"), "SelfTestsPage");
 const ApplicationsSettingsPage = lazyRouteComponent(() => import("../pages/settings/settings-pages"), "ApplicationsSettingsPage");
@@ -78,6 +79,8 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/"
 });
+
+const accountRoute = createRoute({ component: AccountPage, getParentRoute: () => rootRoute, path: "/account" });
 
 const systemHealthRoute = createRoute({
   component: SystemHealthPage,
@@ -182,6 +185,7 @@ const auditRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
+  accountRoute,
   indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute, adminSessionsRoute, rolesRoute,
   authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
   componentDefinitionsRoute, clientSessionsRoute,

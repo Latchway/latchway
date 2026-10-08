@@ -76,6 +76,8 @@ type AdminSession struct {
 	LastSeenAt     pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
 	RevokedAt      pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
 	RevokeReason   *string            `db:"revoke_reason" json:"revoke_reason"`
+	// Coarse browser and operating-system summary for the session owner and owners; never a raw User-Agent or network address.
+	DeviceSummary *string `db:"device_summary" json:"device_summary"`
 }
 
 type AdminUser struct {
@@ -88,6 +90,8 @@ type AdminUser struct {
 	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DisabledAt            pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	PasswordResetRequired bool               `db:"password_reset_required" json:"password_reset_required"`
+	// Organization of the administrator's most recent session; used only when a sign-in names no organization.
+	LastOrganizationID *string `db:"last_organization_id" json:"last_organization_id"`
 }
 
 type AppAttestKeyCommitReceipt struct {

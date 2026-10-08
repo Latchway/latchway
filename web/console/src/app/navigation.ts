@@ -2,6 +2,7 @@ import type { IconName } from "../ui";
 
 export type ConsoleRoute =
   | "/"
+  | "/account"
   | "/applications"
   | "/setup"
   | "/administrators"
@@ -216,11 +217,19 @@ export interface Command {
 }
 
 /** Every navigable destination, for the command palette. Commands only navigate; they never perform actions. */
-export const commands: readonly Command[] = allAreas.flatMap((area): Command[] =>
-  area.tabs
-    ? area.tabs.map((tab) => ({ description: tab.description, label: tab.label, section: area.label, to: tab.to }))
-    : [{ description: area.description, label: area.label, to: area.to }]
-);
+/** Pages reached from the account menu rather than the sidebar. */
+const accountCommands: readonly Command[] = [
+  { description: "Your profile, password and console sessions", label: "Your account", to: "/account" }
+];
+
+export const commands: readonly Command[] = [
+  ...allAreas.flatMap((area): Command[] =>
+    area.tabs
+      ? area.tabs.map((tab) => ({ description: tab.description, label: tab.label, section: area.label, to: tab.to }))
+      : [{ description: area.description, label: area.label, to: area.to }]
+  ),
+  ...accountCommands
+];
 
 /** Paths kept only to redirect pre-redesign links to their new home. */
 export const LEGACY_REDIRECT_PATHS: readonly string[] = ["/usage", "/cost", "/latency", "/errors", "/attestation-failures", "/access-policies", "/abuse-controls", "/environments"];

@@ -557,30 +557,62 @@ func (store *Store) CreateSession(
 	if err := input.validate(); err != nil {
 		return IssuedSession{}, err
 	}
+	issued, prepared, err := store.prepareSession(input)
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return IssuedSession{}, fmt.Errorf("begin session creation: %w", err)
+	}
+	defer rollback(tx)
+	if err := store.insertPreparedSession(ctx, tx, input, issued, prepared); err != nil {
+		return IssuedSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return IssuedSession{}, fmt.Errorf("commit session creation: %w", err)
+	}
+	return issued, nil
+}
+
+// preparedSession holds the hashes and audit record for a session that has
+// been issued but not yet stored.
+type preparedSession struct {
+	sessionToken IssuedToken
+	csrfToken    IssuedToken
+	createdAt    time.Time
+	audit        AuditMutation
+}
+
+// CreatedAt is the instant the prepared session starts.
+func (prepared preparedSession) CreatedAt() time.Time {
+	return prepared.createdAt
+}
+
+func (store *Store) prepareSession(input CreateSessionInput) (IssuedSession, preparedSession, error) {
 	sessionID, err := store.newID(id.AdminSession)
 	if err != nil {
-		return IssuedSession{}, fmt.Errorf("generate session ID: %w", err)
+		return IssuedSession{}, preparedSession{}, fmt.Errorf("generate session ID: %w", err)
 	}
 	sessionToken, err := store.tokens.Issue(AdminSessionKind)
 	if err != nil {
-		return IssuedSession{}, err
+		return IssuedSession{}, preparedSession{}, err
 	}
 	csrfToken, err := store.tokens.Issue(CSRFTokenKind)
 	if err != nil {
-		return IssuedSession{}, err
+		return IssuedSession{}, preparedSession{}, err
 	}
 	eventID, err := store.newID(id.AuditEvent)
 	if err != nil {
-		return IssuedSession{}, fmt.Errorf("generate audit event ID: %w", err)
+		return IssuedSession{}, preparedSession{}, fmt.Errorf("generate audit event ID: %w", err)
 	}
 	actor, err := NewAdminUserActor(input.AdminUserID)
 	if err != nil {
-		return IssuedSession{}, err
+		return IssuedSession{}, preparedSession{}, err
 	}
 	sessionChange, _ := NewSensitiveAuditChange("session_token", AuditSet)
 	csrfChange, _ := NewSensitiveAuditChange("csrf_token", AuditSet)
 	now := store.now().UTC()
-	expiresAt := now.Add(input.Lifetime)
 	mutation, err := NewAuditMutation(
 		eventID,
 		input.OrganizationID,
@@ -595,15 +627,27 @@ func (store *Store) CreateSession(
 		[]AuditChange{sessionChange, csrfChange},
 	)
 	if err != nil {
-		return IssuedSession{}, err
+		return IssuedSession{}, preparedSession{}, err
 	}
-
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return IssuedSession{}, fmt.Errorf("begin session creation: %w", err)
+	issued := IssuedSession{
+		SessionID: sessionID,
+		Token:     sessionToken.Secret,
+		CSRFToken: csrfToken.Secret,
+		ExpiresAt: now.Add(input.Lifetime),
 	}
-	defer rollback(tx)
+	return issued, preparedSession{sessionToken: sessionToken, csrfToken: csrfToken, createdAt: now, audit: mutation}, nil
+}
 
+// insertPreparedSession stores a prepared session for an active administrator
+// with an active membership, records it as the last-used organization and
+// writes its audit event.
+func (store *Store) insertPreparedSession(
+	ctx context.Context,
+	tx pgx.Tx,
+	input CreateSessionInput,
+	issued IssuedSession,
+	prepared preparedSession,
+) error {
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO admin_sessions (
 			admin_session_id,
@@ -614,9 +658,10 @@ func (store *Store) CreateSession(
 			csrf_token_hash,
 			created_at,
 			expires_at,
-			last_seen_at
+			last_seen_at,
+			device_summary
 		)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $7
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $7, $9
 		FROM admin_users AS u
 		JOIN admin_memberships AS m
 			ON m.admin_user_id = u.admin_user_id
@@ -624,26 +669,21 @@ func (store *Store) CreateSession(
 		WHERE u.admin_user_id = $3
 		  AND u.status = 'active'
 		  AND m.status = 'active'
-	`, sessionID, input.OrganizationID, input.AdminUserID, sessionToken.Hash.Bytes(),
-		sessionToken.Secret.Hint(), csrfToken.Hash.Bytes(), now, expiresAt)
+	`, issued.SessionID, input.OrganizationID, input.AdminUserID, prepared.sessionToken.Hash.Bytes(),
+		prepared.sessionToken.Secret.Hint(), prepared.csrfToken.Hash.Bytes(), prepared.createdAt,
+		issued.ExpiresAt, nullableString(input.DeviceSummary))
 	if err != nil {
-		return IssuedSession{}, fmt.Errorf("insert admin session: %w", err)
+		return fmt.Errorf("insert admin session: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
-		return IssuedSession{}, ErrAdminAuthentication
+		return ErrAdminAuthentication
 	}
-	if err := insertAuditMutation(ctx, tx, mutation); err != nil {
-		return IssuedSession{}, err
+	if _, err := tx.Exec(ctx, `
+		UPDATE admin_users SET last_organization_id = $2 WHERE admin_user_id = $1
+	`, input.AdminUserID, input.OrganizationID); err != nil {
+		return fmt.Errorf("record last administrator organization: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return IssuedSession{}, fmt.Errorf("commit session creation: %w", err)
-	}
-	return IssuedSession{
-		SessionID: sessionID,
-		Token:     sessionToken.Secret,
-		CSRFToken: csrfToken.Secret,
-		ExpiresAt: expiresAt,
-	}, nil
+	return insertAuditMutation(ctx, tx, prepared.audit)
 }
 
 // AuthenticateSession validates and touches an active opaque session.
@@ -667,13 +707,15 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		  AND m.organization_id = s.organization_id
 		  AND m.admin_user_id = s.admin_user_id
 		  AND m.status = 'active'
-		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id, s.expires_at
+		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id, s.expires_at,
+		          u.password_reset_required
 	`, hash.Bytes(), now).Scan(
 		&principal.OrganizationID,
 		&principal.AdminUserID,
 		&role,
 		&principal.CredentialID,
 		&principal.CredentialExpiresAt,
+		&principal.PasswordResetRequired,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Principal{}, ErrAdminAuthentication
@@ -954,6 +996,7 @@ func (store *Store) ListAPITokens(ctx context.Context, principal Principal) ([]A
 		       scopes,
 		       created_at,
 		       expires_at,
+		       last_used_at,
 		       revoked_at IS NOT NULL
 		FROM admin_api_tokens
 		WHERE organization_id = $1
@@ -967,7 +1010,7 @@ func (store *Store) ListAPITokens(ctx context.Context, principal Principal) ([]A
 	items := make([]APITokenMetadata, 0)
 	for rows.Next() {
 		var item APITokenMetadata
-		if err := rows.Scan(&item.ID, &item.Name, &item.Scopes, &item.CreatedAt, &item.ExpiresAt, &item.Revoked); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Scopes, &item.CreatedAt, &item.ExpiresAt, &item.LastUsedAt, &item.Revoked); err != nil {
 			return nil, fmt.Errorf("scan admin API token metadata: %w", err)
 		}
 		items = append(items, item)

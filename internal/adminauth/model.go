@@ -39,6 +39,8 @@ var (
 
 var slugPattern = regexp.MustCompile("^[a-z][a-z0-9-]{1,62}$")
 
+var deviceSummaryPattern = regexp.MustCompile(`^[A-Za-z0-9 .()/-]{1,80}$`)
+
 // BootstrapOwnerInput is the complete transaction that consumes the one-time
 // token and creates the first organization owner.
 type BootstrapOwnerInput struct {
@@ -110,6 +112,9 @@ type CreateSessionInput struct {
 	AdminUserID    string
 	Lifetime       time.Duration
 	RequestID      string
+	// DeviceSummary is an optional coarse "Browser on OS" description; see
+	// DeviceSummaryFromUserAgent. Raw User-Agent strings are never stored.
+	DeviceSummary string
 }
 
 func (input CreateSessionInput) validate() error {
@@ -124,6 +129,9 @@ func (input CreateSessionInput) validate() error {
 	}
 	if validateRequestID(input.RequestID) != nil {
 		return fmt.Errorf("%w: request ID", ErrInvalidAdminInput)
+	}
+	if input.DeviceSummary != "" && !deviceSummaryPattern.MatchString(input.DeviceSummary) {
+		return fmt.Errorf("%w: device summary", ErrInvalidAdminInput)
 	}
 	return nil
 }
@@ -183,13 +191,16 @@ type IssuedAPIToken struct {
 }
 
 // APITokenMetadata is the non-secret administrative token representation.
+// Administrator is present only in the organization-wide owner listing.
 type APITokenMetadata struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Scopes    []string   `json:"scopes"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Revoked   bool       `json:"revoked"`
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	Scopes        []string                   `json:"scopes"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	ExpiresAt     *time.Time                 `json:"expires_at,omitempty"`
+	LastUsedAt    *time.Time                 `json:"last_used_at,omitempty"`
+	Revoked       bool                       `json:"revoked"`
+	Administrator *AdminSessionAdministrator `json:"administrator,omitempty"`
 }
 
 // AuthenticationMethod identifies how an admin principal authenticated.
@@ -209,7 +220,10 @@ type Principal struct {
 	Method              AuthenticationMethod
 	CredentialID        string
 	CredentialExpiresAt *time.Time
-	scope               *CapabilitySet
+	// PasswordResetRequired marks a session whose administrator must choose a
+	// new password before using anything but sign-out and the password change.
+	PasswordResetRequired bool
+	scope                 *CapabilitySet
 }
 
 // Allows evaluates membership role and optional API-token scope.

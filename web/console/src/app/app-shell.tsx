@@ -12,7 +12,8 @@ import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, forgetConsoleSession, SESSION_ENDED_EVENT, useConsoleSession } from "../api/session";
 import { Button, buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type MenuEntry, type StatusItem, StatusRail, useFocusTrap } from "../ui";
-import { AccountDialog, ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { ChoosePasswordScreen } from "./auth/choose-password";
 import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
 import { AuthScreen } from "./auth/auth-screen";
 import { ENDING_SOON_MS, sessionEndText } from "./auth/session-model";
@@ -136,7 +137,7 @@ function AppShellContent() {
   const [loggingOut, setLoggingOut] = useState(false);
   // Keeps the sign-in screen up through steps that already hold a session (choosing an organization, setup done).
   const [authHeld, setAuthHeld] = useState(false);
-  const [dialog, setDialog] = useState<"account" | "switch" | "reauth">();
+  const [dialog, setDialog] = useState<"switch" | "reauth">();
   const [endingSoonFor, setEndingSoonFor] = useState<string>();
   const [dismissedFor, setDismissedFor] = useState<string>();
   const { liveness, readiness } = useSystemHealth();
@@ -265,7 +266,10 @@ function AppShellContent() {
   }
 
   if (!configured || authHeld || !adminSession) {
-    return <AuthScreen checking={session.isPending && !session.data} mode={mode} onHoldChange={setAuthHeld} retry={() => void session.refetch()} retrying={session.isFetching} />;
+    return <AuthScreen checking={session.isPending && !session.data} endReason={session.data?.endReason} mode={mode} onHoldChange={setAuthHeld} retry={() => void session.refetch()} retrying={session.isFetching} />;
+  }
+  if (adminSession.password_reset_required && !expired) {
+    return <ChoosePasswordScreen onSignOut={() => void logout()} session={adminSession} />;
   }
 
   const statusItems: StatusItem[] = [];
@@ -321,7 +325,7 @@ function AppShellContent() {
 
   const accountEntries: MenuEntry[] = [
     { heading: adminSession.administrator.email, kind: "heading" },
-    { icon: "users", label: "Your Account", onSelect: () => { setAccountOpen(false); setDialog("account"); } },
+    { icon: "users", label: "Your Account", onSelect: () => { setAccountOpen(false); void navigate({ search: scopeSearch, to: "/account" }); } },
     ...(adminSession.memberships.length > 1 ? [{ icon: "refresh", label: "Switch Organization", onSelect: () => { setAccountOpen(false); setDialog("switch"); } } satisfies MenuEntry] : []),
     { kind: "separator" },
     { destructive: true, icon: "external", label: loggingOut ? "Signing out…" : "Sign out", onSelect: () => void logout() }
@@ -416,9 +420,7 @@ function AppShellContent() {
       </div>
       {commandOpen ? <CommandPalette close={closeCommand} /> : null}
       {expired || dialog === "reauth" ? (
-        <ReauthDialog onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
-      ) : dialog === "account" ? (
-        <AccountDialog onClose={() => setDialog(undefined)} organizationName={workspace.organization?.display_name} session={adminSession} />
+        <ReauthDialog endReason={expired ? session.data?.endReason : undefined} onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
       ) : dialog === "switch" ? (
         <SwitchOrganizationDialog onClose={() => setDialog(undefined)} onSwitched={switched} session={adminSession} />
       ) : null}

@@ -21,7 +21,8 @@ test.describe("real first-run control plane", () => {
 
   test("bootstraps, activates a native-mobile configuration, and signs back in", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Setting up a new server?" }).click();
+    // A fresh server with an unused bootstrap token opens on setup.
+    await expect(page.getByRole("heading", { level: 1, name: "Set up Latchway" })).toBeVisible();
     await page.getByLabel("One-time bootstrap token").fill(bootstrapToken ?? "");
     await page.getByLabel("Organization name").fill("Latchway Live E2E");
     await page.getByLabel("Organization slug").fill("latchway-live");
@@ -87,5 +88,35 @@ test.describe("real first-run control plane", () => {
     // Signing back in returns to the page that was open, with the server-owned setup resumed.
     await expect(page.getByRole("heading", { level: 1, name: "Set up an application" })).toBeVisible();
     await expect(page.getByText(/is active/)).toBeVisible();
+
+    // An owner-set password must be replaced at first sign-in, against the real server.
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Team & Access" }).click();
+    await page.getByRole("button", { name: "Add Member" }).click();
+    const drawer = page.getByRole("complementary", { name: "Add member" });
+    await drawer.getByLabel("Name", { exact: true }).fill("Live Operator");
+    await drawer.getByLabel("Email", { exact: true }).fill("operator@live-e2e.invalid");
+    await drawer.locator("label.lw-role-card").filter({ hasText: "Operator" }).click();
+    await drawer.getByLabel("First password").fill("temporary-operator-passphrase");
+    await drawer.getByRole("checkbox").check();
+    await drawer.getByRole("button", { name: "Add Member" }).click();
+    await expect(page.getByText(/Live Operator was added as Operator/)).toBeVisible();
+
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await page.getByRole("button", { name: "Sign In Again" }).click();
+    await page.getByLabel("Email address").fill("operator@live-e2e.invalid");
+    await page.getByLabel("Password", { exact: true }).fill("temporary-operator-passphrase");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Choose your password" })).toBeVisible();
+    await page.getByLabel("Temporary password").fill("temporary-operator-passphrase");
+    await page.getByLabel("New password").fill("operator chosen live passphrase 2026");
+    await page.getByRole("button", { name: "Save Password" }).click();
+    await expect(page.getByRole("button", { name: /^Your account/ })).toBeVisible();
+
+    await page.getByRole("button", { name: /^Your account/ }).click();
+    await page.getByRole("menuitem", { name: "Your Account" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
+    await expect(page.getByText("This session", { exact: true })).toBeVisible();
+    await expect(page.getByText(/on (macOS|Linux|Windows)|^(Chrome|Firefox|Safari)/).first()).toBeVisible();
   });
 });
