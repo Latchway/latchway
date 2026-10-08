@@ -28,6 +28,7 @@ import {
   VolumeChart
 } from "../../ui";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
+import { ConnectionBreakdownCard, ErrorCodesCard, MonthToDateCard, SettlementNotice } from "./analytics-insights";
 import { formatMs } from "../requests/request-format";
 import {
   BREAKDOWN_LABEL,
@@ -70,7 +71,7 @@ const TAB_COPY: Record<AnalyticsTab, string> = {
 
 type Workspace = ReturnType<typeof useWorkspace>;
 type Usage = ReturnType<typeof useUsage>;
-type RequestDrill = Partial<Pick<RequestRouteSearch, "error_code" | "feature" | "latency_min_ms" | "model" | "status">>;
+type RequestDrill = Partial<Pick<RequestRouteSearch, "error_code" | "feature" | "latency_min_ms" | "model" | "status" | "upstream">>;
 
 function tickEvery(count: number): number {
   return count <= 8 ? 1 : count <= 24 ? 3 : count <= 31 ? 5 : count <= 92 ? 14 : 30;
@@ -337,6 +338,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
           {usage.updatedAt ? `Live · updated ${new Date(usage.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : "Live"}
         </span>
       </div>
+      <SettlementNotice workspaceSearch={workspaceLinkSearch} />
       {copied ? <div className="lw-page-notice"><Notice action={<Button onClick={() => setCopied(undefined)} size="sm">Dismiss</Button>} title={copied.startsWith("latchway") ? "Copy these commands" : "Copied"} tone="success">{copied.startsWith("latchway") ? <pre className="lw-code-block">{copied}</pre> : copied}</Notice></div> : null}
     </>
   );
@@ -415,10 +417,12 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
           <MetricTile delta={percentChange(perThousand, previousPerThousand)} footnote="Across all requests in the range" higherIsBetter={false} label="Per 1,000 requests" value={formatMoney(perThousand)} />
         </StatStrip>
       </Card>
+      <MonthToDateCard environmentID={environmentID} />
       <ChartCard interval={window.interval}>
         <UsageChart metric="cost" onSelect={(bucket) => drillBucket(bucket)} previousLabel={previousLabel} usage={usage} />
       </ChartCard>
       <BreakdownCard by={by} limit={breakdownLimit} mode="cost" onBy={(value) => update({ by: value === "feature" ? undefined : value })} onLimit={(value) => update({ breakdown_limit: value === "50" ? undefined : value })} onOpen={(key) => openBreakdown(key)} previous={previous} summary={summary} />
+      <ConnectionBreakdownCard environmentID={environmentID} mode="cost" onOpen={(upstream) => drillRange({ upstream })} window={window} />
       <div className="lw-hgrid lw-hgrid--2">
         <ProvenanceCard kind="cost" summary={summary} />
         <Card icon="bell" meta="Latchway has no budgets yet" title="Get alerted">
@@ -441,6 +445,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
           <p className="lw-secondary lw-note">These percentiles cover the whole range, not each feature or hour. Requests shows each slow request with its route and attempts.</p>
         </Card>
       </div>
+      <ConnectionBreakdownCard environmentID={environmentID} mode="performance" onOpen={(upstream) => drillRange({ upstream })} window={window} />
     </>;
   } else {
     body = <>
@@ -458,7 +463,8 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
         <RateCard action={<Link className={buttonClass({ size: "md" })} search={workspaceLinkSearch} to="/attestation">Open App Verification</Link>} current={analytics.attestation_failure_rate} denominatorLabel="verification checks" icon="trust" previous={before?.attestation_failure_rate} text="App Attest, Play Integrity, App Check or Turnstile didn't vouch for the app. Counted per verification check, not per request." title="App verification failures" />
         <RateCard action={<Link className={buttonClass({ size: "md" })} search={workspaceLinkSearch} to="/routes">Open Routing</Link>} current={analytics.fallback_rate} denominatorLabel="requests that reached a provider" icon="split" previous={before?.fallback_rate} text="The first route failed and a later one answered. Users were served, but slower." title="Fallbacks" />
       </div>
-      <Notice title="Counts by error code aren't in the usage API yet" tone="info">Open Requests and filter by outcome or error to see which errors happened and where.</Notice>
+      <ErrorCodesCard environmentID={environmentID} onOpen={(code) => drillRange({ error_code: code })} window={window} />
+      <ConnectionBreakdownCard environmentID={environmentID} mode="reliability" onOpen={(upstream) => drillRange({ upstream })} window={window} />
     </>;
   }
 

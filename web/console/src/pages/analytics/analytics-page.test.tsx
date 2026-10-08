@@ -34,6 +34,7 @@ function calls(prefix: string): URLSearchParams[] {
 function respond(summary = summaryFixture(), interval?: "hour" | "day") {
   adminRequestMock.mockImplementation(async (path: string) => {
     if (path.startsWith("/admin/v1/usage/summary")) return { data: summary };
+    if (!path.startsWith("/admin/v1/usage/timeseries")) throw new Error(`Unexpected request: ${path}`);
     const requested = new URLSearchParams(path.split("?")[1]).get("interval") as "hour" | "day";
     const start = new URLSearchParams(path.split("?")[1]).get("start") ?? "";
     return { data: { interval: interval ?? requested, points: [{ timestamp: start.replace(/T.*/, "T00:00:00Z"), values: { ...zero, logical_requests: 3 } }] } };

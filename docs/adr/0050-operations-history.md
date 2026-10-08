@@ -39,8 +39,9 @@ were created with.
   `/environments/{id}` change only `display_name` (1 to 200 characters, one
   line). Organizations need `manage_owners`; applications and environments
   need `activate_configuration` in the application. Each rename records an
-  `admin.*_rename` audit event with a public `display_name` marker. Slugs never
-  change, because configuration documents, console URLs and scripts use them.
+  `admin.*_rename` audit event with a public `display_name` marker; renaming to
+  the current name changes nothing and records nothing. Slugs never change,
+  because configuration documents, console URLs and scripts use them.
 - **No deletion.** Applications, environments and organizations still can't
   be deleted. Requests, usage, audit events and immutable configuration
   revisions reference them, and removing those rows would break the audit
