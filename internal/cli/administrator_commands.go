@@ -22,6 +22,7 @@ type administratorCLI struct {
 	Status                string  `json:"status"`
 	PasswordResetRequired bool    `json:"password_reset_required"`
 	TwoFactorEnabled      bool    `json:"two_factor_enabled"`
+	SSOLinked             bool    `json:"sso_linked"`
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
 	DisabledAt            *string `json:"disabled_at,omitempty"`
@@ -267,10 +268,10 @@ func printAdministrators(opts *options, page administratorPageCLI) error {
 		rows = append(rows, []string{
 			administrator.ID, administrator.Email, administrator.DisplayName,
 			administrator.Role, administrator.Status, boolLabel(administrator.TwoFactorEnabled),
-			formatControlTime(administrator.UpdatedAt),
+			boolLabel(administrator.SSOLinked), formatControlTime(administrator.UpdatedAt),
 		})
 	}
-	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "TWO-FACTOR", "UPDATED"}, rows); err != nil {
+	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "TWO-FACTOR", "SSO", "UPDATED"}, rows); err != nil {
 		return err
 	}
 	if page.Page.HasMore {

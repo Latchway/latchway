@@ -61,7 +61,7 @@ func TestAdministratorCommandsUseCanonicalAPIWithoutPrintingCredentials(t *testi
 		default:
 			t.Fatalf("unexpected administrator request %s %s", request.Method, request.URL.Path)
 		}
-		body := `{"id":"` + adminUserID + `","membership_id":"` + membershipID + `","organization_id":"` + organizationID + `","email":"operator@example.test","display_name":"Operator","role":"` + role + `","status":"` + status + `","password_reset_required":false,"two_factor_enabled":true,"created_at":"` + instant + `","updated_at":"` + instant + `"}`
+		body := `{"id":"` + adminUserID + `","membership_id":"` + membershipID + `","organization_id":"` + organizationID + `","email":"operator@example.test","display_name":"Operator","role":"` + role + `","status":"` + status + `","password_reset_required":false,"two_factor_enabled":true,"sso_linked":false,"created_at":"` + instant + `","updated_at":"` + instant + `"}`
 		return administratorCLIResponse(request, statusCode, body), nil
 	})}
 

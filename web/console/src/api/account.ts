@@ -8,6 +8,7 @@ import {
   AdministratorSchema,
   OwnAdminSessionListSchema,
   PasskeyListSchema,
+  SSOConfigurationSchema,
   RecoveryCodesSchema,
   SignedOutSessionsSchema,
   TotpEnrollmentSchema,
@@ -108,4 +109,33 @@ export async function setTwoFactorRequirement(organizationID: string, required: 
 
 export async function resetMemberTwoFactor(adminUserID: string) {
   return (await adminRequest(`/admin/v1/administrators/${adminUserID}/reset-two-factor`, AdministratorSchema, { method: "POST" })).data;
+}
+
+export function ssoConfigurationQueryOptions(organizationID: string) {
+  return queryOptions({
+    queryFn: async ({ signal }) => (await adminRequest(`/admin/v1/organizations/${organizationID}/sso`, SSOConfigurationSchema, { signal })).data,
+    queryKey: ["organization", organizationID, "sso"] as const,
+    staleTime: 15_000
+  });
+}
+
+export interface SSOProviderInput {
+  allowed_email_domains: string[];
+  client_id: string;
+  enabled: boolean;
+  issuer: string;
+  provision_role: "admin" | "operator" | "viewer" | null;
+  require_sso: boolean;
+}
+
+/** Saves the identity provider. A client secret, when typed, is read from its input and cleared; blank keeps the stored one. */
+export async function saveSSOProvider(organizationID: string, input: SSOProviderInput, secret: HTMLInputElement | null) {
+  const value = secret?.value ?? "";
+  if (secret) secret.value = "";
+  const body = value ? { ...input, client_secret: value } : input;
+  return (await adminRequest(`/admin/v1/organizations/${organizationID}/sso`, SSOConfigurationSchema, { body, method: "PUT" })).data;
+}
+
+export async function removeSSOProvider(organizationID: string): Promise<void> {
+  await adminRequest(`/admin/v1/organizations/${organizationID}/sso`, z.undefined(), { method: "DELETE" });
 }

@@ -20,10 +20,13 @@ import (
 // signInChallengeLifetime bounds the gap between a correct password and the second factor.
 const signInChallengeLifetime = 5 * time.Minute
 
-// factorSealer seals administrator second-factor secrets with the master key.
+// factorSealer seals administrator sign-in secrets with the master key:
+// second-factor keys and single sign-on client secrets.
 type factorSealer interface {
 	SealAdministratorFactor(plaintext []byte, adminUserID string) (secrets.Envelope, error)
 	OpenAdministratorFactor(envelope secrets.Envelope, adminUserID string) ([]byte, error)
+	SealOrganizationSSOSecret(plaintext []byte, organizationID string) (secrets.Envelope, error)
+	OpenOrganizationSSOSecret(envelope secrets.Envelope, organizationID string) ([]byte, error)
 }
 
 // WithFactorSealer enables two-factor sign-in with the master key that seals authenticator keys.
@@ -166,29 +169,38 @@ func (api *API) loginSecondFactor(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
 		return
 	}
-	api.issueSignInSession(w, r, view, membership, challenge.DeviceSummary, requestID)
+	api.issueSignInSession(w, r, view, membership, challenge.DeviceSummary, requestID, adminauth.SignInPassword)
 }
 
-// issueSignInSession creates the console session that ends a successful sign-in.
-func (api *API) issueSignInSession(w http.ResponseWriter, r *http.Request, view controlplane.AdminView, membership controlplane.Membership, deviceSummary, requestID string) {
+// createSignInSession creates the console session that ends a successful
+// sign-in and sets its cookies.
+func (api *API) createSignInSession(w http.ResponseWriter, r *http.Request, membership controlplane.Membership, adminUserID, deviceSummary, requestID string, method adminauth.SignInMethod) (adminauth.Principal, error) {
 	issued, err := api.auth.CreateSession(r.Context(), adminauth.CreateSessionInput{
-		OrganizationID: membership.OrganizationID, AdminUserID: view.ID,
-		Lifetime: api.sessionLifetime, RequestID: requestID, DeviceSummary: deviceSummary,
+		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
+		Lifetime: api.sessionLifetime, RequestID: requestID, DeviceSummary: deviceSummary, SignInMethod: method,
 	})
+	if err != nil {
+		return adminauth.Principal{}, err
+	}
+	principal := adminauth.Principal{
+		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
+		Role: membership.Role, Method: adminauth.AuthenticationSession,
+		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt, SignInMethod: method,
+	}
+	if err := api.fillSessionFlags(r, &principal); err != nil {
+		return adminauth.Principal{}, err
+	}
+	api.setSession(w, issued)
+	return principal, nil
+}
+
+// issueSignInSession creates the session and answers with its document.
+func (api *API) issueSignInSession(w http.ResponseWriter, r *http.Request, view controlplane.AdminView, membership controlplane.Membership, deviceSummary, requestID string, method adminauth.SignInMethod) {
+	principal, err := api.createSignInSession(w, r, membership, view.ID, deviceSummary, requestID, method)
 	if err != nil {
 		api.internal(w, r, err)
 		return
 	}
-	principal := adminauth.Principal{
-		OrganizationID: membership.OrganizationID, AdminUserID: view.ID,
-		Role: membership.Role, Method: adminauth.AuthenticationSession,
-		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
-	}
-	if err := api.fillSessionFlags(r, &principal); err != nil {
-		api.internal(w, r, err)
-		return
-	}
-	api.setSession(w, issued)
 	writeJSON(w, http.StatusOK, api.sessionDocument(view, principal))
 }
 
@@ -202,8 +214,10 @@ func (api *API) fillSessionFlags(r *http.Request, principal *adminauth.Principal
 	if err != nil {
 		return err
 	}
-	principal.PasswordResetRequired = state.PasswordResetRequired
-	principal.TwoFactorEnrollmentRequired = status.RequiredByOrganization && !status.Enabled
+	// A single sign-on session relies on the identity provider for further factors and needs no password.
+	sso := principal.SignInMethod == adminauth.SignInSSO
+	principal.PasswordResetRequired = state.PasswordResetRequired && !sso
+	principal.TwoFactorEnrollmentRequired = status.RequiredByOrganization && !status.Enabled && !sso
 	return nil
 }
 

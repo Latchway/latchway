@@ -197,6 +197,61 @@ paths:
               schema: { $ref: '#/components/schemas/AdminSession' }
         '401': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sso/start:
+    post:
+      tags: [Authentication]
+      operationId: startAdminSSO
+      summary: Start a single sign-on at the organization's identity provider.
+      description: |
+        Public. Returns the provider's authorization URL for the browser to
+        navigate to, and sets a short-lived HttpOnly cookie that binds the
+        sign-in to this browser. The sign-in carries a random state, nonce
+        and PKCE verifier and lasts ten minutes; a bounded number may be
+        pending per organization (`rate_limited` beyond it).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SSOStartRequest' }
+      responses:
+        '200':
+          description: Where to send the browser.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOStart' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sso/callback:
+    get:
+      tags: [Authentication]
+      operationId: finishAdminSSO
+      summary: The identity provider's redirect back; signs in and returns the browser to the console.
+      description: |
+        Public; reached by the browser, not called by clients. It needs the
+        binding cookie from `POST /auth/sso/start`, redeems the code with the
+        PKCE verifier, and verifies the ID token's signature, issuer,
+        audience, expiry and nonce. A linked identity signs in as its
+        administrator; otherwise a provider-verified email in an allowed
+        domain links to the matching member, or, when the organization
+        provisions accounts, creates a membership. Success sets the session
+        cookies and redirects to `/`; failure redirects to `/?sso_error=`
+        with one of `expired`, `denied`, `unavailable`, `failed`,
+        `no_account`, `unverified_email`, `domain` or `conflict`.
+      security: []
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, maxLength: 128 } }
+        - { name: code, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+        - { name: error, in: query, required: false, schema: { type: string, maxLength: 128 } }
+      responses:
+        '303':
+          description: Back to the console, signed in or with a reason.
+          headers:
+            Location: { schema: { type: string } }
+            Set-Cookie: { schema: { type: string } }
   /admin/v1/auth/logout:
     post:
       tags: [Authentication]
@@ -1142,6 +1197,60 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TwoFactorRequirement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/sso:
+    get:
+      tags: [Organizations]
+      operationId: getOrganizationSSO
+      summary: Read the organization's single sign-on provider and the redirect URI to register.
+      description: Requires `manage_owners`. The client secret is never returned.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+      responses:
+        '200':
+          description: Single sign-on configuration; `provider` is null until one is set up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOConfiguration' }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Organizations]
+      operationId: putOrganizationSSO
+      summary: Set up or change the organization's OpenID Connect provider.
+      description: |
+        Requires `manage_owners`. The server reads the issuer's discovery
+        document over the public internet and refuses issuers without the
+        authorization code flow, PKCE S256, and RS256 or ES256 ID tokens
+        (`configuration_invalid`). The client secret is sealed with the master
+        key; omit it to keep the stored one. Disabling ends single sign-on
+        sessions; requiring single sign-on ends members' other console
+        sessions, and owners keep their other sign-in methods.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SSOProviderRequest' }
+      responses:
+        '200':
+          description: Saved configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOConfiguration' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Organizations]
+      operationId: removeOrganizationSSO
+      summary: Remove the organization's single sign-on provider and linked identities.
+      description: Requires `manage_owners`. Ends every single sign-on session in the organization except the caller's.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Removed. }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/administrators/{adminUserId}/reset-two-factor:
     post:
@@ -2346,7 +2455,11 @@ components:
           description: True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes.
         two_factor_enrollment_required:
           type: boolean
-          description: True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed.
+          description: True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. Never true for single sign-on sessions.
+        sign_in_method:
+          type: string
+          enum: [password, passkey, sso]
+          description: How a console session was signed in; absent for API tokens.
         memberships:
           type: array
           items:
@@ -2809,6 +2922,7 @@ components:
         - status
         - password_reset_required
         - two_factor_enabled
+        - sso_linked
         - created_at
         - updated_at
       properties:
@@ -2820,7 +2934,8 @@ components:
         role: { $ref: '#/components/schemas/AdministratorRole' }
         status: { type: string, enum: [active, disabled] }
         password_reset_required: { type: boolean }
-        two_factor_enabled: { type: boolean, description: True when the account has a confirmed authenticator. }
+        two_factor_enabled: { type: boolean, description: True when the account has a confirmed authenticator app or a passkey. }
+        sso_linked: { type: boolean, description: True when the administrator has signed in to this organization with its identity provider. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         disabled_at: { type: string, format: date-time }
@@ -2856,7 +2971,7 @@ components:
       pattern: '^[A-Za-z0-9 .()/-]{1,80}$'
     SessionEndReason:
       type: string
-      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, two_factor_reset, other]
+      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, two_factor_reset, sso_changed, other]
     OwnAdminSession:
       type: object
       additionalProperties: false
@@ -3121,6 +3236,63 @@ components:
       properties:
         credential: { $ref: '#/components/schemas/PasskeyAssertion' }
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    SSOStartRequest:
+      type: object
+      additionalProperties: false
+      required: [organization_slug]
+      properties:
+        organization_slug: { type: string, minLength: 1, maxLength: 128 }
+    SSOStart:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url: { type: string, pattern: '^https://', maxLength: 8192 }
+    SSOProvider:
+      type: object
+      additionalProperties: false
+      required: [issuer, client_id, authorization_endpoint, token_endpoint, jwks_uri, allowed_email_domains, provision_role, enabled, require_sso, created_at, updated_at]
+      properties:
+        issuer: { type: string, pattern: '^https://', maxLength: 2048 }
+        client_id: { type: string, minLength: 1, maxLength: 512 }
+        authorization_endpoint: { type: string, pattern: '^https://', maxLength: 2048 }
+        token_endpoint: { type: string, pattern: '^https://', maxLength: 2048 }
+        jwks_uri: { type: string, pattern: '^https://', maxLength: 2048 }
+        allowed_email_domains: { type: array, maxItems: 20, items: { type: string, maxLength: 253 } }
+        provision_role:
+          description: Role for accounts created at first sign-in; null when accounts aren't created.
+          oneOf:
+            - { type: string, enum: [admin, operator, viewer] }
+            - { type: 'null' }
+        enabled: { type: boolean }
+        require_sso: { type: boolean, description: Members other than owners must sign in with single sign-on. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SSOConfiguration:
+      type: object
+      additionalProperties: false
+      required: [redirect_uri, provider]
+      properties:
+        redirect_uri: { type: string, description: The callback URL to register with the identity provider. }
+        provider:
+          oneOf:
+            - { $ref: '#/components/schemas/SSOProvider' }
+            - { type: 'null' }
+    SSOProviderRequest:
+      type: object
+      additionalProperties: false
+      required: [issuer, client_id, enabled, require_sso]
+      properties:
+        issuer: { type: string, pattern: '^https://', maxLength: 2048 }
+        client_id: { type: string, minLength: 1, maxLength: 512 }
+        client_secret: { type: string, minLength: 1, maxLength: 1024, writeOnly: true, description: Required the first time; omit to keep the stored secret. }
+        allowed_email_domains: { type: array, maxItems: 20, items: { type: string, maxLength: 253 } }
+        provision_role:
+          oneOf:
+            - { type: string, enum: [admin, operator, viewer] }
+            - { type: 'null' }
+        enabled: { type: boolean }
+        require_sso: { type: boolean }
     PasskeyOptionsForSignInRequest:
       type: object
       additionalProperties: false
@@ -3156,8 +3328,8 @@ components:
         sign_in_methods:
           type: array
           uniqueItems: true
-          items: { type: string, enum: [password, passkey] }
-          description: Includes `passkey` when the console is served from a domain name over HTTPS.
+          items: { type: string, enum: [password, passkey, sso] }
+          description: Includes `passkey` when the console is served from a domain name over HTTPS, and `sso` when any organization has single sign-on enabled.
     AdminSessionMetadataPage:
       type: object
       additionalProperties: false
@@ -4123,8 +4295,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 17
-          maxItems: 17
+          minItems: 18
+          maxItems: 18
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -4144,6 +4316,7 @@ components:
             - { const: admin_account_self_service }
             - { const: admin_two_factor }
             - { const: admin_passkeys }
+            - { const: admin_sso }
           items: false
     DoctorCheck:
       type: object

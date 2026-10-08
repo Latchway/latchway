@@ -453,6 +453,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_account_self_service",
 	"admin_two_factor",
 	"admin_passkeys",
+	"admin_sso",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {

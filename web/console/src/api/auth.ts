@@ -13,7 +13,8 @@ export const adminAuthEndpoints = {
   passkeySecondFactorOptions: "/admin/v1/auth/login/two-factor/passkey-options",
   passkeySignIn: "/admin/v1/auth/passkeys/sign-in",
   passkeySignInOptions: "/admin/v1/auth/passkeys/sign-in-options",
-  session: "/admin/v1/auth/session"
+  session: "/admin/v1/auth/session",
+  ssoStart: "/admin/v1/auth/sso/start"
 } as const;
 
 const AdministratorSchema = z
@@ -41,6 +42,8 @@ export const AdminSessionSchema = z
     organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
     /** An owner set the password; only the password change, sign-out and session read work until it changes. */
     password_reset_required: z.boolean().optional(),
+    /** How this console session was signed in. */
+    sign_in_method: z.enum(["password", "passkey", "sso"]).optional(),
     /** The organization requires a second factor this administrator hasn't set up; only enrollment works. */
     two_factor_enrollment_required: z.boolean().optional()
   })
@@ -51,7 +54,7 @@ export const AdminSignInInfoSchema = z
     contract_version: z.string().max(64),
     protocol_versions: z.array(z.number().int().min(1)).max(16),
     setup_open: z.boolean(),
-    sign_in_methods: z.array(z.enum(["password", "passkey"])).max(8)
+    sign_in_methods: z.array(z.enum(["password", "passkey", "sso"])).max(8)
   })
   .strict();
 
@@ -423,6 +426,21 @@ export type SecondFactorAnswer = { code: string } | { recovery_code: string } | 
 
 export function finishSecondFactor(challenge: string, answer: SecondFactorAnswer, signal?: AbortSignal): Promise<AdminSession> {
   return "passkey" in answer ? completeSecondFactorWithPasskey(challenge, signal) : completeSecondFactor({ challenge, ...answer }, signal);
+}
+
+const SSOStartSchema = z.object({ authorization_url: z.string().startsWith("https://").max(8192) }).strict();
+
+/**
+ * Starts a single sign-on for the organization with this sign-in name and returns the identity provider's URL. The
+ * server also sets a cookie tying the sign-in to this browser; the console then navigates away to the provider.
+ */
+export async function startSingleSignOn(organizationSlug: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<string> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.ssoStart, { organization_slug: organizationSlug.trim() }, signal, fetcher);
+  const parsed = SSOStartSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid single sign-on start.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return parsed.data.authorization_url;
 }
 
 /** Signs in with a passkey alone; the browser offers this site's passkeys. */

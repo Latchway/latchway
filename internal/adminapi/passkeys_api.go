@@ -218,6 +218,10 @@ func (api *API) confirmOwnPassword(w http.ResponseWriter, r *http.Request, princ
 		return false
 	}
 	stored, err := api.auth.PasswordCredentialByAdminUserID(r.Context(), principal.AdminUserID)
+	if errors.Is(err, adminauth.ErrAdminNotFound) {
+		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "Your account has no password because it was created by single sign-on. An owner can set one for you."})
+		return false
+	}
 	if err != nil {
 		api.handleAdminAuthError(w, r, err)
 		return false
@@ -497,12 +501,15 @@ func (api *API) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, failed)
 		return
 	}
+	if api.refuseWhenSSORequired(w, r, membership.OrganizationID, membership.Role) {
+		return
+	}
 	requestID, err := id.New(id.AdminRequest)
 	if err != nil {
 		api.internal(w, r, err)
 		return
 	}
-	api.issueSignInSession(w, r, view, membership, adminauth.DeviceSummaryFromUserAgent(r.UserAgent()), requestID)
+	api.issueSignInSession(w, r, view, membership, adminauth.DeviceSummaryFromUserAgent(r.UserAgent()), requestID, adminauth.SignInPasskey)
 }
 
 type secondFactorPasskeyOptionsRequest struct {

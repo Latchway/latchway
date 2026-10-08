@@ -22,6 +22,7 @@ const (
 	serverCapabilityAdminAccountSelfService   serverCapability = "admin_account_self_service"
 	serverCapabilityAdminTwoFactor            serverCapability = "admin_two_factor"
 	serverCapabilityAdminPasskeys             serverCapability = "admin_passkeys"
+	serverCapabilityAdminSSO                  serverCapability = "admin_sso"
 )
 
 // supportedServerCapabilities is intentionally ordered and closed. Append-only
@@ -44,6 +45,7 @@ var supportedServerCapabilities = [...]serverCapability{
 	serverCapabilityAdminAccountSelfService,
 	serverCapabilityAdminTwoFactor,
 	serverCapabilityAdminPasskeys,
+	serverCapabilityAdminSSO,
 }
 
 func serverCapabilities() []serverCapability {
