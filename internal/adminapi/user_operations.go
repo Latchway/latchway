@@ -165,7 +165,9 @@ func (store *operationalStore) previewUserOperation(
 		id.Validate(userID, id.ApplicationUser) != nil || !validUserOperation(action) {
 		return userOperationImpact{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return userOperationImpact{}, err
+	} else if !allowed {
 		return userOperationImpact{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -201,7 +203,9 @@ func (store *operationalStore) performConfirmedUserOperation(
 		id.Validate(operationID, id.AdminRequest) != nil || !validUserOperation(action) {
 		return userOperationResult{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return userOperationResult{}, err
+	} else if !allowed {
 		return userOperationResult{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})

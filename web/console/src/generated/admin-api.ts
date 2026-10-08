@@ -75,6 +75,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/administrators/{adminUserId}/application-roles/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Raise a member's role in one application.
+         * @description Requires `manage_owners`. The role must be higher than the member's
+         *     organization role (`conflict` otherwise, and always for owners).
+         *     Application-scoped actions (configuration, environments, secrets,
+         *     self-tests, installation and user actions) use the higher role for
+         *     that application; organization-wide actions keep the organization
+         *     role. Raising the organization role later drops grants it supersedes.
+         */
+        put: operations["setApplicationRole"];
+        post?: never;
+        /** Return a member to their organization role in one application. */
+        delete: operations["removeApplicationRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/administrators/{adminUserId}/disable": {
         parameters: {
             query?: never;
@@ -212,6 +238,26 @@ export interface paths {
         post?: never;
         /** Revoke an API token. */
         delete: operations["revokeAdminApiToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/application-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every application role in the organization.
+         * @description Requires `manage_owners`. An application role raises a member's organization role in one application; it never lowers it.
+         */
+        get: operations["listApplicationRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1999,6 +2045,12 @@ export interface components {
                 enabled: boolean;
                 id: string;
             };
+            /** @description Roles that raise this administrator's organization role in single applications. `capabilities` reflects the organization role; an application's capabilities follow the higher of the two. */
+            application_roles?: {
+                application_id: components["schemas"]["ApplicationID"];
+                /** @enum {string} */
+                role: "admin" | "operator";
+            }[];
             capabilities: string[];
             /** Format: date-time */
             expires_at: string | null;
@@ -2098,6 +2150,24 @@ export interface components {
         ApplicationPage: {
             items: components["schemas"]["Application"][];
             page: components["schemas"]["PageInfo"];
+        };
+        ApplicationRoleGrant: {
+            admin_user_id: components["schemas"]["AdminUserID"];
+            application_id: components["schemas"]["ApplicationID"];
+            /** Format: date-time */
+            created_at: string;
+            granted_by: string;
+            /** @enum {string} */
+            role: "admin" | "operator";
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ApplicationRoleList: {
+            items: components["schemas"]["ApplicationRoleGrant"][];
+        };
+        ApplicationRoleRequest: {
+            /** @enum {string} */
+            role: "admin" | "operator";
         };
         ApplicationUser: {
             /** Format: date-time */
@@ -4287,7 +4357,8 @@ export interface components {
                 "admin_two_factor",
                 "admin_passkeys",
                 "admin_sso",
-                "admin_invitations"
+                "admin_invitations",
+                "admin_application_roles"
             ];
             server_version: string;
         };
@@ -4730,6 +4801,63 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    setApplicationRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description The application role. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRoleGrant"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeApplicationRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     disableAdministrator: {
         parameters: {
             query?: never;
@@ -4945,6 +5073,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listApplicationRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Application roles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRoleList"];
+                };
             };
             default: components["responses"]["Problem"];
         };

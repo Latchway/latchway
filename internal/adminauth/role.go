@@ -73,6 +73,22 @@ type AuthorizationContext struct {
 	AdminPromptBodiesEnabled    bool
 }
 
+// rank orders roles from viewer (1) to owner (4); invalid roles rank 0.
+func (role Role) rank() int {
+	switch role {
+	case RoleOwner:
+		return 4
+	case RoleAdmin:
+		return 3
+	case RoleOperator:
+		return 2
+	case RoleViewer:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // Allows evaluates the built-in role matrix and conditional prompt-body gate.
 func (role Role) Allows(capability Capability, context AuthorizationContext) bool {
 	if role.Validate() != nil || capability.Validate() != nil {

@@ -44,6 +44,11 @@ export const AdminSessionSchema = z
     organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
     /** An owner set the password; only the password change, sign-out and session read work until it changes. */
     password_reset_required: z.boolean().optional(),
+    /** Roles that raise the organization role in single applications. */
+    application_roles: z
+      .array(z.object({ application_id: z.string().regex(/^app_[A-Za-z0-9_-]{16,128}$/), role: z.enum(["admin", "operator"]) }).strict())
+      .max(1000)
+      .optional(),
     /** How this console session was signed in. */
     sign_in_method: z.enum(["password", "passkey", "sso"]).optional(),
     /** The organization requires a second factor this administrator hasn't set up; only enrollment works. */

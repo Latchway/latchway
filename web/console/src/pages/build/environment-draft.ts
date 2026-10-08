@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { useState } from "react";
 
 import {
@@ -68,6 +69,7 @@ function requireETag(etag: string | undefined, what: string): string {
 }
 
 export function useEnvironmentDraft() {
+  const { can } = useCapabilities();
   const queryClient = useQueryClient();
   const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
@@ -108,7 +110,7 @@ export function useEnvironmentDraft() {
   const document = (draft?.data.document ?? activeRevision?.document) as JSONRecord | undefined;
   const canConfigure = session.data?.mode === "configured"
     && compatibility.mutationAllowed
-    && (session.data.session?.capabilities.includes("activate_configuration") ?? false)
+    && can("activate_configuration")
     && workspace?.application?.status !== "disabled"
     && environment?.status !== "disabled";
 

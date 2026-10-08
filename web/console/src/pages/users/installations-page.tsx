@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
@@ -260,7 +261,6 @@ function FamilyDrawer({ canMutate, componentID, environmentKind, family, linkSea
 }
 
 function InstallationsView() {
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const queryClient = useQueryClient();
@@ -268,7 +268,8 @@ function InstallationsView() {
   const environmentID = environment?.id ?? "";
   const search = InstallationFamilyRouteSearchSchema.parse(workspace.search);
   const linkSearch = { application: search.application, environment: search.environment, organization: search.organization };
-  const canMutate = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("revoke_installations") ?? false);
+  const { can } = useCapabilities();
+  const canMutate = compatibility.mutationAllowed && can("revoke_installations");
   const [view, setView] = useState<"all" | "signals">("all");
   const [operation, setOperation] = useState<Operation>();
   const [outcome, setOutcome] = useState<{ familyID: string; message: string }>();

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { useCapabilities } from "../app/permissions";
 import { useConsoleCompatibility } from "../app/console-compatibility-context";
 import { type DraftSaveResult, useEnvironmentDraft } from "./build/environment-draft";
 import type { JSONRecord } from "./configuration-slice";
@@ -25,9 +26,10 @@ export function useConfigurationTask() {
   const [review, setReview] = useState<TaskConfigurationDraft>();
   const [localProblem, setLocalProblem] = useState<AdminProblem>();
   const source = shared.draft ?? shared.active;
-  const capabilities = session.data?.mode === "configured" ? session.data.session?.capabilities ?? [] : [];
-  const canManageSecrets = consoleCompatibility.mutationAllowed && capabilities.includes("manage_secrets");
-  const canRunSelfTests = consoleCompatibility.mutationAllowed && capabilities.includes("run_self_tests");
+  const { can } = useCapabilities();
+  const signedIn = session.data?.mode === "configured";
+  const canManageSecrets = consoleCompatibility.mutationAllowed && signedIn && can("manage_secrets");
+  const canRunSelfTests = consoleCompatibility.mutationAllowed && signedIn && can("run_self_tests");
   const activeDraft = review && review.revision.environment_id === shared.environment?.id && review.revision.id === shared.draft?.id ? review : undefined;
 
   async function stage(document: JSONRecord, description: string): Promise<TaskConfigurationDraft | undefined> {

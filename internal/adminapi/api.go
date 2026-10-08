@@ -278,6 +278,9 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/enable", api.enableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-password", api.resetAdministratorPassword)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-two-factor", api.resetAdministratorTwoFactor)
+		protected.Get("/application-roles", api.listApplicationRoles)
+		protected.With(api.mutationProtection).Put("/administrators/{adminUserID}/application-roles/{applicationID}", api.setApplicationRole)
+		protected.With(api.mutationProtection).Delete("/administrators/{adminUserID}/application-roles/{applicationID}", api.removeApplicationRole)
 		protected.Get("/admin-sessions", api.adminSessions)
 		protected.With(api.mutationProtection).Post("/admin-sessions/{adminSessionID}/revoke", api.revokeManagedAdminSession)
 		protected.Get("/users", api.users)
@@ -907,7 +910,9 @@ func (api *API) createAPIToken(w http.ResponseWriter, r *http.Request) {
 		AdminPromptBodiesEnabled:    true,
 	}
 	for _, capability := range scope.Values() {
-		if !principal.Allows(capability, maximumContext) {
+		// A token may carry a capability its holder has in some application; each
+		// use is still checked against the target application.
+		if !principal.AllowsSomewhere(capability, maximumContext) {
 			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "An API token cannot delegate a capability outside its own effective scope."})
 			return
 		}
@@ -1151,6 +1156,7 @@ func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth
 	if principal.Method == adminauth.AuthenticationSession && principal.SignInMethod != "" {
 		document["sign_in_method"] = principal.SignInMethod
 	}
+	document["application_roles"] = applicationRolesDocument(principal)
 	return document
 }
 
@@ -1508,6 +1514,10 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.recovery_codes_replace", "admin_request"
 	case strings.HasSuffix(path, "/auth/two-factor/disable"):
 		return "admin.two_factor_disable", "admin_request"
+	case strings.Contains(path, "/application-roles/") && method == http.MethodDelete:
+		return "admin.application_role_remove", "admin_request"
+	case strings.Contains(path, "/application-roles/"):
+		return "admin.application_role_set", "admin_request"
 	case strings.HasSuffix(path, "/reset-two-factor"):
 		return "admin.two_factor_reset", "admin_request"
 	case strings.HasSuffix(path, "/two-factor-requirement"):

@@ -276,6 +276,14 @@ func (store *Store) ChangeAdministratorRole(
 	`, principal.OrganizationID, targetAdminUserID, role, now); err != nil {
 		return Administrator{}, fmt.Errorf("change administrator role: %w", err)
 	}
+	// Application roles that no longer raise the new organization role are dropped.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM admin_application_roles
+		WHERE organization_id = $1 AND admin_user_id = $2
+		  AND (CASE role WHEN 'admin' THEN 3 ELSE 2 END) <= (CASE $3::text WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'operator' THEN 2 ELSE 1 END)
+	`, principal.OrganizationID, targetAdminUserID, string(role)); err != nil {
+		return Administrator{}, fmt.Errorf("drop superseded application roles: %w", err)
+	}
 	if err := store.insertAdministratorAudit(ctx, tx, principal, "admin.administrator_role_change", targetAdminUserID, requestID, now, []AuditChange{mustPublicAuditChange("role", AuditSet)}); err != nil {
 		return Administrator{}, err
 	}

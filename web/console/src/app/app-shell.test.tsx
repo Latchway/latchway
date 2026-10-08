@@ -407,6 +407,26 @@ describe("AppShell", () => {
     expect(fetchMock.mock.calls.some(([input]) => requestURL(input) === "/admin/v1/auth/login")).toBe(true);
   });
 
+  it("lets an owner preview the console as another role, read-only, and exit", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return json({ ...adminSession, capabilities: ["manage_owners", "inspect_users"] });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    }));
+    renderConsole("/administrators");
+
+    await user.click(await screen.findByRole("button", { name: /^Your account/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Preview as Role" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Preview as a role" });
+    await user.click(within(dialog).getByRole("radio", { name: /Viewer/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Start Preview" }));
+    expect(await screen.findByText("Previewing as Viewer.")).toBeInTheDocument();
+    expect(await screen.findByText(/Listing the team/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Exit Preview" }));
+    await waitFor(() => expect(screen.queryByText("Previewing as Viewer.")).not.toBeInTheDocument());
+  });
+
   it("opens the account page from the account menu", async () => {
     const user = userEvent.setup();
     installConfiguredFetch();

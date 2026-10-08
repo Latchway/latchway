@@ -634,7 +634,7 @@ func (store *operationalStore) revokeInstallationFamily(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return installationFamilyDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	reason, err := validateOperationalRevocationReason(reason, "admin_installation_family_revoked")
@@ -652,6 +652,9 @@ func (store *operationalStore) revokeInstallationFamily(
 	)
 	if err != nil {
 		return installationFamilyDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationFamilyDocument{}, err
@@ -739,7 +742,7 @@ func (store *operationalStore) requireInstallationFamilyRenewal(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return installationFamilyDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if _, err := validateOperationalRevocationReason(reason, "admin_containing_app_renewal_required"); err != nil {
@@ -756,6 +759,9 @@ func (store *operationalStore) requireInstallationFamilyRenewal(
 	)
 	if err != nil {
 		return installationFamilyDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationFamilyDocument{}, err
@@ -829,7 +835,7 @@ func (store *operationalStore) revokeClientComponent(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return clientComponentDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return clientComponentDocument{}, errOperationalForbidden
 	}
 	reason, err := validateOperationalRevocationReason(reason, "admin_client_component_revoked")
@@ -847,6 +853,9 @@ func (store *operationalStore) revokeClientComponent(
 	)
 	if err != nil {
 		return clientComponentDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return clientComponentDocument{}, err
@@ -952,7 +961,7 @@ func (store *operationalStore) requireClientComponentReattestation(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return clientComponentDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if _, err := validateOperationalRevocationReason(reason, "admin_component_reattestation_required"); err != nil {
@@ -969,6 +978,9 @@ func (store *operationalStore) requireClientComponentReattestation(
 	)
 	if err != nil {
 		return clientComponentDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return clientComponentDocument{}, err

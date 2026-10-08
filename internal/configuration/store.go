@@ -119,6 +119,9 @@ func (store *Store) CreateRevision(ctx context.Context, principal adminauth.Prin
 	if err != nil {
 		return Revision{}, err
 	}
+	if !canWriteIn(principal, environment.ApplicationID) {
+		return Revision{}, ErrForbidden
+	}
 	baseRevisionID := activeRevisionID
 	if input.BaseRevisionID != "" {
 		if activeRevisionID == "" || input.BaseRevisionID != activeRevisionID {
@@ -201,6 +204,9 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 	if err != nil {
 		return Revision{}, err
 	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return Revision{}, ErrForbidden
+	}
 	if _, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true); err != nil {
 		return Revision{}, err
 	}
@@ -255,6 +261,9 @@ func (store *Store) ValidateRevision(ctx context.Context, principal adminauth.Pr
 	revision, err := store.revision(ctx, tx, principal.OrganizationID, revisionID, true)
 	if err != nil {
 		return ValidationReport{}, err
+	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return ValidationReport{}, ErrForbidden
 	}
 	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
 	if err != nil {
@@ -318,6 +327,9 @@ func (store *Store) PlanRevision(ctx context.Context, principal adminauth.Princi
 	if err != nil {
 		return Plan{}, err
 	}
+	if !canWriteIn(principal, target.applicationID) {
+		return Plan{}, ErrForbidden
+	}
 	if target.State != StateValid || target.Validation == nil || !target.Validation.Valid {
 		return Plan{}, ErrConfigurationInvalid
 	}
@@ -358,6 +370,9 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	revision, err := store.revision(ctx, tx, principal.OrganizationID, revisionID, true)
 	if err != nil {
 		return Revision{}, err
+	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return Revision{}, ErrForbidden
 	}
 	environment, activeRevisionID, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
 	if err != nil {
@@ -444,6 +459,9 @@ func (store *Store) Rollback(ctx context.Context, principal adminauth.Principal,
 	environment, activeRevisionID, err := store.environment(ctx, tx, principal.OrganizationID, environmentID, true)
 	if err != nil {
 		return Revision{}, err
+	}
+	if !canWriteIn(principal, environment.ApplicationID) {
+		return Revision{}, ErrForbidden
 	}
 	if activeRevisionID == "" {
 		return Revision{}, ErrNotFound
@@ -740,6 +758,9 @@ func (store *Store) SimulationSnapshot(
 	if err != nil {
 		return SimulationSnapshot{}, err
 	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return SimulationSnapshot{}, ErrForbidden
+	}
 	if revision.State != StateValid && revision.State != StateActive {
 		return SimulationSnapshot{}, ErrConfigurationInvalid
 	}
@@ -1030,8 +1051,15 @@ func nullableJSON(value json.RawMessage) any {
 	return value
 }
 
+// canWrite is the first check, before the target is loaded: the principal may
+// change configuration in at least one application.
 func canWrite(principal adminauth.Principal) bool {
-	return principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{})
+	return principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{})
+}
+
+// canWriteIn is the exact check for the loaded target's application.
+func canWriteIn(principal adminauth.Principal, applicationID string) bool {
+	return principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{})
 }
 
 // validateActiveUserOverrides rejects a candidate snapshot that would strand

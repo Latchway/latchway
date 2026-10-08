@@ -255,14 +255,71 @@ type Principal struct {
 	// SignInMethod is how a console session was signed in.
 	SignInMethod SignInMethod
 	scope        *CapabilitySet
+	// applicationRoles raise the organization role for single applications.
+	applicationRoles map[string]Role
 }
 
-// Allows evaluates membership role and optional API-token scope.
+// Allows evaluates the organization role and optional API-token scope. It is
+// the check for organization-wide actions; actions on one application use
+// AllowsIn, which also counts application roles.
 func (principal Principal) Allows(capability Capability, context AuthorizationContext) bool {
+	return principal.allowsAs(principal.Role, capability, context)
+}
+
+func (principal Principal) allowsAs(role Role, capability Capability, context AuthorizationContext) bool {
 	if principal.scope == nil {
-		return principal.Role.Allows(capability, context)
+		return role.Allows(capability, context)
 	}
-	return principal.scope.Allows(principal.Role, capability, context)
+	return principal.scope.Allows(role, capability, context)
+}
+
+// RoleIn is the administrator's role for one application: the organization
+// role, raised by an application role when that is higher. Application roles
+// never lower it.
+func (principal Principal) RoleIn(applicationID string) Role {
+	if raised, ok := principal.applicationRoles[applicationID]; ok && raised.rank() > principal.Role.rank() {
+		return raised
+	}
+	return principal.Role
+}
+
+// AllowsIn evaluates a capability for one application.
+func (principal Principal) AllowsIn(capability Capability, applicationID string, context AuthorizationContext) bool {
+	return principal.allowsAs(principal.RoleIn(applicationID), capability, context)
+}
+
+// AllowsSomewhere reports whether the capability is allowed in the
+// organization or in at least one application. It is a cheap first check
+// before the target, and so its application, is loaded.
+func (principal Principal) AllowsSomewhere(capability Capability, context AuthorizationContext) bool {
+	if principal.Allows(capability, context) {
+		return true
+	}
+	for applicationID := range principal.applicationRoles {
+		if principal.AllowsIn(capability, applicationID, context) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplicationRoles returns a copy of the application roles that raise this
+// principal's organization role.
+func (principal Principal) ApplicationRoles() map[string]Role {
+	roles := make(map[string]Role, len(principal.applicationRoles))
+	for applicationID, role := range principal.applicationRoles {
+		roles[applicationID] = role
+	}
+	return roles
+}
+
+// WithApplicationRoles returns the principal with application roles set.
+func (principal Principal) WithApplicationRoles(roles map[string]Role) Principal {
+	principal.applicationRoles = make(map[string]Role, len(roles))
+	for applicationID, role := range roles {
+		principal.applicationRoles[applicationID] = role
+	}
+	return principal
 }
 
 func capabilitiesFromStrings(values []string) (CapabilitySet, error) {

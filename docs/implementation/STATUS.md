@@ -2,6 +2,43 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 15: application roles and role preview (branch `console-api-completion`, unreleased)
+
+Server (ADR 0045, schema 39, capability `admin_application_roles`):
+
+- `admin_application_roles` grants raise a member to Admin or Operator in one
+  application. `Principal` gains `RoleIn`, `AllowsIn` and `AllowsSomewhere`;
+  sessions and API tokens load grants on every request.
+- Converted application-scoped checks: configuration draft, replace,
+  validate, plan, activate, rollback and simulation; environment create and
+  status; application status; secrets list, create, rotate and destroy; user
+  limit overrides; self-test runs, reads and schedules; installation, family
+  and component revocation and re-attestation; user block and confirmed user
+  operations. Organization-wide actions keep the organization role.
+- `GET /application-roles`, `PUT`/`DELETE
+  /administrators/{id}/application-roles/{application}` (owners); grants must
+  be above the organization role, owners have none, and raising the
+  organization role drops covered grants. Token scopes may include
+  capabilities held in some application. The session document carries
+  `application_roles`.
+- Fix: the CLI's token-mode session struct now accepts every field the server
+  sends (`two_factor_enrollment_required` had been missing since phase 11,
+  which strict decoding would refuse).
+
+Console: capabilities are computed per selected application from the session
+(`useCapabilities`), so a raised member gets the right buttons in that app
+only; Team › Members has an Application roles section per member; owners can
+Preview as Role (Admin, Operator, Viewer) from the account menu, which shows
+that role's console read-only with a banner and Exit Preview.
+
+Validation: `go test ./...` against PostgreSQL 16 (a Viewer raised to Admin in
+one app can create environments, drafts and use a scoped token there and not in
+another app or organization-wide; listing, removal, refusal below the
+organization role and drop on promotion), vet, gofmt; contract validation and
+generated references (113 operations); lint, typecheck, `check:api`,
+`pnpm test` (465 passed), Playwright, the live-stack run, build and
+`verify:reproducible`.
+
 ## Console completion phase 14: member invitations (branch `console-api-completion`, unreleased)
 
 Server (ADR 0044, schema 38, capability `admin_invitations`):
