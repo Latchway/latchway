@@ -708,7 +708,9 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		  AND m.admin_user_id = s.admin_user_id
 		  AND m.status = 'active'
 		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id, s.expires_at,
-		          u.password_reset_required
+		          u.password_reset_required,
+		          COALESCE((SELECT o.require_two_factor FROM organizations AS o WHERE o.organization_id = s.organization_id), false)
+		            AND NOT `+confirmedSecondFactorSQL+`
 	`, hash.Bytes(), now).Scan(
 		&principal.OrganizationID,
 		&principal.AdminUserID,
@@ -716,6 +718,7 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		&principal.CredentialID,
 		&principal.CredentialExpiresAt,
 		&principal.PasswordResetRequired,
+		&principal.TwoFactorEnrollmentRequired,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Principal{}, ErrAdminAuthentication

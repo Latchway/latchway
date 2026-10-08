@@ -205,6 +205,7 @@ func newAPIRuntime(
 		}),
 		adminapi.WithConfigurationStore(configurationStore),
 		adminapi.WithCredentialSelfTests(secretStore, targetCache),
+		adminapi.WithFactorSealer(envelope),
 		adminapi.WithDiagnosticDependencies(diagnostics.Dependencies{
 			CompletionPool: completionPool,
 			MasterKey: func(checkCtx context.Context) error {

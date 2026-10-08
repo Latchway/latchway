@@ -24,6 +24,7 @@ func TestServerCapabilitiesAreClosedAndStablyOrdered(t *testing.T) {
 		"admin_session_management",
 		"admin_event_stream",
 		"admin_account_self_service",
+		"admin_two_factor",
 	}
 	first := serverCapabilities()
 	if !reflect.DeepEqual(first, want) {

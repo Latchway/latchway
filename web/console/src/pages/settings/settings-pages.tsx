@@ -2,11 +2,12 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 
-import { adminRequest, DoctorReportSchema, SystemStatusSchema } from "../../api/admin";
+import { setTwoFactorRequirement, twoFactorStatusQueryOptions } from "../../api/account";
+import { AdministratorPageSchema, adminRequest, DoctorReportSchema, queryPath, SystemStatusSchema } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { consoleContractVersion, consoleProtocolVersion } from "../../api/console-compatibility";
 import { type ApplicationResource, ApplicationResourceSchema, type EnvironmentResource, EnvironmentResourceSchema } from "../../api/resources";
-import { useConsoleSession } from "../../api/session";
+import { consoleSessionQueryOptions, useConsoleSession } from "../../api/session";
 import { applicationsQueryOptions, environmentsQueryOptions, organizationsQueryOptions } from "../../api/workspace";
 import { useConsoleCompatibility } from "../../app/console-compatibility-context";
 import { clearTheme, setTheme, storedTheme } from "../../app/theme";
@@ -23,6 +24,52 @@ function scoped(previous: Record<string, unknown>) {
 }
 
 // ─── General ────────────────────────────────────────────────────────────────
+
+/** Owners require, or stop requiring, a second factor for every member of this organization. */
+function SignInSecurityCard({ organizationID }: { organizationID: string }) {
+  const session = useConsoleSession();
+  const compatibility = useConsoleCompatibility();
+  const queryClient = useQueryClient();
+  const owner = session.data?.session?.capabilities.includes("manage_owners") ?? false;
+  const status = useQuery(twoFactorStatusQueryOptions);
+  const members = useQuery({ enabled: owner, queryFn: async () => (await adminRequest(queryPath("/admin/v1/administrators", { page_size: "200" }), AdministratorPageSchema)).data.items, queryKey: ["team", "members", "security"], retry: false });
+  const [confirm, setConfirm] = useState<boolean>();
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<AdminProblem>();
+  const required = status.data?.required_by_organization ?? false;
+  const withoutTwoFactor = (members.data ?? []).filter((member) => member.status === "active" && !member.two_factor_enabled);
+  async function save(next: boolean): Promise<void> {
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      await setTwoFactorRequirement(organizationID, next);
+      setConfirm(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: twoFactorStatusQueryOptions.queryKey }),
+        queryClient.invalidateQueries({ queryKey: consoleSessionQueryOptions.queryKey })
+      ]);
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card icon="shield" meta={status.data ? <Badge color={required ? "success" : undefined} variant="soft">{required ? "Required" : "Optional"}</Badge> : undefined} title="Sign-in security">
+      <p className="lw-note">When two-factor sign-in is required, members without it can only set it up after signing in. API tokens aren&apos;t affected.</p>
+      {owner && members.data ? <p className="lw-secondary lw-note">{withoutTwoFactor.length === 0 ? "Every active member has two-factor sign-in on." : `${withoutTwoFactor.length} active ${withoutTwoFactor.length === 1 ? "member doesn't" : "members don't"} have it on yet.`}</p> : null}
+      {owner ? (
+        <div><Button disabled={!compatibility.mutationAllowed || !status.data} onClick={() => setConfirm(!required)} size="sm" variant={required ? "secondary" : "primary"}>{required ? "Stop Requiring Two-Factor" : "Require Two-Factor"}</Button></div>
+      ) : <p className="lw-secondary lw-note">Only owners change this.</p>}
+      {confirm !== undefined ? (
+        <ConfirmDialog confirmLabel={confirm ? "Require Two-Factor" : "Stop Requiring"} description={confirm ? (withoutTwoFactor.length ? `${withoutTwoFactor.length} active ${withoutTwoFactor.length === 1 ? "member is" : "members are"} limited to setting it up from their next request.` : "Every active member already has it on.") : "Members keep their authenticators; new members won't be asked to set one up."} onCancel={() => setConfirm(undefined)} onConfirm={() => void save(confirm)} pending={busy} title={confirm ? "Require two-factor sign-in?" : "Stop requiring two-factor sign-in?"}>
+          {confirm && withoutTwoFactor.length ? <ul className="lw-issue-items">{withoutTwoFactor.slice(0, 8).map((member) => <li key={member.id}>{member.display_name} · {member.email}</li>)}</ul> : null}
+          {problem ? <ProblemNotice problem={problem} /> : null}
+        </ConfirmDialog>
+      ) : null}
+    </Card>
+  );
+}
 
 function GeneralView() {
   const workspace = useOptionalWorkspace();
@@ -74,6 +121,7 @@ function GeneralView() {
           {status.data && evaluateSettingsCompatibility(status.data).readOnlySafeMode ? <Notice title="Why the console is read-only" tone="warning"><ul className="lw-issue-list">{evaluateSettingsCompatibility(status.data).reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></Notice> : null}
           <Link className="lw-link lw-note" search={scoped} to="/system-health">Open System Health</Link>
         </Card>
+        {organization && compatibility.status?.server_capabilities.includes("admin_two_factor") ? <SignInSecurityCard organizationID={organization.id} /> : null}
         <Card icon="lock" title="Data handling">
           <ul className="lw-issue-list lw-note">
             <li><strong>Prompts and responses: never stored.</strong> There&apos;s no setting; a configuration that tries to store them is refused when published.</li>

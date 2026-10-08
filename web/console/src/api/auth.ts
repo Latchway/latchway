@@ -4,6 +4,7 @@ export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
   info: "/admin/v1/auth/info",
   login: "/admin/v1/auth/login",
+  secondFactor: "/admin/v1/auth/login/two-factor",
   logout: "/admin/v1/auth/logout",
   organization: "/admin/v1/auth/organization",
   session: "/admin/v1/auth/session"
@@ -33,7 +34,9 @@ export const AdminSessionSchema = z
     memberships: z.array(MembershipSchema),
     organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
     /** An owner set the password; only the password change, sign-out and session read work until it changes. */
-    password_reset_required: z.boolean().optional()
+    password_reset_required: z.boolean().optional(),
+    /** The organization requires a second factor this administrator hasn't set up; only enrollment works. */
+    two_factor_enrollment_required: z.boolean().optional()
   })
   .strict();
 
@@ -286,12 +289,42 @@ export function responseProblem(response: Response, payload: unknown): AdminProb
   };
 }
 
-async function submitCredentials(
+export const SecondFactorChallengeSchema = z
+  .object({
+    challenge: z.string().regex(/^lwsic_[A-Za-z0-9_-]{43}$/),
+    expires_at: z.iso.datetime({ offset: true }),
+    methods: z.array(z.enum(["totp", "recovery_code"])).min(1).max(4),
+    status: z.literal("two_factor_required")
+  })
+  .strict();
+
+export type SecondFactorChallenge = z.infer<typeof SecondFactorChallengeSchema>;
+
+/** A password sign-in either opens a session or, with two-factor on, asks for the second factor. */
+export type SignInResult = { kind: "session"; session: AdminSession } | { challenge: SecondFactorChallenge; kind: "challenge" };
+
+export interface SecondFactorInput {
+  challenge: string;
+  code?: string;
+  recovery_code?: string;
+}
+
+function invalidSession(status: number): AdminRequestError {
+  return new AdminRequestError({
+    code: "invalid_response",
+    detail: "The gateway returned an invalid administrator session.",
+    retryable: true,
+    status,
+    title: "Invalid server response"
+  });
+}
+
+async function postCredentials(
   endpoint: string,
-  input: BootstrapOwnerInput | AdministratorLoginInput,
+  input: BootstrapOwnerInput | AdministratorLoginInput | SecondFactorInput,
   signal?: AbortSignal,
   fetcher: typeof fetch = globalThis.fetch
-): Promise<AdminSession> {
+): Promise<{ payload: unknown; response: Response }> {
   let response: Response;
   try {
     response = await fetcher(endpoint, {
@@ -324,20 +357,41 @@ async function submitCredentials(
   if (!response.ok) {
     throw new AdminRequestError(responseProblem(response, payload));
   }
+  return { payload, response };
+}
 
+function sessionFrom(response: Response, payload: unknown): AdminSession {
   rememberAdminCSRFToken(response);
-
   const parsed = AdminSessionSchema.safeParse(payload);
-  if (!parsed.success) {
-    throw new AdminRequestError({
-      code: "invalid_response",
-      detail: "The gateway returned an invalid administrator session.",
-      retryable: true,
-      status: response.status,
-      title: "Invalid server response"
-    });
-  }
+  if (!parsed.success) throw invalidSession(response.status);
   return parsed.data;
+}
+
+async function submitCredentials(
+  endpoint: string,
+  input: BootstrapOwnerInput | AdministratorLoginInput | SecondFactorInput,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminSession> {
+  const { payload, response } = await postCredentials(endpoint, input, signal, fetcher);
+  if (response.status === 202) throw invalidSession(response.status);
+  return sessionFrom(response, payload);
+}
+
+/** Signs in with a password; a 202 means the account has two-factor on and the challenge finishes the sign-in. */
+export async function startAdministratorSignIn(input: AdministratorLoginInput, signal?: AbortSignal, fetcher?: typeof fetch): Promise<SignInResult> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.login, input, signal, fetcher);
+  if (response.status === 202) {
+    const parsed = SecondFactorChallengeSchema.safeParse(payload);
+    if (!parsed.success) throw invalidSession(response.status);
+    return { challenge: parsed.data, kind: "challenge" };
+  }
+  return { kind: "session", session: sessionFrom(response, payload) };
+}
+
+/** Finishes a two-factor sign-in with an authenticator code or a recovery code. */
+export function completeSecondFactor(input: SecondFactorInput, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  return submitCredentials(adminAuthEndpoints.secondFactor, input, signal, fetcher);
 }
 
 /**

@@ -31,6 +31,7 @@ const (
 	SessionEndPasswordChanged    SessionEndReason = "password_changed"
 	SessionEndOrganizationSwitch SessionEndReason = "organization_switch"
 	SessionEndAccessDisabled     SessionEndReason = "access_disabled"
+	SessionEndTwoFactorReset     SessionEndReason = "two_factor_reset"
 	SessionEndOther              SessionEndReason = "other"
 )
 
@@ -50,6 +51,8 @@ func sessionEndFromRevokeReason(reason string) SessionEndReason {
 		return SessionEndOrganizationSwitch
 	case "administrator_disabled":
 		return SessionEndAccessDisabled
+	case revokeReasonTwoFactor:
+		return SessionEndTwoFactorReset
 	default:
 		return SessionEndOther
 	}

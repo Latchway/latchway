@@ -2,6 +2,45 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 11: administrator two-factor sign-in (branch `console-api-completion`, unreleased)
+
+Server (ADR 0041, schema 35, capability `admin_two_factor`):
+
+- TOTP authenticators: `POST /auth/two-factor/totp` returns a new key once (text
+  and `otpauth://`), `POST /auth/two-factor/totp/confirm` confirms it with a
+  code and returns ten single-use recovery codes once. Keys are sealed with an
+  administrator-bound key derived from the master key
+  (`SealAdministratorFactor`); recovery codes are stored hashed.
+- Sign-in: a correct password for a two-factor account returns `202` with a
+  hashed, five-minute, five-attempt challenge and no cookie;
+  `POST /auth/login/two-factor` finishes with a code or a recovery code. Codes
+  work once (the last accepted time step is stored) and wrong codes are also
+  limited per administrator.
+- `GET /auth/two-factor`, `POST /auth/two-factor/recovery-codes` (needs a current
+  code) and `POST /auth/two-factor/disable` (password and code; refused while an
+  organization requires two-factor).
+- `PUT /organizations/{id}/two-factor-requirement` (owners): members without a
+  factor get enrollment-only console sessions. API tokens are unaffected.
+- `POST /administrators/{id}/reset-two-factor` (owners) removes a member's
+  factor and ends their sessions; the CLI gains `accounts reset-two-factor` and
+  a TWO-FACTOR column, and administrator records carry `two_factor_enabled`.
+
+Console: a "Verify it's you" sign-in step (authenticator or recovery code), the
+same step in the re-sign-in dialog, a Two-factor card on Your account (QR code
+drawn locally with the bundled MIT `uqr` encoder, key for manual entry,
+recovery codes shown once behind an "I've saved these" check, replace codes,
+turn off), a full-screen "Set up two-factor sign-in" step when the
+organization requires it, a Two-factor column and Reset Two-Factor action on
+Team › Members, and a Sign-in security card in Settings › General that names
+members without it before requiring it. The live-stack run now enrolls a
+member, signs out and signs back in with a computed TOTP code.
+
+Validation: `go test ./...` against PostgreSQL 16 (including RFC 6238 vectors and
+the sealed-key tests), vet, gofmt; contract validation and generated
+references; lint, typecheck, `check:api`, `pnpm test` (427 passed),
+Playwright (46 passed), the live-stack run (passed), build and
+`verify:reproducible`.
+
 ## Console completion phase 10: administrator account self-service (branch `console-api-completion`, unreleased)
 
 Server (ADR 0040, Admin bundle edition 1.1.3 draft, schema 34, server

@@ -26,6 +26,7 @@ var sessionEndProblems = map[adminauth.SessionEndReason]problem.Error{
 	adminauth.SessionEndPasswordChanged:    {Code: "session_revoked", Detail: "Your password was changed, which signed out your other sessions."},
 	adminauth.SessionEndOrganizationSwitch: {Code: "session_revoked", Detail: "This session was replaced when you switched organization."},
 	adminauth.SessionEndAccessDisabled:     {Code: "session_revoked", Detail: "Your account or membership in this organization was disabled."},
+	adminauth.SessionEndTwoFactorReset:     {Code: "session_revoked", Detail: "An owner reset your two-factor sign-in. Sign in with your password and set it up again if your organization requires it."},
 	adminauth.SessionEndOther:              {Code: "session_revoked", Detail: "This session ended."},
 }
 
@@ -176,12 +177,17 @@ func (api *API) switchOrganization(w http.ResponseWriter, r *http.Request) {
 		api.handleAdminAuthError(w, r, err)
 		return
 	}
-	api.setSession(w, issued)
-	writeJSON(w, http.StatusOK, api.sessionDocument(view, adminauth.Principal{
+	switched := adminauth.Principal{
 		OrganizationID: membership.OrganizationID, AdminUserID: principal.AdminUserID,
 		Role: membership.Role, Method: adminauth.AuthenticationSession,
 		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
-	}))
+	}
+	if err := api.fillSessionFlags(r, &switched); err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	api.setSession(w, issued)
+	writeJSON(w, http.StatusOK, api.sessionDocument(view, switched))
 }
 
 func (api *API) ownSessions(w http.ResponseWriter, r *http.Request) {

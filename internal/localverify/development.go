@@ -215,6 +215,7 @@ func (f *fixture) composeDevelopmentServer(logger *slog.Logger) (*server.Server,
 	adminAPI, err := adminapi.New(
 		f.pool, f.origin(), 12*time.Hour, logger, manager,
 		adminapi.WithConfigurationStore(f.configurationStore),
+		adminapi.WithFactorSealer(f.envelope),
 	)
 	if err != nil {
 		return nil, nil, errors.New("local development Admin API composition failed")

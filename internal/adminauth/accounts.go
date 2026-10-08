@@ -43,6 +43,7 @@ type Administrator struct {
 	Role                  Role       `json:"role"`
 	Status                string     `json:"status"`
 	PasswordResetRequired bool       `json:"password_reset_required"`
+	TwoFactorEnabled      bool       `json:"two_factor_enabled"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 	DisabledAt            *time.Time `json:"disabled_at,omitempty"`
@@ -112,6 +113,7 @@ func (store *Store) ListAdministrators(
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
+		       EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = u.admin_user_id AND f.confirmed_at IS NOT NULL),
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at
@@ -132,7 +134,7 @@ func (store *Store) ListAdministrators(
 		if err := rows.Scan(
 			&item.ID, &item.MembershipID, &item.OrganizationID, &item.Email,
 			&item.DisplayName, &item.Role, &item.Status, &item.PasswordResetRequired,
-			&item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
+			&item.TwoFactorEnabled, &item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan administrator: %w", err)
 		}
@@ -540,6 +542,7 @@ func readAdministratorTx(ctx context.Context, tx pgx.Tx, organizationID, adminUs
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
+		       EXISTS (SELECT 1 FROM admin_totp_factors AS f WHERE f.admin_user_id = u.admin_user_id AND f.confirmed_at IS NOT NULL),
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at
@@ -549,7 +552,7 @@ func readAdministratorTx(ctx context.Context, tx pgx.Tx, organizationID, adminUs
 	`, organizationID, adminUserID).Scan(
 		&item.ID, &item.MembershipID, &item.OrganizationID, &item.Email,
 		&item.DisplayName, &item.Role, &item.Status, &item.PasswordResetRequired,
-		&item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
+		&item.TwoFactorEnabled, &item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Administrator{}, ErrAdminNotFound
