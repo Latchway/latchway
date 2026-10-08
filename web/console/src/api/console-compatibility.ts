@@ -25,7 +25,7 @@ export function consoleCompatibilityQueryOptions(identity: ConsoleCompatibilityQ
   });
 }
 
-export const consoleContractVersion = "1.0.0";
+export const consoleContractVersion = "1.1.0";
 export const consoleProtocolVersion = 2;
 export const requiredConsoleServerCapabilities = [
   "app_attest",

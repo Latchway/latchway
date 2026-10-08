@@ -51,7 +51,7 @@ function AppVerificationView() {
           { header: "Platforms", key: "platforms", render: (row) => object(row.value.platforms) ? Object.keys(row.value.platforms).map((platform) => platform.replaceAll("_", " ")).join(", ") : "—" },
           { header: "Used by", key: "features", render: (row) => draft.document ? specCollection(draft.document, "features").filter((feature) => feature.attestationPolicy === row.key).map((feature) => String(feature.id)).join(", ") || <span className="lw-faint">No feature</span> : "—" }
         ]}
-        after={<div className="lw-page-notice lw-legacy-block"><PlatformReadiness task={task} /></div>}
+        after={<div className="lw-page-notice"><PlatformReadiness task={task} /></div>}
         title="App verification"
       />
       {adding ? (

@@ -8,6 +8,7 @@ import {
   organizationsQueryOptions
 } from "../api/workspace";
 import { useConsoleSession } from "../api/session";
+import { EmptyState, Notice } from "../ui";
 import {
   WorkspaceContext,
   type WorkspaceContextValue,
@@ -109,17 +110,17 @@ export function EnvironmentRequired({ children }: { children: ReactNode }) {
   const workspace = useOptionalWorkspace();
   if (!workspace) return children;
   if (workspace.isLoading) {
-    return <section className="empty-state" role="status"><h1>Loading application environment…</h1><p>The console is resolving the server-owned workspace context.</p></section>;
+    return <div className="lw-page-notice" role="status"><EmptyState icon="spinner" title="Loading application environment…" titleAs="h1">The console is resolving the server-owned workspace context.</EmptyState></div>;
   }
   if (workspace.invalidApplication || workspace.invalidEnvironment) {
-    return <section className="empty-state" role="alert"><h1>The URL names an unavailable environment.</h1><p>Select an application and environment in the top bar. The console will not fall back silently from an invalid URL.</p></section>;
+    return <div className="lw-page-notice" role="alert"><EmptyState icon="alert" title="The URL names an unavailable environment." titleAs="h1">Select an application and environment in the top bar. The console will not fall back silently from an invalid URL.</EmptyState></div>;
   }
   if (!workspace.application || !workspace.environment) {
-    return <section className="empty-state"><h1>Create an application environment first.</h1><p>Task pages remain disabled until the Admin API returns an explicit environment.</p></section>;
+    return <div className="lw-page-notice"><EmptyState icon="rocket" title="Create an application environment first." titleAs="h1">Task pages remain disabled until the Admin API returns an explicit environment. Settings › Applications or the Setup wizard creates one.</EmptyState></div>;
   }
   const disabled = workspace.application.status === "disabled" || workspace.environment.status === "disabled";
   return <>
-    {disabled ? <section className="control-notice" role="status"><strong>Selected scope is disabled</strong><span>Historical requests, usage, audit records, users, installations, and configuration remain available for investigation. Traffic and configuration mutations stay blocked until both the application and environment are active; enabling the scope never restores revoked credentials.</span></section> : null}
+    {disabled ? <div className="lw-page-notice"><Notice icon="ban" title="Selected scope is disabled" tone="info">Historical requests, usage, audit records, users, installations, and configuration remain available for investigation. Traffic and configuration mutations stay blocked until both the application and environment are active; enabling the scope never restores revoked credentials.</Notice></div> : null}
     {children}
   </>;
 }

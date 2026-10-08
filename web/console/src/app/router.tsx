@@ -3,42 +3,13 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect
 } from "@tanstack/react-router";
 
 import { AppShell } from "./app-shell";
 import { NotFoundPage } from "../pages/not-found-page";
 import { OverviewPage } from "../pages/overview-page";
-import { SystemHealthPage } from "../pages/operate/system-health-page";
-import { SelfTestsPage } from "../pages/operate/self-tests-page";
-import { ApplicationsSettingsPage, GeneralSettingsPage } from "../pages/settings/settings-pages";
-import { AuditLogPage } from "../pages/audit/audit-page";
-import { SecretsPage } from "../pages/build/secrets-page";
-import { MembersPage, RolesPage, SessionsPage, TokensPage } from "../pages/team/team-pages";
-import { ComparePage, DraftChangesPage, JsonEditorPage, RevisionHistoryPage } from "../pages/changes/changes-pages";
-import { LimitPlansPage, OverridesPage, PlanByFeaturePage, ProtectionsPage } from "../pages/policies/policies-pages";
-import { SimulatorPage } from "../pages/simulator/simulator-page";
-import { RequestsPage } from "../pages/requests/requests-page";
-import { SessionsPolicyPage } from "../pages/build/client-trust-pages";
-import { InstallationFamiliesPage } from "../pages/users/installations-page";
-import { InstallationsPage } from "../pages/users/older-installs-page";
-import { UsersPage } from "../pages/users/users-page";
-import {
-  CostAnalyticsPage,
-  PerformanceAnalyticsPage,
-  ReliabilityAnalyticsPage,
-  UsageAnalyticsPage
-} from "../pages/analytics/analytics-page";
-import { SetupWizardPage } from "../pages/configuration-pages";
-import {
-  AttestationConfigurationPage,
-  AuthenticationProvidersPage,
-  ComponentDefinitionsConfigurationPage,
-  FeaturesConfigurationPage,
-  ModelsPricingConfigurationPage,
-  RoutesConfigurationPage,
-  UpstreamsConfigurationPage
-} from "../pages/configuration-area-pages";
 import {
   AnalyticsRouteSearchSchema,
   parseAnalyticsRouteSearch,
@@ -58,6 +29,44 @@ import {
   parseTeamRouteSearch,
   parseUserRouteSearch
 } from "./route-search";
+
+// Pages load on first visit so the sign-in screen and shell stay small.
+const SystemHealthPage = lazyRouteComponent(() => import("../pages/operate/system-health-page"), "SystemHealthPage");
+const SelfTestsPage = lazyRouteComponent(() => import("../pages/operate/self-tests-page"), "SelfTestsPage");
+const ApplicationsSettingsPage = lazyRouteComponent(() => import("../pages/settings/settings-pages"), "ApplicationsSettingsPage");
+const GeneralSettingsPage = lazyRouteComponent(() => import("../pages/settings/settings-pages"), "GeneralSettingsPage");
+const AuditLogPage = lazyRouteComponent(() => import("../pages/audit/audit-page"), "AuditLogPage");
+const SecretsPage = lazyRouteComponent(() => import("../pages/build/secrets-page"), "SecretsPage");
+const MembersPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "MembersPage");
+const RolesPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "RolesPage");
+const SessionsPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "SessionsPage");
+const TokensPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "TokensPage");
+const ComparePage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "ComparePage");
+const DraftChangesPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "DraftChangesPage");
+const JsonEditorPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "JsonEditorPage");
+const RevisionHistoryPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "RevisionHistoryPage");
+const LimitPlansPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "LimitPlansPage");
+const OverridesPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "OverridesPage");
+const PlanByFeaturePage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "PlanByFeaturePage");
+const ProtectionsPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "ProtectionsPage");
+const SimulatorPage = lazyRouteComponent(() => import("../pages/simulator/simulator-page"), "SimulatorPage");
+const RequestsPage = lazyRouteComponent(() => import("../pages/requests/requests-page"), "RequestsPage");
+const SessionsPolicyPage = lazyRouteComponent(() => import("../pages/build/client-trust-pages"), "SessionsPolicyPage");
+const InstallationFamiliesPage = lazyRouteComponent(() => import("../pages/users/installations-page"), "InstallationFamiliesPage");
+const InstallationsPage = lazyRouteComponent(() => import("../pages/users/older-installs-page"), "InstallationsPage");
+const UsersPage = lazyRouteComponent(() => import("../pages/users/users-page"), "UsersPage");
+const CostAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "CostAnalyticsPage");
+const PerformanceAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "PerformanceAnalyticsPage");
+const ReliabilityAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "ReliabilityAnalyticsPage");
+const UsageAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "UsageAnalyticsPage");
+const SetupWizardPage = lazyRouteComponent(() => import("../pages/configuration-pages"), "SetupWizardPage");
+const AttestationConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "AttestationConfigurationPage");
+const AuthenticationProvidersPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "AuthenticationProvidersPage");
+const ComponentDefinitionsConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "ComponentDefinitionsConfigurationPage");
+const FeaturesConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "FeaturesConfigurationPage");
+const ModelsPricingConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "ModelsPricingConfigurationPage");
+const RoutesConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "RoutesConfigurationPage");
+const UpstreamsConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "UpstreamsConfigurationPage");
 
 const rootRoute = createRootRoute({
   component: AppShell,

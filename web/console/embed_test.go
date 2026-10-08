@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/latchway/latchway/internal/buildinfo"
 )
 
 func TestAssetsContainManifestEntry(t *testing.T) {
@@ -75,5 +78,23 @@ func TestDockerConsoleBuildIncludesAdminAPIContract(t *testing.T) {
 	}
 	if copyOffset > goStageOffset {
 		t.Fatal("Admin OpenAPI contract is copied too late for the console-build stage")
+	}
+}
+
+// The console embedded in a server must require exactly the contract that server advertises; a drift leaves every
+// release in read-only safe mode.
+func TestConsoleRequiresTheServerContract(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/api/console-compatibility.ts")
+	if err != nil {
+		t.Fatalf("read console compatibility source: %v", err)
+	}
+	match := regexp.MustCompile(`export const consoleContractVersion = "([0-9]+\.[0-9]+\.[0-9]+)";`).FindSubmatch(source)
+	if match == nil {
+		t.Fatal("console compatibility source does not declare consoleContractVersion")
+	}
+	if got := string(match[1]); got != buildinfo.ContractVersion {
+		t.Fatalf("console requires contract %s, server advertises %s", got, buildinfo.ContractVersion)
 	}
 }
