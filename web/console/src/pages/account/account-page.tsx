@@ -29,8 +29,11 @@ const END_REASON: Readonly<Record<SessionEndReason, string>> = {
   revoked_by_owner: "Signed out by an owner",
   signed_out: "Signed out",
   signed_out_elsewhere: "Signed out from another session",
+  sso_changed: "Single sign-on changed by an owner",
   two_factor_reset: "Two-factor reset by an owner"
 };
+
+const SIGN_IN_METHOD = { passkey: "A passkey", password: "Password", sso: "Single sign-on" } as const;
 
 function when(instant: string): string {
   return new Date(instant).toLocaleString(undefined, { day: "numeric", hour: "2-digit", hour12: false, minute: "2-digit", month: "short" });
@@ -165,7 +168,8 @@ export function AccountPage() {
             { label: "Email", value: admin.administrator.email },
             { label: "Role in this organization", value: role ? ROLE_LABEL[role] : "Unknown" },
             { label: "Organization", value: organization?.display_name ?? admin.organization_id },
-            { label: "This session ends", value: admin.expires_at ? sessionEndText(admin.expires_at) : "Not reported" }
+            { label: "This session ends", value: admin.expires_at ? sessionEndText(admin.expires_at) : "Not reported" },
+            ...(admin.sign_in_method ? [{ label: "Signed in with", value: SIGN_IN_METHOD[admin.sign_in_method] }] : [])
           ]} />
           <p className="lw-secondary lw-note">An owner changes names, emails and roles from <Link className="lw-link" search={scopeSearch} to="/administrators">Team › Members</Link>. API tokens are under <Link className="lw-link" search={scopeSearch} to="/api-tokens">Team › API tokens</Link>.</p>
         </Card>

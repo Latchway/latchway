@@ -14,6 +14,7 @@ import {
   type SecondFactorMethod,
   signInWithPasskey,
   startAdministratorSignIn,
+  startSingleSignOn,
   switchAdminOrganization
 } from "../../api/auth";
 import { consoleContractVersion } from "../../api/console-compatibility";
@@ -26,12 +27,14 @@ import { Badge, Button, Field, Icon, Input, Notice, Segmented } from "../../ui";
 import { AuthProblem, PasswordInput } from "./auth-fields";
 import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
+import { leaveFor } from "./leave-for";
 import { acceptable, passwordStrength, type Strength } from "./password-strength";
 import { SecondFactorForm } from "./second-factor";
 import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
+import { forgetSSOReturn, ssoReturnMessage } from "./sso-return";
 
-type View = "sign-in" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
+type View = "sign-in" | "sso" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
 
 /** Failed attempts before the console mentions the server's pause, ahead of the pause itself. */
 const PAUSE_NOTE_AFTER = 3;
@@ -81,7 +84,36 @@ function PauseNotice({ onElapsed, until }: { onElapsed: () => void; until: numbe
   );
 }
 
-function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
+function SSOReturnNotice() {
+  const message = ssoReturnMessage();
+  return message ? <Notice title="Single sign-on didn't finish" tone="warning">{message}</Notice> : null;
+}
+
+function SingleSignOnView({ onBack, onSubmit, pending, problem }: { onBack: () => void; onSubmit: (slug: string) => void; pending: boolean; problem?: AdminProblem }) {
+  const slug = useRef<HTMLInputElement>(null);
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const value = slug.current?.value.trim() ?? "";
+    if (value) onSubmit(value);
+  }
+  return (
+    <div className="lw-auth__body">
+      <SSOReturnNotice />
+      <form aria-busy={pending} className="lw-auth__form" onSubmit={submit}>
+        <Field hint="Your organization's short name, as it appears in console links, like acme. An owner can tell you." id="sso-organization" label="Organization">
+          <div className="lw-input-box">
+            <input autoCapitalize="none" autoComplete="organization" autoFocus className="lw-input" disabled={pending} id="sso-organization" maxLength={128} name="organization" ref={slug} required spellCheck={false} />
+          </div>
+        </Field>
+        {problem ? <AuthProblem problem={problem} /> : null}
+        <Button className="lw-auth__submit" loading={pending} type="submit" variant="primary">Continue to Your Identity Provider</Button>
+      </form>
+      <Button className="lw-auth__link" disabled={pending} onClick={onBack} size="sm" variant="ghost">Sign in with email instead</Button>
+    </div>
+  );
+}
+
+function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey, onSSO, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
   email: string;
   emailRef: RefObject<HTMLInputElement | null>;
   endReason?: string;
@@ -90,6 +122,8 @@ function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey,
   mismatch?: string;
   /** Offered when the server accepts passkeys and this browser can use them. */
   onPasskey?: () => void;
+  /** Offered when an organization on this server has single sign-on. */
+  onSSO?: () => void;
   onSetup: () => void;
   onSubmit: () => void;
   passwordRef: RefObject<HTMLInputElement | null>;
@@ -109,6 +143,7 @@ function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey,
     <div className="lw-auth__body">
       {mismatch ? <Notice title="This console and server are from different releases." tone="warning">The console expects contract {consoleContractVersion}; the server reports {mismatch}. Sign-in may fail until an upgrade finishes; reload this page afterwards.</Notice> : null}
       {endReason ? <Notice title="Your session ended">{endReason}</Notice> : null}
+      <SSOReturnNotice />
       <form aria-busy={Boolean(pending)} className="lw-auth__form" onSubmit={submit}>
         <Field id="login-email" label="Email address">
           <div className="lw-input-box">
@@ -120,10 +155,11 @@ function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey,
         {failures >= PAUSE_NOTE_AFTER && !paused ? <p className="lw-auth__fine">After five failed attempts for one email address within five minutes, the server pauses sign-in for that address for up to five minutes.</p> : null}
         <Button className="lw-auth__submit" disabled={paused || pending === "passkey"} loading={pending === "password"} type="submit" variant="primary">{pending === "password" ? "Signing In…" : "Sign In"}</Button>
       </form>
-      {onPasskey ? (
+      {onPasskey || onSSO ? (
         <div className="lw-auth__alternative">
           <span className="lw-auth__divider">or</span>
-          <Button className="lw-auth__submit" disabled={pending === "password"} icon="key" loading={pending === "passkey"} onClick={onPasskey}>Sign In with a Passkey</Button>
+          {onPasskey ? <Button className="lw-auth__submit" disabled={pending === "password"} icon="key" loading={pending === "passkey"} onClick={onPasskey}>Sign In with a Passkey</Button> : null}
+          {onSSO ? <Button className="lw-auth__submit" disabled={Boolean(pending)} icon="team" onClick={onSSO}>Sign In with SSO</Button> : null}
         </div>
       ) : null}
       <SignInHelp />
@@ -303,6 +339,7 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
 
   function enter(session: AdminSession, to?: "/setup"): void {
     clearInput(passwordRef.current);
+    forgetSSOReturn();
     rememberSignedOutEmail(undefined);
     queryClient.setQueryData(consoleSessionQueryOptions.queryKey, consoleStateFromAdminSession(session));
     onHoldChange(false);
@@ -356,6 +393,18 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
       afterSignIn(session);
     } catch (error) {
       fail(error);
+    }
+  }
+
+  async function singleSignOn(slug: string): Promise<void> {
+    setPending("sso");
+    setProblem(undefined);
+    try {
+      // The page leaves for the identity provider and comes back signed in, or with a reason.
+      leaveFor(await startSingleSignOn(slug));
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setPending(undefined);
     }
   }
 
@@ -473,7 +522,8 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
 
   const mismatch = info.data && info.data.contract_version !== consoleContractVersion ? info.data.contract_version : undefined;
   const passkeySignIn = info.data?.sign_in_methods.includes("passkey") && passkeysAvailable() ? () => void signInByPasskey() : undefined;
-  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onPasskey={passkeySignIn} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in" ? "password" : pending === "passkey" ? "passkey" : undefined} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const ssoOffered = info.data?.sign_in_methods.includes("sso") ? () => show("sso") : undefined;
+  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onPasskey={passkeySignIn} onSSO={ssoOffered} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in" ? "password" : pending === "passkey" ? "passkey" : undefined} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
   const current: View = view === "sign-in" && info.data?.setup_open && !preferSignIn ? "setup" : view;
 
   switch (current) {
@@ -500,6 +550,12 @@ export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, ret
         <AuthLayout description="This server already has an owner, so first-run setup is closed for good. Sign in with your administrator account instead." title="Setup is already done">
           <Button className="lw-auth__submit" onClick={() => show("sign-in")} variant="primary">Go to Sign In</Button>
           <p className="lw-auth__fine">Need an account? Ask an owner to add you from Team › Members.</p>
+        </AuthLayout>
+      );
+    case "sso":
+      return (
+        <AuthLayout description="You'll continue at your organization's identity provider and come back here signed in." title="Sign in with SSO">
+          <SingleSignOnView onBack={() => show("sign-in")} onSubmit={(slug) => void singleSignOn(slug)} pending={pending === "sso"} problem={problem} />
         </AuthLayout>
       );
     case "two-factor":

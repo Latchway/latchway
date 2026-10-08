@@ -85,6 +85,8 @@ export const AdministratorSchema = z
     organization_id: OpaqueID,
     password_reset_required: z.boolean(),
     role: z.enum(["owner", "admin", "operator", "viewer"]),
+    /** Signed in to this organization with its identity provider. */
+    sso_linked: z.boolean().optional(),
     two_factor_enabled: z.boolean().optional(),
     status: z.enum(["active", "disabled"]),
     updated_at: Instant
@@ -144,7 +146,7 @@ export const APITokenMetadataSchema = z
   })
   .strict();
 
-export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "two_factor_reset", "other"]);
+export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "two_factor_reset", "sso_changed", "other"]);
 
 export const OwnAdminSessionSchema = z
   .object({
@@ -188,6 +190,28 @@ export const PasskeySchema = z
   .strict();
 
 export const PasskeyListSchema = z.object({ items: z.array(PasskeySchema).max(1000) }).strict();
+
+const HTTPSURL = z.string().startsWith("https://").max(2048);
+
+export const SSOProviderSchema = z
+  .object({
+    allowed_email_domains: z.array(z.string().min(1).max(253)).max(20),
+    authorization_endpoint: HTTPSURL,
+    client_id: z.string().min(1).max(512),
+    created_at: Instant,
+    enabled: z.boolean(),
+    issuer: HTTPSURL,
+    jwks_uri: HTTPSURL,
+    /** Role for accounts created at first sign-in; null when accounts aren't created. */
+    provision_role: z.enum(["admin", "operator", "viewer"]).nullable(),
+    /** Members other than owners must sign in with single sign-on. */
+    require_sso: z.boolean(),
+    token_endpoint: HTTPSURL,
+    updated_at: Instant
+  })
+  .strict();
+
+export const SSOConfigurationSchema = z.object({ provider: SSOProviderSchema.nullable(), redirect_uri: z.string().min(1).max(2048) }).strict();
 
 export const TotpEnrollmentSchema = z
   .object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), uri: z.string().startsWith("otpauth://totp/").max(1024) })
@@ -1503,6 +1527,8 @@ export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
 export type OwnAdminSession = z.infer<typeof OwnAdminSessionSchema>;
 export type TwoFactorStatus = z.infer<typeof TwoFactorStatusSchema>;
 export type Passkey = z.infer<typeof PasskeySchema>;
+export type SSOProvider = z.infer<typeof SSOProviderSchema>;
+export type SSOConfiguration = z.infer<typeof SSOConfigurationSchema>;
 export type TotpEnrollment = z.infer<typeof TotpEnrollmentSchema>;
 export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;

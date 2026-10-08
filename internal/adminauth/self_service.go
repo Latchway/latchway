@@ -32,6 +32,7 @@ const (
 	SessionEndOrganizationSwitch SessionEndReason = "organization_switch"
 	SessionEndAccessDisabled     SessionEndReason = "access_disabled"
 	SessionEndTwoFactorReset     SessionEndReason = "two_factor_reset"
+	SessionEndSSOChanged         SessionEndReason = "sso_changed"
 	SessionEndOther              SessionEndReason = "other"
 )
 
@@ -53,6 +54,8 @@ func sessionEndFromRevokeReason(reason string) SessionEndReason {
 		return SessionEndAccessDisabled
 	case revokeReasonTwoFactor:
 		return SessionEndTwoFactorReset
+	case revokeReasonSSOChanged:
+		return SessionEndSSOChanged
 	default:
 		return SessionEndOther
 	}
@@ -206,9 +209,13 @@ func (store *Store) SwitchSessionOrganization(
 		principal.OrganizationID == targetOrganizationID {
 		return IssuedSession{}, ErrInvalidAdminInput
 	}
+	if principal.SignInMethod == SignInSSO {
+		return IssuedSession{}, ErrSSOSessionSwitch
+	}
 	input := CreateSessionInput{
 		OrganizationID: targetOrganizationID, AdminUserID: principal.AdminUserID,
 		Lifetime: lifetime, RequestID: requestID, DeviceSummary: deviceSummary,
+		SignInMethod: principal.SignInMethod,
 	}
 	if err := input.validate(); err != nil {
 		return IssuedSession{}, err

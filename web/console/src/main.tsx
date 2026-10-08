@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { captureSSOReturn } from "./app/auth/sso-return";
 import { createAppRouter } from "./app/router";
 import { applyStoredTheme } from "./app/theme";
 // Fonts are bundled (OFL-1.1) and served same-origin: the console's CSP allows only 'self'.
@@ -20,6 +21,7 @@ const queryClient = new QueryClient({
   }
 });
 applyStoredTheme();
+captureSSOReturn();
 const router = createAppRouter();
 const container = document.querySelector<HTMLDivElement>("#root");
 

@@ -115,6 +115,27 @@ type CreateSessionInput struct {
 	// DeviceSummary is an optional coarse "Browser on OS" description; see
 	// DeviceSummaryFromUserAgent. Raw User-Agent strings are never stored.
 	DeviceSummary string
+	// SignInMethod is how the administrator proved who they are; empty means
+	// SignInPassword.
+	SignInMethod SignInMethod
+}
+
+// SignInMethod records how a console session was signed in.
+type SignInMethod string
+
+const (
+	SignInPassword SignInMethod = "password"
+	SignInPasskey  SignInMethod = "passkey"
+	// SignInSSO sessions rely on the organization's identity provider for any
+	// further factors, so the two-factor requirement doesn't apply to them.
+	SignInSSO SignInMethod = "sso"
+)
+
+func (method SignInMethod) orDefault() SignInMethod {
+	if method == "" {
+		return SignInPassword
+	}
+	return method
 }
 
 func (input CreateSessionInput) validate() error {
@@ -132,6 +153,11 @@ func (input CreateSessionInput) validate() error {
 	}
 	if input.DeviceSummary != "" && !deviceSummaryPattern.MatchString(input.DeviceSummary) {
 		return fmt.Errorf("%w: device summary", ErrInvalidAdminInput)
+	}
+	switch input.SignInMethod.orDefault() {
+	case SignInPassword, SignInPasskey, SignInSSO:
+	default:
+		return fmt.Errorf("%w: sign-in method", ErrInvalidAdminInput)
 	}
 	return nil
 }
@@ -226,7 +252,9 @@ type Principal struct {
 	// TwoFactorEnrollmentRequired marks a session in an organization that
 	// requires a second factor the administrator hasn't set up yet.
 	TwoFactorEnrollmentRequired bool
-	scope                       *CapabilitySet
+	// SignInMethod is how a console session was signed in.
+	SignInMethod SignInMethod
+	scope        *CapabilitySet
 }
 
 // Allows evaluates membership role and optional API-token scope.

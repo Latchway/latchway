@@ -700,6 +700,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/sso/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The identity provider's redirect back; signs in and returns the browser to the console.
+         * @description Public; reached by the browser, not called by clients. It needs the
+         *     binding cookie from `POST /auth/sso/start`, redeems the code with the
+         *     PKCE verifier, and verifies the ID token's signature, issuer,
+         *     audience, expiry and nonce. A linked identity signs in as its
+         *     administrator; otherwise a provider-verified email in an allowed
+         *     domain links to the matching member, or, when the organization
+         *     provisions accounts, creates a membership. Success sets the session
+         *     cookies and redirects to `/`; failure redirects to `/?sso_error=`
+         *     with one of `expired`, `denied`, `unavailable`, `failed`,
+         *     `no_account`, `unverified_email`, `domain` or `conflict`.
+         */
+        get: operations["finishAdminSSO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sso/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a single sign-on at the organization's identity provider.
+         * @description Public. Returns the provider's authorization URL for the browser to
+         *     navigate to, and sets a short-lived HttpOnly cookie that binds the
+         *     sign-in to this browser. The sign-in carries a random state, nonce
+         *     and PKCE verifier and lasts ten minutes; a bounded number may be
+         *     pending per organization (`rate_limited` beyond it).
+         */
+        post: operations["startAdminSSO"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/two-factor": {
         parameters: {
             query?: never;
@@ -1214,6 +1267,40 @@ export interface paths {
         /** Create an organization. */
         post: operations["createOrganization"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization's single sign-on provider and the redirect URI to register.
+         * @description Requires `manage_owners`. The client secret is never returned.
+         */
+        get: operations["getOrganizationSSO"];
+        /**
+         * Set up or change the organization's OpenID Connect provider.
+         * @description Requires `manage_owners`. The server reads the issuer's discovery
+         *     document over the public internet and refuses issuers without the
+         *     authorization code flow, PKCE S256, and RS256 or ES256 ID tokens
+         *     (`configuration_invalid`). The client secret is sealed with the master
+         *     key; omit it to keep the stored one. Disabling ends single sign-on
+         *     sessions; requiring single sign-on ends members' other console
+         *     sessions, and owners keep their other sign-in methods.
+         */
+        put: operations["putOrganizationSSO"];
+        post?: never;
+        /**
+         * Remove the organization's single sign-on provider and linked identities.
+         * @description Requires `manage_owners`. Ends every single sign-on session in the organization except the caller's.
+         */
+        delete: operations["removeOrganizationSSO"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1752,9 +1839,11 @@ export interface components {
             organization_id: components["schemas"]["OrganizationID"];
             password_reset_required: boolean;
             role: components["schemas"]["AdministratorRole"];
+            /** @description True when the administrator has signed in to this organization with its identity provider. */
+            sso_linked: boolean;
             /** @enum {string} */
             status: "active" | "disabled";
-            /** @description True when the account has a confirmed authenticator. */
+            /** @description True when the account has a confirmed authenticator app or a passkey. */
             two_factor_enabled: boolean;
             /** Format: date-time */
             updated_at: string;
@@ -1785,7 +1874,12 @@ export interface components {
             organization_id: components["schemas"]["OrganizationID"];
             /** @description True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes. */
             password_reset_required: boolean;
-            /** @description True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. */
+            /**
+             * @description How a console session was signed in; absent for API tokens.
+             * @enum {string}
+             */
+            sign_in_method?: "password" | "passkey" | "sso";
+            /** @description True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. Never true for single sign-on sessions. */
             two_factor_enrollment_required: boolean;
         };
         AdminSessionID: string;
@@ -1817,8 +1911,8 @@ export interface components {
             protocol_versions: number[];
             /** @description True while a bootstrap token is installed and unconsumed and no owner exists. */
             setup_open: boolean;
-            /** @description Includes `passkey` when the console is served from a domain name over HTTPS. */
-            sign_in_methods: ("password" | "passkey")[];
+            /** @description Includes `passkey` when the console is served from a domain name over HTTPS, and `sso` when any organization has single sign-on enabled. */
+            sign_in_methods: ("password" | "passkey" | "sso")[];
         };
         AdminUserID: string;
         ApiTokenMetadata: {
@@ -3861,7 +3955,7 @@ export interface components {
             page: components["schemas"]["PageInfo"];
         };
         /** @enum {string} */
-        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "two_factor_reset" | "other";
+        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "two_factor_reset" | "sso_changed" | "other";
         SessionPolicy: {
             accessTokenTtl?: components["schemas"]["Duration"];
             challengeTtl?: components["schemas"]["Duration"];
@@ -3886,6 +3980,44 @@ export interface components {
             privacy?: components["schemas"]["PrivacyPolicy"];
             session?: components["schemas"]["SessionPolicy"];
             upstreams: components["schemas"]["Upstream"][];
+        };
+        SSOConfiguration: {
+            provider: components["schemas"]["SSOProvider"] | null;
+            /** @description The callback URL to register with the identity provider. */
+            redirect_uri: string;
+        };
+        SSOProvider: {
+            allowed_email_domains: string[];
+            authorization_endpoint: string;
+            client_id: string;
+            /** Format: date-time */
+            created_at: string;
+            enabled: boolean;
+            issuer: string;
+            jwks_uri: string;
+            /** @description Role for accounts created at first sign-in; null when accounts aren't created. */
+            provision_role: ("admin" | "operator" | "viewer") | null;
+            /** @description Members other than owners must sign in with single sign-on. */
+            require_sso: boolean;
+            token_endpoint: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SSOProviderRequest: {
+            allowed_email_domains?: string[];
+            client_id: string;
+            /** @description Required the first time; omit to keep the stored secret. */
+            client_secret?: string;
+            enabled: boolean;
+            issuer: string;
+            provision_role?: ("admin" | "operator" | "viewer") | null;
+            require_sso: boolean;
+        };
+        SSOStart: {
+            authorization_url: string;
+        };
+        SSOStartRequest: {
+            organization_slug: string;
         };
         StartSelfTestRequest: {
             /** @description Exact immutable active revision the server must bind before any provider dispatch. */
@@ -3956,7 +4088,8 @@ export interface components {
                 "admin_event_stream",
                 "admin_account_self_service",
                 "admin_two_factor",
-                "admin_passkeys"
+                "admin_passkeys",
+                "admin_sso"
             ];
             server_version: string;
         };
@@ -5319,6 +5452,58 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    finishAdminSSO: {
+        parameters: {
+            query?: {
+                code?: string;
+                error?: string;
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Back to the console, signed in or with a reason. */
+            303: {
+                headers: {
+                    Location?: string;
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    startAdminSSO: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Where to send the browser. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOStart"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getOwnTwoFactorStatus: {
         parameters: {
             query?: never;
@@ -6161,6 +6346,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Organization"];
                 };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Single sign-on configuration; `provider` is null until one is set up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOConfiguration"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    putOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOConfiguration"];
+                };
+            };
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Problem"];
         };

@@ -1,12 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useRef, useState } from "react";
 
-import { type AdminProblem, type AdminSession, finishSecondFactor, problemFromError, type SecondFactorAnswer, type SecondFactorMethod, startAdministratorSignIn, switchAdminOrganization } from "../../api/auth";
+import { type AdminProblem, type AdminSession, finishSecondFactor, problemFromError, type SecondFactorAnswer, type SecondFactorMethod, startAdministratorSignIn, startSingleSignOn, switchAdminOrganization } from "../../api/auth";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { ROLE_LABEL } from "../../pages/team/roles";
-import { Button, Field } from "../../ui";
+import { Button, Field, Notice } from "../../ui";
 import { AccountDialogFrame, AuthProblem, PasswordInput } from "./auth-fields";
+import { leaveFor } from "./leave-for";
 import { SecondFactorForm } from "./second-factor";
 
 /**
@@ -70,10 +71,54 @@ function useSignInAgain(session: AdminSession) {
 }
 
 /**
+ * A single sign-on session signs in again at the identity provider, which means leaving the page; the console comes
+ * back to its start once the provider answers.
+ */
+function SingleSignOnAgain({ endReason, onClose, onSomeoneElse, session }: { endReason?: string; onClose?: () => void; onSomeoneElse: () => void; session: AdminSession }) {
+  const organizations = useQuery(organizationsQueryOptions());
+  const slug = organizations.data?.items.find((item) => item.id === session.organization_id)?.slug;
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<AdminProblem>();
+  async function start(): Promise<void> {
+    if (!slug) return;
+    setPending(true);
+    setProblem(undefined);
+    try {
+      leaveFor(await startSingleSignOn(slug));
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setPending(false);
+    }
+  }
+  return (
+    <AccountDialogFrame
+      description={`${endReason ? `${endReason} ` : ""}You signed in with your organization's identity provider. Signing in again leaves this page; unsaved changes here are lost.`}
+      onEscape={onClose && !pending ? onClose : undefined}
+      title={onClose ? "Sign in again" : "Your session ended"}
+    >
+      <div className="lw-confirm__body lw-auth__form">
+        {organizations.error ? <Notice tone="warning">The console can&apos;t look up your organization while signed out. Sign out and choose Sign In with SSO.</Notice> : null}
+        {problem ? <AuthProblem problem={problem} /> : null}
+        <div className="lw-confirm__foot">
+          <Button disabled={pending} onClick={onSomeoneElse} size="sm" variant="ghost">Sign out</Button>
+          {onClose ? <Button disabled={pending} onClick={onClose} size="sm">Cancel</Button> : null}
+          <Button disabled={!slug} loading={pending} onClick={() => void start()} size="sm" variant="primary">Sign In with SSO</Button>
+        </div>
+      </div>
+    </AccountDialogFrame>
+  );
+}
+
+/**
  * Sign in again without leaving the page. When the session has ended it can't be dismissed, only completed or traded
  * for a different account; when it's offered early the operator can close it.
  */
 export function ReauthDialog({ endReason, onClose, onSignedIn, onSomeoneElse, session }: { endReason?: string; onClose?: () => void; onSignedIn: () => void; onSomeoneElse: () => void; session: AdminSession }) {
+  if (session.sign_in_method === "sso") return <SingleSignOnAgain endReason={endReason} onClose={onClose} onSomeoneElse={onSomeoneElse} session={session} />;
+  return <PasswordSignInAgain endReason={endReason} onClose={onClose} onSignedIn={onSignedIn} onSomeoneElse={onSomeoneElse} session={session} />;
+}
+
+function PasswordSignInAgain({ endReason, onClose, onSignedIn, onSomeoneElse, session }: { endReason?: string; onClose?: () => void; onSignedIn: () => void; onSomeoneElse: () => void; session: AdminSession }) {
   const queryClient = useQueryClient();
   const again = useSignInAgain(session);
   async function finished(next: AdminSession | undefined): Promise<void> {
@@ -137,6 +182,13 @@ export function SwitchOrganizationDialog({ onClose, onSwitched, session }: { onC
       setProblem(problemFromError(error));
       setPending(false);
     }
+  }
+  if (session.sign_in_method === "sso") {
+    return (
+      <AccountDialogFrame description="A single sign-on session stays in the organization it signed in to. Sign out, then sign in to the other organization." onEscape={onClose} title="Switch organization">
+        <div className="lw-confirm__body"><div className="lw-confirm__foot"><Button onClick={onClose} size="sm">Close</Button></div></div>
+      </AccountDialogFrame>
+    );
   }
   return (
     <AccountDialogFrame description="This session moves to the organization you pick; nothing else changes." onEscape={pending ? undefined : onClose} title="Switch organization">

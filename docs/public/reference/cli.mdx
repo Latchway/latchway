@@ -157,6 +157,11 @@ latchway admin api-tokens create \
 latchway admin api-tokens revoke tok_...
 ```
 
+`accounts list` shows whether each member has two-factor sign-in and whether
+they've signed in with the organization's single sign-on. `accounts
+reset-password` also gives an account created by single sign-on its first
+password.
+
 A password set with `accounts create` or `accounts reset-password` is
 temporary: the administrator must choose their own at their next console
 sign-in before anything else works. The CLI authenticates with API tokens and

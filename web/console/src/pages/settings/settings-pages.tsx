@@ -16,6 +16,7 @@ import { Badge, Button, Card, ConfirmDialog, DetailPanel, EnvironmentBadge, Fiel
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { evaluateSettingsCompatibility } from "../settings-compatibility";
 import { CopyButton } from "../requests/request-detail";
+import { SingleSignOnCard } from "./single-sign-on-card";
 
 const SLUG = /^[a-z][a-z0-9_-]{0,62}$/;
 
@@ -122,6 +123,7 @@ function GeneralView() {
           <Link className="lw-link lw-note" search={scoped} to="/system-health">Open System Health</Link>
         </Card>
         {organization && compatibility.status?.server_capabilities.includes("admin_two_factor") ? <SignInSecurityCard organizationID={organization.id} /> : null}
+        {organization && compatibility.status?.server_capabilities.includes("admin_sso") && session.data?.session?.capabilities.includes("manage_owners") ? <SingleSignOnCard organizationID={organization.id} /> : null}
         <Card icon="lock" title="Data handling">
           <ul className="lw-issue-list lw-note">
             <li><strong>Prompts and responses: never stored.</strong> There&apos;s no setting; a configuration that tries to store them is refused when published.</li>
