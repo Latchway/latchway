@@ -96,6 +96,21 @@ func assertRequestSearch(
 		facetValue("trust_source", "debug") != 1 || len(document.Facets["error_code"].Values) != 0 {
 		t.Fatalf("request facets = %s", facets.Body.String())
 	}
+	if facetValue("limit_plan", "legacy_unknown") != 1 {
+		t.Fatalf("limit-plan facet = %s", facets.Body.String())
+	}
+	byFeature := performGET(handler, facetsQuery+"&feature=assistant", cookie)
+	var featureDocument requestFacetsDocument
+	decodeResponse(t, byFeature, &featureDocument)
+	if byFeature.Code != http.StatusOK || featureDocument.Feature != "assistant" || featureDocument.Requests != 1 {
+		t.Fatalf("feature facets status/body=%d %s", byFeature.Code, byFeature.Body.String())
+	}
+	otherFeature := performGET(handler, facetsQuery+"&feature=summarize", cookie)
+	var otherDocument requestFacetsDocument
+	decodeResponse(t, otherFeature, &otherDocument)
+	if otherFeature.Code != http.StatusOK || otherDocument.Requests != 0 || len(otherDocument.Facets["limit_plan"].Values) != 0 {
+		t.Fatalf("other feature facets status/body=%d %s", otherFeature.Code, otherFeature.Body.String())
+	}
 	limited := performGET(handler, facetsQuery+"&limit=1", cookie)
 	if limited.Code != http.StatusOK {
 		t.Fatalf("limited request facets status/body=%d %s", limited.Code, limited.Body.String())
@@ -111,7 +126,8 @@ func assertRequestSearch(
 		}.Encode(),
 		"reversed": "/admin/v1/requests/facets?" + url.Values{"environment_id": {environmentID}, "start": {end}, "end": {start}}.Encode(),
 		"limit":    facetsQuery + "&limit=0",
-		"unknown":  facetsQuery + "&feature=assistant",
+		"unknown":  facetsQuery + "&user_id=usr_00000000000000000000000000",
+		"feature":  facetsQuery + "&feature=Not%20A%20Key",
 	} {
 		if response := performGET(handler, query, cookie); response.Code != http.StatusBadRequest {
 			t.Fatalf("%s facets status/body=%d %s", name, response.Code, response.Body.String())

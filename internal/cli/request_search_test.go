@@ -127,7 +127,8 @@ func TestRequestsFacetsValidatesAndPrints(t *testing.T) {
 		`"upstream":{"values":[{"value":"openai","count":3}],"truncated":true},` +
 		`"model":{"values":[],"truncated":false},"route":{"values":[],"truncated":false},` +
 		`"platform":{"values":[{"value":"ios","count":3}],"truncated":false},` +
-		`"component_kind":{"values":[],"truncated":false},"trust_source":{"values":[],"truncated":false}}}`
+		`"component_kind":{"values":[],"truncated":false},"trust_source":{"values":[],"truncated":false},` +
+		`"limit_plan":{"values":[{"value":"free","count":3}],"truncated":false}}}`
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		query := request.URL.Query()
 		if request.URL.Path != "/admin/v1/requests/facets" || query.Get("environment_id") != controlTestEnvironment ||

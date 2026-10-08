@@ -1,0 +1,1 @@
+import{ir as e,or as t}from"./control-plane-pages-NKNkSoEW.js";var n=t(e(),1),r=(0,n.createContext)({error:void 0,isFetching:!1,mutationAllowed:!1,refresh:async()=>void 0});function i(){return(0,n.useContext)(r)}export{i as n,r as t};

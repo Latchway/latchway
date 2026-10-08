@@ -653,6 +653,7 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 	assertRequestSearch(t, ctx, pool, handler, cookie, baseQuery, environment.ID, fixture.requestID,
 		filteredRequestQuery, requestStart, requestEnd)
+	assertUsageDistribution(t, handler, cookie, environment.ID, fixture.recordedAt, 12)
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.secondAttemptID)) ||

@@ -2,6 +2,42 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 19: policy insights and simulation (branch `console-api-completion`, unreleased)
+
+Server (ADR 0049, schema 41, capability `admin_policy_insights`):
+
+- `GET /usage/distribution`: per-subject usage in a limit's calendar windows,
+  with peak percentiles, a 1-2-5 histogram and counts over a maximum.
+- `GET /user-overrides`: active and ended overrides, by plan and user.
+- Request facets: a `limit_plan` facet and a `feature` filter.
+- User effective configuration: each limit's current `usage` (quota
+  snapshot per limit).
+- Simulation `failures` and `attempt_plan`, sharing retry and fallback
+  decisions with the data plane through `configuration.Route`.
+- `POST /config-revisions/{id}/simulate-batch` (up to 50).
+- Saved simulation scenarios per application (create, list, replace, delete;
+  versioned and audited, input marked sensitive).
+
+CLI: `routes simulate --fail ROUTE=CONDITION[:ATTEMPTS]` prints the attempt
+plan; effective configuration and simulation output accept the new fields.
+
+Console: the plan editor shows how many users each limit would have stopped
+in recent windows; removing a plan lists users overridden to it; plan rules
+show the last week's split by plan; Overrides lists active and ended
+overrides; the Simulator asks the server what happens when connections fail
+(with a condition picker), runs the coverage grid in one batch, saves and
+loads scenarios, and shows how much of each limit a real user has used.
+Older servers keep the earlier behavior, labeled.
+
+Validation: `go test ./...` against PostgreSQL 16 (failure and batch
+simulation, scenario CRUD with conflicts, audit and no-leak checks, override
+paging, usage distribution with filters and refusals, calendar periods,
+attempt walk and quota-usage mapping units, migrations to schema 41), CLI
+tests, vet, gofmt, sqlc regenerated; contract validation and generated
+references; lint, typecheck, `check:api`, `pnpm test` (494 passed),
+Playwright (46 passed, 1 skipped), the live-stack run, build and
+`verify:reproducible`.
+
 ## Console completion phase 18: configuration draft lifecycle (branch `console-api-completion`, unreleased)
 
 Server (ADR 0048, schema 40, capability `admin_configuration_drafts`; amends

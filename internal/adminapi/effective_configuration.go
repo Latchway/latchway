@@ -15,10 +15,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/dataplane"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/protocol"
+	"github.com/latchway/latchway/internal/quota"
 )
 
 var errEffectiveFeatureNotFound = errors.New("effective configuration feature not found")
@@ -50,20 +52,32 @@ type effectiveInputProvenance struct {
 	Detail       string            `json:"detail"`
 }
 
+// effectiveLimitUsage is the current read-only quota state of one limit for
+// the user's current installation, at ObservedAt.
+type effectiveLimitUsage struct {
+	Maximum    *int64     `json:"maximum,omitempty"`
+	Used       *int64     `json:"used,omitempty"`
+	Reserved   *int64     `json:"reserved,omitempty"`
+	Remaining  *int64     `json:"remaining,omitempty"`
+	ResetsAt   *time.Time `json:"resets_at,omitempty"`
+	ObservedAt time.Time  `json:"observed_at"`
+}
+
 type effectiveLimitDocument struct {
-	Index              int      `json:"index"`
-	Metric             string   `json:"metric"`
-	Algorithm          string   `json:"algorithm"`
-	Scope              []string `json:"scope"`
-	Window             string   `json:"window,omitempty"`
-	Timezone           string   `json:"timezone,omitempty"`
-	Maximum            int64    `json:"maximum,omitempty"`
-	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
-	Capacity           int64    `json:"capacity,omitempty"`
-	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
-	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
-	Hard               bool     `json:"hard"`
-	Source             string   `json:"source"`
+	Index              int                  `json:"index"`
+	Metric             string               `json:"metric"`
+	Algorithm          string               `json:"algorithm"`
+	Scope              []string             `json:"scope"`
+	Window             string               `json:"window,omitempty"`
+	Timezone           string               `json:"timezone,omitempty"`
+	Maximum            int64                `json:"maximum,omitempty"`
+	PerRequestMaximum  int64                `json:"per_request_maximum,omitempty"`
+	Capacity           int64                `json:"capacity,omitempty"`
+	RefillPerSecond    string               `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string               `json:"cost_retry_treatment,omitempty"`
+	Hard               bool                 `json:"hard"`
+	Source             string               `json:"source"`
+	Usage              *effectiveLimitUsage `json:"usage,omitempty"`
 }
 
 type effectiveRouteDocument struct {
@@ -552,6 +566,9 @@ func (api *API) resolveEffectiveUserConfiguration(
 		document.UserOverrideID = basis.OverrideID
 	}
 	document.Limits = effectiveLimits(plan.LimitPlan)
+	if err := api.attachQuotaUsage(ctx, &document, compiled, basis, query.Feature, plan); err != nil {
+		return effectiveConfigurationDocument{}, err
+	}
 	applyEffectiveOutput(&document, plan.LimitPlan, query.MaximumOutputTokens)
 	document.Routes = effectiveRoutes(plan.Candidates)
 	if len(document.Routes) > 0 {
@@ -859,4 +876,62 @@ func (api *API) handleEffectiveConfigurationError(w http.ResponseWriter, r *http
 		return
 	}
 	api.handleConfigurationError(w, r, err)
+}
+
+type quotaSnapshotReader interface {
+	Snapshot(context.Context, quota.SnapshotInput) (quota.Snapshot, error)
+}
+
+// attachQuotaUsage adds each limit's current quota state for the user's current
+// installation. It reads one limit at a time, because the quota store orders
+// rules its own way, and leaves usage out with a warning when a limit depends
+// on the route.
+func (api *API) attachQuotaUsage(
+	ctx context.Context,
+	document *effectiveConfigurationDocument,
+	compiled configuration.SimulationSnapshot,
+	basis effectiveUserBasis,
+	feature string,
+	plan policy.DecisionPlan,
+) error {
+	if api.quotaSnapshots == nil {
+		return nil
+	}
+	rules, err := dataplane.QuotaSnapshotRules(feature, plan.Feature, plan.LimitPlan)
+	if errors.Is(err, dataplane.ErrPhysicalQuotaScope) {
+		document.Warnings = append(document.Warnings, "Current usage isn't shown: a limit depends on the route, AI connection or model a request takes.")
+		return nil
+	}
+	if err != nil {
+		document.Warnings = append(document.Warnings, "Current usage isn't shown: this limit plan can't be enforced as configured.")
+		return nil
+	}
+	if len(rules) != len(document.Limits) {
+		return errors.New("quota rules do not match the effective limits")
+	}
+	for index, rule := range rules {
+		snapshot, err := api.quotaSnapshots.Snapshot(ctx, quota.SnapshotInput{
+			OrganizationID: compiled.Scope.OrganizationID, ApplicationID: compiled.Scope.ApplicationID,
+			EnvironmentID: compiled.Scope.EnvironmentID, ApplicationUserID: basis.UserID,
+			InstallationID: basis.InstallationID, InstallationFamilyID: plan.Scopes.InstallationFamilyID,
+			ClientComponentID: plan.Scopes.ClientComponentID, ComponentDefinitionID: plan.Scopes.ComponentDefinitionID,
+			ComponentKind: plan.Scopes.ComponentKind, TrustSource: plan.Scopes.TrustSource,
+			ConfigRevisionID: compiled.Snapshot.PolicyRevision(), Platform: plan.Scopes.Platform,
+			NormalizedClaimDigests: plan.Scopes.NormalizedClaims, UserOverrideID: basis.OverrideID,
+			LimitPlanOverride: basis.OverridePlan, FeatureKey: plan.Feature.ID, LimitPlanKey: plan.LimitPlan.ID,
+			Rules: []quota.Rule{rule},
+		})
+		if err != nil {
+			return fmt.Errorf("read effective quota usage: %w", err)
+		}
+		if len(snapshot.Limits) != 1 || snapshot.Limits[0].Metric != rule.Metric {
+			return errors.New("quota snapshot does not match its rule")
+		}
+		limit := snapshot.Limits[0]
+		document.Limits[index].Usage = &effectiveLimitUsage{
+			Maximum: limit.Maximum, Used: limit.Used, Reserved: limit.Reserved,
+			Remaining: limit.Remaining, ResetsAt: limit.ResetsAt, ObservedAt: snapshot.ObservedAt,
+		}
+	}
+	return nil
 }

@@ -260,6 +260,7 @@ func TestUserLimitOverrideAdminAPIPostgreSQL(t *testing.T) {
 	}
 
 	assertUserOverridePersistence(t, ctx, pool, environment.ID, userID)
+	assertUserOverrideList(t, handler, cookie, environment.ID, userID, 12)
 }
 
 type userOverrideAPIUser struct {

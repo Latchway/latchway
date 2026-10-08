@@ -798,7 +798,7 @@ const RequestFacetSchema = z
   })
   .strict();
 
-export const REQUEST_FACETS = ["status", "feature", "error_code", "upstream", "model", "route", "platform", "component_kind", "trust_source"] as const;
+export const REQUEST_FACETS = ["status", "feature", "error_code", "upstream", "model", "route", "platform", "component_kind", "trust_source", "limit_plan"] as const;
 export type RequestFacetName = typeof REQUEST_FACETS[number];
 
 /** GET /admin/v1/requests/facets: request counts by each filterable value over a range. */
@@ -806,6 +806,7 @@ export const RequestFacetsSchema = z
   .object({
     end: Instant,
     environment_id: OpaqueID,
+    feature: Identifier.optional(),
     facets: z.object(Object.fromEntries(REQUEST_FACETS.map((name) => [name, RequestFacetSchema])) as Record<RequestFacetName, typeof RequestFacetSchema>).strict(),
     requests: NonnegativeSafeInteger,
     start: Instant
@@ -918,6 +919,17 @@ export const EffectiveLimitSchema = z
     scope: z.array(Identifier).min(1).max(8).refine((scope) => new Set(scope).size === scope.length),
     source: z.string().min(1).max(512),
     timezone: z.string().min(1).max(128).optional(),
+    usage: z
+      .object({
+        maximum: NonnegativeSafeInteger.optional(),
+        observed_at: Instant,
+        remaining: NonnegativeSafeInteger.optional(),
+        reserved: NonnegativeSafeInteger.optional(),
+        resets_at: OptionalInstant,
+        used: NonnegativeSafeInteger.optional()
+      })
+      .strict()
+      .optional(),
     window: z.string().min(2).max(32).optional()
   })
   .strict()
@@ -1618,6 +1630,32 @@ export const RouteSimulationSchema = z
       })
       .strict()
       .optional(),
+    attempt_plan: z
+      .object({
+        assumptions: z.array(z.string().max(512)).max(8),
+        attempts: z
+          .array(
+            z
+              .object({
+                condition: z.string().max(64).optional(),
+                model: Identifier,
+                next: z.enum(["retry", "fallback", "stop"]).optional(),
+                number: z.number().int().min(1).max(32),
+                outcome: z.enum(["succeeded", "failed"]),
+                retry_delay_max_ms: z.number().int().min(0).max(60_000).optional(),
+                route: Identifier,
+                upstream: Identifier
+              })
+              .strict()
+          )
+          .min(1)
+          .max(32),
+        failure_condition: z.string().max(64).optional(),
+        outcome: z.enum(["served", "failed"]),
+        served_by_route: Identifier.optional()
+      })
+      .strict()
+      .optional(),
     revision_id: OpaqueID,
     route: Identifier.optional(),
     upstream: Identifier.optional(),
@@ -1699,6 +1737,74 @@ export type SelfTestSchedule = z.infer<typeof SelfTestScheduleSchema>;
 export type SelfTestSchedulePage = z.infer<typeof SelfTestSchedulePageSchema>;
 export type SystemStatus = z.infer<typeof SystemStatusSchema>;
 export type RouteSimulation = z.infer<typeof RouteSimulationSchema>;
+
+/** POST /admin/v1/config-revisions/{id}/simulate-batch: one item per request, each a result or a problem. */
+export const RouteSimulationBatchSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            index: z.number().int().min(0).max(49),
+            problem: z.object({ code: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/), detail: z.string().max(1024) }).strict().optional(),
+            result: RouteSimulationSchema.optional()
+          })
+          .strict()
+          .refine((item) => (item.result === undefined) !== (item.problem === undefined), { message: "A batch item carries a result or a problem." })
+      )
+      .max(50)
+  })
+  .strict();
+
+/** GET /admin/v1/usage/distribution. */
+export const UsageDistributionSchema = z
+  .object({
+    end: Instant,
+    environment_id: OpaqueID,
+    feature: Identifier.optional(),
+    histogram: z.array(z.object({ from: NonnegativeSafeInteger, subjects: NonnegativeSafeInteger.min(1), to: NonnegativeSafeInteger.optional() }).strict()).max(64),
+    limit_plan: Identifier.optional(),
+    maximum: NonnegativeSafeInteger.optional(),
+    metric: z.string().max(64),
+    over_subjects: NonnegativeSafeInteger.optional(),
+    over_users: NonnegativeSafeInteger.optional(),
+    peaks: z.object({ max: NonnegativeSafeInteger, p50: NonnegativeSafeInteger, p90: NonnegativeSafeInteger, p99: NonnegativeSafeInteger }).strict(),
+    periods: z.number().int().min(1).max(2000),
+    scope: z.array(z.enum(["user", "feature", "installation"])).min(1).max(3),
+    start: Instant,
+    subjects: NonnegativeSafeInteger,
+    timezone: z.string().max(64),
+    users: NonnegativeSafeInteger,
+    window: z.string().max(16)
+  })
+  .strict()
+  .refine((document) => document.users <= document.subjects && (document.over_users ?? 0) <= (document.over_subjects ?? 0), { message: "Distribution counts are inconsistent." });
+export type UsageDistribution = z.infer<typeof UsageDistributionSchema>;
+
+/** GET /admin/v1/user-overrides. */
+export const UserOverridePageSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            created_at: Instant,
+            created_by: z.string().max(256),
+            expires_at: OptionalInstant,
+            id: OpaqueID,
+            limit_plan: Identifier,
+            reason: z.string().min(1).max(500),
+            revoked_at: OptionalInstant,
+            status: z.enum(["active", "expired", "revoked"]),
+            user_id: OpaqueID
+          })
+          .strict()
+      )
+      .max(200),
+    page: PageInfo
+  })
+  .strict();
+export type UserOverridePage = z.infer<typeof UserOverridePageSchema>;
 export type ConfigurationRevision = z.infer<typeof RevisionSchema>;
 
 /** POST /admin/v1/environments/{id}/config-revisions/promote. */

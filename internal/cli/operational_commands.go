@@ -101,19 +101,29 @@ type effectiveInputCLI struct {
 }
 
 type effectiveLimitCLI struct {
-	Index              int      `json:"index"`
-	Metric             string   `json:"metric"`
-	Algorithm          string   `json:"algorithm"`
-	Scope              []string `json:"scope"`
-	Window             string   `json:"window,omitempty"`
-	Timezone           string   `json:"timezone,omitempty"`
-	Maximum            int64    `json:"maximum,omitempty"`
-	PerRequestMaximum  int64    `json:"per_request_maximum,omitempty"`
-	Capacity           int64    `json:"capacity,omitempty"`
-	RefillPerSecond    string   `json:"refill_per_second,omitempty"`
-	CostRetryTreatment string   `json:"cost_retry_treatment,omitempty"`
-	Hard               bool     `json:"hard"`
-	Source             string   `json:"source"`
+	Index              int                     `json:"index"`
+	Metric             string                  `json:"metric"`
+	Algorithm          string                  `json:"algorithm"`
+	Scope              []string                `json:"scope"`
+	Window             string                  `json:"window,omitempty"`
+	Timezone           string                  `json:"timezone,omitempty"`
+	Maximum            int64                   `json:"maximum,omitempty"`
+	PerRequestMaximum  int64                   `json:"per_request_maximum,omitempty"`
+	Capacity           int64                   `json:"capacity,omitempty"`
+	RefillPerSecond    string                  `json:"refill_per_second,omitempty"`
+	CostRetryTreatment string                  `json:"cost_retry_treatment,omitempty"`
+	Hard               bool                    `json:"hard"`
+	Source             string                  `json:"source"`
+	Usage              *effectiveLimitUsageCLI `json:"usage,omitempty"`
+}
+
+type effectiveLimitUsageCLI struct {
+	Maximum    *int64 `json:"maximum,omitempty"`
+	Used       *int64 `json:"used,omitempty"`
+	Reserved   *int64 `json:"reserved,omitempty"`
+	Remaining  *int64 `json:"remaining,omitempty"`
+	ResetsAt   string `json:"resets_at,omitempty"`
+	ObservedAt string `json:"observed_at"`
 }
 
 type effectiveRouteCLI struct {
@@ -299,6 +309,7 @@ type requestFacetCLI struct {
 
 type requestFacetsCLI struct {
 	EnvironmentID string                     `json:"environment_id"`
+	Feature       string                     `json:"feature,omitempty"`
 	Start         string                     `json:"start"`
 	End           string                     `json:"end"`
 	Requests      json.Number                `json:"requests"`
@@ -488,6 +499,7 @@ var requiredServerCapabilitiesCLI = []string{
 	"admin_user_insights",
 	"admin_request_search",
 	"admin_configuration_drafts",
+	"admin_policy_insights",
 }
 
 func validSystemStatusCLI(status systemStatusCLI) bool {
@@ -1897,7 +1909,7 @@ func validListTotalCLI(total listTotalCLI) bool {
 
 var requestFacetNamesCLI = []string{
 	"status", "feature", "error_code", "upstream", "model", "route",
-	"platform", "component_kind", "trust_source",
+	"platform", "component_kind", "trust_source", "limit_plan",
 }
 
 func validRequestFacetsCLI(document requestFacetsCLI, environmentID string, limit int) bool {
