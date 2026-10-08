@@ -77,6 +77,7 @@ const (
 	AuditEvent          Prefix = "aud"
 	SelfTest            Prefix = "tst"
 	SelfTestSchedule    Prefix = "sts"
+	SimulationScenario  Prefix = "ssc"
 )
 
 const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

@@ -31,6 +31,7 @@ import (
 	"github.com/latchway/latchway/internal/oidc"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
@@ -63,6 +64,7 @@ type API struct {
 	eventPrincipals adminEventPrincipalSource
 	eventStream     adminEventStreamSettings
 	policyResolver  *policy.Resolver
+	quotaSnapshots  quotaSnapshotReader
 	role            string
 	systemReadiness func(context.Context) bool
 	diagnostics     diagnostics.Dependencies
@@ -148,6 +150,10 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, err
 	}
+	quotaSnapshots, err := quota.NewStore(quota.StoreConfig{Pool: pool})
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		return nil, errors.New("admin API logger is nil")
 	}
@@ -162,7 +168,7 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute), oidc: &oidc.Client{},
-		operations: newOperationalStore(pool), policyResolver: policyResolver, role: "all",
+		operations: newOperationalStore(pool), policyResolver: policyResolver, quotaSnapshots: quotaSnapshots, role: "all",
 		eventStream: defaultAdminEventStreamSettings(),
 	}
 	for _, option := range options {
@@ -267,6 +273,13 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/validate", api.validateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/simulate", api.simulateConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/simulate-batch", api.simulateConfigurationRevisionBatch)
+		protected.Get("/applications/{applicationID}/simulation-scenarios", api.simulationScenarios)
+		protected.With(api.mutationProtection).Post("/applications/{applicationID}/simulation-scenarios", api.createSimulationScenario)
+		protected.With(api.mutationProtection).Put("/simulation-scenarios/{scenarioID}", api.replaceSimulationScenario)
+		protected.With(api.mutationProtection).Delete("/simulation-scenarios/{scenarioID}", api.deleteSimulationScenario)
+		protected.Get("/user-overrides", api.userOverrides)
+		protected.Get("/usage/distribution", api.usageDistribution)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
 		protected.Get("/secrets", api.secrets)
@@ -1570,6 +1583,12 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.environment_enable", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
 		return "admin.configuration_revision_create", "admin_request"
+	case strings.HasSuffix(path, "/simulation-scenarios") && method == http.MethodPost:
+		return "admin.simulation_scenario_create", "admin_request"
+	case strings.Contains(path, "/simulation-scenarios/") && method == http.MethodPut:
+		return "admin.simulation_scenario_update", "admin_request"
+	case strings.Contains(path, "/simulation-scenarios/") && method == http.MethodDelete:
+		return "admin.simulation_scenario_delete", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions/promote"):
 		return "admin.configuration_promote", "admin_request"
 	case strings.Contains(path, "/config-revisions/") && strings.HasSuffix(path, "/discard"):

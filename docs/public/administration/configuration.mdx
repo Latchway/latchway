@@ -153,6 +153,21 @@ Simulation runs the exact compiled policy and route resolver without reserving
 quota or dispatching upstream traffic. Claims come from a bounded regular JSON
 file so they do not enter shell history.
 
+A simulation can also make routes fail (`failures` in the request, `--fail` in
+the CLI) and returns the attempt plan the data plane would follow, using the
+same retry and fallback decisions. `POST /config-revisions/{id}/simulate-batch`
+runs up to 50 simulations at once, and an application can keep named
+simulation scenarios (`/applications/{id}/simulation-scenarios`) that the
+team reuses.
+
+To see who a limit would stop before publishing it,
+`GET /admin/v1/usage/distribution` sums one metric per user (or per user and
+feature, or installation) in each calendar window of the limit, aligned the way
+enforcement aligns them, and reports peak percentiles, a histogram, and how
+many users would have exceeded a maximum, without returning user IDs.
+`GET /admin/v1/user-overrides` lists active and ended plan overrides, and a
+user's effective configuration includes each limit's current usage.
+
 ## Drafts
 
 A draft stays editable until it is activated, including after it validates;

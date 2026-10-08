@@ -992,6 +992,19 @@ type SessionGrant struct {
 	ComponentSessionFamilyID *string            `db:"component_session_family_id" json:"component_session_family_id"`
 }
 
+type SimulationScenario struct {
+	SimulationScenarioID string             `db:"simulation_scenario_id" json:"simulation_scenario_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	Name                 string             `db:"name" json:"name"`
+	Input                []byte             `db:"input" json:"input"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedByAdminUserID string             `db:"updated_by_admin_user_id" json:"updated_by_admin_user_id"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type UpstreamAttempt struct {
 	UpstreamAttemptID             string             `db:"upstream_attempt_id" json:"upstream_attempt_id"`
 	OrganizationID                string             `db:"organization_id" json:"organization_id"`

@@ -26,7 +26,7 @@ const (
 // request-list filter of the same name.
 var requestFacetNames = [...]string{
 	"status", "feature", "error_code", "upstream", "model", "route",
-	"platform", "component_kind", "trust_source",
+	"platform", "component_kind", "trust_source", "limit_plan",
 }
 
 type requestFacetValue struct {
@@ -41,6 +41,7 @@ type requestFacetDocument struct {
 
 type requestFacetsDocument struct {
 	EnvironmentID string                          `json:"environment_id"`
+	Feature       string                          `json:"feature,omitempty"`
 	Start         time.Time                       `json:"start"`
 	End           time.Time                       `json:"end"`
 	Requests      int64                           `json:"requests"`
@@ -82,12 +83,13 @@ func (store *operationalStore) countRequests(
 func (store *operationalStore) requestFacets(
 	ctx context.Context,
 	principal adminauth.Principal,
-	environmentID string,
+	environmentID, feature string,
 	start time.Time,
 	end time.Time,
 	limit int,
 ) (requestFacetsDocument, error) {
 	if id.Validate(environmentID, id.Environment) != nil || !start.Before(end) ||
+		(feature != "" && !operationalIdentifierPattern.MatchString(feature)) ||
 		end.Sub(start) > maximumRequestFacetRange || limit < 1 || limit > maximumRequestFacetLimit {
 		return requestFacetsDocument{}, errOperationalInvalid
 	}
@@ -102,6 +104,7 @@ func (store *operationalStore) requestFacets(
 			SELECT request.status, request.feature_key, request.failure_code,
 			       request.selected_upstream_key, request.selected_model_key,
 			       request.selected_route_key, request.component_kind, request.trust_source,
+			       request.selected_limit_plan_key,
 			       (
 			           SELECT installation.platform FROM installations AS installation
 			           WHERE installation.installation_id = request.installation_id
@@ -110,6 +113,7 @@ func (store *operationalStore) requestFacets(
 			FROM logical_requests AS request
 			WHERE request.organization_id = $1 AND request.environment_id = $2
 			  AND request.requested_at >= $3 AND request.requested_at < $4
+			  AND ($6 = '' OR request.feature_key = $6)
 		), grouped AS (
 			SELECT 'status' AS facet, status AS value, count(*) AS matched FROM scoped GROUP BY status
 			UNION ALL
@@ -135,6 +139,8 @@ func (store *operationalStore) requestFacets(
 			UNION ALL
 			SELECT 'trust_source', trust_source, count(*) FROM scoped
 			WHERE trust_source IS NOT NULL GROUP BY trust_source
+			UNION ALL
+			SELECT 'limit_plan', selected_limit_plan_key, count(*) FROM scoped GROUP BY selected_limit_plan_key
 		)
 		SELECT facet, value, matched,
 		       (SELECT count(*) FROM scoped) AS requests,
@@ -146,7 +152,7 @@ func (store *operationalStore) requestFacets(
 		) AS ranked
 		WHERE position <= $5
 		ORDER BY facet, matched DESC, value
-	`, principal.OrganizationID, environmentID, start, end, maximumRequestFacetGrouped)
+	`, principal.OrganizationID, environmentID, start, end, maximumRequestFacetGrouped, feature)
 	if err != nil {
 		return requestFacetsDocument{}, fmt.Errorf("count request facets: %w", err)
 	}
@@ -154,7 +160,7 @@ func (store *operationalStore) requestFacets(
 	merged := make(map[string]map[string]int64, len(requestFacetNames))
 	overflow := make(map[string]bool, len(requestFacetNames))
 	document := requestFacetsDocument{
-		EnvironmentID: environmentID, Start: start.UTC(), End: end.UTC(),
+		EnvironmentID: environmentID, Feature: feature, Start: start.UTC(), End: end.UTC(),
 		Facets: make(map[string]requestFacetDocument, len(requestFacetNames)),
 	}
 	for rows.Next() {
@@ -204,7 +210,7 @@ func (store *operationalStore) requestFacets(
 }
 
 func (api *API) requestFacets(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "start", "end", "limit") {
+	if !onlyQueryKeys(r, "environment_id", "start", "end", "limit", "feature") {
 		api.writeProblem(w, r, invalidRequest("The request-facets query is invalid."))
 		return
 	}
@@ -225,6 +231,11 @@ func (api *API) requestFacets(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The request-facets range must be RFC 3339 times, start before end, at most 90 days apart."))
 		return
 	}
+	feature, ok := optionalQueryValue(r, "feature")
+	if !ok || (feature != "" && !operationalIdentifierPattern.MatchString(feature)) {
+		api.writeProblem(w, r, invalidRequest("The request-facets feature is invalid."))
+		return
+	}
 	limit := defaultRequestFacetLimit
 	if raw, ok := optionalQueryValue(r, "limit"); !ok {
 		api.writeProblem(w, r, invalidRequest("The request-facets limit is invalid."))
@@ -237,7 +248,7 @@ func (api *API) requestFacets(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	document, err := api.operations.requestFacets(r.Context(), mustPrincipal(r.Context()), environmentID, start, end, limit)
+	document, err := api.operations.requestFacets(r.Context(), mustPrincipal(r.Context()), environmentID, feature, start, end, limit)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
 		return

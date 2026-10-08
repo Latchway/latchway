@@ -138,21 +138,12 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)
 	}
-	validated, err := validateFeatureLimitPlan(input.Feature, projection.Feature, projection.LimitPlan)
+	rules, err := QuotaSnapshotRules(input.Feature, projection.Feature, projection.LimitPlan)
+	if errors.Is(err, ErrPhysicalQuotaScope) {
+		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(policy.ErrConfiguration)
+	}
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)
-	}
-	for index := range validated.rules {
-		if containsPhysicalScope(validated.rules[index].Scope) {
-			return clientapi.FeatureQuotaResult{}, featureQuotaFailure(policy.ErrConfiguration)
-		}
-		if validated.rules[index].Metric == quota.OutputTokensMetric &&
-			validated.rules[index].Algorithm == quota.PerRequestAlgorithm {
-			// A request can be bounded by the feature absolute maximum, another
-			// per-request rule, or a token-bucket capacity. Report the same
-			// effective static cap that protected request enforcement applies.
-			validated.rules[index].PerRequestMaximum = validated.maximumOutputTokens
-		}
 	}
 
 	quotaSnapshot, err := provider.quotas.Snapshot(ctx, quota.SnapshotInput{
@@ -173,7 +164,7 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 		LimitPlanOverride:      authorization.LimitPlanOverride,
 		FeatureKey:             projection.Feature.ID,
 		LimitPlanKey:           projection.LimitPlan.ID,
-		Rules:                  validated.rules,
+		Rules:                  rules,
 	})
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)
@@ -181,7 +172,35 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 	if quotaSnapshot.Feature != projection.Feature.ID {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(quota.ErrInvalidState)
 	}
-	return featureQuotaResult(quotaSnapshot, validated.rules)
+	return featureQuotaResult(quotaSnapshot, rules)
+}
+
+// ErrPhysicalQuotaScope reports a limit scoped on the route, upstream or
+// model. Those have no single current value outside a request, so a snapshot
+// can't show them.
+var ErrPhysicalQuotaScope = errors.New("quota rule scoped on a physical route dimension")
+
+// QuotaSnapshotRules returns the quota rules a read-only snapshot of a feature
+// and limit plan checks, one per limit in plan order, with the same per-request
+// output cap that request enforcement applies.
+func QuotaSnapshotRules(featureID string, feature configuration.Feature, limitPlan configuration.LimitPlan) ([]quota.Rule, error) {
+	validated, err := validateFeatureLimitPlan(featureID, feature, limitPlan)
+	if err != nil {
+		return nil, err
+	}
+	for index := range validated.rules {
+		if containsPhysicalScope(validated.rules[index].Scope) {
+			return nil, ErrPhysicalQuotaScope
+		}
+		if validated.rules[index].Metric == quota.OutputTokensMetric &&
+			validated.rules[index].Algorithm == quota.PerRequestAlgorithm {
+			// A request can be bounded by the feature absolute maximum, another
+			// per-request rule, or a token-bucket capacity. Report the same
+			// effective static cap that protected request enforcement applies.
+			validated.rules[index].PerRequestMaximum = validated.maximumOutputTokens
+		}
+	}
+	return validated.rules, nil
 }
 
 func (provider *FeatureQuotaProvider) validateInput(input clientapi.FeatureQuotaInput) (url.URL, error) {
