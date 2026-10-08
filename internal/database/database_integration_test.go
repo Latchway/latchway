@@ -22,7 +22,7 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
-const latestTestSchemaVersion int64 = 38
+const latestTestSchemaVersion int64 = 39
 
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()

@@ -20,11 +20,14 @@ import {
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { useConsoleSession } from "../../api/session";
 import { useConsoleCompatibility } from "../../app/console-compatibility-context";
+import { capabilitiesAnywhere, useCapabilities } from "../../app/permissions";
 import { TeamRouteSearchSchema } from "../../app/route-search";
 import { useOptionalWorkspace } from "../../app/workspace-context-value";
 import { PasswordField } from "../../components/password-field";
 import { takePassword } from "../../components/password-value";
 import { resetMemberTwoFactor } from "../../api/account";
+import { applicationRolesQueryOptions, removeApplicationRole, setApplicationRole } from "../../api/application-roles";
+import { applicationsQueryOptions } from "../../api/workspace";
 import { createInvitation, type Invitation, type InvitationLink, invitationsQueryOptions, renewInvitation, revokeInvitation } from "../../api/invitations";
 import {
   Badge,
@@ -69,11 +72,14 @@ function when(value: string | undefined): string {
 function useMe() {
   const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
+  const { can, previewRole } = useCapabilities();
   const me = session.data?.session;
   const role = me?.memberships.find((membership) => membership.organization_id === me.organization_id)?.role as Role | undefined;
-  const capabilities = me?.capabilities ?? [];
+  // Tokens may carry any capability held in some application; each use is checked per application.
+  const capabilities = capabilitiesAnywhere(me, previewRole);
   return {
-    canManageOwners: capabilities.includes("manage_owners"),
+    applicationRolesSupported: compatibility.status?.server_capabilities.includes("admin_application_roles") ?? false,
+    canManageOwners: can("manage_owners"),
     capabilities,
     id: me?.administrator.id,
     mutationAllowed: compatibility.mutationAllowed,
@@ -330,6 +336,63 @@ function InvitationsCard({ enabled, onLink, organizationID }: { enabled: boolean
   );
 }
 
+const RAISED_ROLES: readonly Role[] = ["operator", "admin"];
+
+/**
+ * Roles that raise a member's organization role in single applications. They never lower it, so only roles above the
+ * organization role are offered, and owners have none.
+ */
+function ApplicationRolesSection({ canEdit, member }: { canEdit: boolean; member: Administrator }) {
+  const queryClient = useQueryClient();
+  const organizationID = member.organization_id;
+  const applications = useQuery(applicationsQueryOptions(organizationID));
+  const grants = useQuery(applicationRolesQueryOptions);
+  const [busy, setBusy] = useState<string>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const offered = RAISED_ROLES.filter((candidate) => ROLES.indexOf(candidate) < ROLES.indexOf(member.role));
+  const mine = new Map((grants.data ?? []).filter((grant) => grant.admin_user_id === member.id).map((grant) => [grant.application_id, grant.role]));
+  if (member.role === "owner" || !offered.length) {
+    return <p className="lw-secondary lw-note">{member.role === "owner" ? "Owners have every role in every application." : `${ROLE_LABEL[member.role]} is the highest role an application can grant, so there's nothing to raise.`}</p>;
+  }
+
+  async function change(applicationID: string, next: string): Promise<void> {
+    setBusy(applicationID);
+    setProblem(undefined);
+    try {
+      if (next === "") await removeApplicationRole(member.id, applicationID);
+      else await setApplicationRole(member.id, applicationID, next as "admin" | "operator");
+      await queryClient.invalidateQueries({ queryKey: applicationRolesQueryOptions.queryKey });
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  const items = applications.data?.items ?? [];
+  return (
+    <div className="lw-stack">
+      <p className="lw-secondary lw-note">Raise {member.display_name}&apos;s role in one application without changing it elsewhere.</p>
+      {problem ? <ProblemNotice problem={problem} /> : null}
+      {items.length ? (
+        <ul className="lw-session-list">
+          {items.map((application) => (
+            <li key={application.id}>
+              <label className="lw-note" htmlFor={`app-role-${member.id}-${application.id}`}>{application.display_name}</label>
+              <div className="lw-input-box">
+                <select aria-label={`Role in ${application.display_name}`} className="lw-input" disabled={!canEdit || busy === application.id} id={`app-role-${member.id}-${application.id}`} onChange={(event) => void change(application.id, event.target.value)} value={mine.get(application.id) ?? ""}>
+                  <option value="">{ROLE_LABEL[member.role]} (organization role)</option>
+                  {offered.map((candidate) => <option key={candidate} value={candidate}>{ROLE_LABEL[candidate]}</option>)}
+                </select>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="lw-secondary lw-note">{applications.isPending ? "Loading applications…" : "No applications yet."}</p>}
+    </div>
+  );
+}
+
 type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "reset2fa" } | { kind: "signout"; session: AdminSessionMetadata };
 
 function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { activeOwners: number; member: Administrator; onClose: () => void; onUpdated: () => Promise<void>; sessions: readonly AdminSessionMetadata[] }) {
@@ -429,6 +492,12 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
           {self && role !== member.role ? <Notice tone="warning">This is your own role. {change.loses.length ? "You'll lose access to some pages as soon as you save." : ""}</Notice> : null}
           {change.loses.length ? <Notice tone="info">Their API tokens stop using what the new role doesn&apos;t allow: tokens never exceed their owner&apos;s role.</Notice> : null}
           {canEdit && role !== member.role ? <div className="lw-row"><Button onClick={() => setRole(member.role)}>Cancel</Button><Button onClick={() => open({ kind: "role", role })} variant="primary">Change to {ROLE_LABEL[role]}</Button></div> : null}
+          {me.canManageOwners && me.applicationRolesSupported ? (
+            <div>
+              <strong className="lw-note">Application roles</strong>
+              <ApplicationRolesSection canEdit={canEdit && !disabled} member={member} />
+            </div>
+          ) : null}
           <div>
             <strong className="lw-note">Console sessions</strong>
             {!me.canManageOwners ? <p className="lw-secondary lw-note">Only owners can see console sessions.</p> : theirSessions.length ? (
@@ -449,7 +518,7 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
         <ConfirmDialog
           confirmDisabled={(action.kind === "disable" || (action.kind === "role" && change.loses.length > 0)) ? typed !== member.email || !acknowledged : action.kind === "reset" ? !acknowledged : false}
           confirmLabel={action.kind === "role" ? `Change to ${ROLE_LABEL[action.role]}` : action.kind === "disable" ? "Disable" : action.kind === "enable" ? "Enable" : action.kind === "reset" ? "Reset Password" : action.kind === "reset2fa" ? "Reset Two-Factor" : "Sign Out"}
-          description={action.kind === "role" ? "It applies at once, in every application and environment." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.kind === "reset2fa" ? "Their authenticator and recovery codes are removed and their console sessions here end. They sign in with just their password, and set it up again if this organization requires it. Do this only after confirming who's asking." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
+          description={action.kind === "role" ? "It applies at once, in every application and environment. Application roles the new role already covers are removed." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.kind === "reset2fa" ? "Their authenticator and recovery codes are removed and their console sessions here end. They sign in with just their password, and set it up again if this organization requires it. Do this only after confirming who's asking." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
           destructive={action.kind !== "enable"}
           onCancel={() => setAction(undefined)}
           onConfirm={() => void run()}

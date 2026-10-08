@@ -254,7 +254,7 @@ func (store *Store) CreateApplication(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) CreateEnvironment(ctx context.Context, principal adminauth.Principal, input EnvironmentInput) (Environment, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, input.ApplicationID, adminauth.AuthorizationContext{}) {
 		return Environment{}, ErrForbidden
 	}
 	if id.Validate(input.ApplicationID, id.Application) != nil || validateNamed(input.NamedInput) != nil {
@@ -322,7 +322,7 @@ func (store *Store) EnableApplication(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) setApplicationStatus(ctx context.Context, principal adminauth.Principal, applicationID, status string, reasonProvided bool) (Application, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
 		return Application{}, ErrForbidden
 	}
 	if id.Validate(applicationID, id.Application) != nil || (status != "active" && status != "disabled") {
@@ -413,7 +413,7 @@ func (store *Store) EnableEnvironment(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) setEnvironmentStatus(ctx context.Context, principal adminauth.Principal, environmentID, status string, reasonProvided bool) (Environment, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
 		return Environment{}, ErrForbidden
 	}
 	if id.Validate(environmentID, id.Environment) != nil || (status != "active" && status != "disabled") {
@@ -441,6 +441,9 @@ func (store *Store) setEnvironmentStatus(ctx context.Context, principal adminaut
 		return Environment{}, ErrNotFound
 	} else if err != nil {
 		return Environment{}, fmt.Errorf("lock environment application: %w", err)
+	}
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
+		return Environment{}, ErrForbidden
 	}
 	var item Environment
 	var disabledAt pgtype.Timestamptz

@@ -29,12 +29,17 @@ All notable project changes will be documented here. The format follows [Keep a 
   links, optionally by email through a configured SMTP relay
   (`LATCHWAY_SMTP_*`); new people choose their own password, and existing
   accounts accept after signing in.
+- Application roles (ADR 0045, `admin_application_roles`): owners can make a
+  member Admin or Operator in one application without changing their role
+  elsewhere, and can preview the console as another role.
 - The redesigned admin console, including a stepped Setup wizard.
 - A pull-request CI workflow covering contracts, Go with PostgreSQL, the
   console and the live first-run test.
 
 ### Changed
 
+- The CLI's session check accepts the `two_factor_enrollment_required`,
+  `sign_in_method` and `application_roles` fields the server sends.
 - An owner's password reset now also works for accounts created by single
   sign-on, which have no password until then.
 - Removing the authenticator app (`POST /auth/two-factor/disable`) keeps any

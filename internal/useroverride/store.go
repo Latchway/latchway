@@ -100,7 +100,7 @@ func (store *Store) Replace(ctx context.Context, principal adminauth.Principal, 
 		return ApplicationUser{}, ErrInvalid
 	}
 	if input.Scope.OrganizationID != principal.OrganizationID ||
-		!principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+		!principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
 		return ApplicationUser{}, ErrForbidden
 	}
 	document, err := Encode(Document{LimitPlan: input.LimitPlan})
@@ -122,6 +122,9 @@ func (store *Store) Replace(ctx context.Context, principal adminauth.Principal, 
 	applicationID, err := findEnvironmentApplication(ctx, tx, input.Scope)
 	if err != nil {
 		return ApplicationUser{}, err
+	}
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
+		return ApplicationUser{}, ErrForbidden
 	}
 	user, err := lockApplicationUser(ctx, tx, input.Scope, applicationID)
 	if err != nil {
@@ -216,7 +219,7 @@ func (store *Store) Clear(ctx context.Context, principal adminauth.Principal, sc
 		return ErrInvalid
 	}
 	if scope.OrganizationID != principal.OrganizationID ||
-		!principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+		!principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
 		return ErrForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -227,6 +230,9 @@ func (store *Store) Clear(ctx context.Context, principal adminauth.Principal, sc
 	applicationID, err := findEnvironmentApplication(ctx, tx, scope)
 	if err != nil {
 		return err
+	}
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
+		return ErrForbidden
 	}
 	if _, err := lockApplicationUser(ctx, tx, scope, applicationID); err != nil {
 		return err

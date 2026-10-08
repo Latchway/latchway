@@ -151,7 +151,8 @@ func (api *API) deleteSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) canManageSecrets(w http.ResponseWriter, r *http.Request) bool {
-	if mustPrincipal(r.Context()).Allows(adminauth.ManageSecrets, adminauth.AuthorizationContext{}) {
+	// The manager checks the secret's own application once it is loaded.
+	if mustPrincipal(r.Context()).AllowsSomewhere(adminauth.ManageSecrets, adminauth.AuthorizationContext{}) {
 		return true
 	}
 	api.handleSecretError(w, r, secrets.ErrForbidden, "")

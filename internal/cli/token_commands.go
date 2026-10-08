@@ -36,11 +36,17 @@ type tokenModeSessionCLI struct {
 		Enabled     bool   `json:"enabled"`
 		DisplayName string `json:"display_name,omitempty"`
 	} `json:"administrator"`
-	PasswordResetRequired bool                     `json:"password_reset_required,omitempty"`
-	OrganizationID        string                   `json:"organization_id"`
-	Memberships           []tokenModeMembershipCLI `json:"memberships"`
-	Capabilities          []string                 `json:"capabilities"`
-	ExpiresAt             *string                  `json:"expires_at"`
+	PasswordResetRequired       bool                     `json:"password_reset_required,omitempty"`
+	TwoFactorEnrollmentRequired bool                     `json:"two_factor_enrollment_required,omitempty"`
+	SignInMethod                string                   `json:"sign_in_method,omitempty"`
+	OrganizationID              string                   `json:"organization_id"`
+	Memberships                 []tokenModeMembershipCLI `json:"memberships"`
+	Capabilities                []string                 `json:"capabilities"`
+	ApplicationRoles            []struct {
+		ApplicationID string `json:"application_id"`
+		Role          string `json:"role"`
+	} `json:"application_roles,omitempty"`
+	ExpiresAt *string `json:"expires_at"`
 }
 
 type apiTokenMetadataCLI struct {

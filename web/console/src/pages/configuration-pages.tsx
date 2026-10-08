@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../app/permissions";
 import { type FormEvent, useMemo, useRef, useState } from "react";
 
 import {
@@ -647,10 +648,11 @@ function ScopedSetupWizardPage() {
   const [summary, setSummary] = useState<SetupSummary>({});
   const planForm = useRef<HTMLFormElement>(null);
   const organizationID = session.data?.session?.organization_id ?? "";
-  const canConfigure = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
-  const canManageSecrets = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("manage_secrets") ?? false);
-  const canTest = consoleCompatibility.mutationAllowed && (session.data?.session?.capabilities.includes("run_self_tests") ?? false);
-  const canInspect = session.data?.session?.capabilities.includes("inspect_users") ?? false;
+  const { can } = useCapabilities();
+  const canConfigure = consoleCompatibility.mutationAllowed && can("activate_configuration");
+  const canManageSecrets = consoleCompatibility.mutationAllowed && can("manage_secrets");
+  const canTest = consoleCompatibility.mutationAllowed && can("run_self_tests");
+  const canInspect = can("inspect_users");
   const firstRunNeedsSecretCapability = upstreamAuthenticationMode === "bearer" ||
     (platformScopeHasAndroid(platformScope) && playIntegrityCredentialSource === "service_account");
   const latestRevision = useQuery({
