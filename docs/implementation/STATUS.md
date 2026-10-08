@@ -2,6 +2,39 @@
 
 Status date: 2026-10-08
 
+## Console completion phase 16: user and installation insights (branch `console-api-completion`, unreleased)
+
+Server (ADR 0046, capability `admin_user_insights`, no schema change):
+
+- `GET /users`: `status`, `has_override`, `provider`, `claim=name:value`,
+  `sort` (`oldest`, `newest`, `recently_seen`) and `include_total` (capped at
+  100,000). Cursors follow the sort.
+- `GET /installation-families`: `status`, `platform`, `signal` (or `any`),
+  the same sorts and `include_total`; every family carries server-derived
+  `signals` (`debug_trust`, `trust_expiring`, `token_reuse`,
+  `weak_key_storage`, `failed_sessions`), also on the detail and in the CLI.
+- `GET /users/{id}/usage` for a time range.
+- `GET /installation-families/{id}/operation-impact` and
+  `GET /client-components/{id}/operation-impact` (whole delegation tree).
+- `POST /users/batch-impact` and `POST /users/batch` (up to 100 users, each in
+  its own transaction and audit event, skipping users changed since the
+  preview).
+
+Console: Users gets status, plan-override, provider and claim filters, a sort,
+and a total, all in the URL; selected users can be blocked, unblocked,
+required to sign in or re-verify through the batch; the drawer shows 30-day
+usage. Installations gets signal, status and platform filters, a sort, a
+total, server signals on rows, and live impact previews in action reviews.
+Servers without the capability keep the labeled loaded-rows behavior.
+
+Validation: `go test ./...` against PostgreSQL 16 (filters, sorts, paging,
+totals, invalid filters, per-user usage, signals and their filter, impact
+previews for families and root and child components, batch preview with an
+unknown user, batch apply, replay skipped as changed, and one audit event per
+user), vet, gofmt; contract validation and generated references (118
+operations); lint, typecheck, `check:api`, `pnpm test` (469 passed),
+Playwright, the live-stack run, build and `verify:reproducible`.
+
 ## Console completion phase 15: application roles and role preview (branch `console-api-completion`, unreleased)
 
 Server (ADR 0045, schema 39, capability `admin_application_roles`):

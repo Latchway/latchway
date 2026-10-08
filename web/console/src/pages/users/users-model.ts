@@ -1,4 +1,4 @@
-import type { ClientComponent, InstallationFamily, UserOperationAction } from "../../api/admin";
+import type { ClientComponent, InstallationFamily, InstallationSignal, UserOperationAction } from "../../api/admin";
 import type { Severity } from "../../ui";
 
 export const DAY_MS = 86_400_000;
@@ -33,6 +33,21 @@ export interface Signal {
 
 const NATIVE_PLATFORMS = new Set(["ios", "android", "react_native_ios", "react_native_android"]);
 const WEAK_STORAGE = new Set(["software", "memory"]);
+
+/** Labels for the signals the server derives for each installation. */
+export const SERVER_SIGNAL: Readonly<Record<InstallationSignal, { label: string; severity: Severity }>> = {
+  debug_trust: { label: "Debug trust", severity: "critical" },
+  failed_sessions: { label: "Failed sessions", severity: "warning" },
+  token_reuse: { label: "Token reuse", severity: "critical" },
+  trust_expiring: { label: "Trust expiring", severity: "warning" },
+  weak_key_storage: { label: "Weak key storage", severity: "warning" }
+};
+
+/** Badges for a list row: the server's signals when it sends them, else what the row itself shows. */
+export function rowSignals(family: InstallationFamily, environmentKind: string | undefined, now: number): Array<{ id: string; label: string; severity: Severity }> {
+  if (family.signals) return family.signals.map((signal) => ({ id: signal, ...SERVER_SIGNAL[signal] }));
+  return familySignals(family, environmentKind, now);
+}
 
 /** Signals visible from a list row, which carries the family but not its parts. */
 export function familySignals(family: InstallationFamily, environmentKind: string | undefined, now: number): Signal[] {

@@ -991,6 +991,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/client-components/{componentId}/operation-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what revoking or re-verifying a part ends now.
+         * @description Counts the part and every part it delegated to, directly or not. Revoking a root part isn't applicable; revoke its installation.
+         */
+        get: operations["getClientComponentImpact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/client-components/{componentId}/require-reattestation": {
         parameters: {
             query?: never;
@@ -1247,7 +1267,11 @@ export interface paths {
         };
         /**
          * List redaction-safe Installation Family trust and usage summaries.
-         * @description Returns root trust, component counts, aggregate usage, cost, and revocation state without private keys, refresh grants, raw attestation evidence, or provider bodies.
+         * @description Returns root trust, component counts, aggregate usage, cost, signals,
+         *     and revocation state without private keys, refresh grants, raw
+         *     attestation evidence, or provider bodies. `signal=any` keeps
+         *     installations with at least one signal. Cursors belong to their sort;
+         *     `include_total=true` adds a capped count of every match.
          */
         get: operations["listInstallationFamilies"];
         put?: never;
@@ -1267,6 +1291,23 @@ export interface paths {
         };
         /** Inspect one Installation Family and its complete bounded component trust graph. */
         get: operations["getInstallationFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/installation-families/{familyId}/operation-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview what revoking or renewing an installation ends now. */
+        get: operations["getInstallationFamilyImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1828,7 +1869,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List pseudonymous application users. */
+        /**
+         * List pseudonymous application users.
+         * @description Filters combine. `claim` matches one configured normalized claim
+         *     exactly, as `name:value`. Cursors belong to the sort they came from.
+         *     `include_total=true` adds a count of every match, capped at 100,000.
+         */
         get: operations["listApplicationUsers"];
         put?: never;
         post?: never;
@@ -1984,6 +2030,66 @@ export interface paths {
         put?: never;
         /** Restore future session eligibility without restoring revoked sessions. */
         post: operations["unblockApplicationUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{userId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sum one user's usage for requests started in a time range. */
+        get: operations["getApplicationUserUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply one confirmed user action to up to 100 users.
+         * @description Each user needs the impact token from the batch preview. Every user is
+         *     changed in its own transaction with its own audit event and operation
+         *     ID; a user whose state changed since the preview is skipped as
+         *     `changed` instead of acted on.
+         */
+        post: operations["applyApplicationUserBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/batch-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview one user action for up to 100 users.
+         * @description Returns each user's impact and token, as the single-user preview does, plus summed counts. Unknown users are reported, not failed.
+         */
+        post: operations["previewApplicationUserBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2183,6 +2289,16 @@ export interface components {
             };
             /** @enum {string} */
             status: "active" | "blocked";
+        };
+        ApplicationUserUsage: {
+            /** Format: date-time */
+            end: string;
+            provenance: string[];
+            request_count: number;
+            /** Format: date-time */
+            start: string;
+            user_id: components["schemas"]["UserID"];
+            values: components["schemas"]["UsageValues"];
         };
         AttestationPolicy: {
             id: components["schemas"]["Identifier"];
@@ -3443,6 +3559,15 @@ export interface components {
             /** Format: date-time */
             root_trust_expires_at?: string;
             root_trust_source: components["schemas"]["ComponentTrustSource"];
+            /**
+             * @description Conditions worth a look; revoked installations have none.
+             *     `debug_trust` is debug attestation outside Development,
+             *     `trust_expiring` root trust expiring within seven days,
+             *     `token_reuse` a reused refresh token, `weak_key_storage` a native
+             *     part keeping its key in software or memory, and `failed_sessions`
+             *     a part with three or more sessions that ended uncleanly.
+             */
+            signals: ("debug_trust" | "trust_expiring" | "token_reuse" | "weak_key_storage" | "failed_sessions")[];
             /** @enum {string} */
             status: "active" | "suspended" | "revoked";
             /** Format: date-time */
@@ -3454,6 +3579,7 @@ export interface components {
         InstallationFamilyPage: {
             items: components["schemas"]["InstallationFamily"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
         };
         InstallationID: string;
         InstallationPage: {
@@ -3538,6 +3664,11 @@ export interface components {
             id: components["schemas"]["Identifier"];
             limits: components["schemas"]["Limit"][];
         };
+        ListTotal: {
+            /** @description True when there are more than 100 */
+            capped: boolean;
+            count: number;
+        };
         LogicalRequest: {
             /** @description Ordered by contiguous attempt_number beginning at one. */
             attempts: components["schemas"]["UpstreamAttempt"][];
@@ -3617,6 +3748,23 @@ export interface components {
         OpaqueID: string;
         OperationalRevocationRequest: {
             reason?: string;
+        };
+        OperationImpact: {
+            /** @enum {string} */
+            action: "revoke" | "require_renewal" | "require_reattestation";
+            applicable: boolean;
+            counts: {
+                active_components: number;
+                active_refresh_tokens: number;
+                active_sessions: number;
+                delegated_components: number;
+                /** Format: date-time */
+                last_seen_at?: string;
+                requests_last_24_hours: number;
+                requests_last_24_hours_capped: boolean;
+            };
+            current_status: string;
+            summary: string;
         };
         Organization: {
             /** Format: date-time */
@@ -4358,7 +4506,8 @@ export interface components {
                 "admin_passkeys",
                 "admin_sso",
                 "admin_invitations",
-                "admin_application_roles"
+                "admin_application_roles",
+                "admin_user_insights"
             ];
             server_version: string;
         };
@@ -4583,6 +4732,48 @@ export interface components {
             output_tokens: number;
             total_tokens: number;
         };
+        UserBatchImpact: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            applicable: number;
+            items: {
+                impact?: components["schemas"]["UserOperationImpact"];
+                /**
+                 * @description Set instead of impact when the user can't be previewed.
+                 * @enum {string}
+                 */
+                outcome?: "not_found";
+                user_id: components["schemas"]["UserID"];
+            }[];
+            totals: components["schemas"]["UserOperationCounts"];
+        };
+        UserBatchImpactRequest: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            user_ids: components["schemas"]["UserID"][];
+        };
+        UserBatchRequest: {
+            /** @constant */
+            acknowledge_immediate_effect: true;
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            items: {
+                impact_token: string;
+                user_id: components["schemas"]["UserID"];
+            }[];
+            reason: string;
+        };
+        UserBatchResult: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            done: number;
+            results: {
+                operation_id?: string;
+                /** @enum {string} */
+                outcome: "done" | "changed" | "not_found" | "forbidden" | "failed";
+                user_id: components["schemas"]["UserID"];
+            }[];
+        };
         UserID: string;
         UserLimitOverride: {
             /** Format: date-time */
@@ -4623,6 +4814,7 @@ export interface components {
         UserPage: {
             items: components["schemas"]["ApplicationUser"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
         };
         ValidationIssue: {
             code: string;
@@ -6113,6 +6305,31 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getClientComponentImpact: {
+        parameters: {
+            query: {
+                action: "revoke" | "require_reattestation";
+            };
+            header?: never;
+            path: {
+                componentId: components["parameters"]["ClientComponentID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The impact; nothing changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationImpact"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     requireClientComponentReattestation: {
         parameters: {
             query?: never;
@@ -6545,7 +6762,12 @@ export interface operations {
             query: {
                 cursor?: components["parameters"]["Cursor"];
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                include_total?: "true";
                 page_size?: components["parameters"]["PageSize"];
+                platform?: components["schemas"]["ClientPlatform"];
+                signal?: "any" | "debug_trust" | "trust_expiring" | "token_reuse" | "weak_key_storage" | "failed_sessions";
+                sort?: "oldest" | "newest" | "recently_seen";
+                status?: "active" | "suspended" | "revoked";
                 user_id?: components["parameters"]["ApplicationUserFilter"];
             };
             header?: never;
@@ -6584,6 +6806,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstallationFamily"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getInstallationFamilyImpact: {
+        parameters: {
+            query: {
+                action: "revoke" | "require_renewal";
+            };
+            header?: never;
+            path: {
+                familyId: components["parameters"]["InstallationFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The impact; nothing changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationImpact"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -7479,9 +7726,17 @@ export interface operations {
     listApplicationUsers: {
         parameters: {
             query: {
+                claim?: string;
                 cursor?: components["parameters"]["Cursor"];
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                /** @description Only users with an active limit-plan override. */
+                has_override?: "true";
+                include_total?: "true";
                 page_size?: components["parameters"]["PageSize"];
+                /** @description Only users linked through this identity provider. */
+                provider?: string;
+                sort?: "oldest" | "newest" | "recently_seen";
+                status?: "active" | "blocked";
             };
             header?: never;
             path?: never;
@@ -7776,6 +8031,93 @@ export interface operations {
                 };
             };
             409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getApplicationUserUsage: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                start: string;
+            };
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user's usage. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationUserUsage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    applyApplicationUserBatch: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-user outcomes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBatchResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewApplicationUserBatch: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserBatchImpactRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-user impacts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBatchImpact"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };

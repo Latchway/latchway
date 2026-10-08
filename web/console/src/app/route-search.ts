@@ -15,6 +15,8 @@ const QueryBoolean = z.preprocess((value) => {
   if (value === false || value === "false") return false;
   return value;
 }, z.boolean());
+/** List order, shared by users and installations. */
+const ListSort = z.enum(["newest", "recently_seen"]);
 const AppVersion = z.string().min(1).max(128).regex(/^[A-Za-z0-9._+-]+$/);
 const AuditName = (maximum: number) => z.string().min(1).max(maximum).regex(/^[a-z][a-z0-9_.]*$/);
 const AuditReason = z.string()
@@ -162,6 +164,10 @@ export const InstallationFamilyRouteSearchSchema = z.object({
   cursor: optional(Cursor),
   environment_id: optional(OpaqueID("env")),
   family_id: optional(OpaqueID("fam")),
+  install_sort: optional(ListSort),
+  install_status: optional(z.enum(["active", "suspended", "revoked"])),
+  platform: optional(Platform),
+  signal: optional(z.enum(["any", "debug_trust", "trust_expiring", "token_reuse", "weak_key_storage", "failed_sessions"])),
   user_id: optional(OpaqueID("usr"))
 }).superRefine((search, context) => {
   // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
@@ -174,9 +180,14 @@ export const parseInstallationFamilyRouteSearch = (value: unknown): Installation
 
 export const UserRouteSearchSchema = z.object({
   ...workspaceSearchFields,
+  claim: optional(z.string().max(264).regex(/^[a-z][a-z0-9_]{0,62}:.{1,200}$/u).refine((value) => !/[\r\n]/u.test(value) && !value.includes(String.fromCharCode(0)), "Claim filters cannot contain control characters.")),
   cursor: optional(Cursor),
   environment_id: optional(OpaqueID("env")),
-  user_id: optional(OpaqueID("usr"))
+  override: optional(QueryBoolean),
+  provider: optional(Identifier),
+  user_id: optional(OpaqueID("usr")),
+  user_sort: optional(ListSort),
+  user_status: optional(z.enum(["active", "blocked"]))
 }).superRefine((search, context) => {
   // A selection is always scoped: by an explicit environment ID or by the workspace environment in the URL.
   requireEnvironmentForSelection(context, search.environment_id ?? search.environment, [["cursor", search.cursor], ["user_id", search.user_id]]);

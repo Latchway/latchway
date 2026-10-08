@@ -79,6 +79,7 @@ type installationFamilyCLI struct {
 	LastSeenAt         string               `json:"last_seen_at"`
 	RevokedAt          string               `json:"revoked_at,omitempty"`
 	RevocationReason   string               `json:"revocation_reason,omitempty"`
+	Signals            []string             `json:"signals"`
 	Components         []clientComponentCLI `json:"components,omitempty"`
 }
 
@@ -491,12 +492,12 @@ func printInstallationFamilies(opts *options, page installationFamilyPageCLI) er
 			family.ID, family.UserID, family.Platform, family.Status,
 			family.RootTrustSource, family.ComponentCount.String(), family.RequestCount.String(),
 			family.Usage.TotalTokens.String(), family.Usage.CostNanoUSD.String(),
-			formatControlTime(family.LastSeenAt),
+			formatControlTime(family.LastSeenAt), signalsLabel(family.Signals),
 		})
 	}
 	if err := printControlTable(opts, []string{
 		"FAMILY", "USER", "PLATFORM", "STATUS", "ROOT TRUST", "COMPONENTS",
-		"REQUESTS", "TOTAL TOKENS", "COST NANO-USD", "LAST SEEN",
+		"REQUESTS", "TOTAL TOKENS", "COST NANO-USD", "LAST SEEN", "SIGNALS",
 	}, rows); err != nil {
 		return err
 	}
@@ -593,4 +594,11 @@ func printClientComponent(opts *options, component clientComponentCLI) error {
 		formatControlTime(component.Delegation.ConsumedAt),
 		formatControlTime(component.Delegation.RevokedAt),
 	}})
+}
+
+func signalsLabel(signals []string) string {
+	if len(signals) == 0 {
+		return "-"
+	}
+	return strings.Join(signals, ",")
 }

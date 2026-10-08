@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/latchway/latchway/internal/buildinfo"
@@ -15,8 +18,58 @@ import (
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
+var (
+	identityProviderKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	normalizedClaimKeyPattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+)
+
+// parseUserListFilter reads the optional users-list filters. Each appears at
+// most once; claim is "name:value" over the configured normalized claims.
+func parseUserListFilter(r *http.Request) (userListFilter, bool) {
+	query := r.URL.Query()
+	for _, key := range []string{"status", "has_override", "provider", "claim", "sort", "include_total"} {
+		if len(query[key]) > 1 {
+			return userListFilter{}, false
+		}
+	}
+	filter := userListFilter{status: query.Get("status"), provider: query.Get("provider"), sort: query.Get("sort")}
+	switch filter.status {
+	case "", "active", "blocked":
+	default:
+		return userListFilter{}, false
+	}
+	switch query.Get("has_override") {
+	case "":
+	case "true":
+		filter.hasOverride = true
+	default:
+		return userListFilter{}, false
+	}
+	if filter.provider != "" && !identityProviderKeyPattern.MatchString(filter.provider) {
+		return userListFilter{}, false
+	}
+	if claim := query.Get("claim"); claim != "" {
+		key, value, found := strings.Cut(claim, ":")
+		if !found || !normalizedClaimKeyPattern.MatchString(key) || value == "" || len(value) > 200 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return userListFilter{}, false
+		}
+		filter.claimKey, filter.claimValue = key, value
+	}
+	switch filter.sort {
+	case "", userSortOldest, userSortNewest, userSortRecentlySeen:
+	default:
+		return userListFilter{}, false
+	}
+	switch query.Get("include_total") {
+	case "", "true":
+	default:
+		return userListFilter{}, false
+	}
+	return filter, true
+}
+
 func (api *API) users(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size") {
+	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size", "status", "has_override", "provider", "claim", "sort", "include_total") {
 		api.writeProblem(w, r, invalidRequest("The user-list query is invalid."))
 		return
 	}
@@ -25,20 +78,34 @@ func (api *API) users(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
 		return
 	}
+	filter, ok := parseUserListFilter(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The user filters are invalid: status is active or blocked, has_override is true, provider is an identity provider key, claim is name:value, and sort is oldest, newest or recently_seen."))
+		return
+	}
 	page, err := parseOperationalPage(r, id.ApplicationUser)
 	if err != nil {
 		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
 		return
 	}
-	items, err := api.operations.listUsers(r.Context(), mustPrincipal(r.Context()), environmentID, page)
+	items, err := api.operations.listUsers(r.Context(), mustPrincipal(r.Context()), environmentID, filter, page)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
 		return
 	}
 	items, pageDocument := buildPage(items, int(page.size), func(item useroverride.ApplicationUser) cursorDocument {
-		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+		return cursorDocument{CreatedAt: userSortKey(filter.sort, item), ID: item.ID}
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+	document := map[string]any{"items": items, "page": pageDocument}
+	if r.URL.Query().Get("include_total") == "true" {
+		count, capped, err := api.operations.countUsers(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
+		if err != nil {
+			api.handleOperationalError(w, r, err, "")
+			return
+		}
+		document["total"] = map[string]any{"count": count, "capped": capped}
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func (api *API) user(w http.ResponseWriter, r *http.Request) {
