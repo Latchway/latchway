@@ -14,6 +14,9 @@ const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
 const OptionalInstant = Instant.optional();
 const NonnegativeSafeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/** Correlation identifiers clients may send with a request (8 to 128 characters). */
+export const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+
 const Platform = z.enum([
   "ios",
   "android",
@@ -85,6 +88,9 @@ export const AdministratorSchema = z
     organization_id: OpaqueID,
     password_reset_required: z.boolean(),
     role: z.enum(["owner", "admin", "operator", "viewer"]),
+    /** Signed in to this organization with its identity provider. */
+    sso_linked: z.boolean().optional(),
+    two_factor_enabled: z.boolean().optional(),
     status: z.enum(["active", "disabled"]),
     updated_at: Instant
   })
@@ -93,6 +99,9 @@ export const AdministratorSchema = z
 export const AdministratorPageSchema = z
   .object({ items: z.array(AdministratorSchema).max(200), page: PageInfo })
   .strict();
+
+/** Coarse "Browser on OS" phrase the server derives; never a raw User-Agent or address. */
+const DeviceSummary = z.string().regex(/^[A-Za-z0-9 .()/-]{1,80}$/);
 
 export const AdminSessionMetadataSchema = z
   .object({
@@ -104,6 +113,7 @@ export const AdminSessionMetadataSchema = z
       .strict(),
     created_at: Instant,
     current: z.boolean(),
+    device_summary: DeviceSummary.optional(),
     expires_at: Instant,
     id: z.string().regex(/^asn_[A-Za-z0-9_-]{16,128}$/),
     last_seen_at: Instant,
@@ -128,14 +138,95 @@ const APITokenScopesSchema = z
 
 export const APITokenMetadataSchema = z
   .object({
+    administrator: z.object({ email: z.email().max(320), id: z.string().regex(/^adm_[A-Za-z0-9_-]{16,128}$/) }).strict().optional(),
     created_at: Instant,
     expires_at: OptionalInstant,
     id: z.string().regex(/^tok_[A-Za-z0-9_-]{16,128}$/),
+    last_used_at: OptionalInstant,
     name: z.string().min(1).max(256),
     revoked: z.boolean(),
     scopes: APITokenScopesSchema
   })
   .strict();
+
+export const SessionEndReasonSchema = z.enum(["expired", "signed_out", "signed_out_elsewhere", "revoked_by_owner", "password_reset", "password_changed", "organization_switch", "access_disabled", "two_factor_reset", "sso_changed", "other"]);
+
+export const OwnAdminSessionSchema = z
+  .object({
+    created_at: Instant,
+    current: z.boolean(),
+    device_summary: DeviceSummary.optional(),
+    end_reason: SessionEndReasonSchema.optional(),
+    expires_at: Instant,
+    id: z.string().regex(/^asn_[A-Za-z0-9_-]{16,128}$/),
+    last_seen_at: Instant,
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    status: z.enum(["active", "expired", "revoked"])
+  })
+  .strict();
+
+export const OwnAdminSessionListSchema = z.object({ items: z.array(OwnAdminSessionSchema).max(100) }).strict();
+
+export const SignedOutSessionsSchema = z.object({ signed_out_sessions: z.number().int().min(0) }).strict();
+
+export const TwoFactorStatusSchema = z
+  .object({
+    /** An authenticator app or a passkey is set up. */
+    enabled: z.boolean(),
+    passkeys: z.number().int().min(0).max(1000),
+    recovery_codes_remaining: z.number().int().min(0).max(10),
+    required_by_organization: z.boolean(),
+    totp_enabled: z.boolean(),
+    totp_enabled_at: OptionalInstant
+  })
+  .strict();
+
+export const PasskeySchema = z
+  .object({
+    created_at: z.iso.datetime({ offset: true }),
+    id: z.string().regex(/^apk_[A-Za-z0-9_-]{16,128}$/),
+    last_used_at: OptionalInstant,
+    name: z.string().min(1).max(64),
+    /** The authenticator reports the passkey is backed up, as synced passkeys are. */
+    synced: z.boolean()
+  })
+  .strict();
+
+export const PasskeyListSchema = z.object({ items: z.array(PasskeySchema).max(1000) }).strict();
+
+const HTTPSURL = z.string().startsWith("https://").max(2048);
+
+export const SSOProviderSchema = z
+  .object({
+    allowed_email_domains: z.array(z.string().min(1).max(253)).max(20),
+    authorization_endpoint: HTTPSURL,
+    client_id: z.string().min(1).max(512),
+    created_at: Instant,
+    enabled: z.boolean(),
+    issuer: HTTPSURL,
+    jwks_uri: HTTPSURL,
+    /** Role for accounts created at first sign-in; null when accounts aren't created. */
+    provision_role: z.enum(["admin", "operator", "viewer"]).nullable(),
+    /** Members other than owners must sign in with single sign-on. */
+    require_sso: z.boolean(),
+    token_endpoint: HTTPSURL,
+    updated_at: Instant
+  })
+  .strict();
+
+export const SSOConfigurationSchema = z.object({ provider: SSOProviderSchema.nullable(), redirect_uri: z.string().min(1).max(2048) }).strict();
+
+export const TotpEnrollmentSchema = z
+  .object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), uri: z.string().startsWith("otpauth://totp/").max(1024) })
+  .strict();
+
+const RecoveryCodeList = z.array(z.string().regex(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/)).length(10);
+
+export const RecoveryCodesSchema = z.object({ recovery_codes: RecoveryCodeList }).strict();
+
+export const AddedPasskeySchema = z.object({ passkey: PasskeySchema, recovery_codes: RecoveryCodeList.optional() }).strict();
+
+export const TwoFactorRequirementSchema = z.object({ required: z.boolean() }).strict();
 
 export const APITokenPageSchema = z
   .object({ items: z.array(APITokenMetadataSchema) })
@@ -161,8 +252,11 @@ export const UserSchema = z
   })
   .strict();
 
+/** A count of every match, capped at 100,000. */
+export const ListTotalSchema = z.object({ capped: z.boolean(), count: NonnegativeSafeInteger.max(100_000) }).strict();
+
 export const UserPageSchema = z
-  .object({ items: z.array(UserSchema).max(200), page: PageInfo })
+  .object({ items: z.array(UserSchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
 
 export const InstallationSchema = z
@@ -339,6 +433,8 @@ export const InstallationFamilySchema = z
     root_component_id: ClientComponentID,
     root_trust_expires_at: OptionalInstant,
     root_trust_source: TrustSource,
+    /** Server-derived conditions worth a look; older servers omit them. */
+    signals: z.array(z.enum(["debug_trust", "trust_expiring", "token_reuse", "weak_key_storage", "failed_sessions"])).max(5).optional(),
     status: z.enum(["active", "suspended", "revoked"]),
     updated_at: Instant,
     usage: UsageValuesSchema,
@@ -385,8 +481,36 @@ export const InstallationFamilySchema = z
   });
 
 export const InstallationFamilyPageSchema = z
-  .object({ items: z.array(InstallationFamilySchema).max(200), page: PageInfo })
+  .object({ items: z.array(InstallationFamilySchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
+
+export const UserUsageSchema = z
+  .object({ end: Instant, provenance: z.array(z.string().max(64)).max(8), request_count: NonnegativeSafeInteger, start: Instant, user_id: OpaqueID, values: UsageValuesSchema })
+  .strict();
+
+export const OperationImpactSchema = z
+  .object({
+    action: z.enum(["revoke", "require_renewal", "require_reattestation"]),
+    applicable: z.boolean(),
+    counts: z
+      .object({
+        active_components: NonnegativeSafeInteger,
+        active_refresh_tokens: NonnegativeSafeInteger,
+        active_sessions: NonnegativeSafeInteger,
+        delegated_components: NonnegativeSafeInteger,
+        last_seen_at: OptionalInstant,
+        requests_last_24_hours: NonnegativeSafeInteger.max(10_000),
+        requests_last_24_hours_capped: z.boolean()
+      })
+      .strict(),
+    current_status: z.string().min(1).max(64),
+    summary: z.string().max(300)
+  })
+  .strict();
+
+export type InstallationSignal = NonNullable<z.infer<typeof InstallationFamilySchema>["signals"]>[number];
+export type UserUsage = z.infer<typeof UserUsageSchema>;
+export type OperationImpact = z.infer<typeof OperationImpactSchema>;
 
 const PublicAttemptFailureCode = z.enum([
   "canceled",
@@ -550,6 +674,7 @@ export const RequestSchema = z
     feature: Identifier,
     framework: Identifier.optional(),
     caller_sdk: z.enum(["ios", "android", "react-native", "javascript"]).optional(),
+    client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional(),
     framework_version: z
       .string()
       .min(1)
@@ -561,6 +686,7 @@ export const RequestSchema = z
     id: OpaqueID,
     installation_id: OpaqueID,
     installation_family_id: InstallationFamilyID.optional(),
+    platform: Platform.optional(),
     protocol: z.enum([
       "openai_responses",
       "openai_chat",
@@ -660,8 +786,40 @@ export const RequestSchema = z
   });
 
 export const RequestPageSchema = z
-  .object({ items: z.array(RequestSchema).max(200), page: PageInfo })
+  .object({ items: z.array(RequestSchema).max(200), page: PageInfo, total: ListTotalSchema.optional() })
   .strict();
+
+const RequestFacetSchema = z
+  .object({
+    truncated: z.boolean(),
+    values: z
+      .array(z.object({ count: NonnegativeSafeInteger.min(1), value: z.string().min(1).max(512).refine((value) => !/[\r\n\0]/.test(value)) }).strict())
+      .max(100)
+  })
+  .strict();
+
+export const REQUEST_FACETS = ["status", "feature", "error_code", "upstream", "model", "route", "platform", "component_kind", "trust_source", "limit_plan"] as const;
+export type RequestFacetName = typeof REQUEST_FACETS[number];
+
+/** GET /admin/v1/requests/facets: request counts by each filterable value over a range. */
+export const RequestFacetsSchema = z
+  .object({
+    end: Instant,
+    environment_id: OpaqueID,
+    feature: Identifier.optional(),
+    facets: z.object(Object.fromEntries(REQUEST_FACETS.map((name) => [name, RequestFacetSchema])) as Record<RequestFacetName, typeof RequestFacetSchema>).strict(),
+    requests: NonnegativeSafeInteger,
+    start: Instant
+  })
+  .strict()
+  .superRefine((document, context) => {
+    for (const name of REQUEST_FACETS) {
+      if (document.facets[name].values.some((item) => item.count > document.requests)) {
+        context.addIssue({ code: "custom", message: "A facet count exceeds the request total.", path: ["facets", name] });
+      }
+    }
+  });
+export type RequestFacets = z.infer<typeof RequestFacetsSchema>;
 
 export const DevelopmentSampleSchema = z
   .object({
@@ -761,6 +919,17 @@ export const EffectiveLimitSchema = z
     scope: z.array(Identifier).min(1).max(8).refine((scope) => new Set(scope).size === scope.length),
     source: z.string().min(1).max(512),
     timezone: z.string().min(1).max(128).optional(),
+    usage: z
+      .object({
+        maximum: NonnegativeSafeInteger.optional(),
+        observed_at: Instant,
+        remaining: NonnegativeSafeInteger.optional(),
+        reserved: NonnegativeSafeInteger.optional(),
+        resets_at: OptionalInstant,
+        used: NonnegativeSafeInteger.optional()
+      })
+      .strict()
+      .optional(),
     window: z.string().min(2).max(32).optional()
   })
   .strict()
@@ -1258,6 +1427,34 @@ export const ValidationSchema = z
   })
   .strict();
 
+/** True when text has a control character other than a line break. */
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if ((code < 32 && code !== 10) || (code >= 127 && code < 160)) return true;
+  }
+  return false;
+}
+
+/** A publish note: no control characters other than line breaks. */
+const RevisionText = (maximum: number) => z.string().min(1).max(maximum).refine((value) => !hasControlCharacter(value), { message: "Revision text cannot contain control characters." });
+
+/**
+ * Draft-lifecycle fields (ADR 0048). Servers without `admin_configuration_drafts` omit them, so every one is
+ * optional; `updated_*` falls back to `created_*` where shown.
+ */
+export const revisionLifecycleFields = {
+  activation_note: RevisionText(500).optional(),
+  base_revision_id: OpaqueID.optional(),
+  description: z.string().max(512).optional(),
+  discarded_at: OptionalInstant,
+  discarded_by: z.string().max(256).optional(),
+  updated_at: OptionalInstant,
+  updated_by: z.string().max(256).optional()
+};
+
+export const REVISION_STATES = ["draft", "valid", "active", "superseded", "invalid", "discarded"] as const;
+
 export const RevisionSchema = z
   .object({
     activated_at: OptionalInstant,
@@ -1266,11 +1463,54 @@ export const RevisionSchema = z
     document: z.record(z.string(), z.unknown()),
     environment_id: OpaqueID,
     id: OpaqueID,
-    state: z.enum(["draft", "valid", "active", "superseded", "invalid"]),
+    state: z.enum(REVISION_STATES),
     validation: ValidationSchema.optional(),
-    version: z.number().int().positive()
+    version: z.number().int().positive(),
+    ...revisionLifecycleFields
   })
   .strict();
+
+const ConfigurationChangeSchema = z
+  .object({ operation: z.enum(["add", "remove", "replace"]), path: z.string().max(1024), summary: z.string().max(1024).optional() })
+  .strict();
+
+/** GET /admin/v1/config-revisions/{id}/edits: who changed a revision, when, and which paths (never values). */
+export const RevisionEditsSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            change_count: z.number().int().min(0),
+            changes: z.array(ConfigurationChangeSchema).max(100),
+            edited_at: Instant,
+            edited_by: z.string().max(256),
+            kind: z.enum(["created", "edited", "rebased", "promoted"]),
+            version: z.number().int().positive()
+          })
+          .strict()
+          .refine((edit) => edit.changes.length <= edit.change_count, { message: "An edit lists more changes than it counts." })
+      )
+      .max(200),
+    revision_id: OpaqueID,
+    truncated: z.boolean()
+  })
+  .strict();
+export type RevisionEdits = z.infer<typeof RevisionEditsSchema>;
+
+/** GET /admin/v1/config-revisions/{id}/rebase-preview: paths each side changed and paths both changed differently. */
+export const MergePreviewSchema = z
+  .object({
+    base_revision_id: OpaqueID.optional(),
+    conflicts: z.array(z.string().startsWith("/").max(1024)).max(1000),
+    draft_changes: z.array(ConfigurationChangeSchema),
+    live_changes: z.array(ConfigurationChangeSchema),
+    live_revision_id: OpaqueID,
+    revision_id: OpaqueID,
+    up_to_date: z.boolean()
+  })
+  .strict();
+export type MergePreview = z.infer<typeof MergePreviewSchema>;
 
 export const RouteSimulationSchema = z
   .object({
@@ -1390,6 +1630,32 @@ export const RouteSimulationSchema = z
       })
       .strict()
       .optional(),
+    attempt_plan: z
+      .object({
+        assumptions: z.array(z.string().max(512)).max(8),
+        attempts: z
+          .array(
+            z
+              .object({
+                condition: z.string().max(64).optional(),
+                model: Identifier,
+                next: z.enum(["retry", "fallback", "stop"]).optional(),
+                number: z.number().int().min(1).max(32),
+                outcome: z.enum(["succeeded", "failed"]),
+                retry_delay_max_ms: z.number().int().min(0).max(60_000).optional(),
+                route: Identifier,
+                upstream: Identifier
+              })
+              .strict()
+          )
+          .min(1)
+          .max(32),
+        failure_condition: z.string().max(64).optional(),
+        outcome: z.enum(["served", "failed"]),
+        served_by_route: Identifier.optional()
+      })
+      .strict()
+      .optional(),
     revision_id: OpaqueID,
     route: Identifier.optional(),
     upstream: Identifier.optional(),
@@ -1436,6 +1702,13 @@ export type AdministratorPage = z.infer<typeof AdministratorPageSchema>;
 export type AdminSessionMetadata = z.infer<typeof AdminSessionMetadataSchema>;
 export type AdminSessionMetadataPage = z.infer<typeof AdminSessionMetadataPageSchema>;
 export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
+export type OwnAdminSession = z.infer<typeof OwnAdminSessionSchema>;
+export type TwoFactorStatus = z.infer<typeof TwoFactorStatusSchema>;
+export type Passkey = z.infer<typeof PasskeySchema>;
+export type SSOProvider = z.infer<typeof SSOProviderSchema>;
+export type SSOConfiguration = z.infer<typeof SSOConfigurationSchema>;
+export type TotpEnrollment = z.infer<typeof TotpEnrollmentSchema>;
+export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>;
 export type APITokenPage = z.infer<typeof APITokenPageSchema>;
 export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;
 export type ApplicationUserPage = z.infer<typeof UserPageSchema>;
@@ -1464,7 +1737,92 @@ export type SelfTestSchedule = z.infer<typeof SelfTestScheduleSchema>;
 export type SelfTestSchedulePage = z.infer<typeof SelfTestSchedulePageSchema>;
 export type SystemStatus = z.infer<typeof SystemStatusSchema>;
 export type RouteSimulation = z.infer<typeof RouteSimulationSchema>;
+
+/** POST /admin/v1/config-revisions/{id}/simulate-batch: one item per request, each a result or a problem. */
+export const RouteSimulationBatchSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            index: z.number().int().min(0).max(49),
+            problem: z.object({ code: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/), detail: z.string().max(1024) }).strict().optional(),
+            result: RouteSimulationSchema.optional()
+          })
+          .strict()
+          .refine((item) => (item.result === undefined) !== (item.problem === undefined), { message: "A batch item carries a result or a problem." })
+      )
+      .max(50)
+  })
+  .strict();
+
+/** GET /admin/v1/usage/distribution. */
+export const UsageDistributionSchema = z
+  .object({
+    end: Instant,
+    environment_id: OpaqueID,
+    feature: Identifier.optional(),
+    histogram: z.array(z.object({ from: NonnegativeSafeInteger, subjects: NonnegativeSafeInteger.min(1), to: NonnegativeSafeInteger.optional() }).strict()).max(64),
+    limit_plan: Identifier.optional(),
+    maximum: NonnegativeSafeInteger.optional(),
+    metric: z.string().max(64),
+    over_subjects: NonnegativeSafeInteger.optional(),
+    over_users: NonnegativeSafeInteger.optional(),
+    peaks: z.object({ max: NonnegativeSafeInteger, p50: NonnegativeSafeInteger, p90: NonnegativeSafeInteger, p99: NonnegativeSafeInteger }).strict(),
+    periods: z.number().int().min(1).max(2000),
+    scope: z.array(z.enum(["user", "feature", "installation"])).min(1).max(3),
+    start: Instant,
+    subjects: NonnegativeSafeInteger,
+    timezone: z.string().max(64),
+    users: NonnegativeSafeInteger,
+    window: z.string().max(16)
+  })
+  .strict()
+  .refine((document) => document.users <= document.subjects && (document.over_users ?? 0) <= (document.over_subjects ?? 0), { message: "Distribution counts are inconsistent." });
+export type UsageDistribution = z.infer<typeof UsageDistributionSchema>;
+
+/** GET /admin/v1/user-overrides. */
+export const UserOverridePageSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            created_at: Instant,
+            created_by: z.string().max(256),
+            expires_at: OptionalInstant,
+            id: OpaqueID,
+            limit_plan: Identifier,
+            reason: z.string().min(1).max(500),
+            revoked_at: OptionalInstant,
+            status: z.enum(["active", "expired", "revoked"]),
+            user_id: OpaqueID
+          })
+          .strict()
+      )
+      .max(200),
+    page: PageInfo
+  })
+  .strict();
+export type UserOverridePage = z.infer<typeof UserOverridePageSchema>;
 export type ConfigurationRevision = z.infer<typeof RevisionSchema>;
+
+/** POST /admin/v1/environments/{id}/config-revisions/promote. */
+export const PromotionSchema = z
+  .object({
+    promotion: z
+      .object({
+        copied: z.array(z.string().max(1024)),
+        kept: z.array(z.string().max(1024)),
+        review: z.array(z.string().max(1024)),
+        source_environment_id: OpaqueID,
+        source_revision_id: OpaqueID
+      })
+      .strict(),
+    revision: RevisionSchema
+  })
+  .strict();
+export type Promotion = z.infer<typeof PromotionSchema>;
 export type ConfigurationValidation = z.infer<typeof ValidationSchema>;
 export type ConfigurationPlan = z.infer<typeof ConfigurationPlanSchema>;
 export type DevelopmentSample = z.infer<typeof DevelopmentSampleSchema>;

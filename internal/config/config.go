@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/latchway/latchway/internal/mail"
 )
 
 // Role selects which process responsibilities are active.
@@ -37,6 +39,8 @@ type Config struct {
 	PublicOrigin            string
 	AdminBootstrapToken     string
 	AdminSessionLifetime    time.Duration
+	// SMTP is the relay for invitation emails; a zero Host leaves email off.
+	SMTP mail.Config
 }
 
 // Load reads process configuration from environment variables.
@@ -53,6 +57,12 @@ func Load() (Config, error) {
 	)
 	adminSessionLifetime, adminSessionErr := parseDurationEnv("LATCHWAY_ADMIN_SESSION_LIFETIME", 12*time.Hour)
 	publicOrigin := envOr("LATCHWAY_PUBLIC_ORIGIN", "http://"+net.JoinHostPort("localhost", port))
+	smtpTLS := mail.TLSMode(strings.ToLower(envOr("LATCHWAY_SMTP_TLS", string(mail.TLSStartTLS))))
+	defaultSMTPPort := 587
+	if smtpTLS == mail.TLSImplicit {
+		defaultSMTPPort = 465
+	}
+	smtpPort, smtpPortErr := parseIntEnv("LATCHWAY_SMTP_PORT", defaultSMTPPort)
 	cfg := Config{
 		ListenAddress:           envOr("LATCHWAY_LISTEN_ADDRESS", net.JoinHostPort("0.0.0.0", port)),
 		DatabaseURL:             firstNonEmpty(os.Getenv("LATCHWAY_DATABASE_URL"), os.Getenv("DATABASE_URL")),
@@ -67,8 +77,13 @@ func Load() (Config, error) {
 		PublicOrigin:            publicOrigin,
 		AdminBootstrapToken:     os.Getenv("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"),
 		AdminSessionLifetime:    adminSessionLifetime,
+		SMTP: mail.Config{
+			Host: strings.TrimSpace(os.Getenv("LATCHWAY_SMTP_HOST")), Port: smtpPort,
+			Username: os.Getenv("LATCHWAY_SMTP_USERNAME"), Password: os.Getenv("LATCHWAY_SMTP_PASSWORD"),
+			From: strings.TrimSpace(os.Getenv("LATCHWAY_SMTP_FROM")), TLS: smtpTLS,
+		},
 	}
-	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, completionConnectionsErr, adminSessionErr, cfg.Validate()); err != nil {
+	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, completionConnectionsErr, adminSessionErr, smtpPortErr, cfg.Validate()); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -119,6 +134,13 @@ func (c Config) Validate() error {
 	}
 	if c.AdminSessionLifetime < 5*time.Minute || c.AdminSessionLifetime > 30*24*time.Hour {
 		errs = append(errs, errors.New("admin session lifetime must be between 5 minutes and 30 days"))
+	}
+	if c.SMTP.Host != "" {
+		if err := c.SMTP.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("LATCHWAY_SMTP_*: %w", err))
+		}
+	} else if c.SMTP.Username != "" || c.SMTP.Password != "" || c.SMTP.From != "" {
+		errs = append(errs, errors.New("LATCHWAY_SMTP_HOST is required when other LATCHWAY_SMTP_* variables are set"))
 	}
 	return errors.Join(errs...)
 }

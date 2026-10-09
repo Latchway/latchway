@@ -88,7 +88,11 @@ type Environment struct {
 	Kind          string     `json:"kind"`
 	Status        string     `json:"status"`
 	DisabledAt    *time.Time `json:"disabled_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	// ActiveRevisionID is set only in environment lists. Mutation responses
+	// omit it so CLIs that decode them strictly, released before it was
+	// sent, keep working.
+	ActiveRevisionID string    `json:"active_revision_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type Membership struct {
@@ -173,7 +177,11 @@ func (store *Store) ListEnvironments(ctx context.Context, principal adminauth.Pr
 	}
 	items := make([]Environment, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, environmentFromRow(row.EnvironmentID, row.ApplicationID, row.Slug, row.DisplayName, row.Kind, row.Status, row.DisabledAt, row.CreatedAt))
+		item := environmentFromRow(row.EnvironmentID, row.ApplicationID, row.Slug, row.DisplayName, row.Kind, row.Status, row.DisabledAt, row.CreatedAt)
+		if row.ActiveRevisionID != nil {
+			item.ActiveRevisionID = *row.ActiveRevisionID
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -254,7 +262,7 @@ func (store *Store) CreateApplication(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) CreateEnvironment(ctx context.Context, principal adminauth.Principal, input EnvironmentInput) (Environment, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, input.ApplicationID, adminauth.AuthorizationContext{}) {
 		return Environment{}, ErrForbidden
 	}
 	if id.Validate(input.ApplicationID, id.Application) != nil || validateNamed(input.NamedInput) != nil {
@@ -322,7 +330,7 @@ func (store *Store) EnableApplication(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) setApplicationStatus(ctx context.Context, principal adminauth.Principal, applicationID, status string, reasonProvided bool) (Application, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
 		return Application{}, ErrForbidden
 	}
 	if id.Validate(applicationID, id.Application) != nil || (status != "active" && status != "disabled") {
@@ -413,7 +421,7 @@ func (store *Store) EnableEnvironment(ctx context.Context, principal adminauth.P
 }
 
 func (store *Store) setEnvironmentStatus(ctx context.Context, principal adminauth.Principal, environmentID, status string, reasonProvided bool) (Environment, error) {
-	if !principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{}) {
 		return Environment{}, ErrForbidden
 	}
 	if id.Validate(environmentID, id.Environment) != nil || (status != "active" && status != "disabled") {
@@ -441,6 +449,9 @@ func (store *Store) setEnvironmentStatus(ctx context.Context, principal adminaut
 		return Environment{}, ErrNotFound
 	} else if err != nil {
 		return Environment{}, fmt.Errorf("lock environment application: %w", err)
+	}
+	if !principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{}) {
+		return Environment{}, ErrForbidden
 	}
 	var item Environment
 	var disabledAt pgtype.Timestamptz

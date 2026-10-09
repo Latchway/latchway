@@ -9,6 +9,15 @@ async function goTo(page: Page, area: string, tab?: string): Promise<void> {
   if (tab) await page.getByRole("navigation", { name: `${area} pages` }).getByRole("link", { name: tab, exact: true }).click();
 }
 
+/** Opens a Setup wizard plan step from the step rail. */
+async function wizardStep(page: Page, step: number, title: string): Promise<void> {
+  await page.getByRole("navigation", { name: "Setup steps" }).getByRole("button", { name: `Step ${step}: ${title}` }).click();
+}
+
+function wizardRail(page: Page, label: string) {
+  return page.getByRole("navigation", { name: "Setup steps" }).getByRole("listitem").filter({ hasText: label });
+}
+
 async function signOut(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Your account/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -147,7 +156,7 @@ async function installAdminFixture(
     if (url.pathname === "/admin/v1/auth/login") { authenticated = true; return json(route, 200, session, { "X-CSRF-Token": csrf }); }
     if (url.pathname === "/admin/v1/auth/logout") { authenticated = false; return route.fulfill({ status: 204 }); }
     if (url.pathname === "/admin/v1/system") return json(route, 200, {
-      contract_version: "1.0.0",
+      contract_version: "1.1.0",
       database_schema_version: "28",
       mutation_ready: true,
       protocol_versions: [1, 2],
@@ -564,6 +573,7 @@ test("first-run exposes only the evidence fields for each selected platform scop
     { android: true, apple: false, value: "react_native_android", web: false },
     { android: true, apple: true, value: "react_native_both", web: false }
   ] as const;
+  await wizardStep(page, 2, "Clients");
   for (const scope of scopes) {
     await page.getByLabel("Platform scope").selectOption(scope.value);
     await expect(page.getByLabel("App ID prefix")).toHaveCount(scope.apple ? 1 : 0);
@@ -580,6 +590,7 @@ test("first-run separates Apple acceptance from distribution and confines Play t
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await goTo(page, "Setup wizard");
   await page.getByLabel("Environment kind").selectOption("development");
+  await wizardStep(page, 2, "Clients");
   await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("any");
   await expect(page.getByLabel("Development signing", { exact: true })).toBeChecked();
   await expect(page.getByLabel("TestFlight", { exact: true })).toBeChecked();
@@ -588,10 +599,14 @@ test("first-run separates Apple acceptance from distribution and confines Play t
   const playTesting = page.getByLabel(/Accept Google Play Console testing responses/);
   await expect(playTesting).not.toBeChecked();
   await playTesting.check();
+  await wizardStep(page, 1, "App & environment");
   await page.getByLabel("Environment kind").selectOption("staging");
+  await wizardStep(page, 2, "Clients");
   await expect(playTesting).toBeDisabled();
   await expect(playTesting).not.toBeChecked();
+  await wizardStep(page, 1, "App & environment");
   await page.getByLabel("Environment kind").selectOption("production");
+  await wizardStep(page, 2, "Clients");
   await expect(page.getByLabel("Accepted App Attest environment")).toHaveValue("production");
   await expect(page.getByLabel("App Store", { exact: true })).toBeChecked();
   await expect(page.getByLabel(/explicitly allow Apple development/)).not.toBeChecked();
@@ -610,8 +625,9 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Organization slug").fill("example");
   await page.getByLabel("Application name").fill("Mobile App");
   await page.getByLabel("Application slug").fill("mobile-app");
-  await page.getByLabel("Firebase project ID").fill("example-mobile");
   await page.getByLabel("Environment kind").selectOption("production");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Firebase project ID").fill("example-mobile");
   await page.getByLabel("App ID prefix").fill("TEAM1234");
   await page.getByLabel("Bundle ID", { exact: true }).fill("com.example.mobile");
   await page.getByLabel("Accepted App Attest environment").selectOption("production");
@@ -623,8 +639,11 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
   );
   await page.getByLabel("Exact version code").fill("123");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Input price (nano-USD per million tokens)").fill("250000");
   await page.getByLabel("Output price (nano-USD per million tokens)").fill("2000000");
+  await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Create application and environment" }).click();
   await expect(page.getByRole("heading", { name: "Write-only upstream credential" })).toBeVisible();
   const generated = JSON.parse(await page.getByLabel("Full configuration JSON").inputValue()) as {
@@ -676,16 +695,9 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   expect(snippets[0]).toContain('latchwayFeature: "assistant"');
   expect(snippets.join("\n")).not.toContain("applicationID: \"mobile-app\"");
   expect(snippets.join("\n")).not.toContain("window.location.origin");
-  const activeConfigurationSteps = [
-    "Identity provider",
-    "Attestation & components",
-    "Upstream target",
-    "Feature and route",
-    "Limits",
-    "SDK snippets"
-  ];
+  const activeConfigurationSteps = ["Publish", "Connect your app"];
   for (const label of activeConfigurationSteps) {
-    await expect(page.getByRole("listitem").filter({ hasText: label })).not.toHaveClass(/wizard-progress__done/);
+    await expect(wizardRail(page, label)).toHaveAttribute("data-state", "todo");
   }
   await page.getByLabel("Secret value").fill("test-only-upstream-key");
   await page.getByRole("button", { name: "Add credential" }).click();
@@ -694,14 +706,13 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByRole("button", { name: "Validate and activate with ETag" }).click();
   await expect(page.getByText(/is active/)).toBeVisible();
   for (const label of activeConfigurationSteps) {
-    await expect(page.getByRole("listitem").filter({ hasText: label })).toHaveClass(/wizard-progress__done/);
+    await expect(wizardRail(page, label)).toHaveAttribute("data-state", "done");
   }
   await page.getByRole("button", { name: "Run bounded upstream self-test" }).click();
   await expect(page.getByText(/Self-test .*passed/)).toBeVisible();
   await page.getByRole("button", { name: "Check durable client request" }).click();
   await expect(page.getByText(/Verified durable request/)).toContainText(ids.request);
-  await expect(page.getByRole("listitem").filter({ hasText: "Verified sample request" }))
-    .toHaveClass(/wizard-progress__done/);
+  await expect(wizardRail(page, "Verify a request")).toHaveAttribute("data-state", "done");
   expect(fixture.selfTestBodies).toEqual([{
     config_revision_id: ids.revision,
     environment_id: ids.environment,

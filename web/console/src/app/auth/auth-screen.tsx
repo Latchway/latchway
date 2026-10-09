@@ -1,27 +1,44 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import {
+  acceptInvitation,
   type AdminProblem,
   type AdminSession,
+  adminSignInInfoQueryOptions,
   bootstrapFirstOwner,
-  loginAdministrator,
+  finishSecondFactor,
+  type InvitationPreview,
   logoutAdministrator,
-  problemFromError
+  previewInvitation,
+  problemFromError,
+  type SecondFactorAnswer,
+  type SecondFactorMethod,
+  signInWithPasskey,
+  startAdministratorSignIn,
+  startSingleSignOn,
+  switchAdminOrganization
 } from "../../api/auth";
-import { overallHealthState, useSystemHealth } from "../../api/health";
+import { consoleContractVersion } from "../../api/console-compatibility";
 import { consoleSessionQueryOptions, consoleStateFromAdminSession } from "../../api/session";
+import { passkeysAvailable } from "../../api/webauthn";
 import { organizationsQueryOptions } from "../../api/workspace";
 import { PasswordField } from "../../components/password-field";
 import { ROLE_LABEL } from "../../pages/team/roles";
-import { Button, Field, Icon, Input, Logo, Notice, Segmented } from "../../ui";
+import { Badge, Button, Field, Icon, Input, Notice, Segmented } from "../../ui";
 import { AuthProblem, PasswordInput } from "./auth-fields";
+import { AuthLayout } from "./auth-layout";
 import { lastSignedOutEmail, pauseSignIn, rememberSignedOutEmail, signInPausedUntil, wallClock } from "./auth-memory";
-import { acceptable, passwordStrength, STRENGTH_TEXT, type Strength } from "./password-strength";
+import { forgetInvitation, pendingInvitation } from "./invitation-link";
+import { leaveFor } from "./leave-for";
+import { acceptable, passwordStrength, type Strength } from "./password-strength";
+import { SecondFactorForm } from "./second-factor";
+import { StrengthMeter } from "./strength-meter";
 import { type Platform, PLATFORMS, REMOVE_TOKEN_STEPS, SETUP_FIELDS, type SetupField, slugify, validateSetup } from "./setup-model";
+import { forgetSSOReturn, ssoReturnMessage } from "./sso-return";
 
-type View = "sign-in" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
+type View = "sign-in" | "invitation" | "sso" | "two-factor" | "choose-org" | "setup" | "setup-done" | "setup-closed" | "signed-out";
 
 /** Failed attempts before the console mentions the server's pause, ahead of the pause itself. */
 const PAUSE_NOTE_AFTER = 3;
@@ -33,67 +50,6 @@ function formText(form: HTMLFormElement, name: string): string {
 
 function clearInput(input: HTMLInputElement | null): void {
   if (input) input.value = "";
-}
-
-function BrandArt() {
-  return (
-    <svg aria-hidden="true" className="lw-auth__art" viewBox="0 0 520 300">
-      <rect className="is-tint" height="300" rx="24" width="520" />
-      <rect className="is-ink" height="44" rx="12" width="184" x="40" y="48" />
-      <rect className="is-pill-b" height="12" rx="6" width="96" x="60" y="64" />
-      <rect className="is-accent" height="44" rx="12" width="184" x="40" y="128" />
-      <rect className="is-pill-a" height="12" rx="6" width="120" x="60" y="144" />
-      <rect className="is-ink" height="44" rx="12" width="184" x="40" y="208" />
-      <rect className="is-pill-b" height="12" rx="6" width="72" x="60" y="224" />
-      <rect className="is-accent" height="8" rx="4" width="72" x="240" y="146" />
-      <rect className="is-accent" height="156" rx="20" width="160" x="320" y="72" />
-      <rect className="is-pill-a" height="12" rx="6" width="96" x="344" y="100" />
-      <rect className="is-pill-a" height="12" rx="6" width="64" x="344" y="124" />
-      <rect className="is-prod" height="28" rx="14" width="112" x="344" y="176" />
-      <rect className="is-pill-c" height="8" rx="4" width="48" x="260" y="70" />
-      <rect className="is-pill-c" height="8" rx="4" width="48" x="260" y="230" />
-    </svg>
-  );
-}
-
-/** What the browser can see about this server before sign-in: its host and the public health endpoints. */
-function ServerFacts() {
-  const { liveness, readiness } = useSystemHealth();
-  const state = overallHealthState(liveness.data, readiness.data);
-  const version = liveness.data?.version ?? readiness.data?.version;
-  const status = state === "available" ? "Reachable and ready" : state === "degraded" ? "Reachable, not ready" : state === "unavailable" ? "Not reachable" : "Checking…";
-  return (
-    <section aria-label="This server" className="lw-auth__facts">
-      <strong>This server</strong>
-      <dl>
-        <div><dt>Host</dt><dd>{window.location.host}</dd></div>
-        <div><dt>Version</dt><dd>{version ?? (state === "unavailable" ? "Unknown" : "Not reported before sign-in")}</dd></div>
-        <div><dt>Status</dt><dd>{state === "loading" ? null : <span aria-hidden="true" className={state === "available" ? "lw-auth__dot" : "lw-auth__dot is-down"} />}{status}</dd></div>
-      </dl>
-    </section>
-  );
-}
-
-function AuthLayout({ children, description, title }: { children: ReactNode; description?: ReactNode; title: string }) {
-  return (
-    <div className="lw-auth">
-      <div className="lw-auth__panel">
-        <main className="lw-auth__main" id="main-content">
-          <div className="lw-auth__head">
-            <Logo />
-            <h1>{title}</h1>
-            {description ? <p>{description}</p> : null}
-          </div>
-          <div className="lw-auth__body">{children}</div>
-        </main>
-        <p className="lw-auth__foot">Latchway console · Your session cookie stays on this server.</p>
-      </div>
-      <aside aria-label="About this server" className="lw-auth__brand">
-        <BrandArt />
-        <ServerFacts />
-      </aside>
-    </div>
-  );
 }
 
 function SignInHelp() {
@@ -132,15 +88,130 @@ function PauseNotice({ onElapsed, until }: { onElapsed: () => void; until: numbe
   );
 }
 
-function SignInView({ email, emailRef, failures, hidden, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
+function SSOReturnNotice() {
+  const message = ssoReturnMessage();
+  return message ? <Notice title="Single sign-on didn't finish" tone="warning">{message}</Notice> : null;
+}
+
+const ROLE_ARTICLE: Readonly<Record<InvitationPreview["role"], string>> = { admin: "an Admin", operator: "an Operator", owner: "an Owner", viewer: "a Viewer" };
+
+/**
+ * Accepting an invitation link while signed out. A new address chooses a name and password here; an address that
+ * already has an account signs in first and is offered the invitation inside the console.
+ */
+function InvitationView({ onAccepted, onSignIn }: { onAccepted: (session: AdminSession) => void; onSignIn: (email: string) => void }) {
+  const invitation = pendingInvitation();
+  const [preview, setPreview] = useState<InvitationPreview>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const [pending, setPending] = useState(false);
+  const [strength, setStrength] = useState<Strength>();
+  const password = useRef<HTMLInputElement>(null);
+  const name = useRef<HTMLInputElement>(null);
+  const token = invitation && "token" in invitation ? invitation.token : undefined;
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    previewInvitation(token, controller.signal).then(setPreview, (error: unknown) => {
+      if (!controller.signal.aborted) setProblem(problemFromError(error));
+    });
+    return () => controller.abort();
+  }, [token]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!token) return;
+    if (!acceptable(passwordStrength(password.current?.value ?? ""))) {
+      setProblem({ code: "request_invalid", detail: "Choose a password rated Good or Strong: at least 12 characters with some variety, or a longer passphrase.", retryable: false, status: 0, title: "Choose a stronger password" });
+      password.current?.focus();
+      return;
+    }
+    setPending(true);
+    setProblem(undefined);
+    try {
+      const session = await acceptInvitation(token, name.current?.value ?? "", password.current);
+      forgetInvitation();
+      onAccepted(session);
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setStrength(undefined);
+      setPending(false);
+    }
+  }
+
+  if (!token) {
+    return <Notice title="This invitation link is incomplete" tone="warning">Open the whole link from the invitation, or ask an owner to send it again.</Notice>;
+  }
+  if (!preview) {
+    return problem ? <AuthProblem problem={problem} /> : <span aria-live="polite" className="lw-auth__fine">Checking the invitation…</span>;
+  }
+  const summary = <p className="lw-auth__lead">{preview.invited_by} invited you to join <strong>{preview.organization_name}</strong> as {ROLE_ARTICLE[preview.role]}.</p>;
+  if (preview.account_exists) {
+    return (
+      <div className="lw-auth__body">
+        {summary}
+        <p className="lw-auth__fine">{preview.email} already has a Latchway account. Sign in to it, and you&apos;ll be asked to join {preview.organization_name}.</p>
+        <Button className="lw-auth__submit" onClick={() => onSignIn(preview.email)} variant="primary">Sign In to Accept</Button>
+      </div>
+    );
+  }
+  return (
+    <form aria-busy={pending} className="lw-auth__form" onSubmit={(event) => void submit(event)}>
+      {summary}
+      <Field id="invitation-email" label="Email address">
+        <div className="lw-input-box" data-disabled=""><input autoComplete="username" className="lw-input" id="invitation-email" readOnly value={preview.email} /></div>
+      </Field>
+      <Field id="invitation-name" label="Your name">
+        <div className="lw-input-box"><input autoComplete="name" className="lw-input" defaultValue={preview.display_name ?? ""} disabled={pending} id="invitation-name" maxLength={200} ref={name} required /></div>
+      </Field>
+      <PasswordField id="invitation-password" inputRef={password} label="Choose a password" name="new_password" onValueChange={(value) => setStrength(value ? passwordStrength(value) : undefined)} />
+      <StrengthMeter strength={strength} />
+      {problem ? <AuthProblem problem={problem} /> : null}
+      <Button className="lw-auth__submit" loading={pending} type="submit" variant="primary">Join {preview.organization_name}</Button>
+      <p className="lw-auth__fine">The invitation expires {new Date(preview.expires_at).toLocaleString()}.</p>
+    </form>
+  );
+}
+
+function SingleSignOnView({ onBack, onSubmit, pending, problem }: { onBack: () => void; onSubmit: (slug: string) => void; pending: boolean; problem?: AdminProblem }) {
+  const slug = useRef<HTMLInputElement>(null);
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const value = slug.current?.value.trim() ?? "";
+    if (value) onSubmit(value);
+  }
+  return (
+    <div className="lw-auth__body">
+      <SSOReturnNotice />
+      <form aria-busy={pending} className="lw-auth__form" onSubmit={submit}>
+        <Field hint="Your organization's short name, as it appears in console links, like acme. An owner can tell you." id="sso-organization" label="Organization">
+          <div className="lw-input-box">
+            <input autoCapitalize="none" autoComplete="organization" autoFocus className="lw-input" disabled={pending} id="sso-organization" maxLength={128} name="organization" ref={slug} required spellCheck={false} />
+          </div>
+        </Field>
+        {problem ? <AuthProblem problem={problem} /> : null}
+        <Button className="lw-auth__submit" loading={pending} type="submit" variant="primary">Continue to Your Identity Provider</Button>
+      </form>
+      <Button className="lw-auth__link" disabled={pending} onClick={onBack} size="sm" variant="ghost">Sign in with email instead</Button>
+    </div>
+  );
+}
+
+function SignInView({ email, emailRef, endReason, failures, mismatch, onPasskey, onSSO, onSetup, onSubmit, passwordRef, pending, problem, setEmail }: {
   email: string;
   emailRef: RefObject<HTMLInputElement | null>;
+  endReason?: string;
   failures: number;
-  hidden: boolean;
+  /** The server's advertised contract when it differs from this console's. */
+  mismatch?: string;
+  /** Offered when the server accepts passkeys and this browser can use them. */
+  onPasskey?: () => void;
+  /** Offered when an organization on this server has single sign-on. */
+  onSSO?: () => void;
   onSetup: () => void;
   onSubmit: () => void;
   passwordRef: RefObject<HTMLInputElement | null>;
-  pending: boolean;
+  pending: "password" | "passkey" | undefined;
   problem?: AdminProblem;
   setEmail: (email: string) => void;
 }) {
@@ -153,18 +224,28 @@ function SignInView({ email, emailRef, failures, hidden, onSetup, onSubmit, pass
     onSubmit();
   }
   return (
-    <div className="lw-auth__body" hidden={hidden}>
-      <form aria-busy={pending} className="lw-auth__form" onSubmit={submit}>
+    <div className="lw-auth__body">
+      {mismatch ? <Notice title="This console and server are from different releases." tone="warning">The console expects contract {consoleContractVersion}; the server reports {mismatch}. Sign-in may fail until an upgrade finishes; reload this page afterwards.</Notice> : null}
+      {endReason ? <Notice title="Your session ended">{endReason}</Notice> : null}
+      <SSOReturnNotice />
+      <form aria-busy={Boolean(pending)} className="lw-auth__form" onSubmit={submit}>
         <Field id="login-email" label="Email address">
           <div className="lw-input-box">
-            <input autoComplete="username" className="lw-input" disabled={pending} id="login-email" maxLength={320} name="email" onChange={(event) => setEmail(event.target.value)} ref={emailRef} required spellCheck={false} type="email" value={email} />
+            <input autoComplete="username" className="lw-input" disabled={Boolean(pending)} id="login-email" maxLength={320} name="email" onChange={(event) => setEmail(event.target.value)} ref={emailRef} required spellCheck={false} type="email" value={email} />
           </div>
         </Field>
-        <PasswordInput disabled={pending} id="login-password" inputRef={passwordRef} />
+        <PasswordInput disabled={Boolean(pending)} id="login-password" inputRef={passwordRef} />
         {paused ? <PauseNotice key={pausedUntil} onElapsed={() => setElapsedFor(pausedUntil)} until={pausedUntil} /> : problem ? <AuthProblem problem={problem} /> : null}
         {failures >= PAUSE_NOTE_AFTER && !paused ? <p className="lw-auth__fine">After five failed attempts for one email address within five minutes, the server pauses sign-in for that address for up to five minutes.</p> : null}
-        <Button className="lw-auth__submit" disabled={paused} loading={pending} type="submit" variant="primary">{pending ? "Signing In…" : "Sign In"}</Button>
+        <Button className="lw-auth__submit" disabled={paused || pending === "passkey"} loading={pending === "password"} type="submit" variant="primary">{pending === "password" ? "Signing In…" : "Sign In"}</Button>
       </form>
+      {onPasskey || onSSO ? (
+        <div className="lw-auth__alternative">
+          <span className="lw-auth__divider">or</span>
+          {onPasskey ? <Button className="lw-auth__submit" disabled={pending === "password"} icon="key" loading={pending === "passkey"} onClick={onPasskey}>Sign In with a Passkey</Button> : null}
+          {onSSO ? <Button className="lw-auth__submit" disabled={Boolean(pending)} icon="team" onClick={onSSO}>Sign In with SSO</Button> : null}
+        </div>
+      ) : null}
       <SignInHelp />
       <Button className="lw-auth__link" onClick={onSetup} size="sm" variant="ghost">Setting up a new server?</Button>
     </div>
@@ -184,6 +265,7 @@ function ChooseOrganizationView({ onBack, onChoose, pending, problem, session }:
             <button aria-busy={pending === membership.organization_id} className="lw-orglist__item" disabled={Boolean(pending)} onClick={() => onChoose(membership.organization_id)} type="button">
               <span aria-hidden="true" className="lw-orglist__tile">{name.slice(0, 1).toUpperCase()}</span>
               <span className="lw-orglist__text"><strong>{name}</strong><span>{ROLE_LABEL[membership.role]}{organization ? ` · ${organization.slug}` : ""}</span></span>
+              {membership.organization_id === session.organization_id ? <Badge title="Your last organization, or your first membership">Default</Badge> : null}
               <Icon name={pending === membership.organization_id ? "spinner" : "chevronRight"} spin={pending === membership.organization_id} />
             </button>
           </li>
@@ -194,22 +276,6 @@ function ChooseOrganizationView({ onBack, onChoose, pending, problem, session }:
     {problem ? <AuthProblem problem={problem} /> : null}
     <Button className="lw-auth__link" disabled={Boolean(pending)} onClick={onBack} size="sm" variant="ghost">Sign in as someone else</Button>
   </>;
-}
-
-const STRENGTH_BARS: Readonly<Record<Strength, number>> = { good: 2, strong: 3, "too-short": 0, weak: 1 };
-const STRENGTH_COLOR: Readonly<Record<Strength, string>> = { good: "var(--success)", strong: "var(--success)", "too-short": "var(--foreground-secondary)", weak: "var(--destructive)" };
-
-function StrengthMeter({ strength }: { strength?: Strength }) {
-  const filled = strength ? STRENGTH_BARS[strength] : 0;
-  const color = strength ? STRENGTH_COLOR[strength] : "var(--foreground-secondary)";
-  return (
-    <div className="lw-strength">
-      <div aria-hidden="true" className="lw-strength__bars">
-        {[0, 1, 2].map((bar) => <span key={bar} style={{ background: bar < filled ? color : "var(--border)" }} />)}
-      </div>
-      <span aria-live="polite" className="lw-strength__label" style={{ color }}>{strength ? `Strength: ${STRENGTH_TEXT[strength]}` : "Use at least 12 characters; Good or better is required."}</span>
-    </div>
-  );
 }
 
 function SetupView({ onCancel, onSubmit, pending, problem }: { onCancel: () => void; onSubmit: (form: HTMLFormElement, password: HTMLInputElement | null) => void; pending: boolean; problem?: AdminProblem }) {
@@ -331,10 +397,13 @@ function SetupDoneView({ onContinue }: { onContinue: (to?: "/setup") => void }) 
  * Passwords and the bootstrap token stay in their inputs and are cleared as soon as a request finishes; the parent
  * keeps this screen up while `onHoldChange(true)` so a background session refresh can't skip a step.
  */
-export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { checking: boolean; mode: "configured" | "signed-out" | "unknown"; onHoldChange: (held: boolean) => void; retry: () => void; retrying: boolean }) {
+export function AuthScreen({ checking, endReason, mode, onHoldChange, retry, retrying }: { checking: boolean; endReason?: string; mode: "configured" | "signed-out" | "unknown"; onHoldChange: (held: boolean) => void; retry: () => void; retrying: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [view, setView] = useState<View>(() => (lastSignedOutEmail() ? "signed-out" : "sign-in"));
+  const info = useQuery(adminSignInInfoQueryOptions);
+  const [view, setView] = useState<View>(() => (pendingInvitation() ? "invitation" : lastSignedOutEmail() ? "signed-out" : "sign-in"));
+  // An open setup leads with Set up Latchway until the operator chooses sign-in instead.
+  const [preferSignIn, setPreferSignIn] = useState(false);
   const [email, setEmail] = useState(() => lastSignedOutEmail() ?? "");
   const [pending, setPending] = useState<string>();
   const [problem, setProblem] = useState<AdminProblem>();
@@ -343,6 +412,9 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
   const [created, setCreated] = useState<{ organization: string; session: AdminSession }>();
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+  // The second-factor challenge is short-lived and sensitive, so it lives in a ref, never in rendered state.
+  const challenge = useRef<string | undefined>(undefined);
+  const [methods, setMethods] = useState<readonly SecondFactorMethod[]>([]);
 
   function show(next: View): void {
     setProblem(undefined);
@@ -351,6 +423,7 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
 
   function enter(session: AdminSession, to?: "/setup"): void {
     clearInput(passwordRef.current);
+    forgetSSOReturn();
     rememberSignedOutEmail(undefined);
     queryClient.setQueryData(consoleSessionQueryOptions.queryKey, consoleStateFromAdminSession(session));
     onHoldChange(false);
@@ -373,22 +446,86 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     setProblem(undefined);
     onHoldChange(true);
     try {
-      const session = await loginAdministrator({ email: address, password });
+      const result = await startAdministratorSignIn({ email: address, password });
+      clearInput(passwordRef.current);
       setFailures(0);
-      if (session.memberships.length > 1) {
-        // The password stays in its (now hidden) input so choosing another organization can sign in to it.
-        setChosen(session);
+      if (result.kind === "challenge") {
+        challenge.current = result.challenge.challenge;
+        setMethods(result.challenge.methods);
         setPending(undefined);
-        setView("choose-org");
+        setView("two-factor");
         return;
       }
-      enter(session);
+      afterSignIn(result.session);
     } catch (error) {
       const found = fail(error);
       if (found.code === "rate_limited" && found.retryAfterSeconds) pauseSignIn(address, found.retryAfterSeconds);
       if (found.code === "authentication_required") setFailures((count) => count + 1);
       passwordRef.current?.focus();
     }
+  }
+
+  async function signInByPasskey(): Promise<void> {
+    setPending("passkey");
+    setProblem(undefined);
+    onHoldChange(true);
+    try {
+      const session = await signInWithPasskey();
+      clearInput(passwordRef.current);
+      setFailures(0);
+      setEmail(session.administrator.email);
+      afterSignIn(session);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function singleSignOn(slug: string): Promise<void> {
+    setPending("sso");
+    setProblem(undefined);
+    try {
+      // The page leaves for the identity provider and comes back signed in, or with a reason.
+      leaveFor(await startSingleSignOn(slug));
+    } catch (error) {
+      setProblem(problemFromError(error));
+      setPending(undefined);
+    }
+  }
+
+  function afterSignIn(session: AdminSession): void {
+    if (session.memberships.length > 1) {
+      setChosen(session);
+      setPending(undefined);
+      setView("choose-org");
+      return;
+    }
+    enter(session);
+  }
+
+  async function verifySecondFactor(answer: SecondFactorAnswer): Promise<void> {
+    if (!challenge.current) return;
+    setPending("two-factor");
+    setProblem(undefined);
+    try {
+      const session = await finishSecondFactor(challenge.current, answer);
+      challenge.current = undefined;
+      afterSignIn(session);
+    } catch (error) {
+      const found = problemFromError(error);
+      setPending(undefined);
+      if (found.detail.includes("Sign in again")) {
+        challenge.current = undefined;
+        onHoldChange(false);
+        setView("sign-in");
+      }
+      setProblem(found);
+    }
+  }
+
+  function cancelSecondFactor(): void {
+    challenge.current = undefined;
+    onHoldChange(false);
+    show("sign-in");
   }
 
   async function chooseOrganization(organizationID: string): Promise<void> {
@@ -400,14 +537,11 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     setPending(organizationID);
     setProblem(undefined);
     try {
-      // End the session the first sign-in opened before opening one for the chosen organization.
-      await logoutAdministrator();
-      const session = await loginAdministrator({ email: email.trim(), organization_id: organizationID, password: passwordRef.current?.value ?? "" });
-      enter(session);
+      // The server replaces the session it just issued with one for the chosen organization.
+      enter(await switchAdminOrganization(organizationID));
     } catch (error) {
-      fail(error);
-      setChosen(undefined);
-      setView("sign-in");
+      setProblem(problemFromError(error));
+      setPending(undefined);
     }
   }
 
@@ -470,9 +604,13 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     );
   }
 
-  const signInView = <SignInView email={email} emailRef={emailRef} failures={failures} hidden={view === "choose-org"} onSetup={() => show("setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in"} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const mismatch = info.data && info.data.contract_version !== consoleContractVersion ? info.data.contract_version : undefined;
+  const passkeySignIn = info.data?.sign_in_methods.includes("passkey") && passkeysAvailable() ? () => void signInByPasskey() : undefined;
+  const ssoOffered = info.data?.sign_in_methods.includes("sso") ? () => show("sso") : undefined;
+  const signInView = <SignInView email={email} emailRef={emailRef} endReason={endReason} failures={failures} mismatch={mismatch} onPasskey={passkeySignIn} onSSO={ssoOffered} onSetup={() => show(info.data && !info.data.setup_open ? "setup-closed" : "setup")} onSubmit={() => void signIn()} passwordRef={passwordRef} pending={pending === "sign-in" ? "password" : pending === "passkey" ? "passkey" : undefined} problem={view === "sign-in" ? problem : undefined} setEmail={setEmail} />;
+  const current: View = view === "sign-in" && info.data?.setup_open && !preferSignIn ? "setup" : view;
 
-  switch (view) {
+  switch (current) {
     case "signed-out":
       return (
         <AuthLayout description={email ? `${email} signed out of this server.` : "You signed out of this server."} title="You're signed out">
@@ -482,7 +620,7 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
     case "setup":
       return (
         <AuthLayout description="Create the first owner and organization for a new server. You need the one-time bootstrap token from the server's environment." title="Set up Latchway">
-          <SetupView onCancel={() => show("sign-in")} onSubmit={(form, password) => void createOwner(form, password)} pending={pending === "setup"} problem={problem} />
+          <SetupView onCancel={() => { setPreferSignIn(true); show("sign-in"); }} onSubmit={(form, password) => void createOwner(form, password)} pending={pending === "setup"} problem={problem} />
         </AuthLayout>
       );
     case "setup-done":
@@ -498,10 +636,30 @@ export function AuthScreen({ checking, mode, onHoldChange, retry, retrying }: { 
           <p className="lw-auth__fine">Need an account? Ask an owner to add you from Team › Members.</p>
         </AuthLayout>
       );
+    case "invitation": {
+      const invited = pendingInvitation();
+      return (
+        <AuthLayout description="An owner invited you to their Latchway organization." title="You're invited">
+          <InvitationView onAccepted={(session) => enter(session)} onSignIn={(address) => { setEmail(address); setPreferSignIn(true); show("sign-in"); }} />
+          {invited && "invalid" in invited ? <Button className="lw-auth__link" onClick={() => { forgetInvitation(); show("sign-in"); }} size="sm" variant="ghost">Go to sign in</Button> : null}
+        </AuthLayout>
+      );
+    }
+    case "sso":
+      return (
+        <AuthLayout description="You'll continue at your organization's identity provider and come back here signed in." title="Sign in with SSO">
+          <SingleSignOnView onBack={() => show("sign-in")} onSubmit={(slug) => void singleSignOn(slug)} pending={pending === "sso"} problem={problem} />
+        </AuthLayout>
+      );
+    case "two-factor":
+      return (
+        <AuthLayout description={`Two-factor sign-in is on for ${email.trim()}. ${methods.includes("totp") ? "Enter the code from your authenticator app" : "Use one of your passkeys"} to finish signing in.`} title="Verify it's you">
+          <SecondFactorForm idPrefix="sign-in" methods={methods} onCancel={cancelSecondFactor} onSubmit={(answer) => void verifySecondFactor(answer)} pending={pending === "two-factor"} problem={problem} />
+        </AuthLayout>
+      );
     case "choose-org":
       return (
         <AuthLayout description={`${email.trim()} belongs to more than one organization. Each session works in one; you can switch later from your account menu.`} title="Choose an organization">
-          {signInView}
           {chosen ? <ChooseOrganizationView onBack={() => void signInAsSomeoneElse()} onChoose={(id) => void chooseOrganization(id)} pending={pending} problem={problem} session={chosen} /> : null}
         </AuthLayout>
       );

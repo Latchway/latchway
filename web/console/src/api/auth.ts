@@ -1,14 +1,27 @@
+import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
+
+import { getPasskey, type PasskeyAssertionJSON, PasskeyPromptError, PasskeyRequestOptionsSchema } from "./webauthn";
 
 export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
+  info: "/admin/v1/auth/info",
+  invitationAccept: "/admin/v1/auth/invitations/accept",
+  invitationPreview: "/admin/v1/auth/invitations/preview",
   login: "/admin/v1/auth/login",
+  secondFactor: "/admin/v1/auth/login/two-factor",
   logout: "/admin/v1/auth/logout",
-  session: "/admin/v1/auth/session"
+  organization: "/admin/v1/auth/organization",
+  passkeySecondFactorOptions: "/admin/v1/auth/login/two-factor/passkey-options",
+  passkeySignIn: "/admin/v1/auth/passkeys/sign-in",
+  passkeySignInOptions: "/admin/v1/auth/passkeys/sign-in-options",
+  session: "/admin/v1/auth/session",
+  ssoStart: "/admin/v1/auth/sso/start"
 } as const;
 
 const AdministratorSchema = z
   .object({
+    display_name: z.string().min(1).max(200).optional(),
     email: z.email().max(320),
     enabled: z.boolean(),
     id: z.string().regex(/^adm_[A-Za-z0-9_-]{16,128}$/)
@@ -28,9 +41,31 @@ export const AdminSessionSchema = z
     capabilities: z.array(z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/)),
     expires_at: z.union([z.iso.datetime({ offset: true }), z.null()]),
     memberships: z.array(MembershipSchema),
-    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/)
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    /** An owner set the password; only the password change, sign-out and session read work until it changes. */
+    password_reset_required: z.boolean().optional(),
+    /** Roles that raise the organization role in single applications. */
+    application_roles: z
+      .array(z.object({ application_id: z.string().regex(/^app_[A-Za-z0-9_-]{16,128}$/), role: z.enum(["admin", "operator"]) }).strict())
+      .max(1000)
+      .optional(),
+    /** How this console session was signed in. */
+    sign_in_method: z.enum(["password", "passkey", "sso"]).optional(),
+    /** The organization requires a second factor this administrator hasn't set up; only enrollment works. */
+    two_factor_enrollment_required: z.boolean().optional()
   })
   .strict();
+
+export const AdminSignInInfoSchema = z
+  .object({
+    contract_version: z.string().max(64),
+    protocol_versions: z.array(z.number().int().min(1)).max(16),
+    setup_open: z.boolean(),
+    sign_in_methods: z.array(z.enum(["password", "passkey", "sso"])).max(8)
+  })
+  .strict();
+
+export type AdminSignInInfo = z.infer<typeof AdminSignInInfoSchema>;
 
 export type AdminSession = z.infer<typeof AdminSessionSchema>;
 
@@ -270,12 +305,43 @@ export function responseProblem(response: Response, payload: unknown): AdminProb
   };
 }
 
-async function submitCredentials(
+export const SecondFactorChallengeSchema = z
+  .object({
+    challenge: z.string().regex(/^lwsic_[A-Za-z0-9_-]{43}$/),
+    expires_at: z.iso.datetime({ offset: true }),
+    methods: z.array(z.enum(["totp", "passkey", "recovery_code"])).min(1).max(4),
+    status: z.literal("two_factor_required")
+  })
+  .strict();
+
+export type SecondFactorChallenge = z.infer<typeof SecondFactorChallengeSchema>;
+
+/** A password sign-in either opens a session or, with two-factor on, asks for the second factor. */
+export type SignInResult = { kind: "session"; session: AdminSession } | { challenge: SecondFactorChallenge; kind: "challenge" };
+
+export interface SecondFactorInput {
+  challenge: string;
+  code?: string;
+  passkey?: PasskeyAssertionJSON;
+  recovery_code?: string;
+}
+
+function invalidSession(status: number): AdminRequestError {
+  return new AdminRequestError({
+    code: "invalid_response",
+    detail: "The gateway returned an invalid administrator session.",
+    retryable: true,
+    status,
+    title: "Invalid server response"
+  });
+}
+
+async function postCredentials(
   endpoint: string,
-  input: BootstrapOwnerInput | AdministratorLoginInput,
+  input: object,
   signal?: AbortSignal,
   fetcher: typeof fetch = globalThis.fetch
-): Promise<AdminSession> {
+): Promise<{ payload: unknown; response: Response }> {
   let response: Response;
   try {
     response = await fetcher(endpoint, {
@@ -308,21 +374,151 @@ async function submitCredentials(
   if (!response.ok) {
     throw new AdminRequestError(responseProblem(response, payload));
   }
+  return { payload, response };
+}
 
+function sessionFrom(response: Response, payload: unknown): AdminSession {
   rememberAdminCSRFToken(response);
-
   const parsed = AdminSessionSchema.safeParse(payload);
+  if (!parsed.success) throw invalidSession(response.status);
+  return parsed.data;
+}
+
+async function submitCredentials(
+  endpoint: string,
+  input: object,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminSession> {
+  const { payload, response } = await postCredentials(endpoint, input, signal, fetcher);
+  if (response.status === 202) throw invalidSession(response.status);
+  return sessionFrom(response, payload);
+}
+
+/** Signs in with a password; a 202 means the account has two-factor on and the challenge finishes the sign-in. */
+export async function startAdministratorSignIn(input: AdministratorLoginInput, signal?: AbortSignal, fetcher?: typeof fetch): Promise<SignInResult> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.login, input, signal, fetcher);
+  if (response.status === 202) {
+    const parsed = SecondFactorChallengeSchema.safeParse(payload);
+    if (!parsed.success) throw invalidSession(response.status);
+    return { challenge: parsed.data, kind: "challenge" };
+  }
+  return { kind: "session", session: sessionFrom(response, payload) };
+}
+
+/** Finishes a two-factor sign-in with an authenticator code, a passkey assertion or a recovery code. */
+export function completeSecondFactor(input: SecondFactorInput, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  return submitCredentials(adminAuthEndpoints.secondFactor, input, signal, fetcher);
+}
+
+async function passkeyPrompt(endpoint: string, input: object, signal?: AbortSignal, fetcher?: typeof fetch): Promise<PasskeyAssertionJSON> {
+  const { payload, response } = await postCredentials(endpoint, input, signal, fetcher);
+  const options = PasskeyRequestOptionsSchema.safeParse(payload);
+  if (!options.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned invalid passkey options.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return getPasskey(options.data, signal);
+}
+
+/** Finishes a two-factor sign-in with one of the account's passkeys. */
+export async function completeSecondFactorWithPasskey(challenge: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const passkey = await passkeyPrompt(adminAuthEndpoints.passkeySecondFactorOptions, { challenge }, signal, fetcher);
+  return completeSecondFactor({ challenge, passkey }, signal, fetcher);
+}
+
+export type SecondFactorMethod = SecondFactorChallenge["methods"][number];
+
+/** How the operator answered the second-factor step; a passkey answer runs the browser prompt when sent. */
+export type SecondFactorAnswer = { code: string } | { recovery_code: string } | { passkey: true };
+
+export function finishSecondFactor(challenge: string, answer: SecondFactorAnswer, signal?: AbortSignal): Promise<AdminSession> {
+  return "passkey" in answer ? completeSecondFactorWithPasskey(challenge, signal) : completeSecondFactor({ challenge, ...answer }, signal);
+}
+
+export const InvitationPreviewSchema = z
+  .object({
+    account_exists: z.boolean(),
+    display_name: z.string().min(1).max(200).optional(),
+    email: z.string().min(3).max(320),
+    expires_at: z.iso.datetime({ offset: true }),
+    invited_by: z.string().max(200),
+    organization_id: z.string().regex(/^org_[A-Za-z0-9_-]{16,128}$/),
+    organization_name: z.string().max(200),
+    role: z.enum(["owner", "admin", "operator", "viewer"])
+  })
+  .strict();
+
+export type InvitationPreview = z.infer<typeof InvitationPreviewSchema>;
+
+/** What an invitation link is for; anyone holding the link may ask. */
+export async function previewInvitation(token: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<InvitationPreview> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.invitationPreview, { token }, signal, fetcher);
+  const parsed = InvitationPreviewSchema.safeParse(payload);
   if (!parsed.success) {
-    throw new AdminRequestError({
-      code: "invalid_response",
-      detail: "The gateway returned an invalid administrator session.",
-      retryable: true,
-      status: response.status,
-      title: "Invalid server response"
-    });
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid invitation.", retryable: true, status: response.status, title: "Invalid server response" });
   }
   return parsed.data;
 }
+
+/** Creates the invited account; the password is read from its input and cleared whatever happens. */
+export async function acceptInvitation(token: string, displayName: string, password: HTMLInputElement | null, signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const value = password?.value ?? "";
+  if (password) password.value = "";
+  return submitCredentials(adminAuthEndpoints.invitationAccept, { display_name: displayName.trim(), password: value, token }, signal, fetcher);
+}
+
+const SSOStartSchema = z.object({ authorization_url: z.string().startsWith("https://").max(8192) }).strict();
+
+/**
+ * Starts a single sign-on for the organization with this sign-in name and returns the identity provider's URL. The
+ * server also sets a cookie tying the sign-in to this browser; the console then navigates away to the provider.
+ */
+export async function startSingleSignOn(organizationSlug: string, signal?: AbortSignal, fetcher?: typeof fetch): Promise<string> {
+  const { payload, response } = await postCredentials(adminAuthEndpoints.ssoStart, { organization_slug: organizationSlug.trim() }, signal, fetcher);
+  const parsed = SSOStartSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid single sign-on start.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return parsed.data.authorization_url;
+}
+
+/** Signs in with a passkey alone; the browser offers this site's passkeys. */
+export async function signInWithPasskey(signal?: AbortSignal, fetcher?: typeof fetch): Promise<AdminSession> {
+  const credential = await passkeyPrompt(adminAuthEndpoints.passkeySignInOptions, {}, signal, fetcher);
+  return submitCredentials(adminAuthEndpoints.passkeySignIn, { credential }, signal, fetcher);
+}
+
+/**
+ * What the sign-in screen needs before anyone signs in: the server's advertised contract and whether first-owner
+ * setup is still open. Returns undefined when the server predates this endpoint or can't answer.
+ */
+export async function fetchAdminSignInInfo(signal?: AbortSignal, fetcher: typeof fetch = globalThis.fetch): Promise<AdminSignInInfo | undefined> {
+  try {
+    const response = await fetcher(adminAuthEndpoints.info, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      method: "GET",
+      redirect: "error",
+      referrerPolicy: "same-origin",
+      signal
+    });
+    if (!response.ok) return undefined;
+    const parsed = AdminSignInInfoSchema.safeParse(await parseAdminJSON(response));
+    return parsed.success ? parsed.data : undefined;
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    return undefined;
+  }
+}
+
+/** The sign-in information as a query; null when the server can't say, since queries can't hold undefined. */
+export const adminSignInInfoQueryOptions = queryOptions({
+  queryFn: async ({ signal }) => (await fetchAdminSignInInfo(signal)) ?? null,
+  queryKey: ["admin-sign-in-info"] as const,
+  retry: false,
+  staleTime: 60_000
+});
 
 export function bootstrapFirstOwner(
   input: BootstrapOwnerInput,
@@ -373,9 +569,53 @@ export async function logoutAdministrator(
   rememberedCSRFToken = undefined;
 }
 
+/**
+ * Replaces the signed-in console session with one for another organization the administrator belongs to. The server
+ * revokes the old session in the same step, so no password is needed.
+ */
+export async function switchAdminOrganization(organizationID: string, signal?: AbortSignal, fetcher: typeof fetch = globalThis.fetch): Promise<AdminSession> {
+  const csrf = adminCSRFToken();
+  if (!csrf) {
+    throw new AdminRequestError({ code: "csrf_token_required", detail: "Refresh the administrator session before switching organization.", retryable: true, status: 0, title: "Session confirmation required" });
+  }
+  let response: Response;
+  try {
+    response = await fetcher(adminAuthEndpoints.organization, {
+      body: JSON.stringify({ organization_id: organizationID }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json, application/problem+json", "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      method: "POST",
+      redirect: "error",
+      referrerPolicy: "same-origin",
+      signal
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new AdminRequestError({ code: "network_error", detail: "The gateway could not be reached. Check system health and try again.", retryable: true, status: 0, title: "Connection failed" });
+  }
+  const payload = await parseAdminJSON(response);
+  if (!response.ok) throw new AdminRequestError(responseProblem(response, payload));
+  rememberAdminCSRFToken(response);
+  const parsed = AdminSessionSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AdminRequestError({ code: "invalid_response", detail: "The gateway returned an invalid administrator session.", retryable: true, status: response.status, title: "Invalid server response" });
+  }
+  return parsed.data;
+}
+
+const PASSKEY_PROMPT_PROBLEMS: Readonly<Record<PasskeyPromptError["reason"], AdminProblem>> = {
+  cancelled: { code: "passkey_cancelled", detail: "The passkey prompt was closed or timed out. Try again when you're ready.", retryable: true, status: 0, title: "Passkey not used" },
+  failed: { code: "passkey_failed", detail: "The browser couldn't complete the passkey prompt. Try again, or use another way to sign in.", retryable: true, status: 0, title: "Passkey didn't work" },
+  unsupported: { code: "passkey_unsupported", detail: "This browser or device can't use passkeys for this site.", retryable: false, status: 0, title: "Passkeys unavailable" }
+};
+
 export function problemFromError(error: unknown): AdminProblem {
   if (error instanceof AdminRequestError) {
     return error.problem;
+  }
+  if (error instanceof PasskeyPromptError) {
+    return PASSKEY_PROMPT_PROBLEMS[error.reason];
   }
   return {
     code: "request_failed",

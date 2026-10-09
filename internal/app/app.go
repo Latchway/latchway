@@ -20,6 +20,7 @@ import (
 	"github.com/latchway/latchway/internal/dataplane"
 	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/identity"
+	"github.com/latchway/latchway/internal/mail"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/secrets"
@@ -197,14 +198,14 @@ func newAPIRuntime(
 			_ = targetCache.Close()
 		}
 	}()
-	adminAPI, err := adminapi.New(
-		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
+	adminOptions := []adminapi.Option{
 		adminapi.WithRole(string(cfg.Role)),
 		adminapi.WithSystemReadiness(func(checkCtx context.Context) bool {
 			return server.ReadinessReady(checkCtx, pool, readinessChecks)
 		}),
 		adminapi.WithConfigurationStore(configurationStore),
 		adminapi.WithCredentialSelfTests(secretStore, targetCache),
+		adminapi.WithFactorSealer(envelope),
 		adminapi.WithDiagnosticDependencies(diagnostics.Dependencies{
 			CompletionPool: completionPool,
 			MasterKey: func(checkCtx context.Context) error {
@@ -212,7 +213,15 @@ func newAPIRuntime(
 			},
 			ConfigurationCache: configurationStore.ActiveSnapshotCacheStatus,
 		}),
-	)
+	}
+	if cfg.SMTP.Host != "" {
+		sender, mailErr := mail.NewSMTPSender(cfg.SMTP)
+		if mailErr != nil {
+			return nil, nil, fmt.Errorf("construct invitation email sender: %w", mailErr)
+		}
+		adminOptions = append(adminOptions, adminapi.WithMailer(sender))
+	}
+	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager, adminOptions...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
 	}
@@ -379,6 +388,15 @@ func newWorkerRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("construct worker identity-key maintenance: %w", err)
 	}
+	healthSamples, err := diagnostics.NewSampler(pool, string(role), diagnostics.Dependencies{
+		MasterKey: func(checkCtx context.Context) error {
+			return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
+		},
+		ConfigurationCache: configurationStore.ActiveSnapshotCacheStatus,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("construct worker health sampler: %w", err)
+	}
 	instanceID, err := newRuntimeInstanceID()
 	if err != nil {
 		return nil, err
@@ -390,8 +408,8 @@ func newWorkerRuntime(
 	runtime, err := worker.New(worker.Config{
 		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys,
 		Challenges: challengeMaintenance, SigningKeys: keyManager, IdentityKeys: identityKeys, Operations: operations,
-		SelfTests: selfTests,
-		Queue:     queue, Telemetry: observability, Logger: logger,
+		SelfTests: selfTests, HealthSamples: healthSamples,
+		Queue: queue, Telemetry: observability, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker runtime: %w", err)

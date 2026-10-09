@@ -75,7 +75,13 @@ func TestConsoleFirstRunAgainstLiveStack(t *testing.T) {
 
 	scopedDatabaseURL := databaseURLForSchema(t, databaseURL, schema)
 	listenAddress := availableLoopbackAddress(t)
-	publicOrigin := "http://" + listenAddress
+	// Browsers refuse IP addresses as passkey relying parties, so the console is
+	// reached as localhost (a secure context over plain HTTP) on the same port.
+	_, port, err := net.SplitHostPort(listenAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicOrigin := "http://localhost:" + port
 	masterKey := randomStandardBase64(t, 32)
 	bootstrapToken := "bootstrap_" + randomBase64(t, 32)
 	ownerPassword := "LiveE2E-" + randomBase64(t, 24)

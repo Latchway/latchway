@@ -1,0 +1,25 @@
+/* Document-level rules: page colors, box model, focus ring, skip link and the main content column. */
+:root {
+  color: var(--foreground-primary);
+  background: var(--background-l2);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+html { min-width: 320px; min-height: 100%; background: var(--background-l2); }
+
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--foreground-primary); background: var(--background-l2); font-size: 14px; line-height: 20px; }
+
+button, a { -webkit-tap-highlight-color: transparent; }
+button { font: inherit; }
+a { color: inherit; }
+
+:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
+.skip-link { position: fixed; z-index: 100; top: 16px; left: 16px; padding: 12px 16px; border-radius: var(--radius-lg); color: var(--accent-foreground); background: var(--accent-primary); font-weight: 600; transform: translateY(-180%); transition: transform 120ms ease; }
+.skip-link:focus { transform: translateY(0); }
+
+.main-content { width: min(76rem, 100%); margin: 0 auto; padding: var(--space-6) clamp(16px, 3vw, 32px) 64px; }

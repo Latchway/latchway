@@ -127,10 +127,16 @@ func decodeConfirmedUserOperation(r *http.Request) (confirmedUserOperationReques
 		return confirmedUserOperationRequest{}, false
 	}
 	request.Reason = strings.TrimSpace(request.Reason)
-	return request, request.AcknowledgeImmediateEffect &&
-		utf8.ValidString(request.Reason) && !strings.ContainsRune(request.Reason, '\x00') &&
-		utf8.RuneCountInString(request.Reason) >= 1 && utf8.RuneCountInString(request.Reason) <= 500 &&
+	return request, validConfirmation(request) &&
 		len(request.ImpactToken) == 43 && operationalTokenPattern(request.ImpactToken)
+}
+
+// validConfirmation checks the acknowledgement and reason of a confirmed operation.
+func validConfirmation(request confirmedUserOperationRequest) bool {
+	reason := strings.TrimSpace(request.Reason)
+	return request.AcknowledgeImmediateEffect &&
+		utf8.ValidString(reason) && !strings.ContainsRune(reason, '\x00') &&
+		utf8.RuneCountInString(reason) >= 1 && utf8.RuneCountInString(reason) <= 500
 }
 
 func operationalTokenPattern(value string) bool {
@@ -165,7 +171,9 @@ func (store *operationalStore) previewUserOperation(
 		id.Validate(userID, id.ApplicationUser) != nil || !validUserOperation(action) {
 		return userOperationImpact{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return userOperationImpact{}, err
+	} else if !allowed {
 		return userOperationImpact{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -201,7 +209,9 @@ func (store *operationalStore) performConfirmedUserOperation(
 		id.Validate(operationID, id.AdminRequest) != nil || !validUserOperation(action) {
 		return userOperationResult{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return userOperationResult{}, err
+	} else if !allowed {
 		return userOperationResult{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})

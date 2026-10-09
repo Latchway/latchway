@@ -23,6 +23,17 @@ func TestServerCapabilitiesAreClosedAndStablyOrdered(t *testing.T) {
 		"configuration_import_export",
 		"admin_session_management",
 		"admin_event_stream",
+		"admin_account_self_service",
+		"admin_two_factor",
+		"admin_passkeys",
+		"admin_sso",
+		"admin_invitations",
+		"admin_application_roles",
+		"admin_user_insights",
+		"admin_request_search",
+		"admin_configuration_drafts",
+		"admin_policy_insights",
+		"admin_operations_history",
 	}
 	first := serverCapabilities()
 	if !reflect.DeepEqual(first, want) {

@@ -39,6 +39,11 @@ func newApplicationsCommand(opts *options) *cobra.Command {
 	command.AddCommand(
 		newApplicationLifecycleCommand(opts, values, false),
 		newApplicationLifecycleCommand(opts, values, true),
+		newRenameCommand(opts, values, "APPLICATION_ID", id.Application, "/admin/v1/applications/", func(cmd *cobra.Command, client *controlAPIClient, path string, body any) (renamedResource, error) {
+			var application applicationLifecycleCLI
+			_, err := client.do(cmd.Context(), http.MethodPatch, path, nil, body, http.StatusOK, &application)
+			return renamedResource{id: application.ID, name: application.DisplayName, print: func() error { return printApplicationLifecycle(opts, application) }}, err
+		}),
 	)
 	return command
 }
@@ -50,6 +55,11 @@ func newEnvironmentsCommand(opts *options) *cobra.Command {
 	command.AddCommand(
 		newEnvironmentLifecycleCommand(opts, values, false),
 		newEnvironmentLifecycleCommand(opts, values, true),
+		newRenameCommand(opts, values, "ENVIRONMENT_ID", id.Environment, "/admin/v1/environments/", func(cmd *cobra.Command, client *controlAPIClient, path string, body any) (renamedResource, error) {
+			var environment environmentLifecycleCLI
+			_, err := client.do(cmd.Context(), http.MethodPatch, path, nil, body, http.StatusOK, &environment)
+			return renamedResource{id: environment.ID, name: environment.DisplayName, print: func() error { return printEnvironmentLifecycle(opts, environment) }}, err
+		}),
 	)
 	return command
 }
@@ -201,4 +211,48 @@ func printEnvironmentLifecycle(opts *options, item environmentLifecycleCLI) erro
 		disabledAt = formatControlTime(*item.DisabledAt)
 	}
 	return printControlTable(opts, []string{"ENVIRONMENT", "NAME", "KIND", "STATUS", "DISABLED"}, [][]string{{item.ID, item.DisplayName, item.Kind, item.Status, disabledAt}})
+}
+
+type renamedResource struct {
+	id, name string
+	print    func() error
+}
+
+// newRenameCommand changes a display name. Slugs never change.
+func newRenameCommand(
+	opts *options,
+	root *controlCommandOptions,
+	argument string,
+	prefix id.Prefix,
+	basePath string,
+	send func(*cobra.Command, *controlAPIClient, string, any) (renamedResource, error),
+) *cobra.Command {
+	var name string
+	command := &cobra.Command{
+		Use: "rename " + argument, Short: "Change the display name; the slug stays the same", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], prefix) != nil {
+				return errors.New(strings.ToLower(strings.ReplaceAll(argument, "_", " ")) + " is invalid")
+			}
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" || len(trimmed) > 200 || !utf8.ValidString(trimmed) || strings.ContainsAny(trimmed, "\r\n\x00") {
+				return errors.New("--name must be one line of 1 to 200 characters")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			renamed, err := send(cmd, client, basePath+args[0], map[string]string{"display_name": trimmed})
+			if err != nil {
+				return err
+			}
+			if renamed.id != args[0] || renamed.name != trimmed {
+				return errors.New("admin API returned a non-conforming renamed resource")
+			}
+			return renamed.print()
+		},
+	}
+	command.Flags().StringVar(&name, "name", "", "new display name")
+	_ = command.MarkFlagRequired("name")
+	return command
 }

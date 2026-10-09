@@ -223,12 +223,68 @@ The current local server source advertises a stable ordered
 `firebase_app_check`, `turnstile`, `component_delegation`, `cost_limits`,
 `openai_responses`, `openai_chat`, `openai_embeddings`,
 `anthropic_messages`, `opaque_http`, `configuration_import_export`,
-`admin_session_management`, and `admin_event_stream`. The Console Settings
-surface requires protocol 2 and every listed capability except
-`admin_event_stream` before enabling mutations. Missing protocol or required
-capabilities activates read-only safe mode. `admin_event_stream` is optional:
-older servers retain polling and manual refresh instead of being treated as
-mutation-incompatible.
+`admin_session_management`, `admin_event_stream`,
+`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
+`admin_sso`, `admin_invitations`, `admin_application_roles`,
+`admin_user_insights`, `admin_request_search`, `admin_configuration_drafts`,
+`admin_policy_insights` and `admin_operations_history`. The Console Settings
+surface requires protocol 2
+and every listed capability except `admin_event_stream`,
+`admin_account_self_service`, `admin_two_factor`, `admin_passkeys`,
+`admin_sso`, `admin_invitations`, `admin_application_roles`,
+`admin_user_insights`, `admin_request_search`, `admin_configuration_drafts`,
+`admin_policy_insights` and `admin_operations_history` before enabling
+mutations. Missing protocol or
+required capabilities activates read-only safe mode. `admin_event_stream` is
+optional: older servers retain polling and manual refresh instead of being
+treated as mutation-incompatible. `admin_account_self_service` (draft Admin
+bundle edition 1.1.3, ADR 0040) is optional too: without it the console hides
+own-password change, own sessions and organization switching.
+`admin_two_factor` (ADR 0041) is optional in the same way: without it the
+console hides two-factor setup and the organization requirement.
+`admin_passkeys` (ADR 0042) is optional too: without it the console hides
+passkey sign-in and the Passkeys card. With it, the console still offers
+passkeys only when `GET /auth/info` lists `passkey` (the public origin is a
+domain name over HTTPS, or localhost) and the browser supports WebAuthn.
+`admin_sso` (ADR 0043) is optional as well: without it the console hides the
+Single sign-on settings card; Sign In with SSO appears only when
+`GET /auth/info` lists `sso`. Without `admin_invitations` (ADR 0044) the
+console offers only Add Member with a first password. Without
+`admin_application_roles` (ADR 0045) the member drawer has no Application
+roles section; the console always computes capabilities from the session,
+treating a missing `application_roles` as none. Without `admin_user_insights`
+(ADR 0046) Users & Installs lists rows in server order, derives signals from
+loaded rows, previews installation actions from loaded counts and requires
+sign-in one user at a time, and says so on the page. Without
+`admin_request_search` (ADR 0047) Requests offers free-text filter fields,
+no total, ID-only search and a generic new-request notice; the CLI's
+request filters and `requests facets` need a server with the capability.
+Without `admin_configuration_drafts` (ADR 0048) the console carries a
+validated draft into a new draft before editing (those servers refuse to edit
+it), resets rather than discards a draft, and hides edit history, publish
+notes, the merge dialog and Copy From Environment; the CLI's
+`config history|discard|promote` and `--note` need the capability. Without
+`admin_policy_insights` (ADR 0049) the console says it can't show limit
+impact, overrides for a plan or plan share, works out connection outages in
+the browser (and says so), sends one simulation per grid cell, and hides saved
+scenarios and per-limit usage; `routes simulate --fail` needs the capability.
+Without `admin_operations_history` (ADR 0050) System Health says the server
+keeps no history and shows no connection table, Self-tests explains that runs
+are found only by ID, and Settings offers no renames; the CLI's
+`status history`, `usage connections`, `verify runs` and `rename` commands
+need the capability.
+The console's Analytics breakdowns by AI connection need
+`admin_operations_history` and its error-code counts need
+`admin_request_search`; without them each card says the server can't break
+usage down that way. Environment lists from servers before 1.2.0 carry no
+`active_revision_id`, so on those servers Overview and Settings can't tell
+whether an environment has a live configuration. Environment mutation
+responses never carry it, so released CLIs keep decoding them strictly.
+
+The console requires Admin contract `1.1.0`, the client contract every 1.1.x
+server advertises. Earlier console builds required `1.0.0`, which put the
+embedded console of a real 1.1.x server into read-only safe mode;
+`TestConsoleRequiresTheServerContract` now ties the two together.
 
 These are current local source facts covered by the complete core
 implementation gate, race detector, bounded fuzz corpus, real PostgreSQL

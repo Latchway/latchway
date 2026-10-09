@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   adminRequest: vi.fn(),
+  compatibility: { mutationAllowed: true } as { mutationAllowed: boolean; status?: { server_capabilities: string[] } },
   getUserEffectiveConfiguration: vi.fn(),
   getUserOperationImpact: vi.fn(),
   navigate: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock("../../api/admin", async (importOriginal) => ({
 vi.mock("../../api/session", () => ({
   useConsoleSession: () => ({ data: { mode: "configured", session: { capabilities: ["revoke_installations"], organization_id: "org_0123456789abcdef" } } })
 }));
-vi.mock("../../app/console-compatibility-context", () => ({ useConsoleCompatibility: () => ({ mutationAllowed: true }) }));
+vi.mock("../../app/console-compatibility-context", () => ({ useConsoleCompatibility: () => mocks.compatibility }));
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   Link: ({ children, className, to }: { children: ReactNode; className?: string; to: string }) => <a className={className} href={to}>{children}</a>,
@@ -118,8 +119,11 @@ async function loadedDrawer(name: string, section: string): Promise<HTMLElement>
 }
 
 beforeEach(() => {
-  for (const mock of Object.values(mocks)) mock.mockReset();
+  for (const mock of Object.values(mocks)) if (typeof mock === "function") mock.mockReset();
+  mocks.compatibility = { mutationAllowed: true };
 });
+
+const INSIGHTS = { server_capabilities: ["admin_user_insights"] };
 afterEach(cleanup);
 
 describe("Users", () => {
@@ -255,6 +259,109 @@ function familiesApi(detail: Record<string, unknown> = { ...family, components: 
     throw new Error(`Unexpected request ${path}`);
   });
 }
+
+describe("Users with server filters and batches", () => {
+  it("filters, sorts and counts users on the server", async () => {
+    mocks.compatibility = { mutationAllowed: true, status: INSIGHTS };
+    mocks.adminRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/users?")) {
+        const blocked = path.includes("status=blocked");
+        return { data: { items: blocked ? [{ ...otherUser, status: "blocked" }] : [activeUser, otherUser], page: { has_more: false }, total: { capped: false, count: blocked ? 1 : 2 } } };
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    const { updates } = renderPage(<UsersPage />);
+    expect(await screen.findByText("2 users")).toBeInTheDocument();
+    expect(mocks.adminRequest.mock.calls[0]?.[0]).toContain("include_total=true");
+    await user.click(screen.getByRole("button", { name: "Blocked" }));
+    expect(updates.at(-1)).toEqual({ cursor: undefined, user_id: undefined, user_status: "blocked" });
+    expect(await screen.findByText("1 matching user")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Sort users"), "recently_seen");
+    await user.type(screen.getByLabelText("Claim"), "plan pro");
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Write a claim as name:value");
+    await user.clear(screen.getByLabelText("Claim"));
+    await user.type(screen.getByLabelText("Claim"), "plan:pro");
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await waitFor(() => expect(mocks.adminRequest.mock.calls.some(([path]) => String(path).includes("claim=plan%3Apro") && String(path).includes("sort=recently_seen") && String(path).includes("status=blocked"))).toBe(true));
+  });
+
+  it("acts on several users through the server batch and reports each", async () => {
+    mocks.compatibility = { mutationAllowed: true, status: INSIGHTS };
+    mocks.adminRequest.mockImplementation(async (path: string, _schema: unknown, options?: { body?: { items?: unknown }; method?: string }) => {
+      if (path.startsWith("/admin/v1/users?")) return { data: { items: [activeUser, otherUser], page: { has_more: false }, total: { capped: false, count: 2 } } };
+      if (path.startsWith("/admin/v1/users/batch-impact?") && options?.method === "POST") {
+        return { data: { action: "block", applicable: 2, items: [{ impact: { ...impactFixture("block"), impact_token: "C".repeat(43) }, user_id: USER }, { impact: { ...impactFixture("block"), impact_token: "D".repeat(43) }, user_id: OTHER }], totals: impactFixture("block", 2).counts } };
+      }
+      if (path.startsWith("/admin/v1/users/batch?") && options?.method === "POST") {
+        expect(options.body?.items).toEqual([{ impact_token: "C".repeat(43), user_id: USER }, { impact_token: "D".repeat(43), user_id: OTHER }]);
+        return { data: { action: "block", done: 1, results: [{ operation_id: "arq_01J0000000000000000000000A", outcome: "done", user_id: USER }, { outcome: "changed", user_id: OTHER }] } };
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    renderPage(<UsersPage />);
+    await user.click(await screen.findByRole("checkbox", { name: `Select ${USER}` }));
+    await user.click(screen.getByRole("checkbox", { name: `Select ${OTHER}` }));
+    await user.click(screen.getByRole("button", { name: "Act on Selected" }));
+    await user.click(screen.getByRole("menuitem", { name: "Block" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Block user for 2 users?" });
+    await user.type(within(dialog).getByLabelText("Reason"), "Abuse wave");
+    await user.type(within(dialog).getByLabelText(/to confirm/), "2 users");
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: "Block User for 2" }));
+    const results = await screen.findByRole("alertdialog", { name: "Block user finished" });
+    expect(within(results).getByText("1 done · 1 skipped · 0 unknown · 0 failed")).toBeInTheDocument();
+    expect(within(results).getByText(/changed after the preview/)).toBeInTheDocument();
+  });
+
+  it("shows a user's own 30-day usage", async () => {
+    mocks.compatibility = { mutationAllowed: true, status: INSIGHTS };
+    mocks.adminRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/users?")) return { data: { items: [activeUser], page: { has_more: false } } };
+      if (path.startsWith(`/admin/v1/users/${USER}/usage?`)) return { data: { end: instant, provenance: ["reported"], request_count: 12, start: instant, user_id: USER, values: { ...usage, cost_nano_usd: 2_500_000_000 } } };
+      if (path.startsWith(`/admin/v1/users/${USER}?`)) return { data: activeUser };
+      if (path.startsWith("/admin/v1/installation-families?")) return { data: { items: [family], page: { has_more: false } } };
+      if (path.startsWith("/admin/v1/requests?")) return { data: { items: [], page: { has_more: false } } };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    renderPage(<UsersPage />, { user_id: USER });
+    const drawer = await loadedDrawer(USER, "Identity");
+    expect(await within(drawer).findByText(/Last 30 days: 12 requests/)).toBeInTheDocument();
+    expect(within(drawer).queryByText(/summed from these installations/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Installations with server signals", () => {
+  it("filters by a server signal and previews an action with live counts", async () => {
+    mocks.compatibility = { mutationAllowed: true, status: INSIGHTS };
+    mocks.adminRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith("/admin/v1/installation-families?")) {
+        const onlySignals = path.includes("signal=token_reuse");
+        return { data: { items: onlySignals ? [{ ...family, signals: ["token_reuse"] }] : [{ ...family, signals: [] }, { ...debugFamily, signals: ["debug_trust"] }], page: { has_more: false }, total: { capped: false, count: onlySignals ? 1 : 2 } } };
+      }
+      if (path === `/admin/v1/installation-families/${FAMILY}`) return { data: { ...family, components: [root, child], signals: ["token_reuse"] } };
+      if (path.startsWith(`/admin/v1/installation-families/${FAMILY}/operation-impact?`)) {
+        return { data: { action: "revoke", applicable: true, counts: { active_components: 2, active_refresh_tokens: 3, active_sessions: 2, delegated_components: 0, requests_last_24_hours: 17, requests_last_24_hours_capped: false }, current_status: "active", summary: "Ends 2 active parts, 2 sessions and 3 refresh tokens now." } };
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const user = userEvent.setup();
+    const { updates } = renderPage(<InstallationFamiliesPage />);
+    expect(await screen.findByText(/2 in all/)).toBeInTheDocument();
+    expect(screen.getAllByText("Debug trust")).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText("Signal"), "token_reuse");
+    expect(updates.at(-1)).toEqual({ component_id: undefined, cursor: undefined, family_id: undefined, signal: "token_reuse" });
+    expect(await screen.findByText(/1 matching/)).toBeInTheDocument();
+    renderPage(<InstallationFamiliesPage />, { environment_id: ENV, family_id: FAMILY });
+    const drawer = await loadedDrawer(FAMILY, "Signals");
+    await user.click(within(drawer).getAllByRole("button", { name: "Revoke Installation" })[0] as HTMLElement);
+    const dialog = await screen.findByRole("alertdialog", { name: "Revoke this installation?" });
+    expect(await within(dialog).findByText("Ends 2 active parts, 2 sessions and 3 refresh tokens now.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Counts are from this installation as loaded")).not.toBeInTheDocument();
+  });
+});
 
 describe("Installations", () => {
   it("flags debug trust from the list and narrows to loaded rows with signals", async () => {

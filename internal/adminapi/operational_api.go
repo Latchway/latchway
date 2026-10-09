@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/latchway/latchway/internal/buildinfo"
@@ -15,8 +18,58 @@ import (
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
+var (
+	identityProviderKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	normalizedClaimKeyPattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+)
+
+// parseUserListFilter reads the optional users-list filters. Each appears at
+// most once; claim is "name:value" over the configured normalized claims.
+func parseUserListFilter(r *http.Request) (userListFilter, bool) {
+	query := r.URL.Query()
+	for _, key := range []string{"status", "has_override", "provider", "claim", "sort", "include_total"} {
+		if len(query[key]) > 1 {
+			return userListFilter{}, false
+		}
+	}
+	filter := userListFilter{status: query.Get("status"), provider: query.Get("provider"), sort: query.Get("sort")}
+	switch filter.status {
+	case "", "active", "blocked":
+	default:
+		return userListFilter{}, false
+	}
+	switch query.Get("has_override") {
+	case "":
+	case "true":
+		filter.hasOverride = true
+	default:
+		return userListFilter{}, false
+	}
+	if filter.provider != "" && !identityProviderKeyPattern.MatchString(filter.provider) {
+		return userListFilter{}, false
+	}
+	if claim := query.Get("claim"); claim != "" {
+		key, value, found := strings.Cut(claim, ":")
+		if !found || !normalizedClaimKeyPattern.MatchString(key) || value == "" || len(value) > 200 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return userListFilter{}, false
+		}
+		filter.claimKey, filter.claimValue = key, value
+	}
+	switch filter.sort {
+	case "", userSortOldest, userSortNewest, userSortRecentlySeen:
+	default:
+		return userListFilter{}, false
+	}
+	switch query.Get("include_total") {
+	case "", "true":
+	default:
+		return userListFilter{}, false
+	}
+	return filter, true
+}
+
 func (api *API) users(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size") {
+	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size", "status", "has_override", "provider", "claim", "sort", "include_total") {
 		api.writeProblem(w, r, invalidRequest("The user-list query is invalid."))
 		return
 	}
@@ -25,20 +78,34 @@ func (api *API) users(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
 		return
 	}
+	filter, ok := parseUserListFilter(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The user filters are invalid: status is active or blocked, has_override is true, provider is an identity provider key, claim is name:value, and sort is oldest, newest or recently_seen."))
+		return
+	}
 	page, err := parseOperationalPage(r, id.ApplicationUser)
 	if err != nil {
 		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
 		return
 	}
-	items, err := api.operations.listUsers(r.Context(), mustPrincipal(r.Context()), environmentID, page)
+	items, err := api.operations.listUsers(r.Context(), mustPrincipal(r.Context()), environmentID, filter, page)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
 		return
 	}
 	items, pageDocument := buildPage(items, int(page.size), func(item useroverride.ApplicationUser) cursorDocument {
-		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+		return cursorDocument{CreatedAt: userSortKey(filter.sort, item), ID: item.ID}
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+	document := map[string]any{"items": items, "page": pageDocument}
+	if r.URL.Query().Get("include_total") == "true" {
+		count, capped, err := api.operations.countUsers(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
+		if err != nil {
+			api.handleOperationalError(w, r, err, "")
+			return
+		}
+		document["total"] = map[string]any{"count": count, "capped": capped}
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func (api *API) user(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +248,7 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 		"platform", "component_kind", "trust_source", "route", "upstream", "model",
 		"error_code", "request_id", "start", "end", "latency_min_ms", "latency_max_ms",
 		"tokens_min", "tokens_max", "cost_min_nano_usd", "cost_max_nano_usd", "sort",
+		"client_request_id", "include_total",
 	) {
 		api.writeProblem(w, r, invalidRequest("The request-list query is invalid."))
 		return
@@ -195,6 +263,11 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The request-list filters or pagination cursor are invalid."))
 		return
 	}
+	includeTotal, ok := optionalQueryValue(r, "include_total")
+	if !ok || (includeTotal != "" && includeTotal != "true") {
+		api.writeProblem(w, r, invalidRequest("include_total must be true when present."))
+		return
+	}
 	items, err := api.operations.listRequests(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
@@ -203,7 +276,16 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 	items, pageDocument := buildPage(items, int(filter.page.size), func(item logicalRequestDocument) cursorDocument {
 		return cursorDocument{CreatedAt: item.StartedAt, ID: item.ID}
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+	document := map[string]any{"items": items, "page": pageDocument}
+	if includeTotal == "true" {
+		count, capped, err := api.operations.countRequests(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
+		if err != nil {
+			api.handleOperationalError(w, r, err, "")
+			return
+		}
+		document["total"] = map[string]any{"count": count, "capped": capped}
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
@@ -211,10 +293,11 @@ func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
 	if err != nil {
 		return requestListFilter{}, false
 	}
-	values := make(map[string]string, 14)
+	values := make(map[string]string, 15)
 	for _, name := range []string{
 		"status", "feature", "user_id", "platform", "component_kind", "trust_source",
 		"route", "upstream", "model", "error_code", "request_id", "start", "end", "sort",
+		"client_request_id",
 	} {
 		value, ok := optionalQueryValue(r, name)
 		if !ok {
@@ -227,6 +310,7 @@ func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
 		platform: values["platform"], componentKind: values["component_kind"], trustSource: values["trust_source"],
 		route: values["route"], upstream: values["upstream"], model: values["model"],
 		errorCode: values["error_code"], requestID: values["request_id"], sort: values["sort"],
+		clientRequest: values["client_request_id"],
 	}
 	if filter.sort == "" {
 		filter.sort = "started_at_desc"

@@ -119,7 +119,7 @@ function ConnectionsView() {
         ]}
         title="Connections"
       >
-        {task.environment?.kind === "development" ? <div className="lw-page-notice lw-legacy-block"><DevelopmentPath task={task} /></div> : null}
+        {task.environment?.kind === "development" ? <div className="lw-page-notice"><DevelopmentPath task={task} /></div> : null}
       </CollectionPage>
       {adding ? (
         <div className="lw-drawer-dock lw-drawer-dock--wide">

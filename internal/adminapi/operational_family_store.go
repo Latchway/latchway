@@ -19,24 +19,63 @@ const (
 )
 
 type installationFamilyDocument struct {
-	ID                 string                    `json:"id"`
-	UserID             string                    `json:"user_id"`
-	EnvironmentID      string                    `json:"environment_id"`
-	Platform           string                    `json:"platform"`
-	Status             string                    `json:"status"`
-	RootComponentID    string                    `json:"root_component_id"`
-	RootTrustSource    string                    `json:"root_trust_source"`
-	RootTrustExpiresAt *time.Time                `json:"root_trust_expires_at,omitempty"`
-	ComponentCount     int64                     `json:"component_count"`
-	RequestCount       int64                     `json:"request_count"`
-	Usage              usageValues               `json:"usage"`
-	CreatedAt          time.Time                 `json:"created_at"`
-	UpdatedAt          time.Time                 `json:"updated_at"`
-	LastSeenAt         time.Time                 `json:"last_seen_at"`
-	RevokedAt          *time.Time                `json:"revoked_at,omitempty"`
-	RevocationReason   *string                   `json:"revocation_reason,omitempty"`
-	Components         []clientComponentDocument `json:"components,omitempty"`
+	ID                 string      `json:"id"`
+	UserID             string      `json:"user_id"`
+	EnvironmentID      string      `json:"environment_id"`
+	Platform           string      `json:"platform"`
+	Status             string      `json:"status"`
+	RootComponentID    string      `json:"root_component_id"`
+	RootTrustSource    string      `json:"root_trust_source"`
+	RootTrustExpiresAt *time.Time  `json:"root_trust_expires_at,omitempty"`
+	ComponentCount     int64       `json:"component_count"`
+	RequestCount       int64       `json:"request_count"`
+	Usage              usageValues `json:"usage"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
+	LastSeenAt         time.Time   `json:"last_seen_at"`
+	RevokedAt          *time.Time  `json:"revoked_at,omitempty"`
+	RevocationReason   *string     `json:"revocation_reason,omitempty"`
+	// Signals are conditions worth a look, from a closed set; see familySignalsSQL.
+	Signals    []string                  `json:"signals"`
+	Components []clientComponentDocument `json:"components,omitempty"`
 }
+
+// Installation signals. Revoked installations have none.
+const (
+	signalDebugTrust     = "debug_trust"
+	signalTrustExpiring  = "trust_expiring"
+	signalTokenReuse     = "token_reuse"
+	signalWeakKeyStorage = "weak_key_storage"
+	signalFailedSessions = "failed_sessions"
+)
+
+// familySignalsSQL derives an installation's signals: debug trust outside
+// Development, root trust expiring within seven days, a reused refresh token,
+// a native part keeping its key in software or memory, and a part with three
+// or more sessions that ended without a clean sign-out.
+const familySignalsSQL = `array_remove(ARRAY[
+	CASE WHEN family.status = 'active' AND root.trust_source = 'debug' AND environment.kind <> 'development' THEN 'debug_trust' END,
+	CASE WHEN family.status = 'active' AND root.trust_expires_at > transaction_timestamp()
+	      AND root.trust_expires_at <= transaction_timestamp() + interval '7 days' THEN 'trust_expiring' END,
+	CASE WHEN family.status = 'active' AND EXISTS (
+	    SELECT 1 FROM component_refresh_tokens AS token
+	    JOIN client_components AS part ON part.client_component_id = token.client_component_id
+	    WHERE part.installation_family_id = family.installation_family_id
+	      AND part.status NOT IN ('revoked', 'replaced') AND token.status = 'reused') THEN 'token_reuse' END,
+	CASE WHEN family.status = 'active' AND EXISTS (
+	    SELECT 1 FROM client_components AS part
+	    WHERE part.installation_family_id = family.installation_family_id
+	      AND part.status NOT IN ('revoked', 'replaced')
+	      AND part.platform IN ('ios', 'android', 'react_native_ios', 'react_native_android')
+	      AND part.key_storage_claim IN ('software', 'memory')) THEN 'weak_key_storage' END,
+	CASE WHEN family.status = 'active' AND EXISTS (
+	    SELECT 1 FROM client_components AS part
+	    WHERE part.installation_family_id = family.installation_family_id
+	      AND part.status NOT IN ('revoked', 'replaced')
+	      AND (SELECT count(*) FROM component_session_families AS ended
+	           WHERE ended.client_component_id = part.client_component_id
+	             AND ended.status IN ('revoked', 'expired')) >= 3) THEN 'failed_sessions' END
+], NULL)`
 
 type componentDelegationDocument struct {
 	ID                      string     `json:"id"`
@@ -90,11 +129,21 @@ type clientComponentDocument struct {
 	RevocationReason         *string                      `json:"revocation_reason,omitempty"`
 }
 
+// familyListFilter narrows and orders installations; values are bound as
+// parameters and only the closed sort names choose SQL text.
+type familyListFilter struct {
+	status   string
+	platform string
+	signal   string
+	sort     string
+}
+
 func (store *operationalStore) listInstallationFamilies(
 	ctx context.Context,
 	principal adminauth.Principal,
 	environmentID string,
 	userID string,
+	filter familyListFilter,
 	page operationalPage,
 ) ([]installationFamilyDocument, error) {
 	if id.Validate(environmentID, id.Environment) != nil ||
@@ -104,6 +153,10 @@ func (store *operationalStore) listInstallationFamilies(
 	}
 	if !validOperationalRead(principal) {
 		return nil, errOperationalForbidden
+	}
+	position, order, ok := familyOrdering(filter.sort)
+	if !ok {
+		return nil, errOperationalInvalid
 	}
 	rows, err := store.pool.Query(ctx, `
 		SELECT family.installation_family_id, family.application_user_id,
@@ -116,7 +169,7 @@ func (store *operationalStore) listInstallationFamilies(
 		       stats.request_count, stats.logical_requests, stats.input_tokens,
 		       stats.output_tokens, stats.total_tokens, stats.cost_nano_usd,
 		       family.created_at, family.updated_at, family.last_seen_at,
-		       family.revoked_at, family.revocation_reason
+		       family.revoked_at, family.revocation_reason, flags.signals
 		FROM installation_families AS family
 		JOIN environments AS environment
 		  ON environment.organization_id = family.organization_id
@@ -145,15 +198,17 @@ func (store *operationalStore) listInstallationFamilies(
 		      AND request.environment_id = family.environment_id
 		      AND request.installation_family_id = family.installation_family_id
 		) AS stats ON true
+		CROSS JOIN LATERAL (SELECT `+familySignalsSQL+` AS signals) AS flags
 		WHERE family.organization_id = $1 AND family.environment_id = $2
 		  AND ($3::text IS NULL OR family.application_user_id = $3)
 		  AND organization.status = 'active'
-		  AND ($4::timestamptz IS NULL OR
-		       (family.created_at, family.installation_family_id) > ($4, $5))
-		ORDER BY family.created_at, family.installation_family_id
+		  AND `+familyFilterSQL(7)+`
+		  AND ($4::timestamptz IS NULL OR `+position+`)
+		ORDER BY `+order+`
 		LIMIT $6
 	`, principal.OrganizationID, environmentID, nullableString(userID),
-		nullableTime(page.after), nullableString(page.afterID), page.size+1)
+		nullableTime(page.after), nullableString(page.afterID), page.size+1,
+		nullableString(filter.status), nullableString(filter.platform), nullableString(filter.signal))
 	if err != nil {
 		return nil, fmt.Errorf("list installation families: %w", err)
 	}
@@ -218,7 +273,7 @@ func queryInstallationFamily(
 		       stats.request_count, stats.logical_requests, stats.input_tokens,
 		       stats.output_tokens, stats.total_tokens, stats.cost_nano_usd,
 		       family.created_at, family.updated_at, family.last_seen_at,
-		       family.revoked_at, family.revocation_reason
+		       family.revoked_at, family.revocation_reason, flags.signals
 		FROM installation_families AS family
 		JOIN environments AS environment
 		  ON environment.organization_id = family.organization_id
@@ -247,6 +302,7 @@ func queryInstallationFamily(
 		      AND request.environment_id = family.environment_id
 		      AND request.installation_family_id = family.installation_family_id
 		) AS stats ON true
+		CROSS JOIN LATERAL (SELECT `+familySignalsSQL+` AS signals) AS flags
 		WHERE family.organization_id = $1 AND family.installation_family_id = $2
 		  AND organization.status = 'active'
 	`, organizationID, familyID)
@@ -267,9 +323,12 @@ func scanInstallationFamily(row rowScanner) (installationFamilyDocument, error) 
 		&item.Usage.LogicalRequests, &item.Usage.InputTokens, &item.Usage.OutputTokens,
 		&item.Usage.TotalTokens, &item.Usage.CostNanoUSD,
 		&item.CreatedAt, &item.UpdatedAt, &item.LastSeenAt,
-		&item.RevokedAt, &item.RevocationReason,
+		&item.RevokedAt, &item.RevocationReason, &item.Signals,
 	); err != nil {
 		return installationFamilyDocument{}, err
+	}
+	if item.Signals == nil {
+		item.Signals = []string{}
 	}
 	if rootComponentID == nil || id.Validate(item.ID, id.InstallationFamily) != nil ||
 		id.Validate(*rootComponentID, id.ClientComponent) != nil || item.ComponentCount < 1 ||
@@ -634,7 +693,7 @@ func (store *operationalStore) revokeInstallationFamily(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return installationFamilyDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	reason, err := validateOperationalRevocationReason(reason, "admin_installation_family_revoked")
@@ -652,6 +711,9 @@ func (store *operationalStore) revokeInstallationFamily(
 	)
 	if err != nil {
 		return installationFamilyDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationFamilyDocument{}, err
@@ -739,7 +801,7 @@ func (store *operationalStore) requireInstallationFamilyRenewal(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return installationFamilyDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if _, err := validateOperationalRevocationReason(reason, "admin_containing_app_renewal_required"); err != nil {
@@ -756,6 +818,9 @@ func (store *operationalStore) requireInstallationFamilyRenewal(
 	)
 	if err != nil {
 		return installationFamilyDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationFamilyDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationFamilyDocument{}, err
@@ -829,7 +894,7 @@ func (store *operationalStore) revokeClientComponent(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return clientComponentDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return clientComponentDocument{}, errOperationalForbidden
 	}
 	reason, err := validateOperationalRevocationReason(reason, "admin_client_component_revoked")
@@ -847,6 +912,9 @@ func (store *operationalStore) revokeClientComponent(
 	)
 	if err != nil {
 		return clientComponentDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return clientComponentDocument{}, err
@@ -952,7 +1020,7 @@ func (store *operationalStore) requireClientComponentReattestation(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return clientComponentDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if _, err := validateOperationalRevocationReason(reason, "admin_component_reattestation_required"); err != nil {
@@ -969,6 +1037,9 @@ func (store *operationalStore) requireClientComponentReattestation(
 	)
 	if err != nil {
 		return clientComponentDocument{}, err
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return clientComponentDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return clientComponentDocument{}, err
@@ -1330,4 +1401,66 @@ func nullableStringSlice(values []string) any {
 		return nil
 	}
 	return values
+}
+
+// familyFilterSQL applies the status, platform and signal filters bound at
+// parameters first, first+1 and first+2.
+func familyFilterSQL(first int) string {
+	return fmt.Sprintf(`($%[1]d::text IS NULL OR family.status = $%[1]d)
+		  AND ($%[2]d::text IS NULL OR family.platform = $%[2]d)
+		  AND ($%[3]d::text IS NULL OR ($%[3]d = 'any' AND cardinality(flags.signals) > 0) OR $%[3]d = ANY(flags.signals))`, first, first+1, first+2)
+}
+
+func familyOrdering(sort string) (string, string, bool) {
+	switch sort {
+	case "", userSortOldest:
+		return `(family.created_at, family.installation_family_id) > ($4, $5)`, `family.created_at, family.installation_family_id`, true
+	case userSortNewest:
+		return `(family.created_at, family.installation_family_id) < ($4, $5)`, `family.created_at DESC, family.installation_family_id DESC`, true
+	case userSortRecentlySeen:
+		return `(family.last_seen_at, family.installation_family_id) < ($4, $5)`, `family.last_seen_at DESC, family.installation_family_id DESC`, true
+	default:
+		return "", "", false
+	}
+}
+
+// familySortKey is the cursor position of an installation under a sort.
+func familySortKey(sort string, item installationFamilyDocument) time.Time {
+	if sort == userSortRecentlySeen {
+		return item.LastSeenAt
+	}
+	return item.CreatedAt
+}
+
+// countInstallationFamilies counts the installations a filter matches, up to userTotalCap.
+func (store *operationalStore) countInstallationFamilies(ctx context.Context, principal adminauth.Principal, environmentID, userID string, filter familyListFilter) (int64, bool, error) {
+	if !validOperationalRead(principal) {
+		return 0, false, errOperationalForbidden
+	}
+	var count int64
+	if err := store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+		    SELECT 1
+		    FROM installation_families AS family
+		    JOIN environments AS environment
+		      ON environment.organization_id = family.organization_id
+		     AND environment.application_id = family.application_id
+		     AND environment.environment_id = family.environment_id
+		    JOIN organizations AS organization ON organization.organization_id = environment.organization_id
+		    LEFT JOIN client_components AS root ON root.client_component_id = family.root_component_id
+		    CROSS JOIN LATERAL (SELECT `+familySignalsSQL+` AS signals) AS flags
+		    WHERE family.organization_id = $1 AND family.environment_id = $2
+		      AND ($3::text IS NULL OR family.application_user_id = $3)
+		      AND organization.status = 'active'
+		      AND `+familyFilterSQL(5)+`
+		    LIMIT $4
+		) AS matched
+	`, principal.OrganizationID, environmentID, nullableString(userID), userTotalCap+1,
+		nullableString(filter.status), nullableString(filter.platform), nullableString(filter.signal)).Scan(&count); err != nil {
+		return 0, false, fmt.Errorf("count installation families: %w", err)
+	}
+	if count > userTotalCap {
+		return userTotalCap, true, nil
+	}
+	return count, false, nil
 }

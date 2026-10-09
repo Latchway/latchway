@@ -12,8 +12,17 @@ import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, forgetConsoleSession, SESSION_ENDED_EVENT, useConsoleSession } from "../api/session";
 import { Button, buttonClass, cx, EnvironmentBadge, Icon, Logo, Menu, type MenuEntry, type StatusItem, StatusRail, useFocusTrap } from "../ui";
-import { AccountDialog, ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { ReauthDialog, SwitchOrganizationDialog } from "./auth/account-dialogs";
+import { InvitationClaimDialog } from "./auth/invitation-claim";
+import { ConsoleCompatibilityContext } from "./console-compatibility-context";
+import { type PreviewRole, RolePreviewContext } from "./permissions";
+import { RolePreviewDialog } from "./role-preview-dialog";
+import { ROLE_LABEL } from "../pages/team/roles";
+import { pendingInvitation } from "./auth/invitation-link";
+import { ChoosePasswordScreen } from "./auth/choose-password";
+import { TwoFactorEnrollmentScreen } from "./auth/two-factor-enrollment";
 import { rememberSignedOutEmail, wallClock } from "./auth/auth-memory";
+import { AttentionButton } from "./attention-button";
 import { AuthScreen } from "./auth/auth-screen";
 import { ENDING_SOON_MS, sessionEndText } from "./auth/session-model";
 import { useConsoleCompatibility } from "./console-compatibility-context";
@@ -136,7 +145,10 @@ function AppShellContent() {
   const [loggingOut, setLoggingOut] = useState(false);
   // Keeps the sign-in screen up through steps that already hold a session (choosing an organization, setup done).
   const [authHeld, setAuthHeld] = useState(false);
-  const [dialog, setDialog] = useState<"account" | "switch" | "reauth">();
+  const [dialog, setDialog] = useState<"switch" | "reauth" | "preview">();
+  const [previewRole, setPreviewRole] = useState<PreviewRole>();
+  // An invitation link opened in this tab is offered once a session exists; the token itself stays out of state.
+  const [invitationOpen, setInvitationOpen] = useState(() => Boolean(pendingInvitation()));
   const [endingSoonFor, setEndingSoonFor] = useState<string>();
   const [dismissedFor, setDismissedFor] = useState<string>();
   const { liveness, readiness } = useSystemHealth();
@@ -260,15 +272,33 @@ function AppShellContent() {
 
   function switched(): void {
     setDialog(undefined);
+    setInvitationOpen(false);
     queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== consoleSessionQueryOptions.queryKey[0] });
     void navigate({ search: {}, to: "/" });
   }
 
   if (!configured || authHeld || !adminSession) {
-    return <AuthScreen checking={session.isPending && !session.data} mode={mode} onHoldChange={setAuthHeld} retry={() => void session.refetch()} retrying={session.isFetching} />;
+    return <AuthScreen checking={session.isPending && !session.data} endReason={session.data?.endReason} mode={mode} onHoldChange={setAuthHeld} retry={() => void session.refetch()} retrying={session.isFetching} />;
+  }
+  if (adminSession.password_reset_required && !expired) {
+    return <ChoosePasswordScreen onSignOut={() => void logout()} session={adminSession} />;
+  }
+  if (adminSession.two_factor_enrollment_required && !expired) {
+    return <TwoFactorEnrollmentScreen onSignOut={() => void logout()} session={adminSession} />;
   }
 
   const statusItems: StatusItem[] = [];
+  if (previewRole) {
+    statusItems.push({
+      actions: <Button onClick={() => setPreviewRole(undefined)} size="sm">Exit Preview</Button>,
+      chip: `Previewing as ${ROLE_LABEL[previewRole]}`,
+      icon: "users",
+      id: "role-preview",
+      text: `You're seeing what a ${ROLE_LABEL[previewRole]} sees in this organization, without application roles. Changes are off while you preview; the server always checks your own role.`,
+      title: `Previewing as ${ROLE_LABEL[previewRole]}.`,
+      tone: "warning"
+    });
+  }
   if (!consoleCompatibility.mutationAllowed) {
     const reasons = consoleCompatibility.compatibility?.reasons ?? [];
     statusItems.push({
@@ -321,8 +351,11 @@ function AppShellContent() {
 
   const accountEntries: MenuEntry[] = [
     { heading: adminSession.administrator.email, kind: "heading" },
-    { icon: "users", label: "Your Account", onSelect: () => { setAccountOpen(false); setDialog("account"); } },
+    { icon: "users", label: "Your Account", onSelect: () => { setAccountOpen(false); void navigate({ search: scopeSearch, to: "/account" }); } },
     ...(adminSession.memberships.length > 1 ? [{ icon: "refresh", label: "Switch Organization", onSelect: () => { setAccountOpen(false); setDialog("switch"); } } satisfies MenuEntry] : []),
+    ...(adminSession.capabilities.includes("manage_owners") ? [previewRole
+      ? { icon: "users", label: "Exit Role Preview", onSelect: () => { setAccountOpen(false); setPreviewRole(undefined); } } satisfies MenuEntry
+      : { icon: "users", label: "Preview as Role", onSelect: () => { setAccountOpen(false); setDialog("preview"); } } satisfies MenuEntry] : []),
     { kind: "separator" },
     { destructive: true, icon: "external", label: loggingOut ? "Signing out…" : "Sign out", onSelect: () => void logout() }
   ];
@@ -330,6 +363,8 @@ function AppShellContent() {
   const productionScope = !scopeDimmed && workspace.environment?.kind === "production";
 
   return (
+    <RolePreviewContext.Provider value={{ role: previewRole, set: setPreviewRole }}>
+    <ConsoleCompatibilityContext.Provider value={previewRole ? { ...consoleCompatibility, mutationAllowed: false } : consoleCompatibility}>
     <div className="lw-root lw-console" data-nav-open={navOpen ? "" : undefined}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
 
@@ -366,6 +401,7 @@ function AppShellContent() {
             <span>Search</span>
             <kbd className="lw-kbd">{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
           </button>
+          {configured ? <AttentionButton /> : null}
           <Link aria-label={`${healthLabel}. Open system health.`} className={cx("lw-health", overallState !== "available" && `lw-health--${overallState}`)} search={scopeSearch} to="/system-health">
             <span aria-hidden="true" className="lw-badge__dot" />
             <span className="lw-health__text">{healthLabel}</span>
@@ -416,13 +452,17 @@ function AppShellContent() {
       </div>
       {commandOpen ? <CommandPalette close={closeCommand} /> : null}
       {expired || dialog === "reauth" ? (
-        <ReauthDialog onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
-      ) : dialog === "account" ? (
-        <AccountDialog onClose={() => setDialog(undefined)} organizationName={workspace.organization?.display_name} session={adminSession} />
+        <ReauthDialog endReason={expired ? session.data?.endReason : undefined} onClose={expired ? undefined : () => setDialog(undefined)} onSignedIn={() => setDialog(undefined)} onSomeoneElse={() => void logout(false)} session={adminSession} />
       ) : dialog === "switch" ? (
         <SwitchOrganizationDialog onClose={() => setDialog(undefined)} onSwitched={switched} session={adminSession} />
+      ) : dialog === "preview" ? (
+        <RolePreviewDialog onCancel={() => setDialog(undefined)} onStart={(role) => { setDialog(undefined); setPreviewRole(role); }} />
+      ) : invitationOpen && pendingInvitation() ? (
+        <InvitationClaimDialog onClose={() => setInvitationOpen(false)} onSignOut={() => void logout()} onSwitched={switched} session={adminSession} />
       ) : null}
     </div>
+    </ConsoleCompatibilityContext.Provider>
+    </RolePreviewContext.Provider>
   );
 }
 

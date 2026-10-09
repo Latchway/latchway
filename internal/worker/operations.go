@@ -14,6 +14,7 @@ const (
 	defaultAdminSessionRetention = 7 * 24 * time.Hour
 	defaultJobHistoryRetention   = 30 * 24 * time.Hour
 	defaultRuntimeRetention      = 24 * time.Hour
+	defaultHealthSampleRetention = 30 * 24 * time.Hour
 )
 
 // PostgreSQLOperations implements idempotent usage rollup and bounded
@@ -171,6 +172,15 @@ func (operations *PostgreSQLOperations) EnforceRetention(ctx context.Context, sc
 			)
 			DELETE FROM jobs AS job USING doomed WHERE job.job_id = doomed.job_id
 		`, cutoff: cutoff(scheduledAt, defaultJobHistoryRetention), stage: "delete_job_history"},
+		{query: `
+			WITH doomed AS (
+				SELECT sampled_at FROM system_health_samples
+				WHERE sampled_at < $1
+				ORDER BY sampled_at LIMIT $2 FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM system_health_samples AS sample USING doomed
+			WHERE sample.sampled_at = doomed.sampled_at
+		`, cutoff: cutoff(scheduledAt, defaultHealthSampleRetention), stage: "delete_health_samples"},
 		{query: `
 			WITH doomed AS (
 				SELECT instance.instance_id FROM runtime_instances AS instance

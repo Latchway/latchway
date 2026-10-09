@@ -19,6 +19,12 @@ var (
 	ErrConflict             = errors.New("configuration revision conflict")
 	ErrETagMismatch         = errors.New("configuration revision ETag mismatch")
 	ErrConfigurationInvalid = errors.New("configuration validation failed")
+	// ErrDraftPending refuses an operation that would start a second working
+	// draft beside one that is neither published nor discarded.
+	ErrDraftPending = errors.New("configuration draft pending")
+	// ErrMergeConflict refuses a rebase that leaves a conflicting path
+	// unresolved.
+	ErrMergeConflict = errors.New("configuration merge conflict")
 )
 
 const (
@@ -27,6 +33,7 @@ const (
 	StateActive     = "active"
 	StateSuperseded = "superseded"
 	StateInvalid    = "invalid"
+	StateDiscarded  = "discarded"
 
 	CostRetryTreatmentActualAttempts     = "actual_attempts"
 	CostRetryTreatmentInitialAttemptOnly = "initial_attempt_only"
@@ -54,20 +61,26 @@ type EnvironmentDescriptor struct {
 // Revision is the redaction-safe Admin API representation of one revision.
 // ETag and compiled state are deliberately transported out of band.
 type Revision struct {
-	ID            string            `json:"id"`
-	EnvironmentID string            `json:"environment_id"`
-	State         string            `json:"state"`
-	Version       int64             `json:"version"`
-	Document      json.RawMessage   `json:"document"`
-	Validation    *ValidationReport `json:"validation,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
-	CreatedBy     string            `json:"created_by"`
-	ActivatedAt   *time.Time        `json:"activated_at,omitempty"`
-	ETag          string            `json:"-"`
+	ID             string            `json:"id"`
+	EnvironmentID  string            `json:"environment_id"`
+	State          string            `json:"state"`
+	Version        int64             `json:"version"`
+	Document       json.RawMessage   `json:"document"`
+	Validation     *ValidationReport `json:"validation,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	CreatedBy      string            `json:"created_by"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	UpdatedBy      string            `json:"updated_by"`
+	BaseRevisionID string            `json:"base_revision_id,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	ActivatedAt    *time.Time        `json:"activated_at,omitempty"`
+	ActivationNote string            `json:"activation_note,omitempty"`
+	DiscardedAt    *time.Time        `json:"discarded_at,omitempty"`
+	DiscardedBy    string            `json:"discarded_by,omitempty"`
+	ETag           string            `json:"-"`
 
 	organizationID string
 	applicationID  string
-	baseRevisionID string
 	compiled       json.RawMessage
 	storedState    string
 	editVersion    int64

@@ -156,7 +156,7 @@ describe("Limit plans", () => {
     await user.click(within(drawer).getByRole("button", { name: "Remove premium" }));
     const dialog = screen.getByRole("alertdialog", { name: "Remove premium?" });
     expect(within(dialog).getByLabelText("New plan for chat")).toHaveValue("free");
-    expect(within(dialog).getByText(/can't be listed/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/can't list users with an override/)).toBeInTheDocument();
     const confirm = within(dialog).getByRole("button", { name: "Reassign and Remove in Draft" });
     expect(confirm).toBeDisabled();
     await user.type(within(dialog).getByLabelText(/to confirm/), "premium");

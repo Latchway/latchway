@@ -27,8 +27,11 @@ import (
 	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/mail"
+	"github.com/latchway/latchway/internal/oidc"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
@@ -47,6 +50,9 @@ type API struct {
 	configurations  *configuration.Store
 	overrides       *useroverride.Store
 	secretManager   secretManager
+	factors         factorSealer
+	oidc            *oidc.Client
+	mailer          mail.Sender
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -58,6 +64,7 @@ type API struct {
 	eventPrincipals adminEventPrincipalSource
 	eventStream     adminEventStreamSettings
 	policyResolver  *policy.Resolver
+	quotaSnapshots  quotaSnapshotReader
 	role            string
 	systemReadiness func(context.Context) bool
 	diagnostics     diagnostics.Dependencies
@@ -143,6 +150,10 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, err
 	}
+	quotaSnapshots, err := quota.NewStore(quota.StoreConfig{Pool: pool})
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		return nil, errors.New("admin API logger is nil")
 	}
@@ -156,8 +167,8 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		secretManager: manager,
 		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
-		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
-		operations: newOperationalStore(pool), policyResolver: policyResolver, role: "all",
+		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute), oidc: &oidc.Client{},
+		operations: newOperationalStore(pool), policyResolver: policyResolver, quotaSnapshots: quotaSnapshots, role: "all",
 		eventStream: defaultAdminEventStreamSettings(),
 	}
 	for _, option := range options {
@@ -203,11 +214,46 @@ func (api *API) Handler() http.Handler {
 	router.Use(api.auditMetadata)
 	router.Post("/auth/bootstrap", api.bootstrap)
 	router.Post("/auth/login", api.login)
+	router.Post("/auth/login/two-factor", api.loginSecondFactor)
+	router.Post("/auth/login/two-factor/passkey-options", api.secondFactorPasskeyOptions)
+	router.Post("/auth/passkeys/sign-in-options", api.passkeySignInOptions)
+	router.Post("/auth/passkeys/sign-in", api.passkeySignIn)
+	router.Post("/auth/sso/start", api.startSSO)
+	router.Get("/auth/sso/callback", api.ssoCallback)
+	router.Post("/auth/invitations/preview", api.previewInvitation)
+	router.Post("/auth/invitations/accept", api.acceptInvitation)
+	router.Get("/auth/info", api.authInfo)
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
 		protected.Get("/auth/session", api.session)
 		protected.With(api.mutationProtection).Post("/auth/logout", api.logout)
+		protected.With(api.mutationProtection).Post("/auth/password", api.changeOwnPassword)
+		protected.With(api.mutationProtection).Post("/auth/organization", api.switchOrganization)
+		protected.Get("/auth/sessions", api.ownSessions)
+		protected.With(api.mutationProtection).Post("/auth/sessions/revoke-others", api.revokeOtherOwnSessions)
+		protected.With(api.mutationProtection).Post("/auth/sessions/{adminSessionID}/revoke", api.revokeOwnSession)
+		protected.Get("/auth/two-factor", api.twoFactorStatus)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/totp", api.startTOTPEnrollment)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/totp/confirm", api.confirmTOTPEnrollment)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/recovery-codes", api.replaceRecoveryCodes)
+		protected.With(api.mutationProtection).Post("/auth/two-factor/disable", api.disableTwoFactor)
+		protected.Get("/auth/passkeys", api.listPasskeys)
+		protected.With(api.mutationProtection).Post("/auth/passkeys/registration-options", api.passkeyRegistrationOptions)
+		protected.With(api.mutationProtection).Post("/auth/passkeys", api.addPasskey)
+		protected.With(api.mutationProtection).Post("/auth/passkeys/{adminPasskeyID}/remove", api.removePasskey)
+		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/two-factor-requirement", api.setTwoFactorRequirement)
+		protected.Get("/organizations/{organizationID}/sso", api.getSSOProvider)
+		protected.With(api.mutationProtection).Put("/organizations/{organizationID}/sso", api.putSSOProvider)
+		protected.With(api.mutationProtection).Delete("/organizations/{organizationID}/sso", api.removeSSOProvider)
+		protected.Get("/organizations/{organizationID}/invitations", api.listInvitations)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations", api.createInvitation)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations/{invitationID}/revoke", api.revokeInvitation)
+		protected.With(api.mutationProtection).Post("/organizations/{organizationID}/invitations/{invitationID}/renew", api.renewInvitation)
+		protected.With(api.mutationProtection).Post("/auth/invitations/claim", api.claimInvitation)
 		protected.Get("/organizations", api.organizations)
+		protected.With(api.mutationProtection).Patch("/organizations/{organizationID}", api.renameOrganization)
+		protected.With(api.mutationProtection).Patch("/applications/{applicationID}", api.renameApplication)
+		protected.With(api.mutationProtection).Patch("/environments/{environmentID}", api.renameEnvironment)
 		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
 		protected.Get("/applications", api.applications)
 		protected.With(api.mutationProtection).Post("/applications", api.createApplication)
@@ -220,11 +266,24 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/environments/{environmentID}/config", api.activeConfiguration)
 		protected.Get("/environments/{environmentID}/config-revisions", api.configurationRevisions)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions", api.createConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions/promote", api.promoteConfiguration)
 		protected.Get("/config-revisions/{revisionID}", api.configurationRevision)
+		protected.Get("/config-revisions/{revisionID}/edits", api.configurationRevisionEdits)
+		protected.Get("/config-revisions/{revisionID}/rebase-preview", api.configurationRebasePreview)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/rebase", api.rebaseConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/discard", api.discardConfigurationRevision)
 		protected.With(api.mutationProtection).Patch("/config-revisions/{revisionID}", api.replaceDraftConfiguration)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/validate", api.validateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/simulate", api.simulateConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/simulate-batch", api.simulateConfigurationRevisionBatch)
+		protected.Get("/applications/{applicationID}/simulation-scenarios", api.simulationScenarios)
+		protected.With(api.mutationProtection).Post("/applications/{applicationID}/simulation-scenarios", api.createSimulationScenario)
+		protected.With(api.mutationProtection).Put("/simulation-scenarios/{scenarioID}", api.replaceSimulationScenario)
+		protected.With(api.mutationProtection).Delete("/simulation-scenarios/{scenarioID}", api.deleteSimulationScenario)
+		protected.Get("/user-overrides", api.userOverrides)
+		protected.Get("/usage/distribution", api.usageDistribution)
+		protected.Get("/usage/connections", api.usageConnections)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
 		protected.Get("/secrets", api.secrets)
@@ -240,12 +299,19 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/disable", api.disableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/enable", api.enableAdministrator)
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-password", api.resetAdministratorPassword)
+		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-two-factor", api.resetAdministratorTwoFactor)
+		protected.Get("/application-roles", api.listApplicationRoles)
+		protected.With(api.mutationProtection).Put("/administrators/{adminUserID}/application-roles/{applicationID}", api.setApplicationRole)
+		protected.With(api.mutationProtection).Delete("/administrators/{adminUserID}/application-roles/{applicationID}", api.removeApplicationRole)
 		protected.Get("/admin-sessions", api.adminSessions)
 		protected.With(api.mutationProtection).Post("/admin-sessions/{adminSessionID}/revoke", api.revokeManagedAdminSession)
 		protected.Get("/users", api.users)
 		protected.Get("/users/{userID}", api.user)
 		protected.Get("/users/{userID}/effective-configuration", api.effectiveUserConfiguration)
 		protected.Get("/users/{userID}/operation-impact", api.userOperationImpact)
+		protected.Get("/users/{userID}/usage", api.userUsage)
+		protected.With(api.mutationProtection).Post("/users/batch-impact", api.userBatchImpact)
+		protected.With(api.mutationProtection).Post("/users/batch", api.userBatch)
 		protected.With(api.mutationProtection).Post("/users/{userID}/block", api.blockUser)
 		protected.With(api.mutationProtection).Post("/users/{userID}/unblock", api.unblockUser)
 		protected.With(api.mutationProtection).Post("/users/{userID}/require-reauthentication", api.requireUserReauthentication)
@@ -257,13 +323,16 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/installations/{installationID}/revoke", api.revokeInstallation)
 		protected.Get("/installation-families", api.installationFamilies)
 		protected.Get("/installation-families/{familyID}", api.installationFamily)
+		protected.Get("/installation-families/{familyID}/operation-impact", api.installationFamilyImpact)
 		protected.With(api.mutationProtection).Post("/installation-families/{familyID}/require-renewal", api.requireInstallationFamilyRenewal)
 		protected.With(api.mutationProtection).Post("/installation-families/{familyID}/revoke", api.revokeInstallationFamily)
 		protected.Get("/client-components", api.clientComponents)
 		protected.Get("/client-components/{componentID}", api.clientComponent)
+		protected.Get("/client-components/{componentID}/operation-impact", api.clientComponentImpact)
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/require-reattestation", api.requireClientComponentReattestation)
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/revoke", api.revokeClientComponent)
 		protected.Get("/requests", api.requests)
+		protected.Get("/requests/facets", api.requestFacets)
 		protected.Get("/requests/{requestID}", api.request)
 		protected.Get("/requests/{requestID}/effective-configuration", api.effectiveRequestConfiguration)
 		protected.Get("/usage/summary", api.usageSummary)
@@ -276,9 +345,11 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/self-test-schedules/{scheduleID}", api.selfTestSchedule)
 		protected.With(api.mutationProtection).Delete("/self-test-schedules/{scheduleID}", api.disableSelfTestSchedule)
 		protected.With(api.mutationProtection).Post("/self-tests", api.startSelfTest)
+		protected.Get("/self-tests", api.selfTests)
 		protected.Get("/self-tests/{selfTestID}", api.selfTest)
 		protected.Get("/system", api.systemStatus)
 		protected.Get("/system/doctor", api.systemDoctor)
+		protected.Get("/system/health-history", api.systemHealthHistory)
 		protected.Get("/system/support-bundle", api.systemSupportBundle)
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -407,9 +478,53 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
-	membership, ok := selectMembership(view.Memberships, request.OrganizationID)
+	signIn, err := api.auth.SignInState(r.Context(), adminUserID)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	requestedOrganization := request.OrganizationID
+	if requestedOrganization == "" && signIn.LastOrganizationID != "" {
+		if _, ok := selectMembership(view.Memberships, signIn.LastOrganizationID); ok {
+			requestedOrganization = signIn.LastOrganizationID
+		}
+	}
+	membership, ok := selectMembership(view.Memberships, requestedOrganization)
 	if !ok {
 		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
+		return
+	}
+	api.loginLimiter.success(key)
+	if api.refuseWhenSSORequired(w, r, membership.OrganizationID, membership.Role) {
+		return
+	}
+	deviceSummary := adminauth.DeviceSummaryFromUserAgent(r.UserAgent())
+	factors, err := api.auth.TwoFactorStatus(r.Context(), adminUserID, "")
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	if factors.Enabled {
+		// The password was right; the session waits for the second factor.
+		challenge, expiresAt, err := api.auth.CreateSignInChallenge(r.Context(), adminauth.SignInChallenge{
+			AdminUserID: adminUserID, OrganizationID: membership.OrganizationID, DeviceSummary: deviceSummary,
+		}, signInChallengeLifetime)
+		if err != nil {
+			api.internal(w, r, err)
+			return
+		}
+		methods := make([]string, 0, 3)
+		if factors.TOTPConfirmed {
+			methods = append(methods, "totp")
+		}
+		if _, ok := api.relyingParty(); ok && factors.Passkeys > 0 {
+			methods = append(methods, "passkey")
+		}
+		methods = append(methods, "recovery_code")
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status": "two_factor_required", "challenge": challenge, "expires_at": expiresAt,
+			"methods": methods,
+		})
 		return
 	}
 	auditRequestID, err := id.New(id.AdminRequest)
@@ -417,21 +532,7 @@ func (api *API) login(w http.ResponseWriter, r *http.Request) {
 		api.internal(w, r, err)
 		return
 	}
-	issued, err := api.auth.CreateSession(r.Context(), adminauth.CreateSessionInput{
-		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
-		Lifetime: api.sessionLifetime, RequestID: auditRequestID,
-	})
-	if err != nil {
-		api.internal(w, r, err)
-		return
-	}
-	api.loginLimiter.success(key)
-	api.setSession(w, issued)
-	writeJSON(w, http.StatusOK, api.sessionDocument(view, adminauth.Principal{
-		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
-		Role: membership.Role, Method: adminauth.AuthenticationSession,
-		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
-	}))
+	api.issueSignInSession(w, r, view, membership, deviceSummary, auditRequestID, adminauth.SignInPassword)
 }
 
 func (api *API) session(w http.ResponseWriter, r *http.Request) {
@@ -747,8 +848,13 @@ func (api *API) activateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	options, ok := activationOptions(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The publish note must be 1 to 500 characters without control characters other than line breaks."))
+		return
+	}
 	revision, err := api.configurations.ActivateRevision(
-		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag,
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag, options...,
 	)
 	if err != nil {
 		api.handleConfigurationError(w, r, err)
@@ -799,7 +905,16 @@ func (api *API) requireETag(w http.ResponseWriter, r *http.Request) (string, boo
 }
 
 func (api *API) apiTokens(w http.ResponseWriter, r *http.Request) {
-	items, err := api.auth.ListAPITokens(r.Context(), mustPrincipal(r.Context()))
+	scope, scoped := r.URL.Query()["scope"]
+	if !onlyQueryKeys(r, "scope") || (scoped && (len(scope) != 1 || scope[0] != "organization")) {
+		api.writeProblem(w, r, invalidRequest("The API token query is invalid."))
+		return
+	}
+	list := api.auth.ListAPITokens
+	if scoped {
+		list = api.auth.ListOrganizationAPITokens
+	}
+	items, err := list(r.Context(), mustPrincipal(r.Context()))
 	if err != nil {
 		api.handleAdminAuthError(w, r, err)
 		return
@@ -830,7 +945,9 @@ func (api *API) createAPIToken(w http.ResponseWriter, r *http.Request) {
 		AdminPromptBodiesEnabled:    true,
 	}
 	for _, capability := range scope.Values() {
-		if !principal.Allows(capability, maximumContext) {
+		// A token may carry a capability its holder has in some application; each
+		// use is still checked against the target application.
+		if !principal.AllowsSomewhere(capability, maximumContext) {
 			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "An API token cannot delegate a capability outside its own effective scope."})
 			return
 		}
@@ -989,7 +1106,19 @@ func (api *API) authenticate(next http.Handler) http.Handler {
 			err = adminauth.ErrAdminAuthentication
 		}
 		if err != nil {
+			if cookieErr == nil && bearer == "" {
+				api.writeProblem(w, r, api.sessionFailureProblem(r, cookie.Value))
+				return
+			}
 			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Administrator authentication is required."})
+			return
+		}
+		if principal.PasswordResetRequired && !passwordChangeAllows(r) {
+			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "Choose a new password before using the console."})
+			return
+		}
+		if principal.TwoFactorEnrollmentRequired && !twoFactorEnrollmentAllows(r) {
+			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "This organization requires two-factor sign-in. Set it up before using the console."})
 			return
 		}
 		auditContext, auditErr := adminauth.ResolveAuditMetadata(r.Context(), principal.Method)
@@ -1052,11 +1181,18 @@ func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth
 			capabilities = append(capabilities, string(capability))
 		}
 	}
-	return map[string]any{
-		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true},
+	document := map[string]any{
+		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true, "display_name": view.DisplayName},
 		"organization_id": principal.OrganizationID, "memberships": view.Memberships,
 		"capabilities": capabilities, "expires_at": expiresAt,
+		"password_reset_required":        principal.PasswordResetRequired,
+		"two_factor_enrollment_required": principal.TwoFactorEnrollmentRequired,
 	}
+	if principal.Method == adminauth.AuthenticationSession && principal.SignInMethod != "" {
+		document["sign_in_method"] = principal.SignInMethod
+	}
+	document["application_roles"] = applicationRolesDocument(principal)
+	return document
 }
 
 func selectMembership(memberships []controlplane.Membership, organizationID string) (controlplane.Membership, bool) {
@@ -1393,6 +1529,48 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.bootstrap_owner", "admin_request"
 	case strings.HasSuffix(path, "/auth/login"):
 		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/login/two-factor") || strings.HasSuffix(path, "/auth/login/two-factor/passkey-options"):
+		return "admin.login_second_factor", "admin_request"
+	case strings.HasSuffix(path, "/auth/passkeys/sign-in") || strings.HasSuffix(path, "/auth/passkeys/sign-in-options"):
+		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/passkeys") || strings.HasSuffix(path, "/auth/passkeys/registration-options"):
+		return "admin.passkey_add", "admin_request"
+	case strings.Contains(path, "/auth/passkeys/") && strings.HasSuffix(path, "/remove"):
+		return "admin.passkey_remove", "admin_request"
+	case strings.HasSuffix(path, "/auth/password"):
+		return "admin.password_change", "admin_request"
+	case strings.HasSuffix(path, "/auth/organization"):
+		return "admin.session_switch", "admin_request"
+	case strings.Contains(path, "/auth/sessions/"):
+		return "admin.session_revoke", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/totp") || strings.HasSuffix(path, "/auth/two-factor/totp/confirm"):
+		return "admin.two_factor_enable", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/recovery-codes"):
+		return "admin.recovery_codes_replace", "admin_request"
+	case strings.HasSuffix(path, "/auth/two-factor/disable"):
+		return "admin.two_factor_disable", "admin_request"
+	case strings.Contains(path, "/application-roles/") && method == http.MethodDelete:
+		return "admin.application_role_remove", "admin_request"
+	case strings.Contains(path, "/application-roles/"):
+		return "admin.application_role_set", "admin_request"
+	case strings.HasSuffix(path, "/reset-two-factor"):
+		return "admin.two_factor_reset", "admin_request"
+	case strings.HasSuffix(path, "/two-factor-requirement"):
+		return "admin.organization_security_update", "admin_request"
+	case strings.HasSuffix(path, "/auth/sso/start"):
+		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/invitations/accept") || strings.HasSuffix(path, "/auth/invitations/claim") || strings.HasSuffix(path, "/auth/invitations/preview"):
+		return "admin.invitation_accept", "admin_request"
+	case strings.Contains(path, "/invitations/") && strings.HasSuffix(path, "/revoke"):
+		return "admin.invitation_revoke", "admin_request"
+	case strings.Contains(path, "/invitations/") && strings.HasSuffix(path, "/renew"):
+		return "admin.invitation_renew", "admin_request"
+	case strings.HasSuffix(path, "/invitations"):
+		return "admin.invitation_create", "admin_request"
+	case strings.HasSuffix(path, "/sso") && method == http.MethodDelete:
+		return "admin.sso_remove", "admin_request"
+	case strings.HasSuffix(path, "/sso"):
+		return "admin.sso_configure", "admin_request"
 	case strings.HasSuffix(path, "/auth/logout"):
 		return "admin.logout", "admin_request"
 	case strings.HasSuffix(path, "/organizations"):
@@ -1411,6 +1589,24 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.environment_enable", "admin_request"
 	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
 		return "admin.configuration_revision_create", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/organizations/"):
+		return "admin.organization_rename", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/applications/"):
+		return "admin.application_rename", "admin_request"
+	case method == http.MethodPatch && strings.Contains(path, "/environments/"):
+		return "admin.environment_rename", "admin_request"
+	case strings.HasSuffix(path, "/simulation-scenarios") && method == http.MethodPost:
+		return "admin.simulation_scenario_create", "admin_request"
+	case strings.Contains(path, "/simulation-scenarios/") && method == http.MethodPut:
+		return "admin.simulation_scenario_update", "admin_request"
+	case strings.Contains(path, "/simulation-scenarios/") && method == http.MethodDelete:
+		return "admin.simulation_scenario_delete", "admin_request"
+	case strings.HasSuffix(path, "/config-revisions/promote"):
+		return "admin.configuration_promote", "admin_request"
+	case strings.Contains(path, "/config-revisions/") && strings.HasSuffix(path, "/discard"):
+		return "admin.configuration_revision_discard", "admin_request"
+	case strings.Contains(path, "/config-revisions/") && strings.HasSuffix(path, "/rebase"):
+		return "admin.configuration_revision_rebase", "admin_request"
 	case strings.Contains(path, "/config-revisions/") && method == http.MethodPatch:
 		return "admin.configuration_revision_update", "admin_request"
 	case strings.HasSuffix(path, "/validate"):
@@ -1437,6 +1633,8 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.user_limit_override_replace", "admin_request"
 	case strings.HasSuffix(path, "/limit-override") && method == http.MethodDelete:
 		return "admin.user_limit_override_clear", "admin_request"
+	case strings.HasSuffix(path, "/users/batch") || strings.HasSuffix(path, "/users/batch-impact"):
+		return "admin.user_batch", "admin_request"
 	case strings.HasSuffix(path, "/block") && strings.Contains(path, "/users/"):
 		return "admin.user_block", "admin_request"
 	case strings.HasSuffix(path, "/unblock") && strings.Contains(path, "/users/"):

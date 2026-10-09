@@ -19,6 +19,17 @@ const (
 	serverCapabilityConfigurationImportExport serverCapability = "configuration_import_export"
 	serverCapabilityAdminSessionManagement    serverCapability = "admin_session_management"
 	serverCapabilityAdminEventStream          serverCapability = "admin_event_stream"
+	serverCapabilityAdminAccountSelfService   serverCapability = "admin_account_self_service"
+	serverCapabilityAdminTwoFactor            serverCapability = "admin_two_factor"
+	serverCapabilityAdminPasskeys             serverCapability = "admin_passkeys"
+	serverCapabilityAdminSSO                  serverCapability = "admin_sso"
+	serverCapabilityAdminInvitations          serverCapability = "admin_invitations"
+	serverCapabilityAdminApplicationRoles     serverCapability = "admin_application_roles"
+	serverCapabilityAdminUserInsights         serverCapability = "admin_user_insights"
+	serverCapabilityAdminRequestSearch        serverCapability = "admin_request_search"
+	serverCapabilityAdminConfigurationDrafts  serverCapability = "admin_configuration_drafts"
+	serverCapabilityAdminPolicyInsights       serverCapability = "admin_policy_insights"
+	serverCapabilityAdminOperationsHistory    serverCapability = "admin_operations_history"
 )
 
 // supportedServerCapabilities is intentionally ordered and closed. Append-only
@@ -38,6 +49,17 @@ var supportedServerCapabilities = [...]serverCapability{
 	serverCapabilityConfigurationImportExport,
 	serverCapabilityAdminSessionManagement,
 	serverCapabilityAdminEventStream,
+	serverCapabilityAdminAccountSelfService,
+	serverCapabilityAdminTwoFactor,
+	serverCapabilityAdminPasskeys,
+	serverCapabilityAdminSSO,
+	serverCapabilityAdminInvitations,
+	serverCapabilityAdminApplicationRoles,
+	serverCapabilityAdminUserInsights,
+	serverCapabilityAdminRequestSearch,
+	serverCapabilityAdminConfigurationDrafts,
+	serverCapabilityAdminPolicyInsights,
+	serverCapabilityAdminOperationsHistory,
 }
 
 func serverCapabilities() []serverCapability {

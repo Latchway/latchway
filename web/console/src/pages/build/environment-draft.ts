@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { useState } from "react";
 
 import {
@@ -7,6 +8,8 @@ import {
   type ConfigurationPlan,
   type ConfigurationRevision,
   type ConfigurationValidation,
+  type MergePreview,
+  MergePreviewSchema,
   queryPath,
   RevisionSchema,
   ValidationSchema
@@ -57,7 +60,7 @@ export function draftProblem(error: unknown): AdminProblem {
     return { ...problem, detail: "The draft changed in another tab or by another administrator since this page loaded it. Your change wasn't saved; review the current draft and try again.", title: "The draft changed" };
   }
   if (problem.code === "conflict" || problem.status === 409) {
-    return { ...problem, detail: "This draft was started from a configuration that is no longer live, so it can't be published. Make the change again: it will start a new draft from the live configuration.", title: "The draft is out of date" };
+    return { ...problem, detail: "This draft started from a configuration that's no longer live, so it can't be published as it is. Review it under Changes → Draft.", title: "The draft is out of date" };
   }
   return problem;
 }
@@ -68,6 +71,7 @@ function requireETag(etag: string | undefined, what: string): string {
 }
 
 export function useEnvironmentDraft() {
+  const { can } = useCapabilities();
   const queryClient = useQueryClient();
   const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
@@ -77,6 +81,8 @@ export function useEnvironmentDraft() {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<AdminProblem>();
   const [lastSave, setLastSave] = useState<DraftSaveResult & { environmentID: string }>();
+  /** Servers with the draft lifecycle (ADR 0048) keep a validated draft editable, discard drafts and keep publish notes. */
+  const lifecycle = compatibility.status?.server_capabilities.includes("admin_configuration_drafts") ?? false;
 
   const active = useQuery({
     enabled: Boolean(environmentID),
@@ -108,7 +114,7 @@ export function useEnvironmentDraft() {
   const document = (draft?.data.document ?? activeRevision?.document) as JSONRecord | undefined;
   const canConfigure = session.data?.mode === "configured"
     && compatibility.mutationAllowed
-    && (session.data.session?.capabilities.includes("activate_configuration") ?? false)
+    && can("activate_configuration")
     && workspace?.application?.status !== "disabled"
     && environment?.status !== "disabled";
 
@@ -127,7 +133,14 @@ export function useEnvironmentDraft() {
     if (newest && DRAFT_STATES.has(newest.state) && newest.version > activeNow.data.version) {
       const existing = await adminRequest(`/admin/v1/config-revisions/${newest.id}`, RevisionSchema);
       if (existing.data.environment_id !== environmentID) throw new DraftContextMismatch("draft");
-      return { etag: requireETag(existing.etag, "the working draft"), revision: existing.data };
+      if (existing.data.state !== "valid" || lifecycle) return { etag: requireETag(existing.etag, "the working draft"), revision: existing.data };
+      // Older servers freeze a draft once it validates; carry its content into a fresh draft instead.
+      const carried = await adminRequest(`/admin/v1/environments/${environmentID}/config-revisions`, RevisionSchema, {
+        body: { description, document: existing.data.document },
+        method: "POST"
+      });
+      if (carried.data.environment_id !== environmentID) throw new DraftContextMismatch("draft");
+      return { etag: requireETag(carried.etag, "the new draft"), revision: carried.data };
     }
     const created = await adminRequest(`/admin/v1/environments/${environmentID}/config-revisions`, RevisionSchema, {
       body: { base_revision_id: activeNow.data.id, description },
@@ -166,14 +179,19 @@ export function useEnvironmentDraft() {
     }
   }
 
-  /** Publishes the working draft with its current ETag. */
-  async function publish(): Promise<ConfigurationRevision | undefined> {
+  /** Publishes the working draft with its current ETag, with a publish note when the server keeps one. */
+  async function publish(note?: string): Promise<ConfigurationRevision | undefined> {
     if (!canConfigure || !draft) return undefined;
     setBusy(true);
     setProblem(undefined);
     try {
       const current = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}`, RevisionSchema);
-      const activated = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}/activate`, RevisionSchema, { etag: requireETag(current.etag, "the working draft"), method: "POST" });
+      const trimmed = note?.trim();
+      const activated = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}/activate`, RevisionSchema, {
+        ...(lifecycle && trimmed ? { body: { note: trimmed } } : {}),
+        etag: requireETag(current.etag, "the working draft"),
+        method: "POST"
+      });
       if (activated.data.environment_id !== environmentID) throw new DraftContextMismatch("activated");
       setLastSave(undefined);
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["environment", environmentID] })]);
@@ -181,6 +199,58 @@ export function useEnvironmentDraft() {
     } catch (error) {
       setProblem(draftProblem(error));
       return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Discards the working draft: it stays in History as discarded and the environment has no draft. */
+  async function discard(): Promise<boolean> {
+    if (!canConfigure || !draft || !lifecycle) return false;
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      const current = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}`, RevisionSchema);
+      const discarded = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}/discard`, RevisionSchema, { etag: requireETag(current.etag, "the working draft"), method: "POST" });
+      if (discarded.data.id !== draft.data.id || discarded.data.state !== "discarded") throw new DraftContextMismatch("discarded");
+      setLastSave(undefined);
+      await refresh();
+      return true;
+    } catch (error) {
+      setProblem(draftProblem(error));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** What bringing the stale working draft up to date would combine, by path. */
+  async function previewRebase(): Promise<MergePreview> {
+    if (!draft) throw new Error("There is no working draft.");
+    const preview = (await adminRequest(`/admin/v1/config-revisions/${draft.data.id}/rebase-preview`, MergePreviewSchema)).data;
+    if (preview.revision_id !== draft.data.id) throw new DraftContextMismatch("rebase");
+    return preview;
+  }
+
+  /** Moves the working draft onto the live revision, with a side chosen for every conflicting path. */
+  async function rebase(liveRevisionID: string, resolutions: Record<string, "draft" | "live">): Promise<boolean> {
+    if (!canConfigure || !draft || !lifecycle) return false;
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      const current = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}`, RevisionSchema);
+      const rebased = await adminRequest(`/admin/v1/config-revisions/${draft.data.id}/rebase`, RevisionSchema, {
+        body: { live_revision_id: liveRevisionID, resolutions },
+        etag: requireETag(current.etag, "the working draft"),
+        method: "POST"
+      });
+      if (rebased.data.id !== draft.data.id || rebased.data.base_revision_id !== liveRevisionID) throw new DraftContextMismatch("rebased");
+      setLastSave(undefined);
+      await refresh();
+      return true;
+    } catch (error) {
+      setProblem(draftProblem(error));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -203,6 +273,7 @@ export function useEnvironmentDraft() {
     }
   }
 
+  const base = draft?.data.base_revision_id;
   return {
     active: activeRevision,
     activeDocument: activeRevision?.document as JSONRecord | undefined,
@@ -211,16 +282,22 @@ export function useEnvironmentDraft() {
     application: workspace?.application,
     busy,
     canConfigure,
+    discard,
     document,
     draft: draft?.data,
     environment,
     isPending: active.isPending || (active.isSuccess && working.isPending),
     lastSave: lastSave?.environmentID === environmentID && lastSave.revision.id === draft?.data.id ? lastSave : undefined,
     problem: problem ?? (active.error ? draftProblem(active.error) : working.error ? draftProblem(working.error) : undefined),
+    lifecycle,
+    previewRebase,
     publish,
+    rebase,
     refetch: () => Promise.all([active.refetch(), working.refetch()]),
     save,
     setProblem,
+    /** The draft started from a revision that is no longer live, so it can't be published until it's brought up to date. */
+    stale: Boolean(lifecycle && base && activeRevision && base !== activeRevision.id),
     validate
   };
 }

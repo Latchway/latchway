@@ -173,7 +173,7 @@ describe("Features", () => {
     server();
     renderPage();
     expect(await screen.findByText("weekly_summary")).toBeInTheDocument();
-    expect(screen.getByText("Selected scope is disabled").closest("section")).toHaveAttribute("role", "status");
+    expect(screen.getByText("Selected scope is disabled").closest("[role=status]")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New Feature" })).not.toBeInTheDocument();
   });
 

@@ -42,6 +42,8 @@ const (
 	AdminAPIToken       Prefix = "tok"
 	AdminBootstrapToken Prefix = "abt"
 	AdminRequest        Prefix = "arq"
+	AdminPasskey        Prefix = "apk"
+	AdminInvitation     Prefix = "ain"
 	ConfigRevision      Prefix = "rev"
 	SecretRecord        Prefix = "sec"
 	GatewaySigningKey   Prefix = "gsk"
@@ -75,6 +77,7 @@ const (
 	AuditEvent          Prefix = "aud"
 	SelfTest            Prefix = "tst"
 	SelfTestSchedule    Prefix = "sts"
+	SimulationScenario  Prefix = "ssc"
 )
 
 const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

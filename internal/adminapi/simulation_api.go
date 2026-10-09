@@ -1,8 +1,10 @@
 package adminapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,10 +40,45 @@ type routeSimulationRequest struct {
 	Principal     routeSimulationPrincipal    `json:"principal"`
 	TrustLevel    string                      `json:"trust_level"`
 	Request       routeSimulationRequestFacts `json:"request"`
+	Failures      []routeSimulationFailure    `json:"failures,omitempty"`
 }
+
+// routeSimulationFailure makes attempts on one route fail with a condition:
+// the first Attempts tries, or every try when Attempts is zero.
+// "non_retryable" stands for any failure no retry or fallback policy names.
+type routeSimulationFailure struct {
+	Route     string `json:"route"`
+	Condition string `json:"condition"`
+	Attempts  int64  `json:"attempts,omitempty"`
+}
+
+type routeSimulationAttempt struct {
+	Number          int64  `json:"number"`
+	Route           string `json:"route"`
+	Upstream        string `json:"upstream"`
+	Model           string `json:"model"`
+	Outcome         string `json:"outcome"`
+	Condition       string `json:"condition,omitempty"`
+	Next            string `json:"next,omitempty"`
+	RetryDelayMaxMS *int64 `json:"retry_delay_max_ms,omitempty"`
+}
+
+type routeSimulationAttemptPlan struct {
+	Attempts         []routeSimulationAttempt `json:"attempts"`
+	Outcome          string                   `json:"outcome"`
+	ServedByRoute    string                   `json:"served_by_route,omitempty"`
+	FailureCondition string                   `json:"failure_condition,omitempty"`
+	Assumptions      []string                 `json:"assumptions"`
+}
+
+const (
+	nonRetryableSimulationCondition = "non_retryable"
+	maximumSimulationFailures       = 16
+)
 
 type routeSimulationRequestFacts struct {
 	Streaming             bool   `json:"streaming"`
+	HTTPMethod            string `json:"http_method,omitempty"`
 	AppVersion            string `json:"app_version,omitempty"`
 	RequestedInputTokens  int64  `json:"requested_input_tokens,omitempty"`
 	RequestedOutputMax    int64  `json:"requested_output_max,omitempty"`
@@ -153,19 +190,16 @@ type routeSimulationResult struct {
 	FallbackSequence        []routeSimulationCandidate  `json:"fallback_sequence,omitempty"`
 	PricingConfidence       string                      `json:"pricing_confidence,omitempty"`
 	Reservation             *routeSimulationReservation `json:"reservation,omitempty"`
+	AttemptPlan             *routeSimulationAttemptPlan `json:"attempt_plan,omitempty"`
 	Warnings                []string                    `json:"warnings,omitempty"`
 	Explanation             []string                    `json:"explanation"`
 }
 
 func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Request) {
 	request, err := decodeJSON[routeSimulationRequest](r)
-	if err != nil || request.Principal.Authenticated == nil || request.Principal.Claims == nil ||
-		len(request.Principal.Claims) > 64 || !validSimulationRequestFacts(request.Request) {
+	if err != nil || !validRouteSimulationRequest(&request) {
 		api.writeProblem(w, r, invalidRequest("The route-simulation request is invalid."))
 		return
-	}
-	if request.TrustLevel == "" {
-		request.TrustLevel = "none"
 	}
 	compiled, err := api.configurations.SimulationSnapshot(
 		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
@@ -174,38 +208,122 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		api.handleConfigurationError(w, r, err)
 		return
 	}
+	result, failure := api.simulateRoute(r.Context(), compiled, request)
+	if failure != nil {
+		api.writeProblem(w, r, *failure)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+const maximumBatchSimulations = 50
+
+type routeSimulationBatchRequest struct {
+	Requests []routeSimulationRequest `json:"requests"`
+}
+
+type routeSimulationBatchItem struct {
+	Index   int                    `json:"index"`
+	Result  *routeSimulationResult `json:"result,omitempty"`
+	Problem *simulationItemProblem `json:"problem,omitempty"`
+}
+
+type simulationItemProblem struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+}
+
+// simulateConfigurationRevisionBatch runs up to 50 simulations against one
+// compiled revision. Each item succeeds or fails on its own.
+func (api *API) simulateConfigurationRevisionBatch(w http.ResponseWriter, r *http.Request) {
+	batch, err := decodeJSON[routeSimulationBatchRequest](r)
+	if err != nil || len(batch.Requests) == 0 || len(batch.Requests) > maximumBatchSimulations {
+		api.writeProblem(w, r, invalidRequest("The batch must hold 1 to 50 route-simulation requests."))
+		return
+	}
+	compiled, err := api.configurations.SimulationSnapshot(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	items := make([]routeSimulationBatchItem, 0, len(batch.Requests))
+	for index := range batch.Requests {
+		item := routeSimulationBatchItem{Index: index}
+		if !validRouteSimulationRequest(&batch.Requests[index]) {
+			item.Problem = &simulationItemProblem{Code: "invalid_request", Detail: "The route-simulation request is invalid."}
+		} else if result, failure := api.simulateRoute(r.Context(), compiled, batch.Requests[index]); failure != nil {
+			item.Problem = &simulationItemProblem{Code: failure.Code, Detail: failure.Detail}
+		} else {
+			item.Result = &result
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func validRouteSimulationRequest(request *routeSimulationRequest) bool {
+	if request.Principal.Authenticated == nil || request.Principal.Claims == nil ||
+		len(request.Principal.Claims) > 64 || !validSimulationRequestFacts(request.Request) ||
+		len(request.Failures) > maximumSimulationFailures {
+		return false
+	}
+	if request.TrustLevel == "" {
+		request.TrustLevel = "none"
+	}
+	conditions := configuration.RetryConditions()
+	seen := make(map[string]struct{}, len(request.Failures))
+	for _, failure := range request.Failures {
+		if !operationalIdentifierPattern.MatchString(failure.Route) || failure.Attempts < 0 ||
+			failure.Attempts > configuration.MaximumLogicalAttempts ||
+			(failure.Condition != nonRetryableSimulationCondition && !slices.Contains(conditions, failure.Condition)) {
+			return false
+		}
+		if _, duplicate := seen[failure.Route]; duplicate {
+			return false
+		}
+		seen[failure.Route] = struct{}{}
+	}
+	return true
+}
+
+// simulateRoute evaluates one request against a compiled revision. A non-nil
+// problem means the request or revision can't be simulated; a denial is a
+// result.
+func (api *API) simulateRoute(
+	ctx context.Context,
+	compiled configuration.SimulationSnapshot,
+	request routeSimulationRequest,
+) (routeSimulationResult, *problem.Error) {
 	if request.ApplicationID != "" && (id.Validate(request.ApplicationID, id.Application) != nil ||
 		request.ApplicationID != compiled.Scope.ApplicationID) ||
 		request.EnvironmentID != "" && (id.Validate(request.EnvironmentID, id.Environment) != nil ||
 			request.EnvironmentID != compiled.Scope.EnvironmentID) {
-		api.writeProblem(w, r, invalidRequest("The simulator application or environment does not match the selected revision."))
-		return
+		failure := invalidRequest("The simulator application or environment does not match the selected revision.")
+		return routeSimulationResult{}, &failure
 	}
 	facts := simulationFacts(compiled, request)
 	base := baseSimulationResult(compiled, facts)
 	if !*request.Principal.Authenticated {
 		base.Explanation = []string{"Authentication fails before production policy evaluation."}
-		writeJSON(w, http.StatusOK, base)
-		return
+		return base, nil
 	}
 	feature, found := compiled.Snapshot.Feature(request.Feature)
 	if !found {
 		base.Explanation = []string{"The selected revision has no feature with this identifier."}
-		writeJSON(w, http.StatusOK, base)
-		return
+		return base, nil
 	}
 	attestationPolicy, found := compiled.Snapshot.AttestationPolicy(feature.AttestationPolicyID)
 	if !found {
-		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision has an invalid attestation-policy reference."})
-		return
+		return routeSimulationResult{}, &problem.Error{Code: "configuration_invalid", Detail: "The selected revision has an invalid attestation-policy reference."}
 	}
 	attestation, found := attestationPolicy.Platforms[request.Platform]
 	if !found {
-		writeJSON(w, http.StatusOK, deniedSimulationResult(
+		return deniedSimulationResult(
 			base, feature,
 			"The feature's attestation policy does not define the simulated platform.",
-		))
-		return
+		), nil
 	}
 	now := time.Now().UTC()
 	input, err := policy.NewSimulationInput(policy.SimulationFacts{
@@ -222,21 +340,24 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		EvaluatedAt:          now,
 	})
 	if err != nil {
-		api.writeProblem(w, r, invalidRequest("The route-simulation facts are invalid or exceed their safety bound."))
-		return
+		failure := invalidRequest("The route-simulation facts are invalid or exceed their safety bound.")
+		return routeSimulationResult{}, &failure
 	}
-	plan, err := api.policyResolver.ResolvePlan(r.Context(), compiled.Snapshot, request.Feature, input)
+	plan, err := api.policyResolver.ResolvePlan(ctx, compiled.Snapshot, request.Feature, input)
 	if err != nil {
 		if detail, denied := simulationDenial(err); denied {
-			writeJSON(w, http.StatusOK, deniedSimulationResult(base, feature, detail))
-			return
+			return deniedSimulationResult(base, feature, detail), nil
 		}
-		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an executable route plan."})
-		return
+		return routeSimulationResult{}, &problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an executable route plan."}
 	}
 	if len(plan.Candidates) == 0 {
-		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision produced an empty route plan."})
-		return
+		return routeSimulationResult{}, &problem.Error{Code: "configuration_invalid", Detail: "The selected revision produced an empty route plan."}
+	}
+	for _, failure := range request.Failures {
+		if !slices.ContainsFunc(plan.Candidates, func(candidate policy.RouteDecision) bool { return candidate.Route.ID == failure.Route }) {
+			unknown := invalidRequest("A simulated failure names a route that isn't in this request's route plan.")
+			return routeSimulationResult{}, &unknown
+		}
 	}
 	primary := plan.Candidates[0]
 	projection, err := dataplane.ProjectReservation(compiled.Snapshot, policy.Decision{
@@ -253,11 +374,10 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if errors.Is(err, dataplane.ErrInvalidReservationProjection) {
-			api.writeProblem(w, r, invalidRequest("The request shape cannot produce the trusted conservative reservation required by this route."))
-			return
+			failure := invalidRequest("The request shape cannot produce the trusted conservative reservation required by this route.")
+			return routeSimulationResult{}, &failure
 		}
-		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an exact conservative reservation."})
-		return
+		return routeSimulationResult{}, &problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an exact conservative reservation."}
 	}
 
 	limits := make([]routeSimulationLimit, 0, len(plan.LimitPlan.Limits))
@@ -306,11 +426,80 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		"The route order applies configured priority, weight, sticky selection, and fallback policy.",
 		"Reservation units use the production clamp, trusted-input, pricing, and quota projection helpers without mutating quota state.",
 	}
-	writeJSON(w, http.StatusOK, base)
+	if len(request.Failures) != 0 {
+		attemptPlan := simulateAttempts(plan.Candidates, request.Failures, plan.Feature.Protocol, request.Request.HTTPMethod)
+		base.AttemptPlan = &attemptPlan
+	}
+	return base, nil
+}
+
+// simulateAttempts walks the route plan the way the data plane does after a
+// failed attempt: retry on the same route when its retry policy names the
+// condition, otherwise fall back to the next candidate when its fallback
+// policy does, within the logical attempt limit. It shares those decisions
+// with the data plane through configuration.Route.
+func simulateAttempts(candidates []policy.RouteDecision, failures []routeSimulationFailure, protocolID, method string) routeSimulationAttemptPlan {
+	byRoute := make(map[string]routeSimulationFailure, len(failures))
+	for _, failure := range failures {
+		byRoute[failure.Route] = failure
+	}
+	plan := routeSimulationAttemptPlan{
+		Attempts: make([]routeSimulationAttempt, 0, 4),
+		Assumptions: []string{
+			"Every retry delay fits within the request deadline.",
+			"No response bytes reach the app before an attempt fails.",
+		},
+	}
+	replayable := func(route configuration.Route) bool {
+		return protocolID != protocol.OpaqueHTTPID || method == http.MethodGet || route.RetryUnsafeMethods
+	}
+	if protocolID == protocol.OpaqueHTTPID && method == "" {
+		plan.Assumptions = append(plan.Assumptions, "The opaque HTTP request is not a GET, so it is replayed only on routes that allow unsafe-method retries.")
+	}
+	failed := make(map[string]int64, len(failures))
+	index, routeAttempts := 0, int64(1)
+	for total := int64(1); ; total++ {
+		candidate := candidates[index]
+		attempt := routeSimulationAttempt{
+			Number: total, Route: candidate.Route.ID, Upstream: candidate.Upstream.ID, Model: candidate.Model.ID,
+		}
+		failure, failing := byRoute[candidate.Route.ID]
+		if !failing || (failure.Attempts != 0 && failed[candidate.Route.ID] >= failure.Attempts) {
+			attempt.Outcome = "succeeded"
+			plan.Attempts = append(plan.Attempts, attempt)
+			plan.Outcome, plan.ServedByRoute = "served", candidate.Route.ID
+			return plan
+		}
+		failed[candidate.Route.ID]++
+		attempt.Outcome, attempt.Condition, attempt.Next = "failed", failure.Condition, "stop"
+		retryable := failure.Condition != nonRetryableSimulationCondition
+		if retryable && total < configuration.MaximumLogicalAttempts && replayable(candidate.Route) {
+			if candidate.Route.RetriesOn(failure.Condition, routeAttempts) {
+				attempt.Next = "retry"
+				delay := candidate.Route.RetryPolicy.BackoffCeiling(routeAttempts).Milliseconds()
+				attempt.RetryDelayMaxMS = &delay
+			} else if candidate.Route.FallsBackOn(failure.Condition) && index+1 < len(candidates) && replayable(candidates[index+1].Route) {
+				attempt.Next = "fallback"
+			}
+		}
+		plan.Attempts = append(plan.Attempts, attempt)
+		switch attempt.Next {
+		case "retry":
+			routeAttempts++
+		case "fallback":
+			index, routeAttempts = index+1, 1
+		default:
+			plan.Outcome, plan.FailureCondition = "failed", failure.Condition
+			return plan
+		}
+	}
 }
 
 func validSimulationRequestFacts(facts routeSimulationRequestFacts) bool {
-	return len(facts.AppVersion) <= 128 && !strings.ContainsAny(facts.AppVersion, "\r\n\x00") &&
+	return (facts.HTTPMethod == "" || slices.Contains([]string{
+		http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
+	}, facts.HTTPMethod)) &&
+		len(facts.AppVersion) <= 128 && !strings.ContainsAny(facts.AppVersion, "\r\n\x00") &&
 		facts.RequestedInputTokens >= 0 && facts.RequestedInputTokens <= maximumSimulatedTokens &&
 		facts.RequestedOutputMax >= 0 && facts.RequestedOutputMax <= maximumSimulatedTokens &&
 		facts.RewrittenRequestBytes >= 0 && facts.RewrittenRequestBytes <= maximumSimulatedBytes &&

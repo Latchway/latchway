@@ -110,13 +110,13 @@ class PublicReferenceTests(unittest.TestCase):
     def test_new_draft_admin_bundle_does_not_unrelease_client_baseline(self) -> None:
         rendered = reference.render_all()
         protocol = reference.json.loads(reference.PROTOCOL_SOURCE.read_text())
-        self.assertEqual(protocol["contract_version"], "1.1.2")
+        self.assertEqual(protocol["contract_version"], "1.1.3")
         self.assertEqual(protocol["client_contract_version"], "1.1.0")
-        self.assertIn('serverVersion: "1.1.3"', rendered[reference.ADMIN_OUTPUT])
-        self.assertIn('serverVersion: "1.1.3"', rendered[reference.CONFIG_OUTPUT])
+        self.assertIn('serverVersion: "1.2.0"', rendered[reference.ADMIN_OUTPUT])
+        self.assertIn('serverVersion: "1.2.0"', rendered[reference.CONFIG_OUTPUT])
         self.assertIn('serverVersion: "1.1.0"', rendered[reference.CLIENT_OUTPUT])
         if protocol["contract_status"] == "draft":
-            self.assertIn("draft Admin contract bundle 1.1.2", rendered[reference.ADMIN_OUTPUT])
+            self.assertIn("draft Admin contract bundle 1.1.3", rendered[reference.ADMIN_OUTPUT])
             self.assertIn("Client contract 1.1.0 remains unchanged", rendered[reference.ADMIN_OUTPUT])
         else:
             self.assertNotIn("draft Admin contract bundle", rendered[reference.ADMIN_OUTPUT])
@@ -132,7 +132,7 @@ class PublicReferenceTests(unittest.TestCase):
                 operation = path_item.get(method)
                 if isinstance(operation, dict):
                     operations.append(operation["operationId"])
-        self.assertEqual(len(operations), 77)
+        self.assertEqual(len(operations), 137)
         for operation_id in operations:
             self.assertEqual(rendered.count(f"`{operation_id}`"), 1, operation_id)
         for exact_path in (

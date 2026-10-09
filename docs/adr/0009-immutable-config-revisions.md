@@ -64,3 +64,8 @@ Accepted for version 1 on 2026-08-27.
 The explicit version 1 CRUD mapping and no-delete/no-abandon boundary were
 clarified on 2026-09-01 without changing the original immutable-revision
 decision.
+
+Amended by ADR 0048 on 2026-10-08: a validated revision that was never
+activated is editable again (returning to draft), and a never-activated draft
+can be discarded as a retained, immutable tombstone. Nothing is deleted, and
+activated revisions are unchanged.

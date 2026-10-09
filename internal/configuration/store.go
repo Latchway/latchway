@@ -119,19 +119,26 @@ func (store *Store) CreateRevision(ctx context.Context, principal adminauth.Prin
 	if err != nil {
 		return Revision{}, err
 	}
+	if !canWriteIn(principal, environment.ApplicationID) {
+		return Revision{}, ErrForbidden
+	}
 	baseRevisionID := activeRevisionID
-	if input.BaseRevisionID != "" {
-		if activeRevisionID == "" || input.BaseRevisionID != activeRevisionID {
-			return Revision{}, ErrConflict
-		}
-		base, getErr := store.revision(ctx, tx, principal.OrganizationID, input.BaseRevisionID, false)
+	var baseDocument json.RawMessage
+	if input.BaseRevisionID != "" && (activeRevisionID == "" || input.BaseRevisionID != activeRevisionID) {
+		return Revision{}, ErrConflict
+	}
+	if activeRevisionID != "" {
+		base, getErr := store.revision(ctx, tx, principal.OrganizationID, activeRevisionID, false)
 		if getErr != nil {
 			return Revision{}, getErr
 		}
 		if base.State != StateActive || base.EnvironmentID != input.EnvironmentID {
 			return Revision{}, ErrConflict
 		}
-		document = append(json.RawMessage(nil), base.Document...)
+		baseDocument = base.Document
+		if input.BaseRevisionID != "" {
+			document = append(json.RawMessage(nil), base.Document...)
+		}
 	}
 	revisionID, err := id.New(id.ConfigRevision)
 	if err != nil {
@@ -159,6 +166,10 @@ func (store *Store) CreateRevision(ctx context.Context, principal adminauth.Prin
 		strings.TrimSpace(input.Description), editVersion); err != nil {
 		return Revision{}, mapDatabaseError("insert configuration draft", err)
 	}
+	if err := recordEdit(ctx, tx, environment.OrganizationID, revisionID, editVersion, editKindCreated,
+		principal.AdminUserID, now, baseDocument, document); err != nil {
+		return Revision{}, err
+	}
 	if err := store.audit(ctx, tx, principal, environment.OrganizationID, environment.EnvironmentID,
 		"admin.configuration_revision_create", revisionID,
 		[]auditField{{name: "document", sensitive: true}, {name: "base_revision_id"}}); err != nil {
@@ -170,14 +181,16 @@ func (store *Store) CreateRevision(ctx context.Context, principal adminauth.Prin
 	return Revision{
 		ID: revisionID, EnvironmentID: input.EnvironmentID, State: StateDraft,
 		Version: version, Document: append(json.RawMessage(nil), document...), CreatedAt: now,
-		CreatedBy: principal.AdminUserID, ETag: etag, organizationID: environment.OrganizationID,
-		applicationID: environment.ApplicationID, baseRevisionID: baseRevisionID,
-		storedState: StateDraft, editVersion: editVersion,
+		CreatedBy: principal.AdminUserID, UpdatedAt: now, UpdatedBy: principal.AdminUserID,
+		BaseRevisionID: baseRevisionID, Description: strings.TrimSpace(input.Description),
+		ETag: etag, organizationID: environment.OrganizationID,
+		applicationID: environment.ApplicationID, storedState: StateDraft, editVersion: editVersion,
 	}, nil
 }
 
-// ReplaceDraft replaces the entire document of a mutable draft using a strong
-// ETag. Invalid revisions remain editable and return to draft state.
+// ReplaceDraft replaces the entire document of a never-activated draft using
+// a strong ETag. Invalid and validated revisions that were never activated
+// return to draft state; activated and discarded revisions stay immutable.
 func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Principal, revisionID, ifMatch string, document json.RawMessage) (Revision, error) {
 	if !canWrite(principal) {
 		return Revision{}, ErrForbidden
@@ -201,10 +214,13 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 	if err != nil {
 		return Revision{}, err
 	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return Revision{}, ErrForbidden
+	}
 	if _, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true); err != nil {
 		return Revision{}, err
 	}
-	if revision.storedState != StateDraft && revision.storedState != StateInvalid {
+	if !editableRevision(revision) {
 		return Revision{}, ErrConflict
 	}
 	if revision.ETag != ifMatch {
@@ -212,6 +228,7 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 	}
 	editVersion := revision.editVersion + 1
 	etag := revisionETag(revisionID, editVersion, canonical)
+	now := store.now().UTC()
 	if _, err := tx.Exec(ctx, `
 		UPDATE config_revisions
 		SET document = $2, etag = $3, edit_version = $4, status = 'draft',
@@ -220,6 +237,10 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 		WHERE config_revision_id = $1
 	`, revisionID, canonical, etag, editVersion); err != nil {
 		return Revision{}, mapDatabaseError("replace configuration draft", err)
+	}
+	if err := recordEdit(ctx, tx, revision.organizationID, revisionID, editVersion, editKindEdited,
+		principal.AdminUserID, now, revision.Document, canonical); err != nil {
+		return Revision{}, err
 	}
 	if err := store.audit(ctx, tx, principal, revision.organizationID, revision.EnvironmentID,
 		"admin.configuration_revision_update", revisionID,
@@ -236,6 +257,7 @@ func (store *Store) ReplaceDraft(ctx context.Context, principal adminauth.Princi
 	revision.compiled = nil
 	revision.ETag = etag
 	revision.editVersion = editVersion
+	revision.UpdatedAt, revision.UpdatedBy = now, principal.AdminUserID
 	return revision, nil
 }
 
@@ -255,6 +277,9 @@ func (store *Store) ValidateRevision(ctx context.Context, principal adminauth.Pr
 	revision, err := store.revision(ctx, tx, principal.OrganizationID, revisionID, true)
 	if err != nil {
 		return ValidationReport{}, err
+	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return ValidationReport{}, ErrForbidden
 	}
 	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
 	if err != nil {
@@ -318,6 +343,9 @@ func (store *Store) PlanRevision(ctx context.Context, principal adminauth.Princi
 	if err != nil {
 		return Plan{}, err
 	}
+	if !canWriteIn(principal, target.applicationID) {
+		return Plan{}, ErrForbidden
+	}
 	if target.State != StateValid || target.Validation == nil || !target.Validation.Valid {
 		return Plan{}, ErrConfigurationInvalid
 	}
@@ -343,11 +371,16 @@ func (store *Store) PlanRevision(ctx context.Context, principal adminauth.Princi
 
 // ActivateRevision atomically checks the immutable compiled snapshot, base
 // pointer, ETag, active pointer, notification, and audit evidence.
-func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Principal, revisionID, ifMatch string) (Revision, error) {
+func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Principal, revisionID, ifMatch string, options ...ActivationOption) (Revision, error) {
 	if !canWrite(principal) {
 		return Revision{}, ErrForbidden
 	}
-	if id.Validate(revisionID, id.ConfigRevision) != nil {
+	var settings activationSettings
+	for _, option := range options {
+		option(&settings)
+	}
+	settings.note = strings.TrimSpace(settings.note)
+	if id.Validate(revisionID, id.ConfigRevision) != nil || (settings.note != "" && !ValidActivationNote(settings.note)) {
 		return Revision{}, ErrInvalid
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -358,6 +391,9 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	revision, err := store.revision(ctx, tx, principal.OrganizationID, revisionID, true)
 	if err != nil {
 		return Revision{}, err
+	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return Revision{}, ErrForbidden
 	}
 	environment, activeRevisionID, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
 	if err != nil {
@@ -376,7 +412,7 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	if err != nil {
 		return Revision{}, ErrConfigurationInvalid
 	}
-	if revision.ActivatedAt != nil || revision.baseRevisionID != activeRevisionID || activeRevisionID == revision.ID {
+	if revision.ActivatedAt != nil || revision.BaseRevisionID != activeRevisionID || activeRevisionID == revision.ID {
 		return Revision{}, ErrConflict
 	}
 	if err := validateActiveUserOverrides(ctx, tx, environment, candidate); err != nil {
@@ -385,9 +421,9 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	now := store.now().UTC()
 	if _, err := tx.Exec(ctx, `
 		UPDATE config_revisions
-		SET activated_at = $2
+		SET activated_at = $2, activation_note = NULLIF($3, '')
 		WHERE config_revision_id = $1 AND activated_at IS NULL
-	`, revisionID, now); err != nil {
+	`, revisionID, now, settings.note); err != nil {
 		return Revision{}, mapDatabaseError("record configuration activation", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -406,9 +442,12 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 		revisionID, principal.AdminUserID, now); err != nil {
 		return Revision{}, mapDatabaseError("move active configuration pointer", err)
 	}
+	activationFields := []auditField{{name: "active_revision_id"}}
+	if settings.note != "" {
+		activationFields = append(activationFields, auditField{name: "activation_note", sensitive: true})
+	}
 	if err := store.audit(ctx, tx, principal, environment.OrganizationID, environment.EnvironmentID,
-		"admin.configuration_activate", revisionID,
-		[]auditField{{name: "active_revision_id"}}); err != nil {
+		"admin.configuration_activate", revisionID, activationFields); err != nil {
 		return Revision{}, err
 	}
 	if err := notifyConfigurationChanged(ctx, tx, environment, revisionID); err != nil {
@@ -420,6 +459,7 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	store.activeSnapshots.put(newActiveSnapshotCacheKey(environment.TenantScope), candidate, now)
 	revision.State = StateActive
 	revision.ActivatedAt = &now
+	revision.ActivationNote = settings.note
 	store.observeActivation(ctx, ActivationObservation{
 		ApplicationID: environment.ApplicationID, EnvironmentID: environment.EnvironmentID,
 		Operation: ActivationOperationActivate,
@@ -444,6 +484,9 @@ func (store *Store) Rollback(ctx context.Context, principal adminauth.Principal,
 	environment, activeRevisionID, err := store.environment(ctx, tx, principal.OrganizationID, environmentID, true)
 	if err != nil {
 		return Revision{}, err
+	}
+	if !canWriteIn(principal, environment.ApplicationID) {
+		return Revision{}, ErrForbidden
 	}
 	if activeRevisionID == "" {
 		return Revision{}, ErrNotFound
@@ -740,6 +783,9 @@ func (store *Store) SimulationSnapshot(
 	if err != nil {
 		return SimulationSnapshot{}, err
 	}
+	if !canWriteIn(principal, revision.applicationID) {
+		return SimulationSnapshot{}, ErrForbidden
+	}
 	if revision.State != StateValid && revision.State != StateActive {
 		return SimulationSnapshot{}, ErrConfigurationInvalid
 	}
@@ -794,7 +840,21 @@ const revisionSelect = `
 			WHEN active_revision.config_revision_id = revision.config_revision_id THEN 'active'
 			WHEN revision.activated_at IS NOT NULL THEN 'superseded'
 			ELSE revision.status
-		END AS derived_state
+		END AS derived_state,
+		revision.description,
+		revision.activation_note,
+		revision.discarded_at,
+		revision.discarded_by_admin_user_id,
+		(
+			SELECT edit.edited_at FROM config_revision_edits AS edit
+			WHERE edit.config_revision_id = revision.config_revision_id
+			ORDER BY edit.edit_version DESC LIMIT 1
+		),
+		(
+			SELECT edit.admin_user_id FROM config_revision_edits AS edit
+			WHERE edit.config_revision_id = revision.config_revision_id
+			ORDER BY edit.edit_version DESC LIMIT 1
+		)
 	FROM config_revisions AS revision
 	LEFT JOIN active_config_revisions AS active_revision
 	  ON active_revision.environment_id = revision.environment_id
@@ -839,18 +899,35 @@ type rowScanner interface {
 func scanRevision(row rowScanner) (Revision, error) {
 	var revision Revision
 	var document, compiled, validation []byte
-	var activatedAt *time.Time
-	var baseRevisionID *string
+	var activatedAt, discardedAt, editedAt *time.Time
+	var baseRevisionID, description, activationNote, discardedBy, editedBy *string
 	var derivedState string
 	if err := row.Scan(
 		&revision.ID, &revision.organizationID, &revision.applicationID, &revision.EnvironmentID,
 		&revision.Version, &revision.ETag, &revision.storedState, &document, &compiled,
 		&validation, &revision.CreatedBy, &revision.CreatedAt, &activatedAt,
 		&baseRevisionID, &revision.editVersion, &derivedState,
+		&description, &activationNote, &discardedAt, &discardedBy, &editedAt, &editedBy,
 	); err != nil {
 		return Revision{}, err
 	}
 	revision.State = derivedState
+	revision.CreatedAt = revision.CreatedAt.UTC()
+	// Revisions edited before edit history existed report their creation.
+	revision.UpdatedAt, revision.UpdatedBy = revision.CreatedAt, revision.CreatedBy
+	if editedAt != nil && editedBy != nil {
+		revision.UpdatedAt, revision.UpdatedBy = editedAt.UTC(), *editedBy
+	}
+	if description != nil {
+		revision.Description = *description
+	}
+	if activationNote != nil {
+		revision.ActivationNote = *activationNote
+	}
+	if discardedAt != nil && discardedBy != nil {
+		instant := discardedAt.UTC()
+		revision.DiscardedAt, revision.DiscardedBy = &instant, *discardedBy
+	}
 	revision.Document = append(json.RawMessage(nil), document...)
 	revision.compiled = append(json.RawMessage(nil), compiled...)
 	if activatedAt != nil {
@@ -858,7 +935,7 @@ func scanRevision(row rowScanner) (Revision, error) {
 		revision.ActivatedAt = &instant
 	}
 	if baseRevisionID != nil {
-		revision.baseRevisionID = *baseRevisionID
+		revision.BaseRevisionID = *baseRevisionID
 	}
 	if len(validation) != 0 {
 		var report ValidationReport
@@ -1030,8 +1107,15 @@ func nullableJSON(value json.RawMessage) any {
 	return value
 }
 
+// canWrite is the first check, before the target is loaded: the principal may
+// change configuration in at least one application.
 func canWrite(principal adminauth.Principal) bool {
-	return principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{})
+	return principal.AllowsSomewhere(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{})
+}
+
+// canWriteIn is the exact check for the loaded target's application.
+func canWriteIn(principal adminauth.Principal, applicationID string) bool {
+	return principal.AllowsIn(adminauth.ActivateConfiguration, applicationID, adminauth.AuthorizationContext{})
 }
 
 // validateActiveUserOverrides rejects a candidate snapshot that would strand

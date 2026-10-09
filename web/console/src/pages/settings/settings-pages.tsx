@@ -1,12 +1,16 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 
-import { adminRequest, DoctorReportSchema, SystemStatusSchema } from "../../api/admin";
+import { setTwoFactorRequirement, twoFactorStatusQueryOptions } from "../../api/account";
+import { AdministratorPageSchema, adminRequest, DoctorReportSchema, queryPath, SystemStatusSchema, UserPageSchema } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { consoleContractVersion, consoleProtocolVersion } from "../../api/console-compatibility";
 import { type ApplicationResource, ApplicationResourceSchema, type EnvironmentResource, EnvironmentResourceSchema } from "../../api/resources";
-import { useConsoleSession } from "../../api/session";
+import { OPERATIONS_HISTORY, renameApplication, renameEnvironment, renameOrganization } from "../../api/operations-history";
+import { RenameDialog } from "./rename-dialog";
+import { consoleSessionQueryOptions, useConsoleSession } from "../../api/session";
 import { applicationsQueryOptions, environmentsQueryOptions, organizationsQueryOptions } from "../../api/workspace";
 import { useConsoleCompatibility } from "../../app/console-compatibility-context";
 import { clearTheme, setTheme, storedTheme } from "../../app/theme";
@@ -15,6 +19,7 @@ import { Badge, Button, Card, ConfirmDialog, DetailPanel, EnvironmentBadge, Fiel
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { evaluateSettingsCompatibility } from "../settings-compatibility";
 import { CopyButton } from "../requests/request-detail";
+import { SingleSignOnCard } from "./single-sign-on-card";
 
 const SLUG = /^[a-z][a-z0-9_-]{0,62}$/;
 
@@ -24,14 +29,65 @@ function scoped(previous: Record<string, unknown>) {
 
 // ─── General ────────────────────────────────────────────────────────────────
 
+/** Owners require, or stop requiring, a second factor for every member of this organization. */
+function SignInSecurityCard({ organizationID }: { organizationID: string }) {
+  const { can } = useCapabilities();
+  const compatibility = useConsoleCompatibility();
+  const queryClient = useQueryClient();
+  const owner = can("manage_owners");
+  const status = useQuery(twoFactorStatusQueryOptions);
+  const members = useQuery({ enabled: owner, queryFn: async () => (await adminRequest(queryPath("/admin/v1/administrators", { page_size: "200" }), AdministratorPageSchema)).data.items, queryKey: ["team", "members", "security"], retry: false });
+  const [confirm, setConfirm] = useState<boolean>();
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<AdminProblem>();
+  const required = status.data?.required_by_organization ?? false;
+  const withoutTwoFactor = (members.data ?? []).filter((member) => member.status === "active" && !member.two_factor_enabled);
+  async function save(next: boolean): Promise<void> {
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      await setTwoFactorRequirement(organizationID, next);
+      setConfirm(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: twoFactorStatusQueryOptions.queryKey }),
+        queryClient.invalidateQueries({ queryKey: consoleSessionQueryOptions.queryKey })
+      ]);
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card icon="shield" meta={status.data ? <Badge color={required ? "success" : undefined} variant="soft">{required ? "Required" : "Optional"}</Badge> : undefined} title="Sign-in security">
+      <p className="lw-note">When two-factor sign-in is required, members without it can only set it up after signing in. API tokens aren&apos;t affected.</p>
+      {owner && members.data ? <p className="lw-secondary lw-note">{withoutTwoFactor.length === 0 ? "Every active member has two-factor sign-in on." : `${withoutTwoFactor.length} active ${withoutTwoFactor.length === 1 ? "member doesn't" : "members don't"} have it on yet.`}</p> : null}
+      {owner ? (
+        <div><Button disabled={!compatibility.mutationAllowed || !status.data} onClick={() => setConfirm(!required)} size="sm" variant={required ? "secondary" : "primary"}>{required ? "Stop Requiring Two-Factor" : "Require Two-Factor"}</Button></div>
+      ) : <p className="lw-secondary lw-note">Only owners change this.</p>}
+      {confirm !== undefined ? (
+        <ConfirmDialog confirmLabel={confirm ? "Require Two-Factor" : "Stop Requiring"} description={confirm ? (withoutTwoFactor.length ? `${withoutTwoFactor.length} active ${withoutTwoFactor.length === 1 ? "member is" : "members are"} limited to setting it up from their next request.` : "Every active member already has it on.") : "Members keep their authenticators; new members won't be asked to set one up."} onCancel={() => setConfirm(undefined)} onConfirm={() => void save(confirm)} pending={busy} title={confirm ? "Require two-factor sign-in?" : "Stop requiring two-factor sign-in?"}>
+          {confirm && withoutTwoFactor.length ? <ul className="lw-issue-items">{withoutTwoFactor.slice(0, 8).map((member) => <li key={member.id}>{member.display_name} · {member.email}</li>)}</ul> : null}
+          {problem ? <ProblemNotice problem={problem} /> : null}
+        </ConfirmDialog>
+      ) : null}
+    </Card>
+  );
+}
+
 function GeneralView() {
   const workspace = useOptionalWorkspace();
   const session = useConsoleSession();
+  const { can } = useCapabilities();
   const organizations = useQuery({ ...organizationsQueryOptions(), enabled: !workspace?.organization });
   const compatibility = useConsoleCompatibility();
   const status = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/system", SystemStatusSchema)).data, queryKey: ["system", "status"], retry: false });
   const doctor = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/system/doctor", DoctorReportSchema)).data, queryKey: ["system", "doctor"], retry: false });
   const [theme, setThemeChoice] = useState<"system" | "light" | "dark">(() => storedTheme() ?? "system");
+  const [renamingOrganization, setRenamingOrganization] = useState(false);
+  const [renamed, setRenamed] = useState<string>();
+  const queryClient = useQueryClient();
+  const canRenameOrganization = compatibility.mutationAllowed && can("manage_owners") && (compatibility.status?.server_capabilities.includes(OPERATIONS_HISTORY) ?? false);
   // Organization pages may not carry an organization in the URL; fall back to the one this session signed in to.
   const organization = workspace?.organization ?? organizations.data?.items.find((item) => item.id === session.data?.session?.organization_id);
   const runtime = doctor.data?.facts.runtime;
@@ -55,8 +111,23 @@ function GeneralView() {
           ) : session.data?.session?.organization_id ? (
             <Properties columns={1} items={[{ label: "ID", value: <span className="lw-row lw-row--tight"><span className="lw-mono lw-mono--sm">{session.data.session.organization_id}</span><CopyButton label="Copy organization ID" value={session.data.session.organization_id} /></span> }]} />
           ) : <p className="lw-secondary lw-note">No organization selected.</p>}
-          <p className="lw-secondary lw-note">The organization name can&apos;t be changed from the console yet.</p>
+          {organization && canRenameOrganization ? <div><Button onClick={() => setRenamingOrganization(true)} size="sm">Rename</Button></div> : <p className="lw-secondary lw-note">{can("manage_owners") ? "This server can't rename the organization." : "Only owners rename the organization."}</p>}
+          {renamed ? <p className="lw-note" role="status">{renamed}</p> : null}
         </Card>
+        {renamingOrganization && organization ? (
+          <RenameDialog
+            current={organization.display_name}
+            kind="organization"
+            onClose={() => setRenamingOrganization(false)}
+            onRename={async (name) => {
+              await renameOrganization(organization.id, name);
+              setRenamingOrganization(false);
+              setRenamed(`Renamed to ${name}.`);
+              await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "organizations" || query.queryKey[0] === "organization" });
+            }}
+            slug={organization.slug}
+          />
+        ) : null}
         <Card icon="sun" title="Appearance">
           <Segmented items={[{ id: "system", label: "System" }, { id: "light", label: "Light" }, { id: "dark", label: "Dark" }]} label="Theme" onChange={pickTheme} value={theme} />
           <p className="lw-secondary lw-note">Only for you · saved in this browser.</p>
@@ -74,6 +145,8 @@ function GeneralView() {
           {status.data && evaluateSettingsCompatibility(status.data).readOnlySafeMode ? <Notice title="Why the console is read-only" tone="warning"><ul className="lw-issue-list">{evaluateSettingsCompatibility(status.data).reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></Notice> : null}
           <Link className="lw-link lw-note" search={scoped} to="/system-health">Open System Health</Link>
         </Card>
+        {organization && compatibility.status?.server_capabilities.includes("admin_two_factor") ? <SignInSecurityCard organizationID={organization.id} /> : null}
+        {organization && compatibility.status?.server_capabilities.includes("admin_sso") && can("manage_owners") ? <SingleSignOnCard organizationID={organization.id} /> : null}
         <Card icon="lock" title="Data handling">
           <ul className="lw-issue-list lw-note">
             <li><strong>Prompts and responses: never stored.</strong> There&apos;s no setting; a configuration that tries to store them is refused when published.</li>
@@ -176,9 +249,24 @@ function AddEnvironmentDrawer({ application, existing, onClose, onCreated }: { a
 }
 
 type Lifecycle = { application: ApplicationResource; enable: boolean; environment?: EnvironmentResource };
+type Renaming = { application: ApplicationResource; environment?: EnvironmentResource };
+
+/** How many users an environment has, from the users list's capped total. */
+function EnvironmentUsers({ environmentID }: { environmentID: string }) {
+  const users = useQuery({
+    queryFn: async () => (await adminRequest(queryPath("/admin/v1/users", { environment_id: environmentID, include_total: "true", page_size: "1" }), UserPageSchema)).data.total,
+    queryKey: ["environment", environmentID, "user-total"],
+    retry: false,
+    staleTime: 5 * 60_000
+  });
+  if (users.error) return <span className="lw-faint" title={problemFromError(users.error).detail}>—</span>;
+  if (!users.data) return <span className="lw-faint">…</span>;
+  return <span className="lw-num">{users.data.capped ? `${users.data.count.toLocaleString()}+` : users.data.count.toLocaleString()}</span>;
+}
 
 function ApplicationsView() {
   const session = useConsoleSession();
+  const { can } = useCapabilities();
   const compatibility = useConsoleCompatibility();
   const workspace = useOptionalWorkspace();
   const queryClient = useQueryClient();
@@ -189,10 +277,13 @@ function ApplicationsView() {
   const [addingApp, setAddingApp] = useState(false);
   const [addingEnvironment, setAddingEnvironment] = useState<ApplicationResource>();
   const [lifecycle, setLifecycle] = useState<Lifecycle>();
+  const [renaming, setRenaming] = useState<Renaming>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const canManage = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("activate_configuration") ?? false);
+  const canManage = compatibility.mutationAllowed && can("activate_configuration");
+  const canRename = canManage && (compatibility.status?.server_capabilities.includes(OPERATIONS_HISTORY) ?? false);
+  const showUsers = can("inspect_users") && (compatibility.status?.server_capabilities.includes("admin_user_insights") ?? false);
 
   async function refresh(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ["organization", organizationID, "applications"] });
@@ -221,7 +312,7 @@ function ApplicationsView() {
   const lifecycleName = lifecycle ? (lifecycle.environment ? `${lifecycle.application.slug}/${lifecycle.environment.slug}` : lifecycle.application.slug) : "";
   return (
     <div className="lw-page">
-      <PageHeader actions={<Button disabled={!canManage} icon="plus" onClick={() => setAddingApp(true)} variant="primary">Add Application</Button>} description="Every application in this organization and its environments. Renaming and deleting aren't in the Admin API yet, so names are read-only." title="Applications" />
+      <PageHeader actions={<Button disabled={!canManage} icon="plus" onClick={() => setAddingApp(true)} variant="primary">Add Application</Button>} description={canRename ? "Every application in this organization and its environments. Display names can change; slugs can't. Nothing here can be deleted, because audit and request history must stay intact: disable an application or environment to retire it." : "Every application in this organization and its environments. This server can't rename them, and nothing can be deleted: disable one to retire it."} title="Applications" />
       {notice ? <div className="lw-page-notice"><Notice tone="success">{notice}</Notice></div> : null}
       {applications.error ? <div className="lw-page-notice"><ProblemNotice problem={problemFromError(applications.error)} /></div> : null}
       {!canManage ? <div className="lw-page-notice"><Notice tone="info">View only: adding, disabling and enabling need the Admin role (activate_configuration) and a compatible server.</Notice></div> : null}
@@ -229,10 +320,10 @@ function ApplicationsView() {
         {applications.isPending ? <p role="status">Loading applications…</p> : items.map((application, index) => {
           const list = environments[index]?.data?.items ?? [];
           return (
-            <Card actions={canManage ? <div className="lw-row"><Button disabled={application.status === "disabled"} icon="plus" onClick={() => setAddingEnvironment(application)} size="sm">Add Environment</Button><Button destructive={application.status !== "disabled"} onClick={() => setLifecycle({ application, enable: application.status === "disabled" })} size="sm">{application.status === "disabled" ? "Enable App" : "Disable App"}</Button></div> : undefined} key={application.id} meta={<span className="lw-row lw-row--tight"><span className="lw-mono lw-mono--sm">{application.slug}</span>{application.status === "disabled" ? <Badge color="red" variant="soft">Disabled</Badge> : null}</span>} title={application.display_name}>
+            <Card actions={canManage ? <div className="lw-row">{canRename ? <Button onClick={() => setRenaming({ application })} size="sm" variant="ghost">Rename</Button> : null}<Button disabled={application.status === "disabled"} icon="plus" onClick={() => setAddingEnvironment(application)} size="sm">Add Environment</Button><Button destructive={application.status !== "disabled"} onClick={() => setLifecycle({ application, enable: application.status === "disabled" })} size="sm">{application.status === "disabled" ? "Enable App" : "Disable App"}</Button></div> : undefined} key={application.id} meta={<span className="lw-row lw-row--tight"><span className="lw-mono lw-mono--sm">{application.slug}</span>{application.status === "disabled" ? <Badge color="red" variant="soft">Disabled</Badge> : null}</span>} title={application.display_name}>
               {environments[index]?.isPending ? <p role="status" className="lw-note">Loading environments…</p> : list.length ? (
                 <table className="lw-mini-table">
-                  <thead><tr><th>Environment</th><th>Slug</th><th>Status</th><th>Live revision</th><th /></tr></thead>
+                  <thead><tr><th>Environment</th><th>Slug</th><th>Status</th><th>Live revision</th>{showUsers ? <th>Users</th> : null}<th /></tr></thead>
                   <tbody>
                     {list.map((environment) => (
                       <tr key={environment.id}>
@@ -240,7 +331,8 @@ function ApplicationsView() {
                         <td className="lw-mono lw-mono--sm">{environment.slug}</td>
                         <td>{environment.status === "disabled" ? <Badge color="red" variant="soft">Disabled</Badge> : <Badge color="success" variant="soft">Active</Badge>}</td>
                         <td className="lw-mono lw-mono--sm">{environment.active_revision_id ?? <span className="lw-faint">No configuration</span>}</td>
-                        <td>{canManage ? <Button destructive={environment.status !== "disabled"} onClick={() => setLifecycle({ application, enable: environment.status === "disabled", environment })} size="sm" variant="ghost">{environment.status === "disabled" ? "Enable" : "Disable"}</Button> : null}</td>
+                        {showUsers ? <td><EnvironmentUsers environmentID={environment.id} /></td> : null}
+                        <td>{canManage ? <span className="lw-row lw-row--tight">{canRename ? <Button onClick={() => setRenaming({ application, environment })} size="sm" variant="ghost">Rename</Button> : null}<Button destructive={environment.status !== "disabled"} onClick={() => setLifecycle({ application, enable: environment.status === "disabled", environment })} size="sm" variant="ghost">{environment.status === "disabled" ? "Enable" : "Disable"}</Button></span> : null}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -250,8 +342,23 @@ function ApplicationsView() {
           );
         })}
         {!applications.isPending && !items.length ? <Notice tone="info">No applications yet. Add one, or use Setup to create an application with its first environment.</Notice> : null}
-        <p className="lw-secondary lw-note">Users per environment and copying one environment&apos;s configuration into a new one aren&apos;t available from the Admin API yet.</p>
+        <p className="lw-secondary lw-note">{showUsers ? "Users counts every user with access to that environment. " : ""}To give a new environment its first configuration, switch to it and use Copy From Environment under Changes → Draft.</p>
       </div>
+      {renaming ? (
+        <RenameDialog
+          current={renaming.environment?.display_name ?? renaming.application.display_name}
+          kind={renaming.environment ? "environment" : "application"}
+          onClose={() => setRenaming(undefined)}
+          onRename={async (name) => {
+            if (renaming.environment) await renameEnvironment(renaming.environment.id, name);
+            else await renameApplication(renaming.application.id, name);
+            setRenaming(undefined);
+            setNotice(`Renamed to ${name}.`);
+            await refresh();
+          }}
+          slug={renaming.environment?.slug ?? renaming.application.slug}
+        />
+      ) : null}
       {addingApp ? <div className="lw-drawer-dock"><AddApplicationDrawer onClose={() => setAddingApp(false)} onCreated={(application) => { setAddingApp(false); setNotice(`${application.display_name} was added. Add its first environment next.`); void refresh(); }} organizationID={organizationID} /></div> : null}
       {addingEnvironment ? <div className="lw-drawer-dock lw-drawer-dock--wide"><AddEnvironmentDrawer application={addingEnvironment} existing={environments[items.indexOf(addingEnvironment)]?.data?.items ?? []} onClose={() => setAddingEnvironment(undefined)} onCreated={(environment) => { setAddingEnvironment(undefined); setNotice(`${environment.display_name} was added. It refuses requests until a configuration is published.`); void refresh(); }} /></div> : null}
       {lifecycle && !lifecycle.enable ? (

@@ -4,6 +4,95 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Administrator account self-service (ADR 0040, Admin bundle edition 1.1.3,
+  `admin_account_self_service`): change your own password, list and sign out
+  your own console sessions, switch organization without signing in again,
+  and see why a console session ended. Owners can list every administrator's
+  API tokens with their last use, and session lists show a coarse device
+  summary. `GET /admin/v1/auth/info` reports what the sign-in screen needs.
+- Two-factor sign-in for administrators (ADR 0041, `admin_two_factor`): TOTP
+  authenticator apps with single-use recovery codes, a `202` second-factor step
+  at sign-in, an organization setting that requires it, and owner resets
+  (also `latchway admin accounts reset-two-factor`).
+- Passkeys for administrators (ADR 0042, `admin_passkeys`): sign in with a
+  passkey alone, or use one as the second step after a password. Passkeys
+  count toward an organization's two-factor requirement; adding or removing one
+  needs the current password.
+- Single sign-on for administrators with OpenID Connect (ADR 0043, `admin_sso`):
+  one identity provider per organization, linking by verified email, optional
+  account creation with a chosen role, and an option to require it for members
+  other than owners. Team member lists and `latchway admin accounts list` show
+  who signs in with SSO.
+- Member invitations (ADR 0044, `admin_invitations`): owners send one-time
+  links, optionally by email through a configured SMTP relay
+  (`LATCHWAY_SMTP_*`); new people choose their own password, and existing
+  accounts accept after signing in.
+- Application roles (ADR 0045, `admin_application_roles`): owners can make a
+  member Admin or Operator in one application without changing their role
+  elsewhere, and can preview the console as another role.
+- User and installation insights (ADR 0046, `admin_user_insights`): filters,
+  sorts and capped totals for users and installations, server-side
+  installation signals, per-user usage, impact previews for installation and
+  component actions, and batched user actions that skip anyone who changed
+  since the preview. `latchway` family lists show signals.
+- Request search (ADR 0047, `admin_request_search`): requests show their
+  platform and client request ID, can be found by client request ID, report
+  a capped total, and `GET /requests/facets` counts the values behind each
+  filter. `latchway requests list` takes every filter and `--total`, and
+  `latchway requests facets` prints the counts.
+- Configuration draft lifecycle (ADR 0048, `admin_configuration_drafts`,
+  schema 40): drafts stay editable after validation until activated, can be
+  discarded (kept in history), record who changed which paths, take a publish
+  note, can be brought up to date with a reviewed three-way merge, and can be
+  started from another environment's live configuration.
+  `latchway config history|discard|promote` and `config apply --note`.
+- Policy insights and simulation (ADR 0049, `admin_policy_insights`,
+  schema 41): per-user usage distributions against a limit, an override list,
+  plan share by feature, current limit usage for a user, failure simulation
+  with the data plane's retry and fallback rules, batch simulation and saved
+  scenarios. `latchway routes simulate --fail`.
+- Operations history (ADR 0050, `admin_operations_history`, schema 42): a
+  worker samples the server self-check every five minutes (kept 30 days),
+  per-connection health from recorded attempts, a list of self-test runs, and
+  display-name renames for organizations, applications and environments.
+  `latchway status history`, `usage connections`, `verify runs`, and
+  `applications rename` / `environments rename`.
+- Analytics (ADR 0051): a month-to-date card with a straight-line month-end
+  projection, per-AI-connection breakdowns, errors by code, a warning when
+  usage totals are still settling, and a header attention indicator.
+- The redesigned admin console, including a stepped Setup wizard.
+- A pull-request CI workflow covering contracts, Go with PostgreSQL, the
+  console and the live first-run test.
+
+### Changed
+
+- The CLI's session check accepts the `two_factor_enrollment_required`,
+  `sign_in_method` and `application_roles` fields the server sends.
+- An owner's password reset now also works for accounts created by single
+  sign-on, which have no password until then.
+- Removing the authenticator app (`POST /auth/two-factor/disable`) keeps any
+  passkeys, and recovery codes can be replaced with the password when there's
+  no authenticator app. An owner's two-factor reset also removes passkeys.
+- Passwords set by an owner (administrator creation or reset) must be changed
+  at the administrator's next sign-in before anything else works.
+- A sign-in that names no organization uses the administrator's last one.
+
+### Fixed
+
+- Environment lists include `active_revision_id`, which the Admin contract
+  declared but the server never sent; the console showed every environment as
+  unconfigured on Overview and in Settings.
+- Reloading an Analytics page in the embedded console rendered a blank page;
+  Analytics now lives at `/usage`, `/cost`, `/performance` and `/reliability`.
+- The embedded console required Admin contract 1.0.0 while 1.1.x servers
+  advertise 1.1.0, leaving it in read-only safe mode.
+- A configuration draft that had been validated couldn't be edited again, so
+  the console's second save on a draft failed as "out of date". Servers now
+  keep never-activated drafts editable, and the console carries the draft into
+  a new one on older servers.
+
 ## [1.1.7] - 2026-09-23
 
 ### Added

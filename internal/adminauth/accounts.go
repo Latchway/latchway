@@ -35,17 +35,21 @@ func (page AdministratorPageRequest) validate() error {
 // Administrator is the value-safe organization membership view. Password
 // hashes, session material, and API-token metadata are deliberately absent.
 type Administrator struct {
-	ID                    string     `json:"id"`
-	MembershipID          string     `json:"membership_id"`
-	OrganizationID        string     `json:"organization_id"`
-	Email                 string     `json:"email"`
-	DisplayName           string     `json:"display_name"`
-	Role                  Role       `json:"role"`
-	Status                string     `json:"status"`
-	PasswordResetRequired bool       `json:"password_reset_required"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
-	DisabledAt            *time.Time `json:"disabled_at,omitempty"`
+	ID                    string `json:"id"`
+	MembershipID          string `json:"membership_id"`
+	OrganizationID        string `json:"organization_id"`
+	Email                 string `json:"email"`
+	DisplayName           string `json:"display_name"`
+	Role                  Role   `json:"role"`
+	Status                string `json:"status"`
+	PasswordResetRequired bool   `json:"password_reset_required"`
+	TwoFactorEnabled      bool   `json:"two_factor_enabled"`
+	// SSOLinked is true when the administrator has signed in to this
+	// organization with its identity provider.
+	SSOLinked  bool       `json:"sso_linked"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	DisabledAt *time.Time `json:"disabled_at,omitempty"`
 }
 
 // CreateAdministratorInput atomically creates one local account and its first
@@ -112,6 +116,8 @@ func (store *Store) ListAdministrators(
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
+		       `+hasSecondFactorSQL("u.admin_user_id")+`,
+		       EXISTS (SELECT 1 FROM admin_sso_identities AS i WHERE i.admin_user_id = u.admin_user_id AND i.organization_id = m.organization_id),
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at
@@ -132,7 +138,7 @@ func (store *Store) ListAdministrators(
 		if err := rows.Scan(
 			&item.ID, &item.MembershipID, &item.OrganizationID, &item.Email,
 			&item.DisplayName, &item.Role, &item.Status, &item.PasswordResetRequired,
-			&item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
+			&item.TwoFactorEnabled, &item.SSOLinked, &item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan administrator: %w", err)
 		}
@@ -187,7 +193,7 @@ func (store *Store) CreateAdministrator(
 		INSERT INTO admin_users (
 			admin_user_id, email, email_normalized, display_name, status,
 			created_at, updated_at, password_reset_required
-		) VALUES ($1, $2, $3, $4, 'active', $5, $5, false)
+		) VALUES ($1, $2, $3, $4, 'active', $5, $5, true)
 	`, adminUserID, strings.TrimSpace(input.Email), emailNormalized, strings.TrimSpace(input.DisplayName), now); err != nil {
 		if isUniqueViolation(err) {
 			return Administrator{}, ErrAdminConflict
@@ -227,7 +233,7 @@ func (store *Store) CreateAdministrator(
 	return Administrator{
 		ID: adminUserID, MembershipID: membershipID, OrganizationID: principal.OrganizationID,
 		Email: strings.TrimSpace(input.Email), DisplayName: strings.TrimSpace(input.DisplayName),
-		Role: input.Role, Status: "active", CreatedAt: now, UpdatedAt: now,
+		Role: input.Role, Status: "active", PasswordResetRequired: true, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -269,6 +275,14 @@ func (store *Store) ChangeAdministratorRole(
 		WHERE organization_id = $1 AND admin_user_id = $2
 	`, principal.OrganizationID, targetAdminUserID, role, now); err != nil {
 		return Administrator{}, fmt.Errorf("change administrator role: %w", err)
+	}
+	// Application roles that no longer raise the new organization role are dropped.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM admin_application_roles
+		WHERE organization_id = $1 AND admin_user_id = $2
+		  AND (CASE role WHEN 'admin' THEN 3 ELSE 2 END) <= (CASE $3::text WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'operator' THEN 2 ELSE 1 END)
+	`, principal.OrganizationID, targetAdminUserID, string(role)); err != nil {
+		return Administrator{}, fmt.Errorf("drop superseded application roles: %w", err)
 	}
 	if err := store.insertAdministratorAudit(ctx, tx, principal, "admin.administrator_role_change", targetAdminUserID, requestID, now, []AuditChange{mustPublicAuditChange("role", AuditSet)}); err != nil {
 		return Administrator{}, err
@@ -399,10 +413,12 @@ func (store *Store) ResetAdministratorPassword(
 	if otherMemberships != 0 {
 		return Administrator{}, ErrAdminConflict
 	}
+	// Accounts created by single sign-on have no password until an owner sets one.
 	tag, err := tx.Exec(ctx, `
-		UPDATE admin_password_credentials
-		SET password_hash = $2, changed_at = $3, reset_by_admin_user_id = $4
-		WHERE admin_user_id = $1
+		INSERT INTO admin_password_credentials (admin_user_id, password_hash, created_at, changed_at, reset_by_admin_user_id)
+		VALUES ($1, $2, $3, $3, $4)
+		ON CONFLICT (admin_user_id) DO UPDATE
+		SET password_hash = EXCLUDED.password_hash, changed_at = EXCLUDED.changed_at, reset_by_admin_user_id = EXCLUDED.reset_by_admin_user_id
 	`, targetAdminUserID, passwordHash.Encoded(), now, principal.AdminUserID)
 	if err != nil {
 		return Administrator{}, fmt.Errorf("reset administrator password: %w", err)
@@ -412,7 +428,7 @@ func (store *Store) ResetAdministratorPassword(
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE admin_users
-		SET password_reset_required = false, updated_at = $2
+		SET password_reset_required = true, updated_at = $2
 		WHERE admin_user_id = $1
 	`, targetAdminUserID, now); err != nil {
 		return Administrator{}, fmt.Errorf("update administrator password state: %w", err)
@@ -540,6 +556,8 @@ func readAdministratorTx(ctx context.Context, tx pgx.Tx, organizationID, adminUs
 		       m.role,
 		       m.status,
 		       u.password_reset_required,
+		       `+hasSecondFactorSQL("u.admin_user_id")+`,
+		       EXISTS (SELECT 1 FROM admin_sso_identities AS i WHERE i.admin_user_id = u.admin_user_id AND i.organization_id = m.organization_id),
 		       m.created_at,
 		       m.updated_at,
 		       m.disabled_at
@@ -549,7 +567,7 @@ func readAdministratorTx(ctx context.Context, tx pgx.Tx, organizationID, adminUs
 	`, organizationID, adminUserID).Scan(
 		&item.ID, &item.MembershipID, &item.OrganizationID, &item.Email,
 		&item.DisplayName, &item.Role, &item.Status, &item.PasswordResetRequired,
-		&item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
+		&item.TwoFactorEnabled, &item.SSOLinked, &item.CreatedAt, &item.UpdatedAt, &item.DisabledAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Administrator{}, ErrAdminNotFound

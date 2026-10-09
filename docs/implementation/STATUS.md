@@ -1,6 +1,524 @@
 # Implementation status
 
-Status date: 2026-10-04
+Status date: 2026-10-08
+
+## Console completion: public console guide (branch `console-api-completion`, unreleased)
+
+`docs/public/administration/console.mdx` now describes the redesigned console:
+navigation and workspace URLs, the attention list and header count, the
+draft lifecycle, Simulator, Analytics, users and limits, operating the server,
+application lifecycle (rename, disable, no deletion), secrets, live refresh,
+read-only mode and what each optional capability adds. Validation: metadata,
+structure, prose (Vale) and broken-link checks.
+
+## Console completion phase 21: analytics projection and attention (branch `console-api-completion`, unreleased)
+
+Server (ADR 0051): environment lists include `active_revision_id`, which the
+contract declared but the server never sent, so Overview's setup checklist,
+its "No active configuration" item and Settings' live revision column now
+reflect real configuration. Mutation responses still omit it for released
+CLIs. Renaming to the current name is a no-op without an audit event.
+
+Console:
+
+- Cost: this UTC month so far, a straight-line month-end projection in exact
+  integer nano-USD (after the first full day), and last month.
+- Cost, Performance and Reliability: per-AI-connection tables from
+  `/usage/connections`; Reliability counts requests by error code from request
+  facets, replacing the "not in the usage API yet" notice.
+- A warning on every Analytics tab when usage is waiting for settlement, no
+  worker is running, or reconciliation is stale (from the server self-check).
+- A header attention button: the count of pressing items from Overview's
+  model (with the last day of usage and the newest health sample) and a
+  popover listing them.
+- Analytics moved to single-segment paths (`/usage`, `/cost`, `/performance`,
+  `/reliability`; separate commit): reloading `/analytics/*` in the embedded
+  console rendered a blank page because assets load by relative URL. A test
+  keeps every route one segment deep.
+
+The earlier note that the month-end projection, per-connection breakdowns,
+per-provider health, settlement-lag warnings and the header attention
+indicator are not built yet no longer applies.
+
+Validation: `go test ./...` against PostgreSQL 16 (environment list with and
+without an active revision, mutation responses without it, no-op renames),
+contract validation and generated references; lint, typecheck, `check:api`,
+`pnpm test` (526 passed), Playwright (46 passed, 1 skipped), the live-stack
+run, build and `verify:reproducible`; a manual pass over `latchway develop` in
+light and dark themes and at phone width.
+
+## Console completion phase 20: operations history and renames (branch `console-api-completion`, unreleased)
+
+Server (ADR 0050, schema 42, capability `admin_operations_history`):
+
+- A five-minute `record_health_sample` worker job stores the self-check's
+  overall state and failed and warning check IDs; retention keeps 30 days.
+  `GET /system/health-history` returns at most 7 days.
+- `GET /usage/connections`: per-connection attempts, outcomes, 429 and 5xx
+  counts, fallbacks, failure categories, first-byte and duration percentiles
+  and usage, with an optional hourly or daily series.
+- `GET /self-tests`: an environment's runs, newest first, by schedule or state.
+- `PATCH /organizations/{id}`, `/applications/{id}`, `/environments/{id}`:
+  display-name renames, audited; slugs never change and nothing is deleted.
+
+CLI: `status history`, `usage connections`, `verify runs`,
+`applications rename` and `environments rename`.
+
+Console: System Health shows sampled history with incidents and each AI
+connection's last day; Self-tests lists recent runs; Settings renames the
+organization (owners), applications and environments, and shows each
+environment's user count. Older servers keep the earlier behavior, labeled.
+
+Validation: `go test ./...` against PostgreSQL 16 (health sampling and
+retention, history range refusals, connection health with fallback and
+failure categories, self-test paging and filters, renames with audit counts
+and refusals, worker job inventory, migrations to schema 42), CLI tests, vet,
+gofmt, sqlc regenerated; contract validation and generated references; lint,
+typecheck, `check:api`, `pnpm test` (508 passed), Playwright (46 passed, 1
+skipped), the live-stack run, build and `verify:reproducible`.
+
+## Console completion phase 19: policy insights and simulation (branch `console-api-completion`, unreleased)
+
+Server (ADR 0049, schema 41, capability `admin_policy_insights`):
+
+- `GET /usage/distribution`: per-subject usage in a limit's calendar windows,
+  with peak percentiles, a 1-2-5 histogram and counts over a maximum.
+- `GET /user-overrides`: active and ended overrides, by plan and user.
+- Request facets: a `limit_plan` facet and a `feature` filter.
+- User effective configuration: each limit's current `usage` (quota
+  snapshot per limit).
+- Simulation `failures` and `attempt_plan`, sharing retry and fallback
+  decisions with the data plane through `configuration.Route`.
+- `POST /config-revisions/{id}/simulate-batch` (up to 50).
+- Saved simulation scenarios per application (create, list, replace, delete;
+  versioned and audited, input marked sensitive).
+
+CLI: `routes simulate --fail ROUTE=CONDITION[:ATTEMPTS]` prints the attempt
+plan; effective configuration and simulation output accept the new fields.
+
+Console: the plan editor shows how many users each limit would have stopped
+in recent windows; removing a plan lists users overridden to it; plan rules
+show the last week's split by plan; Overrides lists active and ended
+overrides; the Simulator asks the server what happens when connections fail
+(with a condition picker), runs the coverage grid in one batch, saves and
+loads scenarios, and shows how much of each limit a real user has used.
+Older servers keep the earlier behavior, labeled.
+
+Validation: `go test ./...` against PostgreSQL 16 (failure and batch
+simulation, scenario CRUD with conflicts, audit and no-leak checks, override
+paging, usage distribution with filters and refusals, calendar periods,
+attempt walk and quota-usage mapping units, migrations to schema 41), CLI
+tests, vet, gofmt, sqlc regenerated; contract validation and generated
+references; lint, typecheck, `check:api`, `pnpm test` (494 passed),
+Playwright (46 passed, 1 skipped), the live-stack run, build and
+`verify:reproducible`.
+
+## Console completion phase 18: configuration draft lifecycle (branch `console-api-completion`, unreleased)
+
+Server (ADR 0048, schema 40, capability `admin_configuration_drafts`; amends
+ADR 0009):
+
+- Fixes a refused second save: a validated, never-activated draft is editable
+  again and returns to draft. The redesigned console validated after every
+  save, so its next save on the same draft got a 409 shown as "The draft is
+  out of date". The console also works around it on older servers.
+- `POST /config-revisions/{id}/discard`: a retained, immutable `discarded`
+  tombstone.
+- `config_revision_edits` (append-only) and `GET /config-revisions/{id}/edits`;
+  revisions expose `updated_at`, `updated_by`, `base_revision_id`,
+  `description`, `activation_note`, `discarded_at` and `discarded_by`.
+- Activation takes an optional publish note.
+- `GET /config-revisions/{id}/rebase-preview` and `POST .../rebase`: a
+  three-way merge by path with explicit resolution of every conflict.
+- `POST /environments/{id}/config-revisions/promote`: copies another
+  environment's live configuration into a new draft, keeping the target's
+  sign-in providers, attestation policies, components and AI connections and
+  listing source-only entries for review.
+
+CLI: `config history`, `config discard`, `config promote`, and
+`config apply --note`; revision output accepts the new fields.
+
+Console: Discard Draft (server-side), edit history on Draft and in revision
+details, last-edited author, publish notes in the publish dialog and History,
+a stale-draft notice with a side-by-side merge dialog, Copy From Environment
+with a review summary, and a discarded status. Against older servers it
+carries a validated draft into a fresh one instead of patching it.
+
+Validation: `go test ./...` against PostgreSQL 16 (store lifecycle: edit after
+validation, history, discard of draft and validated revisions, trigger
+refusals, publish note immutability, rebase conflicts and resolution, stale
+live refusal, promotion with pending-draft, viewer and empty-source refusals;
+HTTP API: bodies, ETags, audit events; three-way merge and promotion unit
+tests; migrations to schema 40), CLI tests, vet, gofmt, sqlc regenerated;
+contract validation and generated references; lint, typecheck, `check:api`,
+`pnpm test` (484 passed), Playwright (46 passed, 1 skipped), the live-stack
+run (two consecutive saves, edit history and discard against the real
+server), build and `verify:reproducible`.
+
+## Console completion phase 17: request search, totals and facets (branch `console-api-completion`, unreleased)
+
+Server (ADR 0047, capability `admin_request_search`, no schema change):
+
+- Request documents carry `platform` and `client_request_id`.
+- `GET /requests` accepts `client_request_id` and `include_total` (capped at
+  100,000), sharing one condition builder with the count.
+- `GET /requests/facets`: counts by outcome, feature, failure code,
+  connection, model, route, platform, component kind and trust source over at
+  most 90 days, with public values only.
+- The event stream stays data-free (see the ADR); the console counts new
+  matches instead.
+
+CLI: `requests list` takes every filter (`--status`, `--feature`, `--user`,
+`--platform`, `--component-kind`, `--trust-source`, `--route`, `--upstream`,
+`--model`, `--error-code`, `--request-id`, `--client-request-id`, `--start`,
+`--end`, `--sort`, the latency, token and nano-USD ranges) and `--total`, and
+shows a PLATFORM column; `requests facets` prints counts. Inspect shows the
+platform and client request ID.
+
+Console: filter popovers list the most common values with counts (Outcome,
+Platform and More filters annotate their options), the bar shows the total,
+the search box finds a client request ID, the new-request pill says how many
+arrived, a Platform column is available, the drawer shows the platform and
+client request ID, and Export copies a CLI command. Without the capability
+the page keeps free-text filters and ID-only search.
+
+Validation: `go test ./...` against PostgreSQL 16 (client request filter,
+fields, totals with and without filters, invalid values, facets and their
+range and limit checks), CLI tests (flags sent, invalid flags rejected
+before any request, unrequested or invalid totals rejected, facet counts
+validated), vet, gofmt; contract validation and generated references (119
+operations); lint, typecheck, `check:api`, `pnpm test` (475 passed),
+Playwright (46 passed, 1 skipped), build and `verify:reproducible`.
+
+## Console completion phase 16: user and installation insights (branch `console-api-completion`, unreleased)
+
+Server (ADR 0046, capability `admin_user_insights`, no schema change):
+
+- `GET /users`: `status`, `has_override`, `provider`, `claim=name:value`,
+  `sort` (`oldest`, `newest`, `recently_seen`) and `include_total` (capped at
+  100,000). Cursors follow the sort.
+- `GET /installation-families`: `status`, `platform`, `signal` (or `any`),
+  the same sorts and `include_total`; every family carries server-derived
+  `signals` (`debug_trust`, `trust_expiring`, `token_reuse`,
+  `weak_key_storage`, `failed_sessions`), also on the detail and in the CLI.
+- `GET /users/{id}/usage` for a time range.
+- `GET /installation-families/{id}/operation-impact` and
+  `GET /client-components/{id}/operation-impact` (whole delegation tree).
+- `POST /users/batch-impact` and `POST /users/batch` (up to 100 users, each in
+  its own transaction and audit event, skipping users changed since the
+  preview).
+
+Console: Users gets status, plan-override, provider and claim filters, a sort,
+and a total, all in the URL; selected users can be blocked, unblocked,
+required to sign in or re-verify through the batch; the drawer shows 30-day
+usage. Installations gets signal, status and platform filters, a sort, a
+total, server signals on rows, and live impact previews in action reviews.
+Servers without the capability keep the labeled loaded-rows behavior.
+
+Validation: `go test ./...` against PostgreSQL 16 (filters, sorts, paging,
+totals, invalid filters, per-user usage, signals and their filter, impact
+previews for families and root and child components, batch preview with an
+unknown user, batch apply, replay skipped as changed, and one audit event per
+user), vet, gofmt; contract validation and generated references (118
+operations); lint, typecheck, `check:api`, `pnpm test` (469 passed),
+Playwright, the live-stack run, build and `verify:reproducible`.
+
+## Console completion phase 15: application roles and role preview (branch `console-api-completion`, unreleased)
+
+Server (ADR 0045, schema 39, capability `admin_application_roles`):
+
+- `admin_application_roles` grants raise a member to Admin or Operator in one
+  application. `Principal` gains `RoleIn`, `AllowsIn` and `AllowsSomewhere`;
+  sessions and API tokens load grants on every request.
+- Converted application-scoped checks: configuration draft, replace,
+  validate, plan, activate, rollback and simulation; environment create and
+  status; application status; secrets list, create, rotate and destroy; user
+  limit overrides; self-test runs, reads and schedules; installation, family
+  and component revocation and re-attestation; user block and confirmed user
+  operations. Organization-wide actions keep the organization role.
+- `GET /application-roles`, `PUT`/`DELETE
+  /administrators/{id}/application-roles/{application}` (owners); grants must
+  be above the organization role, owners have none, and raising the
+  organization role drops covered grants. Token scopes may include
+  capabilities held in some application. The session document carries
+  `application_roles`.
+- Fix: the CLI's token-mode session struct now accepts every field the server
+  sends (`two_factor_enrollment_required` had been missing since phase 11,
+  which strict decoding would refuse).
+
+Console: capabilities are computed per selected application from the session
+(`useCapabilities`), so a raised member gets the right buttons in that app
+only; Team › Members has an Application roles section per member; owners can
+Preview as Role (Admin, Operator, Viewer) from the account menu, which shows
+that role's console read-only with a banner and Exit Preview.
+
+Validation: `go test ./...` against PostgreSQL 16 (a Viewer raised to Admin in
+one app can create environments, drafts and use a scoped token there and not in
+another app or organization-wide; listing, removal, refusal below the
+organization role and drop on promotion), vet, gofmt; contract validation and
+generated references (113 operations); lint, typecheck, `check:api`,
+`pnpm test` (465 passed), Playwright, the live-stack run, build and
+`verify:reproducible`.
+
+## Console completion phase 14: member invitations (branch `console-api-completion`, unreleased)
+
+Server (ADR 0044, schema 38, capability `admin_invitations`):
+
+- `GET`/`POST /organizations/{id}/invitations`, `…/{invitation}/revoke` and
+  `…/{invitation}/renew` (owners). Links are `/invitation#lwinv_…`, shown
+  once; tokens are stored as domain-separated hashes, last seven days, work
+  once, and are replaced by a newer invitation for the same address.
+  Inviting a current member, or a non-owner while single sign-on is
+  required, is refused.
+- `POST /auth/invitations/preview` and `/auth/invitations/accept` (public;
+  accept creates the account with the chosen password and signs in) and
+  `POST /auth/invitations/claim` (signed in, invited address only).
+- `internal/mail`: an SMTP sender (STARTTLS or implicit TLS; plaintext only to
+  localhost; header-injection checks) configured by `LATCHWAY_SMTP_HOST`,
+  `_PORT`, `_TLS`, `_USERNAME`, `_PASSWORD` and `_FROM`. Delivery results are
+  recorded on the invitation; the link is always returned.
+
+Console: Invite Member on Team › Members (email option when the server has a
+relay, role cards, one-time link reveal with copy), an Invitations card (status,
+New Link, Revoke), the `/invitation#…` link captured at startup and removed
+from the address, a "You're invited" screen for new accounts (name, password
+with strength meter) and, for existing accounts, sign in first and then a
+"Join an organization" dialog that claims the invitation and switches the
+session.
+
+Validation: `go test ./...` against PostgreSQL 16 (SMTP sender against an
+in-process relay; config loading; the full invitation lifecycle with
+replacement, renewal, revocation, email success and failure, acceptance,
+reuse, claiming across organizations and refusals), vet, gofmt; contract
+validation and generated references (110 operations); lint, typecheck,
+`check:api`, `pnpm test` (461 passed), Playwright, the live-stack run (now
+also invites an address and accepts the link in a second browser), build and
+`verify:reproducible`.
+
+## Console completion phase 13: administrator single sign-on (branch `console-api-completion`, unreleased)
+
+Server (ADR 0043, schema 37, capability `admin_sso`):
+
+- `internal/oidc`: discovery (same issuer, HTTPS endpoints, code flow, PKCE
+  S256, RS256/ES256), authorization URLs with state, nonce and PKCE, the code
+  exchange with `client_secret_post`, and ID token verification against the
+  issuer's JWKS (signature, issuer, audience, authorized party, expiry, issue
+  time, nonce). Requests use the public-destination upstream transport.
+  `internal/oidc/oidctest` is an in-memory provider for tests.
+- `GET`/`PUT`/`DELETE /organizations/{id}/sso` (owners): the provider with
+  discovered endpoints, a sealed client secret (organization-bound derived key,
+  never returned), allowed email domains, an optional provisioning role,
+  enabled and require_sso. Disabling or removing ends single sign-on sessions;
+  requiring it ends members' other sessions (`sso_changed`).
+- `POST /auth/sso/start` (by organization slug; browser-binding cookie; at most
+  500 pending per organization) and `GET /auth/sso/callback` (single-use state,
+  PKCE, ID token checks; links by provider-verified email in allowed domains or
+  provisions a membership; redirects to `/` or `/?sso_error=`).
+- Sessions record `sign_in_method` (`password`, `passkey`, `sso`). Single
+  sign-on sessions aren't held to the two-factor requirement or a pending
+  password change and can't switch organization. Requiring SSO refuses member
+  password and passkey sign-in; owners keep theirs. `GET /auth/info` lists
+  `sso` when any organization has it on. Members carry `sso_linked`; the CLI
+  adds an SSO column. Owner password resets now create a password for accounts
+  that have none.
+
+Console: Sign In with SSO (organization name, then the identity provider), the
+returned failure reason on the sign-in screen (read once and removed from the
+address), single sign-on re-sign-in in the session-ended dialog, an explanation
+instead of switching for SSO sessions, a Single sign-on card in Settings ›
+General for owners (redirect URI to copy, write-only client secret, domains,
+account creation role, offer and require toggles with confirmation of the
+sessions that end, remove), an SSO badge on Team › Members, and "Signed in
+with" on Your account.
+
+Validation: `go test ./...` against PostgreSQL 16 (OIDC unit tests including
+expired, wrong-audience, replayed-nonce and `alg: none` tokens; the full
+start/callback flow against the in-memory provider with linking,
+provisioning, domain, unverified-email, replay, other-browser and IdP-error
+cases, require_sso, the two-factor exemption, session endings and removal),
+vet, gofmt; contract validation and generated references (103 operations);
+lint, typecheck, `check:api`, `pnpm test` (452 passed), Playwright, the
+live-stack run, build and `verify:reproducible`. The live-stack run doesn't
+cover single sign-on because its transport refuses loopback identity
+providers by design.
+
+## Console completion phase 12: administrator passkeys (branch `console-api-completion`, unreleased)
+
+Server (ADR 0042, schema 36, capability `admin_passkeys`):
+
+- `internal/webauthn` verifies registration and assertion ceremonies for ES256
+  with user presence and verification required, exact origin and RP ID hash,
+  no cross-origin use, strict CBOR, and attestation `none`.
+  `internal/webauthn/webauthntest` is a software authenticator for tests.
+- `POST /auth/passkeys/registration-options` (password required) and
+  `POST /auth/passkeys` register a discoverable passkey; the first second
+  factor also returns recovery codes. `GET /auth/passkeys` lists them (name,
+  created, last used, synced). `POST /auth/passkeys/{id}/remove` needs the
+  password and refuses the last factor an organization requires.
+- Passwordless sign-in: `POST /auth/passkeys/sign-in-options` (at most 1,000
+  pending) and `POST /auth/passkeys/sign-in`. As a second factor: the `202`
+  lists `passkey`, `POST /auth/login/two-factor/passkey-options` starts a
+  prompt tied to the sign-in challenge, and `POST /auth/login/two-factor`
+  accepts `passkey`. Non-advancing signature counters are refused.
+- Passkeys count toward the organization requirement, the members'
+  `two_factor_enabled` flag and owner resets (which now remove them too).
+  `POST /auth/two-factor/disable` removes only the authenticator app;
+  recovery codes can be replaced with the password. `GET /auth/two-factor` adds
+  `enabled` and `passkeys`; `GET /auth/info` lists `passkey` when the public
+  origin is a domain name over HTTPS or localhost.
+
+Console: "Sign In with a Passkey" on the sign-in screen, a passkey option in
+the second-factor step (sign-in and re-sign-in), a Passkeys card on Your
+account (add with name and password, recovery codes when first, synced or
+device-only, last used, remove with password), a reworked Two-factor card
+(authenticator app and passkeys side by side; replacing codes takes the
+password without an app; setup starts immediately), and a passkey option on
+the forced enrollment screen. The sign-in information query no longer resolves
+to `undefined`. The live-stack run now reaches the console as `localhost`,
+registers a passkey with Chromium's virtual authenticator, signs in with it
+alone, and uses it as the second factor after a password.
+
+Validation: `go test ./...` against PostgreSQL 16 (WebAuthn verification,
+software-authenticator API tests including replay, counter, origin and
+unregistered-credential refusals), vet, gofmt; contract validation and
+generated references (98 operations); lint, typecheck, `check:api`,
+`pnpm test` (443 passed), Playwright, the live-stack run (passed), build and
+`verify:reproducible`.
+
+## Console completion phase 11: administrator two-factor sign-in (branch `console-api-completion`, unreleased)
+
+Server (ADR 0041, schema 35, capability `admin_two_factor`):
+
+- TOTP authenticators: `POST /auth/two-factor/totp` returns a new key once (text
+  and `otpauth://`), `POST /auth/two-factor/totp/confirm` confirms it with a
+  code and returns ten single-use recovery codes once. Keys are sealed with an
+  administrator-bound key derived from the master key
+  (`SealAdministratorFactor`); recovery codes are stored hashed.
+- Sign-in: a correct password for a two-factor account returns `202` with a
+  hashed, five-minute, five-attempt challenge and no cookie;
+  `POST /auth/login/two-factor` finishes with a code or a recovery code. Codes
+  work once (the last accepted time step is stored) and wrong codes are also
+  limited per administrator.
+- `GET /auth/two-factor`, `POST /auth/two-factor/recovery-codes` (needs a current
+  code) and `POST /auth/two-factor/disable` (password and code; refused while an
+  organization requires two-factor).
+- `PUT /organizations/{id}/two-factor-requirement` (owners): members without a
+  factor get enrollment-only console sessions. API tokens are unaffected.
+- `POST /administrators/{id}/reset-two-factor` (owners) removes a member's
+  factor and ends their sessions; the CLI gains `accounts reset-two-factor` and
+  a TWO-FACTOR column, and administrator records carry `two_factor_enabled`.
+
+Console: a "Verify it's you" sign-in step (authenticator or recovery code), the
+same step in the re-sign-in dialog, a Two-factor card on Your account (QR code
+drawn locally with the bundled MIT `uqr` encoder, key for manual entry,
+recovery codes shown once behind an "I've saved these" check, replace codes,
+turn off), a full-screen "Set up two-factor sign-in" step when the
+organization requires it, a Two-factor column and Reset Two-Factor action on
+Team › Members, and a Sign-in security card in Settings › General that names
+members without it before requiring it. The live-stack run now enrolls a
+member, signs out and signs back in with a computed TOTP code.
+
+Validation: `go test ./...` against PostgreSQL 16 (including RFC 6238 vectors and
+the sealed-key tests), vet, gofmt; contract validation and generated
+references; lint, typecheck, `check:api`, `pnpm test` (427 passed),
+Playwright (46 passed), the live-stack run (passed), build and
+`verify:reproducible`.
+
+## Console completion phase 10: administrator account self-service (branch `console-api-completion`, unreleased)
+
+Server (ADR 0040, Admin bundle edition 1.1.3 draft, schema 34, server
+capability `admin_account_self_service`):
+
+- Passwords an owner sets on creation or reset are temporary. The account's
+  console session can only read itself, read `GET /system`, change the password
+  and sign out until it does; everything else is `permission_denied`. The
+  `password_reset_required` column was never set before this change.
+- `POST /auth/password` changes your own password (console sessions only),
+  checks the current one under the login limiter, refuses reuse, and signs
+  out your other console sessions in every organization.
+- A cookie for an ended session gets `session_expired` or `session_revoked`
+  (existing registry codes) with the reason in the detail: signed out, signed
+  out from another session, revoked by an owner, password reset, password
+  changed, organization switch, or access disabled. Unknown cookies stay
+  `authentication_required`.
+- `POST /auth/organization` swaps the session to another membership
+  atomically, without a password. A sign-in without an organization uses the
+  last one (`admin_users.last_organization_id`).
+- `GET /auth/sessions`, `POST /auth/sessions/{id}/revoke` and
+  `POST /auth/sessions/revoke-others` cover your own sessions across
+  organizations, with end reasons for the last 30 days.
+- Sessions store a coarse server-derived device summary ("Chrome on macOS"),
+  never the raw User-Agent or an address; owner session lists show it.
+- `GET /api-tokens?scope=organization` lists every administrator's tokens for
+  owners; token metadata now includes `last_used_at`.
+- `GET /auth/info` (public) reports the client contract, protocols, whether
+  first-owner setup is open, and sign-in methods.
+- The CLI decodes session and token documents strictly; it now accepts and
+  prints the device summary and last use, and its `login` accepts the new
+  session fields. `accounts create` and `reset-password` say the password is
+  temporary. The OpenAPI also corrects `SystemStatus.protocol_versions` to the
+  `[1, 2, 3]` the server returns.
+
+Console: a Your account page (profile, password change with the strength
+gate, your sessions with device, organization, end reason and sign-out), a
+full-screen "Choose your password" step for owner-set passwords, organization
+switching without a password (also from the sign-in chooser, which now marks
+the default organization), the sign-in screen opening on setup while setup is
+open and naming why a session ended, a pre-sign-in contract mismatch notice,
+an Everyone view of API tokens for owners with last use, and a Device column
+on Team › Sessions. The live-stack run now also adds a member, signs in as
+them through Choose your password and opens Your account.
+
+Validation: `go test ./...` against PostgreSQL 16, vet and gofmt; contract
+validation and the generated public references; lint, typecheck, `check:api`,
+`pnpm test` (421 passed), Playwright (46 passed), the live-stack run (passed),
+build and `verify:reproducible`.
+
+## Console redesign phase 9: Setup wizard, CI and cleanup (branch `console-api-completion`, unreleased)
+
+The Setup wizard (`/setup`) uses the design system's setup layout: a step
+rail, the current step and a running summary. Planning is five steps (App &
+environment, Clients, AI connection, Pricing & limits, Review) inside one
+form; Continue checks only the current step, the rail moves freely, and Create
+checks every step and opens the first one with a problem. The Play Integrity
+service-account JSON and the provider key stay write-only and are cleared as
+before. After creation the page shows Credential, Configuration document,
+Self-test, SDK snippets and Verify a request as cards the rail links to, each
+marked done from the same server evidence as before. The guided Add Connection
+and Add Platform forms, platform readiness cards, draft review, the shared
+problem notice, effective-configuration panel, workspace gates and the 404
+page moved to the UI kit; native label-wrapped controls keep their names and
+are styled by a `.lw-form` scope. The legacy `styles.css` is gone: its global
+rules moved to `ui/base.css`, and every page imports only the design-system
+styles.
+
+Pages load on first visit (36 lazy route components), so the entry bundle is
+390 KB instead of 1.25 MB. The compatibility guard now treats only the window
+losing or regaining focus as inactivity; focus moving between elements no
+longer closes a grant or calls `flushSync` during React commits.
+
+Fixed a release-blocking mismatch: the console required Admin contract 1.0.0
+while servers since 1.1.0 advertise `1.1.0`, so a real 1.1.x server left the
+embedded console in read-only safe mode. Mocked fixtures had hidden it; the
+live-stack run exposed it. The console now requires `1.1.0`, the fixtures
+follow, and `TestConsoleRequiresTheServerContract` fails if the console and
+`buildinfo.ContractVersion` drift again.
+
+`.github/workflows/ci.yml` runs on pull requests and `main`: workflow lint,
+contract validation and deterministic bundle; gofmt, sqlc drift, vet and
+`go test` against PostgreSQL; and the console's lint, contract types,
+typecheck, unit, build and browser tests, the live browser-to-Go-to-PostgreSQL
+first-run test, reproducible assets and a check that the committed `dist`
+matches. `make test-scripts` is not run: 133 of its Python tests still read
+release workflows removed in `02c3c24` (ci: simplify v1 publication), a
+pre-existing state this phase does not change. `credential_selftest.go` was
+reformatted for Go 1.27's gofmt.
+
+Validation: lint, typecheck, `check:api`, `pnpm test` (411 passed),
+Playwright across Chromium, Firefox, WebKit and mobile WebKit (46 passed),
+the live-stack first run against a local PostgreSQL 16 gateway (passed), build,
+`verify:reproducible`, actionlint, `go test ./...` against PostgreSQL and
+`go test ./web/console/ ./internal/server/` passed.
 
 ## Console redesign phase 8: Authentication (branch `console-redesign`, unreleased)
 

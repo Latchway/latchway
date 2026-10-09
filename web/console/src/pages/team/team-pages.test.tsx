@@ -21,7 +21,7 @@ type Options = { body?: Record<string, unknown>; method?: string } | undefined;
 
 const owner = { created_at: instant, display_name: "Owner One", email: "owner@example.test", id: "adm_0123456789abcdef", membership_id: "amb_0123456789abcdef", organization_id: "org_0123456789abcdef", password_reset_required: false, role: "owner", status: "active", updated_at: instant };
 const jo = { ...owner, display_name: "Jo Admin", email: "jo@example.test", id: "adm_1123456789abcdef", membership_id: "amb_1123456789abcdef", role: "admin" };
-const sessionOf = (id: string, admin: typeof owner, current = false, status = "active") => ({ administrator: { email: admin.email, id: admin.id }, created_at: instant, current, expires_at: "2026-08-29T12:00:00Z", id, last_seen_at: instant, status });
+const sessionOf = (id: string, admin: typeof owner, current = false, status = "active") => ({ administrator: { email: admin.email, id: admin.id }, created_at: instant, current, device_summary: "Chrome on macOS", expires_at: "2026-08-29T12:00:00Z", id, last_seen_at: instant, status });
 const token = { created_at: instant, expires_at: new Date(Date.now() + 2.5 * 86_400_000).toISOString(), id: "tok_0123456789abcdef", name: "grafana-reader", revoked: false, scopes: ["inspect_users"] };
 
 function server() {
@@ -36,6 +36,7 @@ function server() {
     const revoke = /^\/admin\/v1\/admin-sessions\/(asn_[A-Za-z0-9]+)\/revoke$/.exec(path);
     if (revoke && method === "POST") { state.sessions = state.sessions.map((item) => (item.id === revoke[1] ? { ...item, status: "revoked" } : item)); return Promise.resolve({ data: undefined }); }
     if (path === "/admin/v1/api-tokens" && method === "GET") return Promise.resolve({ data: { items: state.tokens } });
+    if (path === "/admin/v1/api-tokens?scope=organization" && method === "GET") return Promise.resolve({ data: { items: [...state.tokens.map((item) => ({ ...item, administrator: { email: owner.email, id: owner.id } })), { ...token, administrator: { email: jo.email, id: jo.id }, id: "tok_9123456789abcdef", last_used_at: instant, name: "jo-ci" }] } });
     if (path === "/admin/v1/api-tokens" && method === "POST") {
       const created = { created_at: instant, ...(options?.body?.expires_at ? { expires_at: options.body.expires_at } : {}), id: `tok_${state.tokens.length + 1}123456789abcdef`, name: options?.body?.name, revoked: false, scopes: options?.body?.scopes };
       state.tokens = [...state.tokens, created as typeof token];
@@ -125,6 +126,29 @@ describe("Members", () => {
   });
 });
 
+describe("Two-factor", () => {
+  it("shows who has two-factor on and lets an owner reset it after confirming", async () => {
+    const user = userEvent.setup();
+    server();
+    const base = adminRequestMock.getMockImplementation();
+    adminRequestMock.mockImplementation((path: string, schema: unknown, options: Options) => {
+      if (path.startsWith("/admin/v1/administrators?")) return Promise.resolve({ data: { items: [owner, { ...jo, two_factor_enabled: true }], page: { has_more: false } } });
+      if (path === `/admin/v1/administrators/${jo.id}/reset-two-factor`) return Promise.resolve({ data: { ...jo, two_factor_enabled: false } });
+      return base?.(path, schema, options);
+    });
+    renderWithWorkspace(<MembersPage />);
+    const row = (await screen.findByText("Jo Admin")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("On")).toBeInTheDocument();
+    await user.click(row);
+    const drawer = await screen.findByRole("complementary", { name: "Jo Admin" });
+    await user.click(within(drawer).getByRole("button", { name: "Reset Two-Factor" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Reset Jo Admin's two-factor sign-in?" });
+    expect(dialog).toHaveTextContent("confirming who's asking");
+    await user.click(within(dialog).getByRole("button", { name: "Reset Two-Factor" }));
+    await waitFor(() => expect(mutationsOf(adminRequestMock)).toEqual([`POST /admin/v1/administrators/${jo.id}/reset-two-factor`]));
+  });
+});
+
 describe("API tokens", () => {
   it("reveals a new token once, unlocks Done only after it's saved, and never re-shows it after a read-only spell", async () => {
     const user = userEvent.setup();
@@ -167,6 +191,28 @@ describe("API tokens", () => {
     expect(adminRequestMock.mock.calls.find(([, , options]) => (options as Options)?.method === "POST")?.[2]).toMatchObject({ body: { name: "grafana-reader", scopes: ["inspect_users"] } });
   });
 
+  it("lets an owner see everyone's tokens with their owner and last use, and replace only their own", async () => {
+    const user = userEvent.setup();
+    server();
+    renderWithWorkspace(<TokensPage />);
+    expect(await screen.findByText("Never")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Everyone" }));
+    const row = (await screen.findByText("jo-ci", { selector: ".lw-mono" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText(jo.email)).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+    expect(within(row).queryByText("Never")).not.toBeInTheDocument();
+  });
+
+  it("hides the everyone view from non-owners", async () => {
+    session.capabilities = ["inspect_users"];
+    server();
+    renderWithWorkspace(<TokensPage />);
+    expect(await screen.findByText("grafana-reader", { selector: ".lw-mono" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Everyone" })).not.toBeInTheDocument();
+    session.capabilities = ["manage_owners", "activate_configuration", "manage_secrets", "inspect_users", "run_self_tests", "revoke_installations"];
+  });
+
   it("revokes only after the token's name is typed", async () => {
     const user = userEvent.setup();
     server();
@@ -189,6 +235,7 @@ describe("Sessions", () => {
     server();
     renderWithWorkspace(<SessionsPage />);
     expect(await screen.findByText("This session")).toBeInTheDocument();
+    expect(screen.getAllByText("Chrome on macOS").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Sign Out Everyone Else" }));
     const dialog = screen.getByRole("alertdialog", { name: "Sign out everyone else?" });
     expect(dialog).toHaveTextContent("2 sessions for 1 person end now");

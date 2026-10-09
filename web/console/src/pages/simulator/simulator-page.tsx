@@ -6,6 +6,8 @@ import { adminRequest, EffectiveConfigurationSchema, type EffectiveConfiguration
 import { problemFromError } from "../../api/auth";
 import { ConfigurationRevisionResourcePageSchema } from "../../api/resources";
 import { useConsoleSession } from "../../api/session";
+import { POLICY_INSIGHTS, simulateBatch } from "../../api/policy-insights";
+import { useConsoleCompatibility } from "../../app/console-compatibility-context";
 import { GRID_DIMENSIONS, RouteSimulatorRouteSearchSchema, type RouteSimulatorRouteSearch } from "../../app/route-search";
 import { EnvironmentRequired } from "../../app/workspace-context";
 import { useOptionalWorkspace, useWorkspace, type WorkspaceSearch } from "../../app/workspace-context-value";
@@ -18,16 +20,20 @@ import { LimitSentenceText } from "../policies/limit-editor";
 import { nanoToDollars } from "../policies/limit-model";
 import { CopyButton } from "../requests/request-detail";
 import { STAGE_LABEL as RECORDED_STAGE_LABEL } from "../requests/request-format";
+import { ScenariosCard } from "./scenarios-card";
 import {
   changedStages,
   cliCommand,
   deniedAt,
+  FAILURE_CONDITIONS,
+  failuresFor,
   handlingStep,
   outcomeText,
   type Platform,
   PLATFORM_LABEL,
   type RequestSize,
   simulate,
+  simulationBody,
   type SimulationInput,
   SIZE_PRESETS,
   sizePreset,
@@ -42,6 +48,38 @@ import {
 } from "./simulator-model";
 
 type Mode = NonNullable<RouteSimulatorRouteSearch["mode"]>;
+type AttemptPlan = NonNullable<RouteSimulation["attempt_plan"]>;
+
+/** Whether the server simulates failures, batches, saved scenarios and limit usage. */
+function usePolicyInsights(): boolean {
+  const compatibility = useConsoleCompatibility();
+  return compatibility.status?.server_capabilities.includes(POLICY_INSIGHTS) ?? false;
+}
+
+const NEXT_LABEL: Readonly<Record<NonNullable<AttemptPlan["attempts"][number]["next"]>, string>> = {
+  fallback: "falls back",
+  retry: "retries",
+  stop: "stops"
+};
+
+/** The server's walk through the route plan with the chosen connections failing. */
+function AttemptList({ plan }: { plan: AttemptPlan }) {
+  return (
+    <div className="lw-stack lw-stack--tight">
+      <ol aria-label="Attempts" className="lw-attempts">
+        {plan.attempts.map((attempt) => (
+          <li className={`lw-attempt lw-attempt--${attempt.outcome}`} key={attempt.number}>
+            <span className="lw-num lw-faint">{attempt.number}</span>
+            <span><strong>{attempt.model} on {attempt.upstream}</strong> <span className="lw-mono lw-mono--sm">route {attempt.route}</span></span>
+            <span className="lw-secondary">{attempt.outcome === "succeeded" ? "Succeeds" : <>Fails ({attempt.condition}) · {attempt.next ? NEXT_LABEL[attempt.next] : "stops"}{attempt.retry_delay_max_ms !== undefined ? ` after up to ${attempt.retry_delay_max_ms.toLocaleString()} ms` : ""}</>}</span>
+          </li>
+        ))}
+      </ol>
+      {plan.outcome === "failed" ? <Notice tone="warning">The app gets an error: no route&apos;s retry or fallback policy covers {plan.failure_condition}.</Notice> : null}
+      <details><summary className="lw-sim-note">Assumptions</summary><ul className="lw-issue-list lw-note">{plan.assumptions.map((line) => <li key={line}>{line}</li>)}</ul></details>
+    </div>
+  );
+}
 type GridDimension = (typeof GRID_DIMENSIONS)[number];
 
 const GRID_LABEL: Readonly<Record<GridDimension, string>> = { plan: "Plan claim", platform: "Platform", size: "Request size", streaming: "Streaming", trust_level: "Trust level" };
@@ -138,7 +176,14 @@ function simulatedLimit(limit: NonNullable<RouteSimulation["limits"]>[number]): 
   };
 }
 
-function StageBody({ down, input, onToggleDown, result, stage }: { down: ReadonlySet<string>; input: SimulationInput; onToggleDown?: (connection: string) => void; result: RouteSimulation; stage: Stage }) {
+interface FailureControls {
+  attemptPlan?: AttemptPlan;
+  condition: string;
+  onCondition?: (condition: string) => void;
+  pending: boolean;
+}
+
+function StageBody({ down, failure, input, onToggleDown, result, stage }: { down: ReadonlySet<string>; failure?: FailureControls; input: SimulationInput; onToggleDown?: (connection: string) => void; result: RouteSimulation; stage: Stage }) {
   switch (stage) {
     case "signed_in": return <span className="lw-trace__detail">{input.authenticated ? "Verified sign-in" : "Not signed in"}</span>;
     case "app_verified": return <span className="lw-trace__detail">{PLATFORM_LABEL[input.platform]} · {TRUST_LABEL[input.trustLevel]}</span>;
@@ -150,13 +195,14 @@ function StageBody({ down, input, onToggleDown, result, stage }: { down: Readonl
         <div className="lw-trace__detail">
           {reservation ? <span>Up to {reservation.total_token_bound.toLocaleString("en-US")} tokens (output capped at {reservation.applied_output_maximum.toLocaleString("en-US")}) · {reservation.cost_bound_known ? `at most ${nanoToDollars(reservation.cost_nano_usd_bound)}` : "cost bound unknown"}</span> : null}
           {(result.limits ?? []).length ? <ul className="lw-trace__limits">{(result.limits ?? []).map((limit, index) => <li key={index}><LimitSentenceText limit={simulatedLimit(limit)} /></li>)}</ul> : null}
-          <span className="lw-faint">Nothing is reserved; remaining quota isn't simulated.</span>
+          <span className="lw-faint">Nothing is reserved. A sample request has no usage of its own; check a real user for what&apos;s left.</span>
         </div>
       );
     }
     case "route": {
       const sequence = result.fallback_sequence ?? [];
-      const handler = handlingStep(result, down);
+      const served = failure?.attemptPlan ? sequence.findIndex((step) => step.route === failure.attemptPlan?.served_by_route) : -1;
+      const handler = failure?.attemptPlan ? (served < 0 ? undefined : served) : handlingStep(result, down);
       if (!sequence.length) return <span className="lw-trace__detail">{result.model ? `${result.model} on ${result.upstream ?? "?"}${result.physical_model ? ` (${result.physical_model})` : ""}` : "—"}</span>;
       return (
         <div className="lw-trace__detail">
@@ -174,16 +220,24 @@ function StageBody({ down, input, onToggleDown, result, stage }: { down: Readonl
             <div className="lw-sim-chips">
               <span className="lw-sim-note">Pretend down:</span>
               {[...new Set(sequence.map((step) => step.upstream))].map((connection) => <button aria-pressed={down.has(connection)} className="lw-pill" key={connection} onClick={() => onToggleDown(connection)} type="button">{connection}</button>)}
+              {failure?.onCondition ? (
+                <select aria-label="Fails with" className="lw-select lw-select--sm" onChange={(event) => failure.onCondition?.(event.target.value)} value={failure.condition}>
+                  {FAILURE_CONDITIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+              ) : null}
             </div>
           ) : null}
-          {down.size && handler === undefined ? <Notice tone="warning">Allowed, but every connection is down: the app would get upstream_unavailable.</Notice> : null}
+          {down.size && failure?.pending ? <p className="lw-sim-note" role="status">Asking the server what happens…</p> : null}
+          {down.size && failure?.attemptPlan ? <AttemptList plan={failure.attemptPlan} /> : null}
+          {down.size && !failure?.attemptPlan && !failure?.pending && handler === undefined ? <Notice tone="warning">Allowed, but every connection is down: the app would get upstream_unavailable.</Notice> : null}
+          {down.size && !failure ? <p className="lw-sim-note">Worked out in the browser: this server doesn&apos;t simulate failures, so retry and fallback conditions aren&apos;t checked.</p> : null}
         </div>
       );
     }
   }
 }
 
-function Trace({ changed, input, label, onToggleDown, down, result }: { changed?: ReadonlySet<Stage>; down: ReadonlySet<string>; input: SimulationInput; label?: string; onToggleDown?: (connection: string) => void; result: RouteSimulation }) {
+function Trace({ changed, failure, input, label, onToggleDown, down, result }: { changed?: ReadonlySet<Stage>; down: ReadonlySet<string>; failure?: FailureControls; input: SimulationInput; label?: string; onToggleDown?: (connection: string) => void; result: RouteSimulation }) {
   const stopped = deniedAt(result);
   const stopIndex = stopped ? STAGES.indexOf(stopped) : result.allowed ? STAGES.length : -1;
   const fix = stopped ? STAGE_FIX[stopped] : undefined;
@@ -207,7 +261,7 @@ function Trace({ changed, input, label, onToggleDown, down, result }: { changed?
               <span className="lw-trace__dot"><Icon name={state === "pass" ? "check" : state === "deny" ? "x" : "minus"} size={12} /></span>
               <div className="lw-trace__body">
                 <div className="lw-trace__head"><strong>{STAGE_LABEL[stage]}</strong>{changed?.has(stage) ? <Badge color="orange" variant="soft">Changed</Badge> : null}{state === "skip" && !result.allowed ? <span className="lw-sim-note">Not reached</span> : null}</div>
-                {state !== "skip" || result.allowed ? <StageBody down={down} input={input} onToggleDown={onToggleDown} result={result} stage={stage} /> : null}
+                {state !== "skip" || result.allowed ? <StageBody down={down} failure={failure} input={input} onToggleDown={onToggleDown} result={result} stage={stage} /> : null}
               </div>
             </li>
           );
@@ -305,7 +359,9 @@ function SampleMode({ draft, input, onInput, search, targets }: { draft: Environ
   const versus = search.versus ? targets.options.find((option) => option.id === search.versus) : undefined;
   const [submitted, setSubmitted] = useState<SimulationInput>();
   const [down, setDown] = useState<ReadonlySet<string>>(new Set());
+  const [condition, setCondition] = useState("connect_error");
   const [showWhatIf, setShowWhatIf] = useState(false);
+  const insights = usePolicyInsights();
   const features = run?.document ? identifierValues(run.document, "features") : [];
   const plans = draft.document ? identifierValues(draft.document, "limitPlans") : [];
   const results = useQueries({
@@ -319,6 +375,19 @@ function SampleMode({ draft, input, onInput, search, targets }: { draft: Environ
   });
   const [primary, secondary] = results;
   const changed = changedStages(primary?.data, secondary?.data);
+  const failures = insights && primary?.data && down.size ? failuresFor(primary.data, down, condition) : [];
+  const failurePlan = useQuery({
+    enabled: Boolean(run && submitted && failures.length),
+    queryFn: async () => {
+      const result = await simulate(run?.revision ?? "", submitted as SimulationInput, failures);
+      if (!result.attempt_plan) throw new Error("The server didn't return an attempt plan.");
+      return result.attempt_plan;
+    },
+    queryKey: ["simulate-failures", run?.revision, JSON.stringify(submitted), JSON.stringify(failures)],
+    retry: false,
+    staleTime: 60_000
+  });
+  const failure: FailureControls | undefined = insights ? { attemptPlan: failures.length ? failurePlan.data : undefined, condition, onCondition: setCondition, pending: failurePlan.isFetching } : undefined;
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -331,19 +400,23 @@ function SampleMode({ draft, input, onInput, search, targets }: { draft: Environ
   const toggleDown = (connection: string) => setDown((current) => { const next = new Set(current); if (next.has(connection)) next.delete(connection); else next.add(connection); return next; });
   return (
     <div className="lw-sim">
-      <Card icon="simulator" title="Request">
-        <form className="lw-sim-inputs" onSubmit={submit}>
-          <InputsPanel features={features} input={input} onChange={onInput} plans={plans} />
-          <div className="lw-row"><Button disabled={!run || !input.feature} icon="play" type="submit" variant="primary">Simulate</Button></div>
-        </form>
-      </Card>
+      <div className="lw-stack">
+        <Card icon="simulator" title="Request">
+          <form className="lw-sim-inputs" onSubmit={submit}>
+            <InputsPanel features={features} input={input} onChange={onInput} plans={plans} />
+            <div className="lw-row"><Button disabled={!run || !input.feature} icon="play" type="submit" variant="primary">Simulate</Button></div>
+          </form>
+        </Card>
+        {insights && workspace.application ? <ScenariosCard applicationID={workspace.application.id} canSave={draft.canConfigure} input={input} onLoad={(loaded) => { onInput(loaded); setSubmitted(loaded); setDown(new Set()); }} /> : null}
+      </div>
       <div className="lw-sim-out">
         {!submitted ? <p className="lw-secondary lw-note">Set the inputs and select Simulate. Nothing is reserved and nothing is sent.</p> : null}
         {primary?.error ? <ProblemNotice problem={simulationProblem(primary.error)} /> : null}
+        {failurePlan.error ? <ProblemNotice problem={simulationProblem(failurePlan.error)} /> : null}
         {submitted && primary?.isFetching && !primary.data ? <p role="status">Simulating…</p> : null}
         {primary?.data && submitted ? (
           <div className={`lw-sim-cols${versus ? " lw-sim-cols--2" : ""}`}>
-            <Trace changed={versus ? changed : undefined} down={down} input={submitted} label={run?.label} onToggleDown={toggleDown} result={primary.data} />
+            <Trace changed={versus ? changed : undefined} down={down} failure={failure} input={submitted} label={run?.label} onToggleDown={toggleDown} result={primary.data} />
             {versus ? (secondary?.data ? <Trace changed={changed} down={down} input={submitted} label={versus.label} result={secondary.data} /> : secondary?.error ? <ProblemNotice problem={simulationProblem(secondary.error)} /> : <p role="status">Simulating…</p>) : null}
           </div>
         ) : null}
@@ -407,9 +480,24 @@ function GridMode({ draft, input, onOpenCell, search, targets }: { draft: Enviro
   const columns = gridValues(x, plans);
   const rows = gridValues(y, plans);
   const cells = rows.flatMap((row) => columns.map((column) => applyGrid(applyGrid(input, y, row), x, column)));
-  const runCells = (target: typeof run) => cells.map((cell) => ({ enabled: Boolean(started && target), queryFn: () => simulate(target?.revision ?? "", cell), queryKey: ["simulate", target?.revision, JSON.stringify(cell)], retry: false, staleTime: 60_000 }));
-  const primary = useQueries({ queries: runCells(run) });
-  const secondary = useQueries({ queries: versus ? runCells(versus) : [] });
+  const insights = usePolicyInsights();
+  const runCells = (target: typeof run) => cells.map((cell) => ({ enabled: Boolean(started && target && !insights), queryFn: () => simulate(target?.revision ?? "", cell), queryKey: ["simulate", target?.revision, JSON.stringify(cell)], retry: false, staleTime: 60_000 }));
+  const single = { primary: useQueries({ queries: runCells(run) }), secondary: useQueries({ queries: versus ? runCells(versus) : [] }) };
+  const batches = useQueries({
+    queries: [run, versus].map((target) => ({
+      enabled: Boolean(started && target && insights),
+      queryFn: () => simulateBatch(target?.revision ?? "", cells.map((cell) => simulationBody(cell))),
+      queryKey: ["simulate-batch", target?.revision, JSON.stringify(cells)],
+      retry: false,
+      staleTime: 60_000
+    }))
+  });
+  const fromBatch = (batch: (typeof batches)[number] | undefined) => cells.map((_, index) => {
+    const item = batch?.data?.[index];
+    return { data: item?.result, error: batch?.error ?? (item?.error ? new Error(item.error) : undefined) };
+  });
+  const primary = insights ? fromBatch(batches[0]) : single.primary;
+  const secondary = insights ? (versus ? fromBatch(batches[1]) : []) : single.secondary;
   const changedCount = versus ? cells.filter((_, index) => outcomeText(primary[index]?.data, primary[index]?.error) !== outcomeText(secondary[index]?.data, secondary[index]?.error)).length : 0;
   const pick = (key: "grid_x" | "grid_y", value: GridDimension) => { setStarted(false); workspace.updateSearch({ [key]: value }); };
   return (
@@ -420,7 +508,7 @@ function GridMode({ draft, input, onOpenCell, search, targets }: { draft: Enviro
         <Field id="grid-y" label="Rows"><select className="lw-select" id="grid-y" onChange={(event) => pick("grid_y", event.target.value as GridDimension)} value={y}>{GRID_DIMENSIONS.filter((value) => value !== x).map((value) => <option key={value} value={value}>{GRID_LABEL[value]}</option>)}</select></Field>
       </div>
       <div className="lw-row"><Button disabled={!run || !input.feature || !columns.length} icon="play" onClick={() => setStarted(true)} variant="primary">Run {cells.length} Requests</Button></div>
-      <p className="lw-secondary lw-note">Every cell is one simulated request using the rest of the Sample request inputs. The console sends one call per cell (at most 25); there's no batch endpoint yet.</p>
+      <p className="lw-secondary lw-note">Every cell is one simulated request using the rest of the Sample request inputs{insights ? ", all sent in one batch." : ". This server has no batch endpoint, so the console sends one call per cell (at most 25)."}</p>
       {started && versus ? <p className="lw-note">{changedCount} of {cells.length} cells change from {run?.label} to {versus.label}.</p> : null}
       {started ? (
         <div className="lw-sim-grid-scroll">
@@ -453,6 +541,17 @@ function GridMode({ draft, input, onOpenCell, search, targets }: { draft: Enviro
   );
 }
 
+function LimitUsage({ usage }: { usage: NonNullable<EffectiveConfiguration["limits"][number]["usage"]> }) {
+  if (usage.used === undefined || usage.maximum === undefined) return <span className="lw-faint"> · checked per request</span>;
+  const percent = usage.maximum ? Math.min(100, Math.round((usage.used / usage.maximum) * 100)) : 0;
+  return (
+    <span className="lw-limit-usage">
+      <span aria-hidden="true" className="lw-share__bar"><span style={{ width: `${percent}%` }} /></span>
+      <span className="lw-secondary">{usage.used.toLocaleString()} of {usage.maximum.toLocaleString()} used{usage.reserved ? `, ${usage.reserved.toLocaleString()} in flight` : ""} · {(usage.remaining ?? 0).toLocaleString()} left{usage.resets_at ? ` · resets ${new Date(usage.resets_at).toLocaleString()}` : ""}</span>
+    </span>
+  );
+}
+
 function EffectiveView({ effective, liveID }: { effective: EffectiveConfiguration; liveID?: string }) {
   const recorded = effective.evaluation_mode === "recorded_request";
   return (
@@ -468,8 +567,8 @@ function EffectiveView({ effective, liveID }: { effective: EffectiveConfiguratio
         </Notice>
       ) : null}
       <Card icon="policies" title="Limits">
-        {effective.limits.length ? <ul className="lw-issue-list lw-note">{effective.limits.map((limit) => <li key={limit.index}><LimitSentenceText limit={{ ...limit, perRequestMaximum: limit.per_request_maximum, refillPerSecond: limit.refill_per_second === undefined ? undefined : Number(limit.refill_per_second) }} /></li>)}</ul> : <p className="lw-faint lw-note">No limits apply.</p>}
-        <p className="lw-secondary lw-note">How much of each limit is already used isn't returned by the Admin API.</p>
+        {effective.limits.length ? <ul className="lw-issue-list lw-note">{effective.limits.map((limit) => <li key={limit.index}><LimitSentenceText limit={{ ...limit, perRequestMaximum: limit.per_request_maximum, refillPerSecond: limit.refill_per_second === undefined ? undefined : Number(limit.refill_per_second) }} />{limit.usage ? <LimitUsage usage={limit.usage} /> : null}</li>)}</ul> : <p className="lw-faint lw-note">No limits apply.</p>}
+        {recorded ? null : effective.limits.some((limit) => limit.usage) ? <p className="lw-secondary lw-note">Used and remaining are for the user&apos;s current installation, as of the time shown.</p> : <p className="lw-secondary lw-note">This server doesn&apos;t report how much of each limit is used.</p>}
       </Card>
       <Card icon="split" title="Routes">
         <div className="lw-trace__route">
@@ -598,7 +697,6 @@ function SimulatorView() {
         {mode === "grid" ? <GridMode draft={draft} input={input} onOpenCell={(cell) => { setInput(cell); workspace.updateSearch({ ...searchFromInput(cell), mode: undefined }); }} search={search} targets={targets} /> : null}
         {mode === "user" ? <UserMode draft={draft} search={search} /> : null}
         {mode === "request" ? <RequestMode draft={draft} search={search} /> : null}
-        <p className="lw-secondary lw-note">Saved scenarios aren't offered yet: the Admin API has nowhere to store them.</p>
       </div>
     </div>
   );

@@ -9,11 +9,14 @@ import {
   type LogicalRequest,
   type LogicalRequestPage,
   queryPath,
+  type RequestFacets,
+  RequestFacetsSchema,
   RequestPageSchema,
   RequestSchema
 } from "../../api/admin";
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { useConsoleSession } from "../../api/session";
+import { useConsoleCompatibility } from "../../app/console-compatibility-context";
 import { type RequestRouteSearch, RequestRouteSearchSchema } from "../../app/route-search";
 import { useAdminRefreshTopic } from "../../app/use-admin-refresh";
 import { EnvironmentRequired } from "../../app/workspace-context";
@@ -61,8 +64,10 @@ import {
 import {
   activeQuickView,
   applyMoreFilters,
+  cliCommand,
   CUSTOM_RANGE_MAX_DAYS,
   curlCommand,
+  facetRange,
   type FilterKey,
   filtersOf,
   filtersPatch,
@@ -70,6 +75,7 @@ import {
   MORE_FILTER_KEYS,
   moreFilterDraft,
   type MoreFilterDraft,
+  newArrivalsQuery,
   PAGE_SIZES,
   QUICK_VIEWS,
   RANGE_PRESETS,
@@ -79,7 +85,7 @@ import {
   requestListQuery
 } from "./request-query";
 
-const OPTIONAL_COLUMNS = [["trust", "Trust"], ["route", "Route"], ["revision", "Revision"], ["plan", "Plan"]] as const;
+const OPTIONAL_COLUMNS = [["platform", "Platform"], ["trust", "Trust"], ["route", "Route"], ["revision", "Revision"], ["plan", "Plan"]] as const;
 type OptionalColumn = typeof OPTIONAL_COLUMNS[number][0];
 const COLUMNS_STORAGE_KEY = "latchway.console.requests.columns";
 
@@ -107,8 +113,20 @@ const OUTCOMES = ["succeeded", "failed", "denied", "canceled", "unknown"] as con
 const PLATFORMS = ["ios", "android", "web", "react_native_ios", "react_native_android", "node"] as const;
 const COMPONENT_KINDS = ["main_app", "widget", "share_extension", "app_intent_extension", "notification_service_extension", "action_extension", "sso_extension", "watch_extension", "android_app", "wear_app", "browser", "node_process"] as const;
 
+type Facet = RequestFacets["facets"][keyof RequestFacets["facets"]];
+
+/** Facet counts for a filter, and a phrase naming the range they cover. */
+interface FacetHint {
+  facet: Facet;
+  note: string;
+}
+
 interface ValueFilterProps {
   emptyLabel?: string;
+  /** Server counts of the most common values; shown with the options or above the text field. */
+  facet?: FacetHint;
+  /** How a value appears in the list of common values. */
+  formatValue?: (value: string) => string;
   label: string;
   onChange: (value: string | undefined) => void;
   /** A fixed set of values shown as a list; otherwise a validated text field. */
@@ -121,7 +139,7 @@ interface ValueFilterProps {
 }
 
 /** A filter chip that opens a small panel to pick or type one exact value. */
-function ValueFilter({ emptyLabel, label, onChange, options, pattern, placeholder, suggestions, value, valueLabel }: ValueFilterProps) {
+function ValueFilter({ emptyLabel, facet, formatValue, label, onChange, options, pattern, placeholder, suggestions, value, valueLabel }: ValueFilterProps) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
   const id = useId();
@@ -144,8 +162,11 @@ function ValueFilter({ emptyLabel, label, onChange, options, pattern, placeholde
           {options ? (
             <Menu
               entries={[
-                { heading: label, kind: "heading" },
-                ...options.map((option): MenuEntry => ({ checked: option.value === value, label: option.label, onSelect: () => onChange(option.value) })),
+                { heading: facet ? `${label} · ${facet.note}` : label, kind: "heading" },
+                ...options.map((option): MenuEntry => {
+                  const count = facet?.facet.values.find((item) => item.value === option.value)?.count;
+                  return { checked: option.value === value, label: option.label, meta: facet ? <span className="lw-num">{(count ?? 0).toLocaleString()}</span> : undefined, onSelect: () => onChange(option.value) };
+                }),
                 ...(value ? [{ kind: "separator" } as const, { label: "Any", onSelect: () => onChange(undefined) }] : [])
               ]}
               label={`${label} filter`}
@@ -153,7 +174,8 @@ function ValueFilter({ emptyLabel, label, onChange, options, pattern, placeholde
             />
           ) : (
             <form className="lw-popover__form" onSubmit={submit}>
-              <Field hint="Exact match." id={id} label={label}>
+              {facet ? <CommonValues facet={facet} formatValue={formatValue} label={label} onPick={(next) => { onChange(next); setOpen(false); }} value={value} /> : null}
+              <Field hint="Exact match." id={id} label={facet?.facet.values.length ? "Or type a value" : label}>
                 <input className="lw-input lw-popover__input" data-autofocus defaultValue={value ?? ""} id={id} list={suggestions ? `${id}-list` : undefined} name="value" pattern={pattern} placeholder={placeholder} spellCheck={false} />
               </Field>
               {suggestions ? <datalist id={`${id}-list`}>{suggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist> : null}
@@ -169,7 +191,28 @@ function ValueFilter({ emptyLabel, label, onChange, options, pattern, placeholde
   );
 }
 
-function MoreFilters({ filters, onApply }: { filters: RequestFilters; onApply: (filters: RequestFilters) => void }) {
+/** The most common values the server counted, each one click from applying. */
+function CommonValues({ facet, formatValue, label, onPick, value }: { facet: FacetHint; formatValue?: (value: string) => string; label: string; onPick: (value: string) => void; value?: string }) {
+  if (!facet.facet.values.length) return <p className="lw-vf__note">No {label.toLowerCase()} values {facet.note}.</p>;
+  return (
+    <div className="lw-vf">
+      <span className="lw-vf__note">Most common {facet.note}</span>
+      <ul aria-label={`Common ${label.toLowerCase()} values`} className="lw-vf__list">
+        {facet.facet.values.map((item) => (
+          <li key={item.value}>
+            <button aria-pressed={item.value === value} className="lw-vf__item" onClick={() => onPick(item.value)} type="button">
+              <span className="lw-mono lw-vf__value">{formatValue?.(item.value) ?? item.value}</span>
+              <span className="lw-faint lw-num">{item.count.toLocaleString()}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {facet.facet.truncated ? <span className="lw-vf__note">Other values exist; type one below.</span> : null}
+    </div>
+  );
+}
+
+function MoreFilters({ facets, filters, onApply }: { facets?: RequestFacets; filters: RequestFilters; onApply: (filters: RequestFilters) => void }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -187,12 +230,17 @@ function MoreFilters({ filters, onApply }: { filters: RequestFilters; onApply: (
         onClick={() => setOpen(!open)}
         value={count ? String(count) : undefined}
       />
-      {open ? <MoreFiltersPanel filters={filters} onApply={(next) => { setOpen(false); onApply(next); }} onCancel={close} /> : null}
+      {open ? <MoreFiltersPanel facets={facets} filters={filters} onApply={(next) => { setOpen(false); onApply(next); }} onCancel={close} /> : null}
     </span>
   );
 }
 
-function MoreFiltersPanel({ filters, onApply, onCancel }: { filters: RequestFilters; onApply: (filters: RequestFilters) => void; onCancel: () => void }) {
+function MoreFiltersPanel({ facets, filters, onApply, onCancel }: { facets?: RequestFacets; filters: RequestFilters; onApply: (filters: RequestFilters) => void; onCancel: () => void }) {
+  const counted = (name: "component_kind" | "trust_source", value: string, label: string): string => {
+    if (!facets) return label;
+    const count = facets.facets[name].values.find((item) => item.value === value)?.count ?? 0;
+    return `${label} (${count.toLocaleString()})`;
+  };
   const [draft, setDraft] = useState<MoreFilterDraft>(() => moreFilterDraft(filters));
   const [error, setError] = useState<string>();
   const set = (key: keyof MoreFilterDraft, value: string) => setDraft((current) => ({ ...current, [key]: value }));
@@ -220,14 +268,14 @@ function MoreFiltersPanel({ filters, onApply, onCancel }: { filters: RequestFilt
         <label className="lw-mf__label" htmlFor="requests-component-kind">Component</label>
         <select className="lw-select" id="requests-component-kind" onChange={(event) => set("component_kind", event.target.value)} value={draft.component_kind}>
           <option value="">Any</option>
-          {COMPONENT_KINDS.map((kind) => <option key={kind} value={kind}>{words(kind)}</option>)}
+          {COMPONENT_KINDS.map((kind) => <option key={kind} value={kind}>{counted("component_kind", kind, words(kind))}</option>)}
         </select>
       </div>
       <div className="lw-mf__row">
         <label className="lw-mf__label" htmlFor="requests-trust-source">Trust</label>
         <select className="lw-select" id="requests-trust-source" onChange={(event) => set("trust_source", event.target.value)} value={draft.trust_source}>
           <option value="">Any</option>
-          {Object.entries(TRUST_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          {Object.entries(TRUST_LABEL).map(([value, label]) => <option key={value} value={value}>{counted("trust_source", value, label)}</option>)}
         </select>
       </div>
       {error ? <p className="lw-field__error" role="alert">{error}</p> : null}
@@ -248,8 +296,18 @@ const MISMATCH_PROBLEM: AdminProblem = { code: "invalid_response", detail: "The 
 /** The server answered for a different request or environment than the one asked for. */
 class RequestContextMismatch extends Error {}
 
+type Arrivals = { capped: boolean; count: number } | "maybe" | "updates";
+
+function arrivalsLabel(arrivals: Arrivals): string {
+  if (arrivals === "maybe") return "New requests may have arrived · Show";
+  if (arrivals === "updates") return "Requests in progress changed · Show";
+  return `${arrivals.capped ? `${arrivals.count.toLocaleString()}+` : arrivals.count.toLocaleString()} new request${arrivals.count === 1 && !arrivals.capped ? "" : "s"} · Show`;
+}
+
 function RequestsView() {
   const workspace = useWorkspace();
+  const compatibility = useConsoleCompatibility();
+  const searchable = compatibility.status?.server_capabilities.includes("admin_request_search") ?? false;
   const environment = workspace.environment;
   const environmentID = environment?.id ?? "";
   const search = RequestRouteSearchSchema.parse(workspace.search);
@@ -263,7 +321,8 @@ function RequestsView() {
   const [goError, setGoError] = useState<string>();
   const [columns, setColumns] = useState<OptionalColumn[]>(readColumns);
   const [live, setLive] = useState(true);
-  const [newArrivals, setNewArrivals] = useState(false);
+  const [newArrivals, setNewArrivals] = useState<Arrivals>();
+  const arrivalsSequence = useRef(0);
   const [effective, setEffective] = useState<{ configuration: EffectiveConfiguration; requestID: string }>();
   const [explainProblem, setExplainProblem] = useState<{ problem: AdminProblem; requestID: string }>();
   const [explainBusy, setExplainBusy] = useState(false);
@@ -275,13 +334,31 @@ function RequestsView() {
     enabled: Boolean(environmentID),
     getNextPageParam: (last: LogicalRequestPage) => (last.page.has_more ? last.page.next_cursor : undefined),
     initialPageParam: search.cursor as string | undefined,
-    queryFn: async ({ pageParam }): Promise<LogicalRequestPage> => (await adminRequest(queryPath("/admin/v1/requests", requestListQuery(listSearch, environmentID, clock(), pageParam)), RequestPageSchema)).data,
-    queryKey: ["requests", environmentID, listKey],
+    // Only the first page asks for the total; later pages reuse it.
+    queryFn: async ({ pageParam }): Promise<LogicalRequestPage> => (await adminRequest(queryPath("/admin/v1/requests", requestListQuery(listSearch, environmentID, clock(), pageParam, searchable && pageParam === search.cursor)), RequestPageSchema)).data,
+    queryKey: ["requests", environmentID, listKey, searchable],
     refetchOnWindowFocus: false,
     staleTime: Infinity
   });
   const rows = useMemo(() => list.data?.pages.flatMap((page) => page.items) ?? [], [list.data]);
+  const total = list.data?.pages[0]?.total;
   const hasMore = Boolean(list.hasNextPage);
+
+  const facetKey = JSON.stringify({ end: search.end, range: search.range, start: search.start });
+  const facets = useQuery({
+    enabled: Boolean(environmentID) && searchable,
+    queryFn: async () => {
+      const bounds = facetRange(search, clock());
+      const response = await adminRequest(queryPath("/admin/v1/requests/facets", { end: bounds.end, environment_id: environmentID, limit: "20", start: bounds.start }), RequestFacetsSchema);
+      if (response.data.environment_id !== environmentID) throw new RequestContextMismatch("request_facets");
+      return { document: response.data, note: bounds.fallback ? "in the last 7 days" : "in this range" };
+    },
+    queryKey: ["request-facets", environmentID, facetKey],
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: 60_000
+  });
+  const facetHint = (name: keyof RequestFacets["facets"]): FacetHint | undefined => facets.data ? { facet: facets.data.document.facets[name], note: facets.data.note } : undefined;
   const loadedAt = list.dataUpdatedAt;
 
   const detail = useQuery({
@@ -303,13 +380,36 @@ function RequestsView() {
 
   useAdminRefreshTopic("requests", () => {
     // The stream carries hints, not data: new requests wait behind a pill so the list never shifts under the reader.
-    if (live) setNewArrivals(true);
     if (search.request) void detail.refetch();
+    if (!live) return;
+    const newest = rows[0]?.started_at;
+    const query = searchable && list.isSuccess ? newArrivalsQuery(listSearch, environmentID, newest, clock()) : undefined;
+    if (!query) {
+      setNewArrivals("maybe");
+      return;
+    }
+    const sequence = ++arrivalsSequence.current;
+    const inFlight = rows.some((row) => row.status === "unknown");
+    // Rows that started at the newest loaded instant are already on screen.
+    const loadedAtNewest = newest ? rows.filter((row) => row.started_at === newest).length : 0;
+    adminRequest(queryPath("/admin/v1/requests", query), RequestPageSchema).then((response) => {
+      if (sequence !== arrivalsSequence.current) return;
+      const count = response.data.total ? Math.max(0, response.data.total.count - loadedAtNewest) : undefined;
+      if (count === undefined) setNewArrivals("maybe");
+      else if (count > 0) setNewArrivals({ capped: response.data.total?.capped ?? false, count });
+      else if (inFlight) setNewArrivals((current) => current ?? "updates");
+    }, () => {
+      if (sequence === arrivalsSequence.current) setNewArrivals("maybe");
+    });
   }, Boolean(environmentID));
 
   const updateSearch = workspace.updateSearch;
+  function clearArrivals(): void {
+    arrivalsSequence.current += 1;
+    setNewArrivals(undefined);
+  }
   function update(patch: Partial<RequestRouteSearch>): void {
-    setNewArrivals(false);
+    clearArrivals();
     updateSearch(patch);
   }
 
@@ -350,8 +450,14 @@ function RequestsView() {
       setGoError(undefined);
       setGoValue("");
       applyFilters({ ...filters, user_id: target.id });
+    } else if (target.kind === "client" && searchable) {
+      setGoError(undefined);
+      setGoValue("");
+      applyFilters({ ...filters, client_request_id: target.id });
+    } else if (searchable) {
+      setGoError("Paste a req_ ID, a usr_ ID, or a client request ID (8 to 128 letters, digits, '.', '_', ':' or '-').");
     } else {
-      setGoError("Search isn't available. Paste a req_ ID to open a request, or a usr_ ID to filter by user.");
+      setGoError("This server can't search by client request ID. Paste a req_ ID to open a request, or a usr_ ID to filter by user.");
     }
   }
 
@@ -372,14 +478,15 @@ function RequestsView() {
     }
   }
 
-  function copyQuery(): void {
-    const command = curlCommand(window.location.origin, requestListQuery(listSearch, environmentID, clock()));
+  function copyCommand(command: string, done: string): void {
     try {
-      void navigator.clipboard.writeText(command).then(() => setCopied("API query copied. The CLI's requests list doesn't take filters yet."), () => setCopied(command));
+      void navigator.clipboard.writeText(command).then(() => setCopied(done), () => setCopied(command));
     } catch {
       setCopied(command);
     }
   }
+  const copyQuery = () => copyCommand(curlCommand(window.location.origin, requestListQuery(listSearch, environmentID, clock())), "API query copied.");
+  const copyCli = () => copyCommand(cliCommand(requestListQuery(listSearch, environmentID, clock())), "CLI command copied.");
 
   const quickView = activeQuickView(filters);
   const filtered = Object.keys(filters).length > 0;
@@ -416,6 +523,7 @@ function RequestsView() {
       }
     },
     ...columns.map((column): Column<LogicalRequest> => {
+      if (column === "platform") return { header: "Platform", key: "platform", render: (row) => row.platform ? <span className="lw-secondary">{PLATFORM_LABEL[row.platform] ?? words(row.platform)}</span> : <span className="lw-faint">—</span> };
       if (column === "trust") return { header: "Trust", key: "trust", render: (row) => row.trust_source ? <span className="lw-secondary">{TRUST_LABEL[row.trust_source] ?? words(row.trust_source)}</span> : <span className="lw-faint">—</span> };
       if (column === "route") return { header: "Route", key: "route", render: (row) => row.selected_route ? <span className="lw-mono lw-mono--sm">{row.selected_route}</span> : <span className="lw-faint">—</span> };
       if (column === "revision") return { header: "Revision", key: "revision", render: (row) => <span className="lw-mono lw-mono--sm">{shortId(row.config_revision_id)}</span> };
@@ -454,19 +562,20 @@ function RequestsView() {
               { label: "CSV without user IDs", onSelect: () => downloadText(`requests-${environment?.slug ?? "environment"}.csv`, requestsCsv(rows, false)) },
               { label: "CSV with user IDs", onSelect: () => downloadText(`requests-${environment?.slug ?? "environment"}-with-users.csv`, requestsCsv(rows, true)) },
               { kind: "separator" },
-              { icon: "code", label: "Copy API Query", onSelect: copyQuery }
+              { icon: "code", label: "Copy API Query", onSelect: copyQuery },
+              ...(searchable ? [{ icon: "code", label: "Copy CLI Command", onSelect: copyCli } satisfies MenuEntry] : [])
             ]} icon="upload" label="Export">Export</MenuButton>
           </div>
         }
         badge={
-          <button aria-pressed={live} className={`lw-livebtn${live ? "" : " is-paused"}`} onClick={() => { setLive(!live); if (live) setNewArrivals(false); }} title={live ? "Pause new-request notices" : "Resume new-request notices"} type="button">
+          <button aria-pressed={live} className={`lw-livebtn${live ? "" : " is-paused"}`} onClick={() => { setLive(!live); if (live) clearArrivals(); }} title={live ? "Pause new-request notices" : "Resume new-request notices"} type="button">
             <span aria-hidden="true" className="lw-livebtn__dot" />{live ? "Live" : "Paused"}
           </button>
         }
         description="Every request your apps sent through Latchway: its outcome, route, timing and cost. Prompts and responses are never stored."
         title="Requests"
       />
-      {copied ? <div className="lw-page-notice"><Notice action={<Button onClick={() => setCopied(undefined)} size="sm">Dismiss</Button>} title={copied.startsWith("curl") ? "Copy this API query" : "Copied"} tone="success">{copied.startsWith("curl") ? <pre className="lw-code-block">{copied}</pre> : copied}</Notice></div> : null}
+      {copied ? <div className="lw-page-notice"><Notice action={<Button onClick={() => setCopied(undefined)} size="sm">Dismiss</Button>} title={copied.startsWith("curl") ? "Copy this API query" : copied.startsWith("latchway") ? "Copy this CLI command" : "Copied"} tone="success">{copied.startsWith("curl") || copied.startsWith("latchway") ? <pre className="lw-code-block">{copied}</pre> : copied}</Notice></div> : null}
 
       <div aria-label="Quick views" className="lw-rq-views" role="group">
         {QUICK_VIEWS.map((view) => (
@@ -480,32 +589,33 @@ function RequestsView() {
         className="lw-toolbar--wrap"
         search={
           <form className="lw-rq-go" onSubmit={goTo} role="search">
-            <Input aria-label="Go to a request or user ID" boxClassName="lw-search" onChange={(event) => { setGoValue(event.target.value); setGoError(undefined); }} placeholder="Go to req_… or usr_…" prefix="search" spellCheck={false} value={goValue} />
+            <Input aria-label={searchable ? "Go to a request, user or client request ID" : "Go to a request or user ID"} boxClassName="lw-search" onChange={(event) => { setGoValue(event.target.value); setGoError(undefined); }} placeholder={searchable ? "req_…, usr_… or client request ID" : "Go to req_… or usr_…"} prefix="search" spellCheck={false} value={goValue} />
             {goError ? <span className="lw-rq-go__err" role="status">{goError}</span> : null}
           </form>
         }
       >
-        <ValueFilter label="Outcome" onChange={(value) => setFilter("status", value)} options={OUTCOMES.map((value) => ({ label: capitalize(value), value }))} value={filters.status} valueLabel={filters.status && capitalize(filters.status)} />
-        <ValueFilter label="Feature" onChange={(value) => setFilter("feature", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="feature-key" value={filters.feature} />
-        <ValueFilter label="Error" onChange={(value) => setFilter("error_code", value)} pattern="[a-z][a-z0-9_]{0,99}" placeholder="quota_exceeded" suggestions={ERROR_FILTER_SUGGESTIONS} value={filters.error_code} />
-        <ValueFilter label="AI connection" onChange={(value) => setFilter("upstream", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="connection-key" value={filters.upstream} />
-        <ValueFilter label="Model" onChange={(value) => setFilter("model", value)} placeholder="Model key or provider model" value={filters.model} />
-        <ValueFilter label="Route" onChange={(value) => setFilter("route", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="route-key" value={filters.route} />
-        <ValueFilter label="Platform" onChange={(value) => setFilter("platform", value)} options={PLATFORMS.map((value) => ({ label: PLATFORM_LABEL[value] ?? value, value }))} value={filters.platform} valueLabel={filters.platform && PLATFORM_LABEL[filters.platform]} />
+        <ValueFilter facet={facetHint("status")} label="Outcome" onChange={(value) => setFilter("status", value)} options={OUTCOMES.map((value) => ({ label: capitalize(value), value }))} value={filters.status} valueLabel={filters.status && capitalize(filters.status)} />
+        <ValueFilter facet={facetHint("feature")} label="Feature" onChange={(value) => setFilter("feature", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="feature-key" value={filters.feature} />
+        <ValueFilter facet={facetHint("error_code")} label="Error" onChange={(value) => setFilter("error_code", value)} pattern="[a-z][a-z0-9_]{0,99}" placeholder="quota_exceeded" suggestions={facets.data ? undefined : ERROR_FILTER_SUGGESTIONS} value={filters.error_code} />
+        <ValueFilter facet={facetHint("upstream")} label="AI connection" onChange={(value) => setFilter("upstream", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="connection-key" value={filters.upstream} />
+        <ValueFilter facet={facetHint("model")} label="Model" onChange={(value) => setFilter("model", value)} placeholder="Model key or provider model" value={filters.model} />
+        <ValueFilter facet={facetHint("route")} label="Route" onChange={(value) => setFilter("route", value)} pattern="[a-z][a-z0-9_\-]{0,62}" placeholder="route-key" value={filters.route} />
+        <ValueFilter facet={facetHint("platform")} label="Platform" onChange={(value) => setFilter("platform", value)} options={PLATFORMS.map((value) => ({ label: PLATFORM_LABEL[value] ?? value, value }))} value={filters.platform} valueLabel={filters.platform && PLATFORM_LABEL[filters.platform]} />
         {filters.user_id ? <FilterChip label="User" onClear={() => setFilter("user_id", undefined)} value={shortId(filters.user_id)} /> : null}
         {filters.request_id ? <FilterChip label="Request" onClear={() => setFilter("request_id", undefined)} value={shortId(filters.request_id)} /> : null}
-        <MoreFilters filters={filters} onApply={applyFilters} />
+        {filters.client_request_id ? <FilterChip label="Client request" onClear={() => setFilter("client_request_id", undefined)} value={filters.client_request_id} /> : null}
+        <MoreFilters facets={facets.data?.document} filters={filters} onApply={applyFilters} />
       </Toolbar>
 
       <div className="lw-rq-bar">
-        <span>{sort === "started_at_asc" ? "Oldest first" : "Newest first"}{filtered ? " · filtered" : ""}{range.id === "between" ? " · open-ended time range" : ""}</span>
+        <span>{total ? <strong className="lw-num lw-rq-total">{total.capped ? `${total.count.toLocaleString()}+` : total.count.toLocaleString()} request{total.count === 1 && !total.capped ? "" : "s"} · </strong> : null}{sort === "started_at_asc" ? "Oldest first" : "Newest first"}{filtered ? " · filtered" : ""}{range.id === "between" ? " · open-ended time range" : ""}</span>
         <span className="lw-spacer" />
         {newArrivals ? (
-          <button className="lw-rq-new" onClick={() => { setNewArrivals(false); void list.refetch(); }} type="button">
-            <Icon name="arrowUp" size={12} />New requests may have arrived · Show
+          <button className="lw-rq-new" onClick={() => { clearArrivals(); void list.refetch(); }} type="button">
+            <Icon name="arrowUp" size={12} />{arrivalsLabel(newArrivals)}
           </button>
         ) : null}
-        <Button aria-label="Refresh requests" icon="refresh" loading={list.isFetching && !list.isFetchingNextPage} onClick={() => { setNewArrivals(false); void list.refetch(); }} size="sm" variant="ghost" />
+        <Button aria-label="Refresh requests" icon="refresh" loading={list.isFetching && !list.isFetchingNextPage} onClick={() => { clearArrivals(); void list.refetch(); }} size="sm" variant="ghost" />
         <Segmented items={[{ id: "started_at_desc", label: "Newest" }, { id: "started_at_asc", label: "Oldest" }]} label="Sort" onChange={(value) => update({ cursor: undefined, sort: value === "started_at_desc" ? undefined : value })} value={sort} />
         <MenuButton entries={[
           { heading: "Add columns", kind: "heading" },
@@ -522,10 +632,10 @@ function RequestsView() {
       ) : list.isSuccess ? <div className="lw-page-empty">{empty}</div> : null}
 
       <div className="lw-rq-foot">
-        <span>{rows.length ? `${rows.length} shown${hasMore ? " · more available" : " · that's all"}` : ""}</span>
+        <span>{rows.length ? `${rows.length.toLocaleString()} shown${hasMore ? total ? ` of ${total.capped ? `${total.count.toLocaleString()}+` : total.count.toLocaleString()}` : " · more available" : " · that's all"}` : ""}</span>
         {hasMore ? <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} size="sm">Load {pageSize} More</Button> : null}
         <span className="lw-spacer" />
-        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/analytics/usage">Analytics</Link></span>
+        <span className="lw-faint">↑ ↓ move between requests · totals are in <Link className="lw-link" search={workspaceLinkSearch} to="/usage">Analytics</Link></span>
         <Segmented items={PAGE_SIZES.map((size) => ({ id: size, label: size }))} label="Page size" onChange={(value) => update({ cursor: undefined, page_size: value === "50" ? undefined : value })} value={pageSize} />
       </div>
 

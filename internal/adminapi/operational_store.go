@@ -48,6 +48,9 @@ var (
 	operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	operationalRuleKeyPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 	operationalFailurePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+	// clientRequestIDPattern matches the correlation identifiers the runtime
+	// accepts from clients (8 to 128 characters).
+	clientRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 )
 
 type operationalStore struct {
@@ -84,6 +87,7 @@ type requestListFilter struct {
 	model         string
 	errorCode     string
 	requestID     string
+	clientRequest string
 	start         time.Time
 	end           time.Time
 	sort          string
@@ -119,6 +123,7 @@ func (filter requestListFilter) validate() error {
 		(filter.upstream != "" && !operationalIdentifierPattern.MatchString(filter.upstream)) ||
 		(filter.model != "" && !validOperationalText(filter.model, 512)) ||
 		(filter.requestID != "" && id.Validate(filter.requestID, id.LogicalRequest) != nil) ||
+		(filter.clientRequest != "" && !clientRequestIDPattern.MatchString(filter.clientRequest)) ||
 		(!filter.start.IsZero() && !filter.end.IsZero() && !filter.start.Before(filter.end)) ||
 		!validOptionalRange(filter.minimumLatencyMS, filter.maximumLatencyMS) ||
 		!validOptionalRange(filter.minimumTokens, filter.maximumTokens) ||
@@ -281,6 +286,8 @@ type logicalRequestDocument struct {
 	Framework             *string                        `json:"framework,omitempty"`
 	FrameworkVersion      *string                        `json:"framework_version,omitempty"`
 	CallerSDK             *string                        `json:"caller_sdk,omitempty"`
+	Platform              *string                        `json:"platform,omitempty"`
+	ClientRequestID       *string                        `json:"client_request_id,omitempty"`
 	ConfigRevisionID      string                         `json:"config_revision_id"`
 	SelectedLimitPlan     string                         `json:"selected_limit_plan"`
 	SelectedRoute         *string                        `json:"selected_route,omitempty"`
@@ -376,39 +383,26 @@ type selfTestDocument struct {
 	Checks           []selfTestCheck `json:"checks"`
 }
 
-func (store *operationalStore) listUsers(
-	ctx context.Context,
-	principal adminauth.Principal,
-	environmentID string,
-	page operationalPage,
-) ([]useroverride.ApplicationUser, error) {
-	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.ApplicationUser) != nil {
-		return nil, errOperationalInvalid
-	}
-	if !validOperationalRead(principal) {
-		return nil, errOperationalForbidden
-	}
-	rows, err := store.pool.Query(ctx, `
-		SELECT u.application_user_id, e.environment_id, u.status,
-		       u.normalized_claims, u.created_at, u.last_seen_at,
-		       ARRAY(
-		           SELECT DISTINCT identity.provider_key
-		           FROM external_identities AS identity
-		           WHERE identity.organization_id = u.organization_id
-		             AND identity.application_id = u.application_id
-		             AND identity.application_user_id = u.application_user_id
-		           ORDER BY identity.provider_key
-		           LIMIT 65
-		       ) AS identity_providers,
-		       CASE WHEN override.user_override_id IS NULL THEN NULL ELSE
-		           jsonb_build_object(
-		               'id', override.user_override_id,
-		               'limit_plan', override.override_document->>'limit_plan',
-		               'reason', override.reason,
-		               'created_at', override.created_at,
-		               'expires_at', override.expires_at
-		           )
-		       END AS limit_override
+// userListFilter narrows and orders the users list. Every value is bound as a
+// parameter; only the closed sort names choose SQL text.
+type userListFilter struct {
+	status      string
+	hasOverride bool
+	provider    string
+	claimKey    string
+	claimValue  string
+	sort        string
+}
+
+const (
+	userSortOldest       = "oldest"
+	userSortNewest       = "newest"
+	userSortRecentlySeen = "recently_seen"
+	// userTotalCap bounds the work a total does; larger counts are reported as capped.
+	userTotalCap = 100_000
+)
+
+const userListFrom = `
 		FROM environments AS e
 		JOIN applications AS application
 		  ON application.organization_id = e.organization_id
@@ -432,10 +426,84 @@ func (store *operationalStore) listUsers(
 		) AS override ON true
 		WHERE e.organization_id = $1 AND e.environment_id = $2
 		  AND organization.status = 'active' AND u.status <> 'deleted'
-		  AND ($3::timestamptz IS NULL OR (u.created_at, u.application_user_id) > ($3, $4))
-		ORDER BY u.created_at, u.application_user_id
-		LIMIT $5
-	`, principal.OrganizationID, environmentID, nullableTime(page.after), nullableString(page.afterID), page.size+1)
+		  AND ($3::text IS NULL OR u.status = $3)
+		  AND (NOT $4::bool OR override.user_override_id IS NOT NULL)
+		  AND ($5::text IS NULL OR EXISTS (
+		      SELECT 1 FROM external_identities AS identity
+		      WHERE identity.organization_id = u.organization_id
+		        AND identity.application_id = u.application_id
+		        AND identity.application_user_id = u.application_user_id
+		        AND identity.provider_key = $5))
+		  AND ($6::text IS NULL OR u.normalized_claims ->> $6 = $7)`
+
+func (filter userListFilter) arguments(organizationID, environmentID string) []any {
+	return []any{organizationID, environmentID, nullableString(filter.status), filter.hasOverride,
+		nullableString(filter.provider), nullableString(filter.claimKey), nullableString(filter.claimValue)}
+}
+
+// userSortKey is the cursor position of a user under a sort.
+func userSortKey(sort string, item useroverride.ApplicationUser) time.Time {
+	if sort == userSortRecentlySeen {
+		if item.LastSeenAt == nil {
+			return time.Unix(0, 0).UTC()
+		}
+		return item.LastSeenAt.UTC()
+	}
+	return item.CreatedAt
+}
+
+func (store *operationalStore) listUsers(
+	ctx context.Context,
+	principal adminauth.Principal,
+	environmentID string,
+	filter userListFilter,
+	page operationalPage,
+) ([]useroverride.ApplicationUser, error) {
+	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.ApplicationUser) != nil {
+		return nil, errOperationalInvalid
+	}
+	if !validOperationalRead(principal) {
+		return nil, errOperationalForbidden
+	}
+	var position, order string
+	switch filter.sort {
+	case "", userSortOldest:
+		position, order = `(u.created_at, u.application_user_id) > ($8, $9)`, `u.created_at, u.application_user_id`
+	case userSortNewest:
+		position, order = `(u.created_at, u.application_user_id) < ($8, $9)`, `u.created_at DESC, u.application_user_id DESC`
+	case userSortRecentlySeen:
+		position, order = `(COALESCE(u.last_seen_at, 'epoch'::timestamptz), u.application_user_id) < ($8, $9)`,
+			`COALESCE(u.last_seen_at, 'epoch'::timestamptz) DESC, u.application_user_id DESC`
+	default:
+		return nil, errOperationalInvalid
+	}
+	arguments := append(filter.arguments(principal.OrganizationID, environmentID), nullableTime(page.after), nullableString(page.afterID), page.size+1)
+	rows, err := store.pool.Query(ctx, `
+		SELECT u.application_user_id, e.environment_id, u.status,
+		       u.normalized_claims, u.created_at, u.last_seen_at,
+		       ARRAY(
+		           SELECT DISTINCT identity.provider_key
+		           FROM external_identities AS identity
+		           WHERE identity.organization_id = u.organization_id
+		             AND identity.application_id = u.application_id
+		             AND identity.application_user_id = u.application_user_id
+		           ORDER BY identity.provider_key
+		           LIMIT 65
+		       ) AS identity_providers,
+		       CASE WHEN override.user_override_id IS NULL THEN NULL ELSE
+		           jsonb_build_object(
+		               'id', override.user_override_id,
+		               'limit_plan', override.override_document->>'limit_plan',
+		               'reason', override.reason,
+		               'created_at', override.created_at,
+		               'expires_at', override.expires_at
+		           )
+		       END AS limit_override
+		`+userListFrom+`
+		  AND ($8::timestamptz IS NULL OR `+position+`)
+		ORDER BY `+order+`
+		LIMIT $10
+	`, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("list application users: %w", err)
 	}
@@ -452,6 +520,24 @@ func (store *operationalStore) listUsers(
 		return nil, fmt.Errorf("iterate application users: %w", err)
 	}
 	return items, nil
+}
+
+// countUsers counts the users a filter matches, up to userTotalCap.
+func (store *operationalStore) countUsers(ctx context.Context, principal adminauth.Principal, environmentID string, filter userListFilter) (int64, bool, error) {
+	if !validOperationalRead(principal) {
+		return 0, false, errOperationalForbidden
+	}
+	arguments := append(filter.arguments(principal.OrganizationID, environmentID), userTotalCap+1)
+	var count int64
+	if err := store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (SELECT 1 `+userListFrom+` LIMIT $8) AS matched
+	`, arguments...).Scan(&count); err != nil {
+		return 0, false, fmt.Errorf("count application users: %w", err)
+	}
+	if count > userTotalCap {
+		return userTotalCap, true, nil
+	}
+	return count, false, nil
 }
 
 func (store *operationalStore) getUser(
@@ -627,7 +713,9 @@ func (store *operationalStore) setUserBlocked(
 		id.Validate(requestID, id.AdminRequest) != nil {
 		return useroverride.ApplicationUser{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RevokeInstallations, environmentID); err != nil {
+		return useroverride.ApplicationUser{}, err
+	} else if !allowed {
 		return useroverride.ApplicationUser{}, errOperationalForbidden
 	}
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -953,7 +1041,7 @@ func (store *operationalStore) revokeInstallation(
 	if id.Validate(installationID, id.Installation) != nil || id.Validate(requestID, id.AdminRequest) != nil {
 		return installationDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
+	if !principal.AllowsSomewhere(adminauth.RevokeInstallations, adminauth.AuthorizationContext{}) {
 		return installationDocument{}, errOperationalForbidden
 	}
 	reason = strings.TrimSpace(reason)
@@ -984,6 +1072,9 @@ func (store *operationalStore) revokeInstallation(
 	}
 	if status != "active" && status != "revoked" {
 		return installationDocument{}, errOperationalCorrupt
+	}
+	if !principal.AllowsIn(adminauth.RevokeInstallations, applicationID, adminauth.AuthorizationContext{}) {
+		return installationDocument{}, errOperationalForbidden
 	}
 	if err := lockActiveOperationalScope(ctx, tx, principal.OrganizationID, applicationID, environmentID); err != nil {
 		return installationDocument{}, err
@@ -1082,19 +1173,11 @@ func (store *operationalStore) revokeInstallation(
 	return result, nil
 }
 
-func (store *operationalStore) listRequests(
-	ctx context.Context,
-	principal adminauth.Principal,
-	environmentID string,
-	filter requestListFilter,
-) ([]logicalRequestDocument, error) {
-	if id.Validate(environmentID, id.Environment) != nil || filter.validate() != nil {
-		return nil, errOperationalInvalid
-	}
-	if !validOperationalRead(principal) {
-		return nil, errOperationalForbidden
-	}
-	arguments := []any{principal.OrganizationID, environmentID}
+// requestListConditions returns the WHERE conditions and bound arguments for
+// a request-list filter, excluding pagination. Every value is bound; only
+// fixed SQL text is chosen by the filter.
+func requestListConditions(organizationID, environmentID string, filter requestListFilter) ([]string, []any) {
+	arguments := []any{organizationID, environmentID}
 	where := []string{
 		"request.organization_id = $1",
 		"request.environment_id = $2",
@@ -1196,6 +1279,9 @@ func (store *operationalStore) listRequests(
 	if filter.requestID != "" {
 		add("request.logical_request_id = $%d", filter.requestID)
 	}
+	if filter.clientRequest != "" {
+		add("request.client_request_id = $%d", filter.clientRequest)
+	}
 	if !filter.start.IsZero() {
 		add("request.requested_at >= $%d", filter.start)
 	}
@@ -1236,6 +1322,22 @@ func (store *operationalStore) listRequests(
 			  AND usage.metric = 'cost_nano_usd'
 		), 0) <= $%d`, *filter.maximumCost)
 	}
+	return where, arguments
+}
+
+func (store *operationalStore) listRequests(
+	ctx context.Context,
+	principal adminauth.Principal,
+	environmentID string,
+	filter requestListFilter,
+) ([]logicalRequestDocument, error) {
+	if id.Validate(environmentID, id.Environment) != nil || filter.validate() != nil {
+		return nil, errOperationalInvalid
+	}
+	if !validOperationalRead(principal) {
+		return nil, errOperationalForbidden
+	}
+	where, arguments := requestListConditions(principal.OrganizationID, environmentID, filter)
 	descending := filter.sort == "started_at_desc"
 	if !filter.page.after.IsZero() {
 		arguments = append(arguments, filter.page.after, filter.page.afterID)
@@ -1254,13 +1356,7 @@ func (store *operationalStore) listRequests(
 		direction = "DESC"
 	}
 	query := fmt.Sprintf(`
-		SELECT logical_request_id, environment_id, application_user_id, installation_id,
-		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version, caller_sdk,
-		       config_revision_id, selected_limit_plan_key,
-		       selected_route_key, selected_upstream_key, selected_model_key,
-		       selected_physical_model, feature_key, protocol, requested_at,
-		       completed_at, status, failure_code
+		SELECT `+requestSummaryColumns+`
 		FROM logical_requests AS request
 		WHERE %s
 		ORDER BY request.requested_at %s, request.logical_request_id %s
@@ -1301,15 +1397,9 @@ func (store *operationalStore) getRequest(
 		return logicalRequestDocument{}, errOperationalForbidden
 	}
 	row := store.pool.QueryRow(ctx, `
-		SELECT logical_request_id, environment_id, application_user_id, installation_id,
-		       installation_family_id, client_component_id, component_definition_id,
-		       component_kind, trust_source, framework, framework_version, caller_sdk,
-		       config_revision_id, selected_limit_plan_key,
-		       selected_route_key, selected_upstream_key, selected_model_key,
-		       selected_physical_model, feature_key, protocol, requested_at,
-		       completed_at, status, failure_code
-		FROM logical_requests
-		WHERE organization_id = $1 AND logical_request_id = $2
+		SELECT `+requestSummaryColumns+`
+		FROM logical_requests AS request
+		WHERE request.organization_id = $1 AND request.logical_request_id = $2
 	`, principal.OrganizationID, requestID)
 	item, err := scanLogicalRequestSummary(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1326,6 +1416,24 @@ func (store *operationalStore) getRequest(
 	return items[0], nil
 }
 
+// requestSummaryColumns selects a logical request row (aliased "request") in
+// the order scanLogicalRequestSummary reads it. The platform comes from the
+// installation that sent the request.
+const requestSummaryColumns = `
+		request.logical_request_id, request.environment_id, request.application_user_id,
+		request.installation_id, request.installation_family_id, request.client_component_id,
+		request.component_definition_id, request.component_kind, request.trust_source,
+		request.framework, request.framework_version, request.caller_sdk,
+		request.config_revision_id, request.selected_limit_plan_key,
+		request.selected_route_key, request.selected_upstream_key, request.selected_model_key,
+		request.selected_physical_model, request.feature_key, request.protocol, request.requested_at,
+		request.completed_at, request.status, request.failure_code, request.client_request_id,
+		(
+			SELECT installation.platform FROM installations AS installation
+			WHERE installation.installation_id = request.installation_id
+			  AND installation.organization_id = request.organization_id
+		)`
+
 func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 	var item logicalRequestDocument
 	var status string
@@ -1339,7 +1447,7 @@ func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 		&item.SelectedRoute, &item.SelectedUpstream, &item.SelectedModel,
 		&item.SelectedPhysicalModel,
 		&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
-		&failureCode,
+		&failureCode, &item.ClientRequestID, &item.Platform,
 	); err != nil {
 		return logicalRequestDocument{}, err
 	}
@@ -1407,6 +1515,10 @@ func validRequestAttribution(item logicalRequestDocument) bool {
 			!validOperationalVersion(*item.FrameworkVersion) {
 			return false
 		}
+	}
+	if item.Platform != nil && !operationalIdentifierPattern.MatchString(*item.Platform) ||
+		item.ClientRequestID != nil && !clientRequestIDPattern.MatchString(*item.ClientRequestID) {
+		return false
 	}
 	return true
 }
@@ -2470,7 +2582,9 @@ func (store *operationalStore) startSelfTest(
 		id.Validate(input.RequestID, id.AdminRequest) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, input.Environment); err != nil {
+		return selfTestDocument{}, err
+	} else if !allowed {
 		return selfTestDocument{}, errOperationalForbidden
 	}
 	switch input.Kind {
@@ -2604,7 +2718,9 @@ func (store *operationalStore) getSelfTest(
 	if id.Validate(environmentID, id.Environment) != nil || id.Validate(selfTestID, id.Prefix("tst")) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
-	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
+	if allowed, err := store.allowedInEnvironment(ctx, principal, adminauth.RunSelfTests, environmentID); err != nil {
+		return selfTestDocument{}, err
+	} else if !allowed {
 		return selfTestDocument{}, errOperationalForbidden
 	}
 	var payload []byte
@@ -2711,4 +2827,27 @@ func rollbackOperational(tx pgx.Tx) {
 	rollbackContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = tx.Rollback(rollbackContext)
+}
+
+// allowedInEnvironment checks a capability for the application an environment
+// belongs to, so application roles count. An unknown environment is simply not
+// allowed; the caller reports it like any other refusal.
+func (store *operationalStore) allowedInEnvironment(ctx context.Context, principal adminauth.Principal, capability adminauth.Capability, environmentID string) (bool, error) {
+	if principal.Allows(capability, adminauth.AuthorizationContext{}) {
+		return true, nil
+	}
+	if !principal.AllowsSomewhere(capability, adminauth.AuthorizationContext{}) {
+		return false, nil
+	}
+	var applicationID string
+	err := store.pool.QueryRow(ctx, `
+		SELECT application_id FROM environments WHERE organization_id = $1 AND environment_id = $2
+	`, principal.OrganizationID, environmentID).Scan(&applicationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("resolve environment application: %w", err)
+	}
+	return principal.AllowsIn(capability, applicationID, adminauth.AuthorizationContext{}), nil
 }

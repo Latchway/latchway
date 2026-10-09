@@ -106,10 +106,15 @@ export function ConsoleCompatibilityProvider({ children }: { children: ReactNode
   }, [compatibilityGeneration, sessionKey]);
 
   useEffect(() => {
-    const beginInactive = () => {
+    // Capture listeners also see focus moving between elements; only the window itself losing or regaining focus
+    // marks the console inactive or active.
+    const windowEvent = (event?: Event) => !event || !(event.target instanceof Element);
+    const beginInactive = (event?: Event) => {
+      if (!windowEvent(event)) return;
       inactiveSince.current ??= inactiveClock();
     };
-    const resume = () => {
+    const resume = (event?: Event) => {
+      if (!windowEvent(event)) return;
       if (document.visibilityState === "hidden") return;
       const started = inactiveSince.current;
       if (!started) return;

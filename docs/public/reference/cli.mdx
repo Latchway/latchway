@@ -64,6 +64,7 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway readiness` | Probe the remote unauthenticated readiness contract |
 | `latchway version` | Print build, contract, and protocol metadata |
 | `latchway status` | Read authenticated remote system status |
+| `latchway status history` | Read the server self-check sampled every five minutes |
 
 The local `doctor` command uses one transient database connection and does not
 represent the serving process's pool allocation. Use `readiness` or the Admin
@@ -87,6 +88,8 @@ latchway applications disable app_... --reason 'contain compromised release'
 latchway applications enable app_...
 latchway environments disable env_... --reason 'isolate production traffic'
 latchway environments enable env_...
+latchway applications rename app_... --name 'Mobile App'
+latchway environments rename env_... --name 'Production (EU)'
 
 latchway --output json config pull --environment env_...
 latchway config pull --environment env_... --format yaml > environment.yaml
@@ -108,7 +111,16 @@ latchway routes simulate rev_... \
   --platform react_native_ios \
   --trust-level app_verified \
   --claims-file normalized-claims.json
+latchway routes simulate rev_... --feature assistant --platform ios \
+  --fail primary=status_503 --fail backup=timeout_before_headers:1
 ```
+
+`--fail ROUTE=CONDITION[:ATTEMPTS]` makes attempts on a route fail so the
+output shows the server's attempt plan: retries the route's retry policy
+allows, fallbacks its `fallbackOn` allows, and where the app gets an error.
+Conditions are `connect_error`, `timeout_before_headers`,
+`first_byte_timeout`, `status_408`, `status_429`, `status_500`, `status_502`,
+`status_503`, `status_504`, or `non_retryable` for any other failure.
 
 Configuration input accepts one bounded YAML 1.2 or JSON object. Duplicate
 keys, aliases, anchors, merge keys, custom tags, timestamps, non-finite
@@ -124,6 +136,12 @@ for future enrollment; it never revives a revoked credential. Disabled scopes
 remain available to authorized forensic request, usage, audit, user,
 installation, family, and configuration reads, while execution and mutations
 fail closed.
+
+`rename` changes only an application's or environment's display name (1 to
+200 characters, needing `activate_configuration` in the application). Slugs
+never change, so configuration, URLs and scripts keep working. Nothing can be
+deleted: request, usage and audit history must stay attached, so disable a
+scope to retire it.
 
 Secret values can come from stdin, a regular file, a file descriptor, or a
 named environment variable. They are not accepted as command arguments or
@@ -142,6 +160,7 @@ latchway admin accounts role adm_... --role admin
 latchway admin accounts disable adm_...
 latchway admin accounts enable adm_...
 latchway admin accounts reset-password adm_... --from-stdin
+latchway admin accounts reset-two-factor adm_...
 
 latchway admin sessions list
 latchway admin sessions list --page-size 50 --cursor CURSOR
@@ -156,11 +175,22 @@ latchway admin api-tokens create \
 latchway admin api-tokens revoke tok_...
 ```
 
+`accounts list` shows whether each member has two-factor sign-in and whether
+they've signed in with the organization's single sign-on. `accounts
+reset-password` also gives an account created by single sign-on its first
+password.
+
+A password set with `accounts create` or `accounts reset-password` is
+temporary: the administrator must choose their own at their next console
+sign-in before anything else works. The CLI authenticates with API tokens and
+cannot change its holder's own password; use the console's Your account page.
+
 Administrator-session commands require an API token scoped with
 `manage_owners`. List output is bounded metadata only: session and
-administrator IDs, administrator email, lifecycle timestamps, status, and the
-`current` flag. It excludes credentials, token hints or hashes, CSRF and
-network metadata, and revocation reasons. API-token-authenticated CLI requests
+administrator IDs, administrator email, a coarse "Browser on OS" device summary,
+lifecycle timestamps, status, and the `current` flag. It excludes credentials,
+token hints or hashes, CSRF material, raw User-Agent strings, network
+addresses, and revocation reasons. API-token-authenticated CLI requests
 always receive `current: false`. Revocation is immediate and deliberately has
 no `--reason` option because the server owns the persisted reason; retrying a
 successful same-organization revocation is idempotent.
@@ -202,14 +232,37 @@ latchway components revoke cmp_... \
   --reason 'component credential compromise'
 
 latchway requests list --environment env_...
+latchway requests list --environment env_... --status failed \
+  --start 2026-10-01T00:00:00Z --total
+latchway requests list --environment env_... \
+  --client-request-id checkout:2026-10-08.a1
 latchway requests inspect req_...
+latchway requests facets --environment env_...
 latchway usage summary --environment env_...
 latchway usage timeseries --environment env_... --interval hour
+latchway usage connections --environment env_... --interval day
 latchway audit --organization org_...
 ```
 
 List commands print opaque cursors for the next bounded page. Do not decode or
 modify them.
+
+`requests list` takes the same filters as the Requests page: `--status`,
+`--feature`, `--user`, `--platform`, `--component-kind`, `--trust-source`,
+`--route`, `--upstream`, `--model`, `--error-code`, `--request-id`,
+`--client-request-id`, `--start`, `--end`, `--sort`, and the
+`--latency-*-ms`, `--tokens-*` and `--cost-*-nano-usd` ranges. `--total` adds
+a count of every match, capped at 100,000. `requests facets` counts requests
+in a range of at most 90 days (24 hours by default) by each filterable value.
+Both need a server that advertises `admin_request_search`.
+
+`usage connections` summarizes each AI connection's upstream attempts from
+what requests recorded: outcomes, 429 and 5xx counts, how often a failure
+moved to another attempt, first-byte latency, the commonest failure and cost.
+It covers at most 90 days, or 14 days with `--interval hour`. `status history`
+prints the worker's five-minute health samples (24 hours by default, at most
+7 days), and `verify runs` lists recent self-test runs. All three need a server
+that advertises `admin_operations_history`.
 
 Family renewal expires root trust and refresh credentials before future
 refresh or provisioning; it does not revoke already-issued access grants before
@@ -302,6 +355,7 @@ latchway verify schedule create \
 latchway verify schedule list --environment env_...
 latchway verify schedule get sts_...
 latchway verify schedule disable sts_...
+latchway verify runs --environment env_... --state failed
 ```
 
 ## Completion and exit behavior

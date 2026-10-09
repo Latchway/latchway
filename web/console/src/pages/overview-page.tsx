@@ -2,10 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { adminRequest, APITokenPageSchema, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
+import { adminRequest, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
 import { problemFromError } from "../api/auth";
-import { useSystemHealth } from "../api/health";
-import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
 import { AnalyticsRouteSearchSchema } from "../app/route-search";
 import { useWorkspace } from "../app/workspace-context-value";
 import { AttentionList, buttonClass, Card, Icon, MetricTile, PageHeader, ProportionBar, RangePicker, StatStrip, VolumeChart } from "../ui";
@@ -28,11 +26,11 @@ import {
 import { useUsage } from "./analytics/use-usage";
 import { ProblemNotice } from "./control-plane-pages";
 import { ATTENTION_GROUPS, attentionItems } from "./overview/attention-model";
+import { useAttentionSources } from "./overview/use-attention";
 import { formatMs } from "./requests/request-format";
 
 function OperatingOverview() {
   const workspace = useWorkspace();
-  const { readiness } = useSystemHealth();
   const navigate = useNavigate();
   const environment = workspace.environment;
   const environmentID = environment?.id ?? "";
@@ -48,22 +46,13 @@ function OperatingOverview() {
     queryKey: ["environment", environment?.id ?? "none", "active-configuration", "overview"],
     retry: false
   });
-  const latestRevision = useQuery({
-    ...latestConfigurationRevisionQueryOptions(environmentID),
-    enabled: Boolean(environmentID)
-  });
   const recentRequests = useQuery({
     enabled: Boolean(environmentID),
     queryFn: async () => (await adminRequest(queryPath("/admin/v1/requests", { environment_id: environmentID, page_size: "1" }), RequestPageSchema)).data,
     queryKey: ["environment", environmentID || "none", "recent-request", "overview"],
     retry: false
   });
-  // Token metadata needs a capability some administrators lack; without it, token expiry simply isn't listed.
-  const apiTokens = useQuery({
-    queryFn: async () => (await adminRequest("/admin/v1/api-tokens", APITokenPageSchema)).data.items,
-    queryKey: ["api-tokens", "overview"],
-    retry: false
-  });
+  const sources = useAttentionSources(environmentID);
 
   const spec = configuration.data?.document.spec;
   const configObject = spec && typeof spec === "object" && !Array.isArray(spec) ? spec as Record<string, unknown> : undefined;
@@ -79,15 +68,7 @@ function OperatingOverview() {
   ];
   const completedSteps = setupSteps.filter((step) => step.complete).length;
 
-  const attention = attentionItems({
-    apiTokens: apiTokens.data,
-    application: workspace.application,
-    environment,
-    latestRevisionState: latestRevision.data?.items[0]?.state,
-    now,
-    readiness: readiness.data,
-    summary: usage.summary
-  });
+  const attention = attentionItems({ ...sources, application: workspace.application, environment, now, summary: usage.summary });
   const pressing = attention.filter((item) => item.severity !== "info").length;
   const summary = usage.summary;
   const analytics = summary?.analytics;
@@ -95,7 +76,7 @@ function OperatingOverview() {
   const cost = summary ? recorded(summary.values, "cost_nano_usd") : null;
   const previousCost = usage.previous ? recorded(usage.previous.values, "cost_nano_usd") : undefined;
   const periodName = period.id === "custom" ? "period" : period.id;
-  const openAnalytics = (to: "/analytics/usage" | "/analytics/cost" | "/analytics/performance" | "/analytics/reliability") => void navigate({ search: (previous) => previous, to });
+  const openAnalytics = (to: "/usage" | "/cost" | "/performance" | "/reliability") => void navigate({ search: (previous) => previous, to });
   const points = buckets(usage.window, usage.series).map((bucket) => ({ label: bucket.label, title: bucket.title, values: { requests: bucket.values?.logical_requests ?? 0 } }));
   const topFeatures = [...(analytics?.by_feature.items ?? [])].sort((a, b) => b.request_count - a.request_count).slice(0, 5);
   const modelTotal = analytics?.by_model.items.reduce((sum, item) => sum + item.request_count, 0) ?? 0;
@@ -130,7 +111,7 @@ function OperatingOverview() {
 
         <Card flush icon="alert" meta={attention.length ? `${pressing} to look at · ${attention.length} in all` : "All clear"} title="Needs attention">
           <AttentionList
-            emptyText="Checked just now: configuration, usage, API tokens and gateway readiness look fine."
+            emptyText="Checked just now: configuration, usage, API tokens, gateway readiness and the server self-check look fine."
             groups={ATTENTION_GROUPS}
             items={attention.map((item) => ({
               ...item,
@@ -144,10 +125,10 @@ function OperatingOverview() {
         {analytics && summary ? (
           <Card flush>
             <StatStrip>
-              <MetricTile color="var(--accent-subtle)" delta={percentChange(analytics.request_count, before?.request_count)} footnote={before ? `vs previous ${periodName}` : "Logical requests"} label="Requests" onClick={() => openAnalytics("/analytics/usage")} value={formatCount(analytics.request_count)} />
-              <MetricTile color="var(--destructive)" delta={pointChange(analytics.failure_rate, before?.failure_rate)} deltaUnit=" pts" footnote={`${analytics.failure_rate.numerator.toLocaleString()} failed requests`} higherIsBetter={false} label="Failed" onClick={() => openAnalytics("/analytics/reliability")} value={ratePercent(analytics.failure_rate, 2)} />
-              <MetricTile delta={before?.time_to_first_token.samples ? percentChange(analytics.time_to_first_token.p95_ms, before.time_to_first_token.p95_ms) : undefined} footnote={`${analytics.time_to_first_token.samples.toLocaleString()} streaming requests`} higherIsBetter={false} label="p95 first token" onClick={() => openAnalytics("/analytics/performance")} value={analytics.time_to_first_token.samples ? formatMs(analytics.time_to_first_token.p95_ms) : "—"} />
-              <MetricTile color="var(--orange)" delta={percentChange(cost, previousCost)} footnote="At your configured prices" higherIsBetter={false} label="Cost" onClick={() => openAnalytics("/analytics/cost")} value={formatMoney(cost)} />
+              <MetricTile color="var(--accent-subtle)" delta={percentChange(analytics.request_count, before?.request_count)} footnote={before ? `vs previous ${periodName}` : "Logical requests"} label="Requests" onClick={() => openAnalytics("/usage")} value={formatCount(analytics.request_count)} />
+              <MetricTile color="var(--destructive)" delta={pointChange(analytics.failure_rate, before?.failure_rate)} deltaUnit=" pts" footnote={`${analytics.failure_rate.numerator.toLocaleString()} failed requests`} higherIsBetter={false} label="Failed" onClick={() => openAnalytics("/reliability")} value={ratePercent(analytics.failure_rate, 2)} />
+              <MetricTile delta={before?.time_to_first_token.samples ? percentChange(analytics.time_to_first_token.p95_ms, before.time_to_first_token.p95_ms) : undefined} footnote={`${analytics.time_to_first_token.samples.toLocaleString()} streaming requests`} higherIsBetter={false} label="p95 first token" onClick={() => openAnalytics("/performance")} value={analytics.time_to_first_token.samples ? formatMs(analytics.time_to_first_token.p95_ms) : "—"} />
+              <MetricTile color="var(--orange)" delta={percentChange(cost, previousCost)} footnote="At your configured prices" higherIsBetter={false} label="Cost" onClick={() => openAnalytics("/cost")} value={formatMoney(cost)} />
             </StatStrip>
             <VolumeChart
               bars={["requests"]}

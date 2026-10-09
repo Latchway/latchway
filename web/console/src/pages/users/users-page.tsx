@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 
@@ -34,15 +35,17 @@ import {
   Notice,
   PageHeader,
   Properties,
+  Segmented,
   StatusBadge,
   Toolbar
 } from "../../ui";
 import { formatCount, formatMoney, recorded } from "../analytics/usage-model";
 import { AccessRequired, EffectiveConfigurationPanel, ProblemNotice } from "../control-plane-pages";
 import { capitalize, formatClock, formatUtc, outcomeStatus, shortId } from "../requests/request-format";
-import { BulkSignInReview, type OperationOutcome, UserOperationReview, ViewOnlyNotice } from "./user-review";
+import { getUserUsage } from "../../api/user-insights";
+import { BulkSignInReview, BulkUserReview, type OperationOutcome, UserOperationReview, ViewOnlyNotice } from "./user-review";
 import { GoToForm } from "./go-to-form";
-import { ACTION_TITLE, claimText, familySignals, maskClaim, signalBadgeColor } from "./users-model";
+import { ACTION_TITLE, claimText, maskClaim, rowSignals, signalBadgeColor } from "./users-model";
 
 const PAGE_SIZE = "50";
 const BULK_LIMIT = 50;
@@ -153,6 +156,8 @@ interface UserDrawerProps {
   canMutate: boolean;
   environmentID: string;
   environmentKind?: string;
+  /** The server has per-user usage, filters and batches. */
+  insights: boolean;
   linkSearch: Record<string, string | undefined>;
   onAction: (action: UserOperationAction) => void;
   onClose: () => void;
@@ -160,7 +165,7 @@ interface UserDrawerProps {
   user: ApplicationUser;
 }
 
-function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onAction, onClose, outcome, user }: UserDrawerProps) {
+function UserDrawer({ canMutate, environmentID, environmentKind, insights, linkSearch, onAction, onClose, outcome, user }: UserDrawerProps) {
   const navigate = useNavigate();
   const [now] = useState(() => Date.now());
   const [chooser, setChooser] = useState(false);
@@ -172,6 +177,12 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
   const recent = useQuery({
     queryFn: async () => (await adminRequest(queryPath("/admin/v1/requests", { environment_id: environmentID, page_size: "5", user_id: user.id }), RequestPageSchema)).data,
     queryKey: ["user-requests", environmentID, user.id],
+    retry: false
+  });
+  const usage = useQuery({
+    enabled: insights,
+    queryFn: ({ signal }) => getUserUsage(user.id, environmentID, new Date(now - 30 * 86_400_000), new Date(now), signal),
+    queryKey: ["user-usage", environmentID, user.id],
     retry: false
   });
   const familyItems = families.data?.items ?? [];
@@ -237,7 +248,10 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
         {
           content: families.error ? <ProblemNotice problem={problemFromError(families.error)} /> : (
             <div className="lw-stack lw-stack--tight">
-              {familyItems.length ? <p className="lw-secondary lw-note">{formatCount(requestTotal)} requests · {formatMoney(costTotal)} recorded, summed from these installations (there's no per-user usage total).</p> : null}
+              {insights ? (
+                usage.data ? <p className="lw-secondary lw-note">Last 30 days: {formatCount(usage.data.request_count)} requests · {formatMoney(recorded(usage.data.values, "cost_nano_usd"))} recorded.</p>
+                  : usage.error ? <ProblemNotice problem={problemFromError(usage.error)} /> : <p className="lw-secondary lw-note" role="status">Loading usage…</p>
+              ) : familyItems.length ? <p className="lw-secondary lw-note">{formatCount(requestTotal)} requests · {formatMoney(costTotal)} recorded, summed from these installations (this server has no per-user usage total).</p> : null}
               {familyItems.length ? (
                 <ul className="lw-rank">
                   {familyItems.map((family) => (
@@ -246,7 +260,7 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
                         <Link className="lw-link lw-mono lw-mono--sm" search={{ ...linkSearch, environment_id: environmentID, family_id: family.id }} to="/installation-families">{family.id}</Link>
                         <span className="lw-row lw-row--tight">
                           <span className="lw-faint">{family.platform.replaceAll("_", " ")} · {family.component_count} part{family.component_count === 1 ? "" : "s"}</span>
-                          {familySignals(family, environmentKind, now).map((signal) => <Badge color={signalBadgeColor(signal.severity)} key={signal.id} variant="soft">{signal.label}</Badge>)}
+                          {rowSignals(family, environmentKind, now).map((signal) => <Badge color={signalBadgeColor(signal.severity)} key={signal.id} variant="soft">{signal.label}</Badge>)}
                         </span>
                       </span>
                       <StatusBadge status={family.status === "active" ? "active" : family.status === "revoked" ? "revoked" : "disabled"}>{capitalize(family.status)}</StatusBadge>
@@ -293,8 +307,49 @@ function UserDrawer({ canMutate, environmentID, environmentKind, linkSearch, onA
   );
 }
 
+const SORT_LABEL = { newest: "Newest first", oldest: "Oldest first", recently_seen: "Recently seen" } as const;
+
+/** Filters live in the URL so a filtered list can be shared or reloaded. */
+function UserFilters({ claim, onChange, override, provider, sort, status }: {
+  claim?: string;
+  onChange: (change: Record<string, string | boolean | undefined>) => void;
+  override: boolean;
+  provider?: string;
+  sort?: "newest" | "recently_seen";
+  status?: "active" | "blocked";
+}) {
+  const [claimInput, setClaimInput] = useState(claim ?? "");
+  const [providerInput, setProviderInput] = useState(provider ?? "");
+  const [error, setError] = useState<string>();
+  function apply(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const nextClaim = claimInput.trim();
+    const nextProvider = providerInput.trim();
+    if (nextClaim && !/^[a-z][a-z0-9_]{0,62}:.{1,200}$/u.test(nextClaim)) return setError("Write a claim as name:value, like plan:pro.");
+    if (nextProvider && !/^[a-z][a-z0-9_-]{0,62}$/u.test(nextProvider)) return setError("A provider key is lowercase, like firebase.");
+    setError(undefined);
+    onChange({ claim: nextClaim || undefined, provider: nextProvider || undefined });
+  }
+  return (
+    <div className="lw-row lw-row--wrap">
+      <Segmented items={[{ id: "all", label: "All" }, { id: "active", label: "Active" }, { id: "blocked", label: "Blocked" }]} label="Status" onChange={(next) => onChange({ user_status: next === "all" ? undefined : next })} value={status ?? "all"} />
+      <label className="lw-check"><input checked={override} onChange={(event) => onChange({ override: event.target.checked || undefined })} type="checkbox" /><span>Plan override</span></label>
+      <div className="lw-input-box">
+        <select aria-label="Sort users" className="lw-input" onChange={(event) => onChange({ user_sort: event.target.value === "oldest" ? undefined : event.target.value })} value={sort ?? "oldest"}>
+          {(["oldest", "newest", "recently_seen"] as const).map((value) => <option key={value} value={value}>{SORT_LABEL[value]}</option>)}
+        </select>
+      </div>
+      <form className="lw-row lw-row--wrap" onSubmit={apply}>
+        <Input aria-label="Identity provider" maxLength={63} onChange={(event) => setProviderInput(event.target.value)} placeholder="Provider, e.g. firebase" spellCheck={false} value={providerInput} />
+        <Input aria-label="Claim" maxLength={264} onChange={(event) => setClaimInput(event.target.value)} placeholder="Claim, e.g. plan:pro" spellCheck={false} value={claimInput} />
+        <Button size="sm" type="submit">Filter</Button>
+      </form>
+      {error ? <span className="lw-field__error" role="alert">{error}</span> : null}
+    </div>
+  );
+}
+
 function UsersView() {
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const queryClient = useQueryClient();
@@ -302,7 +357,12 @@ function UsersView() {
   const environmentID = environment?.id ?? "";
   const search = UserRouteSearchSchema.parse(workspace.search);
   const linkSearch = { application: search.application, environment: search.environment, organization: search.organization };
-  const canMutate = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("revoke_installations") ?? false);
+  const { can } = useCapabilities();
+  const canMutate = compatibility.mutationAllowed && can("revoke_installations");
+  const insights = compatibility.status?.server_capabilities.includes("admin_user_insights") ?? false;
+  const filters = insights ? { claim: search.claim, has_override: search.override ? "true" : undefined, provider: search.provider, sort: search.user_sort, status: search.user_status } : {};
+  const filtered = insights && Boolean(search.claim || search.override || search.provider || search.user_status);
+  const [bulkAction, setBulkAction] = useState<UserOperationAction>();
   const [review, setReview] = useState<{ action: UserOperationAction; user: ApplicationUser }>();
   const [outcome, setOutcome] = useState<{ message: string; userID: string }>();
   const [selected, setSelected] = useState<string[]>([]);
@@ -315,14 +375,20 @@ function UsersView() {
     getNextPageParam: (last: { page: { has_more: boolean; next_cursor?: string } }) => (last.page.has_more ? last.page.next_cursor : undefined),
     initialPageParam: search.cursor as string | undefined,
     queryFn: async ({ pageParam }) => {
-      const page = (await adminRequest(queryPath("/admin/v1/users", { cursor: pageParam, environment_id: environmentID, page_size: PAGE_SIZE }), UserPageSchema)).data;
+      const page = (await adminRequest(queryPath("/admin/v1/users", { ...filters, cursor: pageParam, environment_id: environmentID, include_total: insights && !pageParam ? "true" : undefined, page_size: PAGE_SIZE }), UserPageSchema)).data;
       if (page.items.some((item) => item.environment_id !== environmentID)) throw new UserContextMismatch("user_context");
       return page;
     },
-    queryKey: ["users", environmentID, search.cursor ?? ""],
+    queryKey: ["users", environmentID, search.cursor ?? "", filters],
     refetchOnWindowFocus: false
   });
   const users = list.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = list.data?.pages[0]?.total;
+
+  function filter(change: Record<string, string | boolean | undefined>): void {
+    setSelected([]);
+    workspace.updateSearch({ ...change, cursor: undefined, user_id: undefined }, { replace: false });
+  }
 
   const detail = useQuery({
     enabled: Boolean(environmentID && search.user_id) && !scopeMismatch,
@@ -353,7 +419,8 @@ function UsersView() {
     setOutcome({ message: result.message, userID: result.user.id });
   }
 
-  const selectable = users.filter((user) => user.status !== "blocked");
+  // Batches can block and unblock, so every user is selectable; the per-user path only requires sign-in.
+  const selectable = insights ? users : users.filter((user) => user.status !== "blocked");
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length >= BULK_LIMIT ? current : [...current, id]);
   const columns: Array<Column<ApplicationUser>> = [
     ...(canMutate ? [{
@@ -363,11 +430,11 @@ function UsersView() {
         <input
           aria-label={`Select ${user.id}`}
           checked={selected.includes(user.id)}
-          disabled={user.status === "blocked" || (!selected.includes(user.id) && selected.length >= BULK_LIMIT)}
+          disabled={(!insights && user.status === "blocked") || (!selected.includes(user.id) && selected.length >= BULK_LIMIT)}
           onChange={() => toggle(user.id)}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
-          title={user.status === "blocked" ? "Blocked users have no sessions to end" : undefined}
+          title={!insights && user.status === "blocked" ? "Blocked users have no sessions to end" : undefined}
           type="checkbox"
         />
       ),
@@ -390,26 +457,36 @@ function UsersView() {
         className="lw-toolbar--wrap"
         search={<GoToForm onUser={select} />}
       >
-        <span className="lw-secondary lw-note">Listed in server order. The API can't filter, sort or search users yet.</span>
+        {insights ? <UserFilters claim={search.claim} onChange={filter} override={search.override ?? false} provider={search.provider} sort={search.user_sort} status={search.user_status} /> : <span className="lw-secondary lw-note">Listed in server order. This server can&apos;t filter, sort or search users.</span>}
         {canMutate && selected.length ? <>
           <span className="lw-note">{selected.length} selected</span>
-          <Button onClick={() => setBulk(true)} size="sm">Require Sign-in…</Button>
+          {insights ? (
+            <MenuButton entries={[
+              { label: "Require Sign-in", onSelect: () => setBulkAction("require_reauthentication") },
+              { label: "Require App Re-verification", onSelect: () => setBulkAction("require_app_reverification") },
+              { kind: "separator" },
+              { destructive: true, label: "Block", onSelect: () => setBulkAction("block") },
+              { label: "Unblock", onSelect: () => setBulkAction("unblock") }
+            ]} label="Act on selected users" size="sm">Act on Selected</MenuButton>
+          ) : <Button onClick={() => setBulk(true)} size="sm">Require Sign-in…</Button>}
           <Button onClick={() => setSelected([])} size="sm" variant="ghost">Clear</Button>
         </> : null}
-        {canMutate && !selected.length && selectable.length ? <span className="lw-faint lw-note">Select up to {BULK_LIMIT} users to require sign-in together.</span> : null}
+        {canMutate && !selected.length && selectable.length ? <span className="lw-faint lw-note">Select up to {BULK_LIMIT} users to {insights ? "act on them together" : "require sign-in together"}.</span> : null}
       </Toolbar>
 
       {problem ? <div className="lw-page-notice"><ProblemNotice problem={problem} /></div> : null}
       {list.isPending && !scopeMismatch ? <p className="lw-page-status" role="status">Loading users…</p> : users.length ? (
         <DataTable caption="Users" columns={columns} onSelect={(user) => select(user.id)} rowKey={(user) => user.id} rows={users} selectedKey={search.user_id} />
       ) : list.isSuccess ? (
-        <div className="lw-page-empty"><EmptyState icon="users" orientation="horizontal" title="No users yet">Users appear here the first time someone signs in to your app through Latchway.</EmptyState></div>
+        filtered
+          ? <div className="lw-page-empty"><EmptyState icon="users" orientation="horizontal" title="No users match">Change or clear the filters.</EmptyState></div>
+          : <div className="lw-page-empty"><EmptyState icon="users" orientation="horizontal" title="No users yet">Users appear here the first time someone signs in to your app through Latchway.</EmptyState></div>
       ) : null}
       <div className="lw-rq-foot">
         <span>{users.length ? `${users.length} shown${list.hasNextPage ? " · more available" : " · that's all"}` : ""}</span>
         {list.hasNextPage ? <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} size="sm">Load More</Button> : null}
         <span className="lw-spacer" />
-        <span className="lw-faint">There's no total: the users API doesn't count matches.</span>
+        {total ? <span className="lw-secondary lw-num">{total.capped ? "More than 100,000" : formatCount(total.count)} {filtered ? "matching" : ""} user{total.count === 1 && !total.capped ? "" : "s"}</span> : insights ? null : <span className="lw-faint">There&apos;s no total: this server doesn&apos;t count users.</span>}
       </div>
 
       {search.user_id ? (
@@ -419,6 +496,7 @@ function UsersView() {
               canMutate={canMutate}
               environmentID={environmentID}
               environmentKind={environment?.kind}
+              insights={insights}
               key={drawerUser.id}
               linkSearch={linkSearch}
               onAction={(action) => setReview({ action, user: drawerUser })}
@@ -434,6 +512,7 @@ function UsersView() {
         </div>
       ) : null}
       {review ? <UserOperationReview action={review.action} environmentID={environmentID} key={`${review.user.id}-${review.action}`} onClose={() => setReview(undefined)} onDone={applyOutcome} user={review.user} /> : null}
+      {bulkAction ? <BulkUserReview action={bulkAction} environmentID={environmentID} onClose={() => { setBulkAction(undefined); setSelected([]); }} onFinished={() => void queryClient.invalidateQueries({ queryKey: ["users", environmentID] })} users={selectedUsers} /> : null}
       {bulk ? <BulkSignInReview environmentID={environmentID} onClose={() => { setBulk(false); setSelected([]); }} onFinished={() => void queryClient.invalidateQueries({ queryKey: ["users", environmentID] })} users={selectedUsers} /> : null}
     </div>
   );

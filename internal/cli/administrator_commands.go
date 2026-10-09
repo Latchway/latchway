@@ -21,6 +21,8 @@ type administratorCLI struct {
 	Role                  string  `json:"role"`
 	Status                string  `json:"status"`
 	PasswordResetRequired bool    `json:"password_reset_required"`
+	TwoFactorEnabled      bool    `json:"two_factor_enabled"`
+	SSOLinked             bool    `json:"sso_linked"`
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
 	DisabledAt            *string `json:"disabled_at,omitempty"`
@@ -52,6 +54,7 @@ func newAdminAccountsCommand(opts *options) *cobra.Command {
 		newAdminAccountStatusCommand(opts, values, false),
 		newAdminAccountStatusCommand(opts, values, true),
 		newAdminAccountResetCommand(opts, values),
+		newAdminAccountResetTwoFactorCommand(opts, values),
 	)
 	return command
 }
@@ -88,7 +91,7 @@ func newAdminAccountsListCommand(opts *options, root *controlCommandOptions) *co
 func newAdminAccountCreateCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	values := administratorCreateCLIOptions{role: "viewer", password: secretValueCLIOptions{valueFD: -1}}
 	command := &cobra.Command{
-		Use: "create", Short: "Create a local administrator and first organization membership", Args: cobra.NoArgs,
+		Use: "create", Short: "Create a local administrator who chooses a new password at first sign-in", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !validAdministratorRole(values.role) || strings.TrimSpace(values.email) == "" || strings.TrimSpace(values.displayName) == "" {
 				return errors.New("administrator email, display name, or role is invalid")
@@ -176,7 +179,7 @@ func newAdminAccountResetCommand(opts *options, root *controlCommandOptions) *co
 	values := secretValueCLIOptions{valueFD: -1}
 	command := &cobra.Command{
 		Use: "reset-password ADMIN_USER_ID", Aliases: []string{"reset"},
-		Short: "Replace a local administrator password and revoke active credentials", Args: cobra.ExactArgs(1),
+		Short: "Set a temporary administrator password, revoke active credentials and require a new password at next sign-in", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if id.Validate(args[0], id.AdminUser) != nil {
 				return errors.New("administrator ID is invalid")
@@ -202,6 +205,28 @@ func newAdminAccountResetCommand(opts *options, root *controlCommandOptions) *co
 	}
 	addSecretValueFlags(command, &values)
 	return command
+}
+
+func newAdminAccountResetTwoFactorCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset-two-factor ADMIN_USER_ID",
+		Short: "Remove an administrator's authenticator app, passkeys and recovery codes and end their console sessions",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.AdminUser) != nil {
+				return errors.New("administrator ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var administrator administratorCLI
+			if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/administrators/"+args[0]+"/reset-two-factor", nil, nil, http.StatusOK, &administrator); err != nil {
+				return err
+			}
+			return printAdministrator(opts, administrator)
+		},
+	}
 }
 
 func readAdministratorPassword(command *cobra.Command, values secretValueCLIOptions) ([]byte, error) {
@@ -242,10 +267,11 @@ func printAdministrators(opts *options, page administratorPageCLI) error {
 	for _, administrator := range page.Items {
 		rows = append(rows, []string{
 			administrator.ID, administrator.Email, administrator.DisplayName,
-			administrator.Role, administrator.Status, formatControlTime(administrator.UpdatedAt),
+			administrator.Role, administrator.Status, boolLabel(administrator.TwoFactorEnabled),
+			boolLabel(administrator.SSOLinked), formatControlTime(administrator.UpdatedAt),
 		})
 	}
-	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "UPDATED"}, rows); err != nil {
+	if err := printControlTable(opts, []string{"ADMINISTRATOR", "EMAIL", "NAME", "ROLE", "STATUS", "TWO-FACTOR", "SSO", "UPDATED"}, rows); err != nil {
 		return err
 	}
 	if page.Page.HasMore {

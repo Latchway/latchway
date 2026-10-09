@@ -39,6 +39,8 @@ var (
 
 var slugPattern = regexp.MustCompile("^[a-z][a-z0-9-]{1,62}$")
 
+var deviceSummaryPattern = regexp.MustCompile(`^[A-Za-z0-9 .()/-]{1,80}$`)
+
 // BootstrapOwnerInput is the complete transaction that consumes the one-time
 // token and creates the first organization owner.
 type BootstrapOwnerInput struct {
@@ -110,6 +112,30 @@ type CreateSessionInput struct {
 	AdminUserID    string
 	Lifetime       time.Duration
 	RequestID      string
+	// DeviceSummary is an optional coarse "Browser on OS" description; see
+	// DeviceSummaryFromUserAgent. Raw User-Agent strings are never stored.
+	DeviceSummary string
+	// SignInMethod is how the administrator proved who they are; empty means
+	// SignInPassword.
+	SignInMethod SignInMethod
+}
+
+// SignInMethod records how a console session was signed in.
+type SignInMethod string
+
+const (
+	SignInPassword SignInMethod = "password"
+	SignInPasskey  SignInMethod = "passkey"
+	// SignInSSO sessions rely on the organization's identity provider for any
+	// further factors, so the two-factor requirement doesn't apply to them.
+	SignInSSO SignInMethod = "sso"
+)
+
+func (method SignInMethod) orDefault() SignInMethod {
+	if method == "" {
+		return SignInPassword
+	}
+	return method
 }
 
 func (input CreateSessionInput) validate() error {
@@ -124,6 +150,14 @@ func (input CreateSessionInput) validate() error {
 	}
 	if validateRequestID(input.RequestID) != nil {
 		return fmt.Errorf("%w: request ID", ErrInvalidAdminInput)
+	}
+	if input.DeviceSummary != "" && !deviceSummaryPattern.MatchString(input.DeviceSummary) {
+		return fmt.Errorf("%w: device summary", ErrInvalidAdminInput)
+	}
+	switch input.SignInMethod.orDefault() {
+	case SignInPassword, SignInPasskey, SignInSSO:
+	default:
+		return fmt.Errorf("%w: sign-in method", ErrInvalidAdminInput)
 	}
 	return nil
 }
@@ -183,13 +217,16 @@ type IssuedAPIToken struct {
 }
 
 // APITokenMetadata is the non-secret administrative token representation.
+// Administrator is present only in the organization-wide owner listing.
 type APITokenMetadata struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Scopes    []string   `json:"scopes"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Revoked   bool       `json:"revoked"`
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	Scopes        []string                   `json:"scopes"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	ExpiresAt     *time.Time                 `json:"expires_at,omitempty"`
+	LastUsedAt    *time.Time                 `json:"last_used_at,omitempty"`
+	Revoked       bool                       `json:"revoked"`
+	Administrator *AdminSessionAdministrator `json:"administrator,omitempty"`
 }
 
 // AuthenticationMethod identifies how an admin principal authenticated.
@@ -209,15 +246,80 @@ type Principal struct {
 	Method              AuthenticationMethod
 	CredentialID        string
 	CredentialExpiresAt *time.Time
-	scope               *CapabilitySet
+	// PasswordResetRequired marks a session whose administrator must choose a
+	// new password before using anything but sign-out and the password change.
+	PasswordResetRequired bool
+	// TwoFactorEnrollmentRequired marks a session in an organization that
+	// requires a second factor the administrator hasn't set up yet.
+	TwoFactorEnrollmentRequired bool
+	// SignInMethod is how a console session was signed in.
+	SignInMethod SignInMethod
+	scope        *CapabilitySet
+	// applicationRoles raise the organization role for single applications.
+	applicationRoles map[string]Role
 }
 
-// Allows evaluates membership role and optional API-token scope.
+// Allows evaluates the organization role and optional API-token scope. It is
+// the check for organization-wide actions; actions on one application use
+// AllowsIn, which also counts application roles.
 func (principal Principal) Allows(capability Capability, context AuthorizationContext) bool {
+	return principal.allowsAs(principal.Role, capability, context)
+}
+
+func (principal Principal) allowsAs(role Role, capability Capability, context AuthorizationContext) bool {
 	if principal.scope == nil {
-		return principal.Role.Allows(capability, context)
+		return role.Allows(capability, context)
 	}
-	return principal.scope.Allows(principal.Role, capability, context)
+	return principal.scope.Allows(role, capability, context)
+}
+
+// RoleIn is the administrator's role for one application: the organization
+// role, raised by an application role when that is higher. Application roles
+// never lower it.
+func (principal Principal) RoleIn(applicationID string) Role {
+	if raised, ok := principal.applicationRoles[applicationID]; ok && raised.rank() > principal.Role.rank() {
+		return raised
+	}
+	return principal.Role
+}
+
+// AllowsIn evaluates a capability for one application.
+func (principal Principal) AllowsIn(capability Capability, applicationID string, context AuthorizationContext) bool {
+	return principal.allowsAs(principal.RoleIn(applicationID), capability, context)
+}
+
+// AllowsSomewhere reports whether the capability is allowed in the
+// organization or in at least one application. It is a cheap first check
+// before the target, and so its application, is loaded.
+func (principal Principal) AllowsSomewhere(capability Capability, context AuthorizationContext) bool {
+	if principal.Allows(capability, context) {
+		return true
+	}
+	for applicationID := range principal.applicationRoles {
+		if principal.AllowsIn(capability, applicationID, context) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplicationRoles returns a copy of the application roles that raise this
+// principal's organization role.
+func (principal Principal) ApplicationRoles() map[string]Role {
+	roles := make(map[string]Role, len(principal.applicationRoles))
+	for applicationID, role := range principal.applicationRoles {
+		roles[applicationID] = role
+	}
+	return roles
+}
+
+// WithApplicationRoles returns the principal with application roles set.
+func (principal Principal) WithApplicationRoles(roles map[string]Role) Principal {
+	principal.applicationRoles = make(map[string]Role, len(roles))
+	for applicationID, role := range roles {
+		principal.applicationRoles[applicationID] = role
+	}
+	return principal
 }
 
 func capabilitiesFromStrings(values []string) (CapabilitySet, error) {

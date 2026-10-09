@@ -153,6 +153,57 @@ Simulation runs the exact compiled policy and route resolver without reserving
 quota or dispatching upstream traffic. Claims come from a bounded regular JSON
 file so they do not enter shell history.
 
+A simulation can also make routes fail (`failures` in the request, `--fail` in
+the CLI) and returns the attempt plan the data plane would follow, using the
+same retry and fallback decisions. `POST /config-revisions/{id}/simulate-batch`
+runs up to 50 simulations at once, and an application can keep named
+simulation scenarios (`/applications/{id}/simulation-scenarios`) that the
+team reuses.
+
+To see who a limit would stop before publishing it,
+`GET /admin/v1/usage/distribution` sums one metric per user (or per user and
+feature, or installation) in each calendar window of the limit, aligned the way
+enforcement aligns them, and reports peak percentiles, a histogram, and how
+many users would have exceeded a maximum, without returning user IDs.
+`GET /admin/v1/user-overrides` lists active and ended plan overrides, and a
+user's effective configuration includes each limit's current usage.
+
+## Drafts
+
+A draft stays editable until it is activated, including after it validates;
+editing returns it to `draft`, so it needs validating again before activation.
+Every create and edit is recorded with its author, time and changed paths
+(never values):
+
+```bash
+latchway config history rev_...
+latchway config apply --environment env_... --file candidate.json \
+  --note "Raise the free plan to 50k tokens"
+latchway config discard rev_...
+latchway config promote --environment env_production --from env_staging
+```
+
+`--note` records a publish note on the activated revision. Discarding sets a
+never-activated draft aside: it stays in history as `discarded` and can't be
+edited, validated, simulated or activated. Activated revisions can't be
+discarded or changed.
+
+A draft records the live revision it started from. If something else is
+published first, the draft can't be activated until it is brought up to date:
+`GET /admin/v1/config-revisions/{id}/rebase-preview` lists, by path, what each
+side changed and where both changed the same thing differently, and
+`POST /admin/v1/config-revisions/{id}/rebase` merges the live changes in after
+you choose `draft` or `live` for every conflicting path. The console's Draft
+page does this with both values side by side.
+
+`config promote` starts a draft from another environment's live revision in
+the same application. Features, models, input accounting, pricing, limit plans,
+session and privacy settings come from the source. The target keeps its own
+sign-in providers, attestation policies, component definitions and AI
+connections; entries only the source has are copied and listed for review,
+because they may point at the source's projects, app identifiers, base URLs or
+secret references. Promotion refuses while the target has an unpublished draft.
+
 ## Activation safety
 
 Validation covers schema, duplicate keys, references, secrets, identity and

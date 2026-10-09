@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 1.1.2
+  version: 1.1.3
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -69,6 +69,11 @@ paths:
       tags: [Authentication]
       operationId: adminLogin
       summary: Create a secure administrator cookie session.
+      description: |
+        When the administrator has a second factor (an authenticator app or a
+        passkey), a correct password returns `202` with a short-lived
+        challenge and no cookie; the session is issued by
+        `POST /auth/login/two-factor`.
       security: []
       requestBody:
         required: true
@@ -84,8 +89,236 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminSession' }
+        '202':
+          description: Password accepted; a second factor is required.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecondFactorChallenge' }
         '401': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/login/two-factor:
+    post:
+      tags: [Authentication]
+      operationId: adminLoginSecondFactor
+      summary: Finish a sign-in with an authenticator code, a passkey or a recovery code.
+      description: |
+        Send exactly one of `code`, `passkey` or `recovery_code`. A challenge
+        lasts five minutes and ends after five failed attempts; failures are
+        also limited per administrator across challenges. Authenticator codes
+        work once. A passkey answers the prompt from
+        `POST /auth/login/two-factor/passkey-options` for the same challenge.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecondFactorRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/login/two-factor/passkey-options:
+    post:
+      tags: [Authentication]
+      operationId: adminLoginPasskeyOptions
+      summary: Start a passkey prompt for a sign-in whose password was correct.
+      description: |
+        Returns WebAuthn request options limited to the administrator's
+        passkeys and tied to the sign-in challenge. Each prompt works once and
+        lasts five minutes. Returns `server_not_ready` when the console isn't
+        served from a domain name over HTTPS.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasskeyOptionsForSignInRequest' }
+      responses:
+        '200':
+          description: WebAuthn request options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyRequestOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/sign-in-options:
+    post:
+      tags: [Authentication]
+      operationId: adminPasskeySignInOptions
+      summary: Start a passwordless sign-in with a passkey.
+      description: |
+        Public; any body is ignored. Returns WebAuthn request options with no
+        allowed-credential list, so the browser offers any of this site's
+        passkeys. Each prompt works once and lasts five minutes; a bounded
+        number may be pending at once (`rate_limited` beyond it).
+      security: []
+      responses:
+        '200':
+          description: WebAuthn request options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyRequestOptions' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/sign-in:
+    post:
+      tags: [Authentication]
+      operationId: adminPasskeySignIn
+      summary: Create a console session with a passkey.
+      description: |
+        Verifies the passkey's signature, user verification and counter, then
+        signs in to `organization_id`, the last organization used, or the
+        first active membership. User verification on the authenticator stands
+        in for both the password and the second factor.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasskeySignInRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sso/start:
+    post:
+      tags: [Authentication]
+      operationId: startAdminSSO
+      summary: Start a single sign-on at the organization's identity provider.
+      description: |
+        Public. Returns the provider's authorization URL for the browser to
+        navigate to, and sets a short-lived HttpOnly cookie that binds the
+        sign-in to this browser. The sign-in carries a random state, nonce
+        and PKCE verifier and lasts ten minutes; a bounded number may be
+        pending per organization (`rate_limited` beyond it).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SSOStartRequest' }
+      responses:
+        '200':
+          description: Where to send the browser.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOStart' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sso/callback:
+    get:
+      tags: [Authentication]
+      operationId: finishAdminSSO
+      summary: The identity provider's redirect back; signs in and returns the browser to the console.
+      description: |
+        Public; reached by the browser, not called by clients. It needs the
+        binding cookie from `POST /auth/sso/start`, redeems the code with the
+        PKCE verifier, and verifies the ID token's signature, issuer,
+        audience, expiry and nonce. A linked identity signs in as its
+        administrator; otherwise a provider-verified email in an allowed
+        domain links to the matching member, or, when the organization
+        provisions accounts, creates a membership. Success sets the session
+        cookies and redirects to `/`; failure redirects to `/?sso_error=`
+        with one of `expired`, `denied`, `unavailable`, `failed`,
+        `no_account`, `unverified_email`, `domain` or `conflict`.
+      security: []
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, maxLength: 128 } }
+        - { name: code, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+        - { name: error, in: query, required: false, schema: { type: string, maxLength: 128 } }
+      responses:
+        '303':
+          description: Back to the console, signed in or with a reason.
+          headers:
+            Location: { schema: { type: string } }
+            Set-Cookie: { schema: { type: string } }
+  /admin/v1/auth/invitations/preview:
+    post:
+      tags: [Authentication]
+      operationId: previewInvitation
+      summary: Show the holder of an invitation link what they're invited to.
+      description: Public. Unknown, used, revoked, replaced and expired tokens all answer `resource_not_found`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationTokenRequest' }
+      responses:
+        '200':
+          description: The invitation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationPreview' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/invitations/accept:
+    post:
+      tags: [Authentication]
+      operationId: acceptInvitation
+      summary: Accept an invitation by creating the invited account, and sign in.
+      description: |
+        Public, for addresses without an account: creates it with the chosen
+        name and password and its membership, then opens a console session.
+        An address that already has an account gets `conflict` and claims the
+        invitation after signing in.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInvitationRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/invitations/claim:
+    post:
+      tags: [Authentication]
+      operationId: claimInvitation
+      summary: Add the signed-in administrator to the organization they were invited to.
+      description: Console sessions only, and only for the invited address. The session stays where it is; switch organization to use the new membership.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationTokenRequest' }
+      responses:
+        '200':
+          description: The joined organization.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimedInvitation' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/auth/logout:
     post:
@@ -102,12 +335,307 @@ paths:
       tags: [Authentication]
       operationId: getAdminSession
       summary: Return the current administrator and capabilities.
+      description: |
+        A cookie that belonged to a session that has ended returns 401 with
+        `session_expired` or `session_revoked` and a detail naming the reason
+        (signed out, signed out from another session, revoked by an owner,
+        password reset by an owner, password changed, organization switch, or
+        access disabled). Unknown credentials keep `authentication_required`.
       responses:
         '200':
           description: Current session.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/info:
+    get:
+      tags: [Authentication]
+      operationId: getAdminSignInInfo
+      summary: Return what the sign-in screen needs before authentication.
+      description: |
+        Public. Reports the advertised client contract and protocols so a
+        console can detect a version mismatch before sign-in, whether
+        first-owner setup can still be completed, and the enabled sign-in
+        methods. It never reports server build versions or account data.
+      security: []
+      responses:
+        '200':
+          description: Pre-authentication sign-in information.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSignInInfo' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/password:
+    post:
+      tags: [Authentication]
+      operationId: changeOwnAdminPassword
+      summary: Change the signed-in administrator's own password.
+      description: |
+        Console sessions only. Verifies the current password (rate limited),
+        refuses reuse, clears a pending forced change, and signs out every
+        other console session of the administrator in every organization. API
+        tokens are unaffected. A session whose password was set by an owner may
+        call only this operation, `GET /auth/session`, `GET /system` and logout
+        until it succeeds; anything else returns `permission_denied`.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeOwnPasswordRequest' }
+      responses:
+        '200':
+          description: Password changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/organization:
+    post:
+      tags: [Authentication]
+      operationId: switchAdminOrganization
+      summary: Replace the console session with one for another organization.
+      description: |
+        Console sessions only. The administrator must be an active member of
+        the target organization. The current session is revoked and a new
+        session cookie is issued in the same transaction.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SwitchOrganizationRequest' }
+      responses:
+        '200':
+          description: Session for the chosen organization.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions:
+    get:
+      tags: [Authentication]
+      operationId: listOwnAdminSessions
+      summary: List the signed-in administrator's own console sessions.
+      description: |
+        Covers every organization. Includes active sessions and sessions that
+        ended in the last 30 days, newest activity first, at most 100.
+      responses:
+        '200':
+          description: Own sessions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnAdminSessionList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions/revoke-others:
+    post:
+      tags: [Authentication]
+      operationId: revokeOtherOwnAdminSessions
+      summary: Sign out every other console session of the signed-in administrator.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Sessions signed out.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/sessions/{adminSessionId}/revoke:
+    post:
+      tags: [Authentication]
+      operationId: revokeOwnAdminSession
+      summary: Sign out one of the signed-in administrator's own sessions.
+      parameters:
+        - $ref: '#/components/parameters/AdminSessionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Session signed out; signing out the current session also clears its cookie.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedOutSessions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor:
+    get:
+      tags: [Authentication]
+      operationId: getOwnTwoFactorStatus
+      summary: Report the signed-in administrator's second factor.
+      responses:
+        '200':
+          description: Second-factor status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TwoFactorStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/totp:
+    post:
+      tags: [Authentication]
+      operationId: startTotpEnrollment
+      summary: Start setting up an authenticator app.
+      description: |
+        Console sessions only. Returns a new key and its `otpauth://` link
+        once; the key is sealed server-side and unusable until confirmed.
+        Replaces an earlier unconfirmed key; refuses while a confirmed one
+        exists.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enrollment key, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TotpEnrollment' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/totp/confirm:
+    post:
+      tags: [Authentication]
+      operationId: confirmTotpEnrollment
+      summary: Confirm the authenticator with a current code and receive recovery codes.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TotpCodeRequest' }
+      responses:
+        '200':
+          description: Two-factor sign-in is on; ten single-use recovery codes, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodes' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/recovery-codes:
+    post:
+      tags: [Authentication]
+      operationId: replaceRecoveryCodes
+      summary: Replace every recovery code after checking a current authenticator code or the password.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecoveryCodesRequest' }
+      responses:
+        '200':
+          description: New recovery codes, shown once; earlier codes stop working.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodes' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/two-factor/disable:
+    post:
+      tags: [Authentication]
+      operationId: disableOwnTwoFactor
+      summary: Remove the authenticator app with the password and a current code.
+      description: |
+        Passkeys stay. Refused with `conflict` when no passkey remains and an
+        organization the administrator belongs to requires two-factor sign-in.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisableTwoFactorRequest' }
+      responses:
+        '204': { description: Authenticator removed, and the recovery codes too when no passkey remains. }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys:
+    get:
+      tags: [Authentication]
+      operationId: listOwnPasskeys
+      summary: List the signed-in administrator's passkeys.
+      responses:
+        '200':
+          description: Passkeys, oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyList' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Authentication]
+      operationId: addOwnPasskey
+      summary: Register a passkey from the browser's response to the registration prompt.
+      description: |
+        Console sessions only. Accepts ES256 credentials with user
+        verification; attestation statements are not evaluated. The first
+        second factor also issues ten recovery codes, returned once.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddPasskeyRequest' }
+      responses:
+        '201':
+          description: Passkey registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddedPasskey' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/registration-options:
+    post:
+      tags: [Authentication]
+      operationId: startPasskeyRegistration
+      summary: Check the password and start a passkey registration prompt.
+      description: |
+        Console sessions only. Requires the current password (rate limited)
+        because a passkey can sign in on its own. Returns WebAuthn creation
+        options that require a discoverable credential, user verification and
+        ES256, and exclude passkeys already registered. Returns
+        `server_not_ready` when the console isn't served from a domain name
+        over HTTPS.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordConfirmation' }
+      responses:
+        '200':
+          description: WebAuthn creation options.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasskeyCreationOptions' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/passkeys/{adminPasskeyId}/remove:
+    post:
+      tags: [Authentication]
+      operationId: removeOwnPasskey
+      summary: Remove one of the signed-in administrator's passkeys.
+      description: |
+        Console sessions only; requires the current password. Refused with
+        `conflict` when it is the last second factor and an organization the
+        administrator belongs to requires one. Removing the last second
+        factor also removes the recovery codes.
+      parameters:
+        - $ref: '#/components/parameters/AdminPasskeyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordConfirmation' }
+      responses:
+        '204': { description: Passkey removed. }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/organizations:
     get:
@@ -176,6 +704,72 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}:
+    patch:
+      tags: [Organizations]
+      operationId: renameOrganization
+      summary: Change the organization's display name.
+      description: Owners only. The slug never changes.
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { $ref: '#/components/schemas/OrganizationID' } }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed organization.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}:
+    patch:
+      tags: [Applications]
+      operationId: renameApplication
+      summary: Change an application's display name.
+      description: |
+        The slug never changes: configuration metadata, URLs and CLI flags name applications by slug.
+        Applications can't be deleted, because their audit and request history must stay intact; disable
+        one instead.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed application.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}:
+    patch:
+      tags: [Environments]
+      operationId: renameEnvironment
+      summary: Change an environment's display name.
+      description: The slug never changes. Environments can't be deleted, because their audit and request history must stay intact; disable one instead.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenameRequest' }
+      responses:
+        '200':
+          description: Renamed environment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Environment' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/applications/{applicationId}/disable:
     post:
@@ -346,6 +940,39 @@ paths:
               schema: { $ref: '#/components/schemas/ConfigurationRevision' }
         '422': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/config-revisions/promote:
+    post:
+      tags: [Configuration]
+      operationId: promoteConfiguration
+      summary: Start a draft from another environment's live configuration.
+      description: |
+        Creates a draft in this environment from the live revision of another environment of the
+        same application. Features, models, input accounting, pricing, limit plans, session and
+        privacy settings come from the source. Sign-in providers, attestation policies, component
+        definitions and AI connections this environment already has are kept; entries only the
+        source has are copied and listed under `review`, because they may point at the source's
+        projects, app identifiers, origins, base URLs or secret references. Metadata always names
+        this environment. Refused with `conflict` while this environment has an unpublished,
+        undiscarded draft.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromoteConfigurationRequest' }
+      responses:
+        '201':
+          description: Promoted draft and where each part came from.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationPromotion' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/config-revisions/{revisionId}:
     get:
       tags: [Configuration]
@@ -365,7 +992,8 @@ paths:
     patch:
       tags: [Configuration]
       operationId: replaceDraftConfiguration
-      summary: Replace the document of a mutable draft using optimistic concurrency.
+      summary: Replace the document of a never-activated draft using optimistic concurrency.
+      description: A validated revision that was never activated returns to draft; activated and discarded revisions are immutable. Each replacement is recorded in the edit history.
       parameters:
         - $ref: '#/components/parameters/RevisionID'
         - $ref: '#/components/parameters/IfMatch'
@@ -383,6 +1011,91 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/edits:
+    get:
+      tags: [Configuration]
+      operationId: listConfigurationRevisionEdits
+      summary: List who changed a revision, when, and which paths.
+      description: Newest first, at most 200 edits. Paths only; values are never recorded. Edits made before the server recorded history are absent.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+      responses:
+        '200':
+          description: Edit history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevisionEdits' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/discard:
+    post:
+      tags: [Configuration]
+      operationId: discardConfigurationRevision
+      summary: Discard a never-activated draft, keeping it in history.
+      description: The revision becomes `discarded`; its document stays readable, and it can no longer be edited, validated, simulated or activated.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Discarded revision.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/rebase-preview:
+    get:
+      tags: [Configuration]
+      operationId: previewConfigurationRebase
+      summary: Preview bringing a draft up to date with the live revision.
+      description: |
+        Compares the draft and the live revision with the revision the draft started from. Lists the
+        paths each side changed and the paths both changed differently. Paths only; read the three
+        revisions to show values.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+      responses:
+        '200':
+          description: Merge preview.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationMergePreview' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/rebase:
+    post:
+      tags: [Configuration]
+      operationId: rebaseConfigurationRevision
+      summary: Bring a draft up to date with the live revision.
+      description: |
+        Merges the live revision's changes into the draft and moves its base to `live_revision_id`,
+        which must still be live. Objects merge by key and lists of identified entries by `id`;
+        reordered lists, sensitive values and other values are taken whole. `resolutions` must name
+        `draft` or `live` for every conflicting path and nothing else. The draft returns to `draft`.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RebaseConfigurationRequest' }
+      responses:
+        '200':
+          description: Rebased draft.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
@@ -436,15 +1149,116 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RouteSimulationResult' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/simulate-batch:
+    post:
+      tags: [Configuration]
+      operationId: simulateConfigurationRevisionBatch
+      summary: Run up to 50 simulations against one revision.
+      description: Each item succeeds or fails on its own; a failed item carries a problem code and detail.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteSimulationBatchRequest' }
+      responses:
+        '200':
+          description: One item per request, in order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteSimulationBatchResult' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}/simulation-scenarios:
+    get:
+      tags: [Configuration]
+      operationId: listSimulationScenarios
+      summary: List an application's saved simulator inputs.
+      description: Newest first, at most 200. Needs activate_configuration in the application.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+      responses:
+        '200':
+          description: Saved scenarios.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SimulationScenario' } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Configuration]
+      operationId: createSimulationScenario
+      summary: Save a simulator input under a name.
+      description: The input is validated like a simulation and stored without application or environment. The audit event records that it was set, not its values.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulationScenarioRequest' }
+      responses:
+        '201':
+          description: Saved scenario.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulationScenario' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/simulation-scenarios/{scenarioId}:
+    put:
+      tags: [Configuration]
+      operationId: replaceSimulationScenario
+      summary: Replace a saved scenario's name and input.
+      parameters:
+        - { name: scenarioId, in: path, required: true, schema: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulationScenarioRequest' }
+      responses:
+        '200':
+          description: Replaced scenario with the next version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulationScenario' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Configuration]
+      operationId: deleteSimulationScenario
+      summary: Delete a saved scenario.
+      parameters:
+        - { name: scenarioId, in: path, required: true, schema: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Deleted. }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/config-revisions/{revisionId}/activate:
     post:
       tags: [Configuration]
       operationId: activateConfigurationRevision
       summary: Atomically activate a fully valid immutable revision.
+      description: An optional body records a publish note on the revision. Without a body the revision activates without one.
       parameters:
         - $ref: '#/components/parameters/RevisionID'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActivateConfigurationRequest' }
       responses:
         '200':
           description: Activated revision.
@@ -567,6 +1381,15 @@ paths:
       tags: [API tokens]
       operationId: listAdminApiTokens
       summary: List token metadata without token hashes or plaintext.
+      description: |
+        Lists the caller's own tokens. With `scope=organization` it lists every
+        administrator's tokens in the organization with their owner; that
+        requires `manage_owners`.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [organization] }
       responses:
         '200':
           description: API token metadata.
@@ -704,6 +1527,239 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Administrator' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/two-factor-requirement:
+    put:
+      tags: [Organizations]
+      operationId: setOrganizationTwoFactorRequirement
+      summary: Require, or stop requiring, a second factor for every member.
+      description: |
+        Requires `manage_owners` in that organization. While required, a
+        member's console session without a confirmed second factor may only
+        set one up, change its password, read its session and system status,
+        and sign out. API tokens are not affected.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TwoFactorRequirement' }
+      responses:
+        '200':
+          description: Requirement saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TwoFactorRequirement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/sso:
+    get:
+      tags: [Organizations]
+      operationId: getOrganizationSSO
+      summary: Read the organization's single sign-on provider and the redirect URI to register.
+      description: Requires `manage_owners`. The client secret is never returned.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+      responses:
+        '200':
+          description: Single sign-on configuration; `provider` is null until one is set up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOConfiguration' }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Organizations]
+      operationId: putOrganizationSSO
+      summary: Set up or change the organization's OpenID Connect provider.
+      description: |
+        Requires `manage_owners`. The server reads the issuer's discovery
+        document over the public internet and refuses issuers without the
+        authorization code flow, PKCE S256, and RS256 or ES256 ID tokens
+        (`configuration_invalid`). The client secret is sealed with the master
+        key; omit it to keep the stored one. Disabling ends single sign-on
+        sessions; requiring single sign-on ends members' other console
+        sessions, and owners keep their other sign-in methods.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SSOProviderRequest' }
+      responses:
+        '200':
+          description: Saved configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOConfiguration' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Organizations]
+      operationId: removeOrganizationSSO
+      summary: Remove the organization's single sign-on provider and linked identities.
+      description: Requires `manage_owners`. Ends every single sign-on session in the organization except the caller's.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Removed. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations:
+    get:
+      tags: [Organizations]
+      operationId: listInvitations
+      summary: List the organization's recent invitations.
+      description: Requires `manage_owners`. Newest first, at most 200. Tokens and links are never listed.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+      responses:
+        '200':
+          description: Invitations and whether this server can email them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationList' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Organizations]
+      operationId: createInvitation
+      summary: Invite an email address to the organization.
+      description: |
+        Requires `manage_owners`. Returns the invitation link once; its token
+        is stored only as a hash, sits in the URL fragment, works once and
+        expires after seven days. A new invitation replaces any open one for
+        the same address. With `send_email`, the server also emails the link
+        through its configured relay (`conflict` when none is configured); a
+        failed delivery is recorded and the link is still returned. Refused
+        for members other than owners while the organization requires single
+        sign-on.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInvitationRequest' }
+      responses:
+        '201':
+          description: The invitation and its link, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationLink' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations/{invitationId}/revoke:
+    post:
+      tags: [Organizations]
+      operationId: revokeInvitation
+      summary: Stop an open invitation from being used.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/InvitationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Revoked invitation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invitation' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations/{organizationId}/invitations/{invitationId}/renew:
+    post:
+      tags: [Organizations]
+      operationId: renewInvitation
+      summary: Give an open or expired invitation a new link and seven more days.
+      description: The earlier link stops working. Optionally emails the new link.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIDPath'
+        - $ref: '#/components/parameters/InvitationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenewInvitationRequest' }
+      responses:
+        '200':
+          description: The invitation and its new link, shown once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationLink' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/application-roles:
+    get:
+      tags: [Administrators]
+      operationId: listApplicationRoles
+      summary: List every application role in the organization.
+      description: Requires `manage_owners`. An application role raises a member's organization role in one application; it never lowers it.
+      responses:
+        '200':
+          description: Application roles.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationRoleList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/application-roles/{applicationId}:
+    put:
+      tags: [Administrators]
+      operationId: setApplicationRole
+      summary: Raise a member's role in one application.
+      description: |
+        Requires `manage_owners`. The role must be higher than the member's
+        organization role (`conflict` otherwise, and always for owners).
+        Application-scoped actions (configuration, environments, secrets,
+        self-tests, installation and user actions) use the higher role for
+        that application; organization-wide actions keep the organization
+        role. Raising the organization role later drops grants it supersedes.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplicationRoleRequest' }
+      responses:
+        '200':
+          description: The application role.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationRoleGrant' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Administrators]
+      operationId: removeApplicationRole
+      summary: Return a member to their organization role in one application.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Removed. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/reset-two-factor:
+    post:
+      tags: [Administrators]
+      operationId: resetAdministratorTwoFactor
+      summary: Remove a member's authenticator app, passkeys and recovery codes and end their sessions.
+      description: |
+        Requires `manage_owners`. Like a password reset it is refused when the
+        member also belongs to another organization, because the second
+        factor is global to the account.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Second factor removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/administrators/{adminUserId}/reset-password:
     post:
       tags: [Administrators]
@@ -736,8 +1792,9 @@ paths:
       operationId: listAdminSessions
       summary: List redaction-safe administrator sessions in the active organization.
       description: |
-        Requires `manage_owners`. Returns administrator identity and lifecycle
-        metadata only. Token hints, hashes, CSRF material, network metadata, and
+        Requires `manage_owners`. Returns administrator identity, lifecycle
+        metadata and a coarse server-derived device summary only. Token hints,
+        hashes, CSRF material, raw User-Agent strings, network addresses and
         revocation reasons are never returned. `current` is true only when the
         request itself authenticated with that cookie session; bearer-token
         requests report false for every item.
@@ -773,10 +1830,20 @@ paths:
       tags: [Users]
       operationId: listApplicationUsers
       summary: List pseudonymous application users.
+      description: |
+        Filters combine. `claim` matches one configured normalized claim
+        exactly, as `name:value`. Cursors belong to the sort they came from.
+        `include_total=true` adds a count of every match, capped at 100,000.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, required: false, schema: { type: string, enum: [active, blocked] } }
+        - { name: has_override, in: query, required: false, schema: { type: string, enum: ['true'] }, description: Only users with an active limit-plan override. }
+        - { name: provider, in: query, required: false, schema: { type: string, pattern: '^[a-z][a-z0-9_-]{0,62}$' }, description: Only users linked through this identity provider. }
+        - { name: claim, in: query, required: false, schema: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}:.{1,200}$' } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [oldest, newest, recently_seen], default: oldest } }
+        - { name: include_total, in: query, required: false, schema: { type: string, enum: ['true'] } }
       responses:
         '200':
           description: User page without raw subjects or identity tokens.
@@ -864,6 +1931,69 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UserOperationImpact' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/usage:
+    get:
+      tags: [Users]
+      operationId: getApplicationUserUsage
+      summary: Sum one user's usage for requests started in a time range.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: The user's usage.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationUserUsage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/batch-impact:
+    post:
+      tags: [Users]
+      operationId: previewApplicationUserBatch
+      summary: Preview one user action for up to 100 users.
+      description: Returns each user's impact and token, as the single-user preview does, plus summed counts. Unknown users are reported, not failed.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserBatchImpactRequest' }
+      responses:
+        '200':
+          description: Per-user impacts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserBatchImpact' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/batch:
+    post:
+      tags: [Users]
+      operationId: applyApplicationUserBatch
+      summary: Apply one confirmed user action to up to 100 users.
+      description: |
+        Each user needs the impact token from the batch preview. Every user is
+        changed in its own transaction with its own audit event and operation
+        ID; a user whose state changed since the preview is skipped as
+        `changed` instead of acted on.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserBatchRequest' }
+      responses:
+        '200':
+          description: Per-user outcomes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserBatchResult' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users/{userId}/block:
     post:
@@ -1052,18 +2182,43 @@ paths:
       tags: [Installation families]
       operationId: listInstallationFamilies
       summary: List redaction-safe Installation Family trust and usage summaries.
-      description: Returns root trust, component counts, aggregate usage, cost, and revocation state without private keys, refresh grants, raw attestation evidence, or provider bodies.
+      description: |
+        Returns root trust, component counts, aggregate usage, cost, signals,
+        and revocation state without private keys, refresh grants, raw
+        attestation evidence, or provider bodies. `signal=any` keeps
+        installations with at least one signal. Cursors belong to their sort;
+        `include_total=true` adds a capped count of every match.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/ApplicationUserFilter'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, required: false, schema: { type: string, enum: [active, suspended, revoked] } }
+        - { name: platform, in: query, required: false, schema: { $ref: '#/components/schemas/ClientPlatform' } }
+        - { name: signal, in: query, required: false, schema: { type: string, enum: [any, debug_trust, trust_expiring, token_reuse, weak_key_storage, failed_sessions] } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [oldest, newest, recently_seen], default: oldest } }
+        - { name: include_total, in: query, required: false, schema: { type: string, enum: ['true'] } }
       responses:
         '200':
           description: Installation Family page.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InstallationFamilyPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installation-families/{familyId}/operation-impact:
+    get:
+      tags: [Installation families]
+      operationId: getInstallationFamilyImpact
+      summary: Preview what revoking or renewing an installation ends now.
+      parameters:
+        - $ref: '#/components/parameters/InstallationFamilyID'
+        - { name: action, in: query, required: true, schema: { type: string, enum: [revoke, require_renewal] } }
+      responses:
+        '200':
+          description: The impact; nothing changes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationImpact' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/installation-families/{familyId}:
     get:
@@ -1137,6 +2292,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ClientComponentPage' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/client-components/{componentId}/operation-impact:
+    get:
+      tags: [Client components]
+      operationId: getClientComponentImpact
+      summary: Preview what revoking or re-verifying a part ends now.
+      description: Counts the part and every part it delegated to, directly or not. Revoking a root part isn't applicable; revoke its installation.
+      parameters:
+        - $ref: '#/components/parameters/ClientComponentID'
+        - { name: action, in: query, required: true, schema: { type: string, enum: [revoke, require_reattestation] } }
+      responses:
+        '200':
+          description: The impact; nothing changes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationImpact' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/client-components/{componentId}:
     get:
       tags: [Client components]
@@ -1198,7 +2369,11 @@ paths:
       tags: [Requests]
       operationId: listLogicalRequests
       summary: List redaction-safe logical request metadata.
-      description: Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned.
+      description: |
+        Returns authenticated logical requests using deterministic server-side filtering, sorting, and
+        cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider
+        error text are never returned. `client_request_id` matches the correlation identifier a client
+        sent, exactly. `include_total=true` adds a count of every match, capped at 100,000.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/Cursor'
@@ -1267,12 +2442,44 @@ paths:
         - name: sort
           in: query
           schema: { type: string, enum: [started_at_desc, started_at_asc], default: started_at_desc }
+        - name: client_request_id
+          in: query
+          schema: { $ref: '#/components/schemas/ClientRequestID' }
+        - { name: include_total, in: query, required: false, schema: { type: string, enum: ['true'] } }
       responses:
         '200':
           description: Logical request page.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RequestPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/requests/facets:
+    get:
+      tags: [Requests]
+      operationId: getRequestFacets
+      summary: Count requests by each filterable value.
+      description: |
+        Counts the requests started in the half-open `[start, end)` range (at most 90 days) by
+        outcome, feature, failure code, AI connection, model, route, platform, component kind, trust
+        source and selected limit plan, most common first. Every value is one the matching request-list filter accepts.
+        Connection, model and route count the selected values; the list filters also match retried
+        attempts, so a filter can return more requests than its count. Facets ignore other filters.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - name: feature
+          in: query
+          required: false
+          description: Count only requests for this feature, for example to see how its limit-plan rules split traffic.
+          schema: { $ref: '#/components/schemas/Identifier' }
+      responses:
+        '200':
+          description: Request counts by value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestFacets' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/requests/{requestId}:
     get:
@@ -1306,6 +2513,78 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EffectiveConfiguration' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/connections:
+    get:
+      tags: [Usage]
+      operationId: getConnectionHealth
+      summary: Summarize upstream attempts per AI connection.
+      description: |
+        Outcomes, public failure categories, rate limits and server errors, how many failed attempts were
+        followed by another attempt, time to first byte, duration, and recorded usage for each AI
+        connection, from attempts that started in `[start, end)` (at most 90 days). `interval=hour`
+        (at most 14 days) or `day` adds attempt and failure counts per bucket. Nothing probes the
+        providers; this is what your requests recorded.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: interval, in: query, required: false, schema: { type: string, enum: [hour, day] } }
+      responses:
+        '200':
+          description: Per-connection health.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionHealth' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/distribution:
+    get:
+      tags: [Usage]
+      operationId: getUsageDistribution
+      summary: Per-user usage in each limit window, summarized, and how many would exceed a maximum.
+      description: |
+        Sums one metric per subject (the scope's dimensions) in each calendar window of `window` and
+        `timezone`, aligned exactly as quota enforcement aligns them, over a range of at most 90 days
+        and 2,000 windows. Each subject's busiest window feeds the percentiles, a 1-2-5 histogram and,
+        with `maximum`, the count of subjects and users that would have exceeded it. No user or
+        subject identifiers are returned.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [logical_requests, upstream_attempts, input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, cache_write_tokens, cost_nano_usd] } }
+        - { name: window, in: query, required: true, schema: { type: string, pattern: '^[1-9][0-9]*(m|h|d|w|mo)$' } }
+        - { name: timezone, in: query, required: false, schema: { type: string, maxLength: 64, default: UTC } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: feature, in: query, required: false, schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: limit_plan, in: query, required: false, description: Only requests that selected this limit plan., schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: scope, in: query, required: false, description: 'Comma-separated, from user, feature and installation. Defaults to user.', schema: { type: string, maxLength: 64 } }
+        - { name: maximum, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: Usage distribution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserUsageDistribution' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/user-overrides:
+    get:
+      tags: [Users]
+      operationId: listUserOverrides
+      summary: List limit-plan overrides, current and ended.
+      description: Newest first. `active` is unrevoked and unexpired; `ended` is revoked or expired.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, required: false, schema: { type: string, enum: [active, ended] } }
+        - { name: limit_plan, in: query, required: false, schema: { $ref: '#/components/schemas/Identifier' } }
+        - { name: user_id, in: query, required: false, schema: { $ref: '#/components/schemas/UserID' } }
+      responses:
+        '200':
+          description: Override page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOverridePage' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/usage/summary:
     get:
@@ -1520,6 +2799,30 @@ paths:
               schema: { $ref: '#/components/schemas/SelfTestSchedule' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/self-tests:
+    get:
+      tags: [Self-tests]
+      operationId: listSelfTests
+      summary: List an environment's recent self-test runs, newest first.
+      description: Runs are kept for the job-history retention window. Needs run_self_tests in the application.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: schedule_id, in: query, required: false, schema: { type: string, pattern: '^sts_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' } }
+        - { name: state, in: query, required: false, schema: { type: string, enum: [queued, running, passed, failed, canceled] } }
+      responses:
+        '200':
+          description: Self-test run page.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, page]
+                properties:
+                  items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SelfTestRun' } }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       tags: [Self-tests]
       operationId: startSelfTest
@@ -1578,6 +2881,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SystemStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/system/health-history:
+    get:
+      tags: [System]
+      operationId: getSystemHealthHistory
+      summary: Return the server self-check sampled every five minutes.
+      description: |
+        A worker records the overall state and the identifiers of failed and warning checks every five
+        minutes and keeps 30 days. A range is at most 7 days and defaults to the last 24 hours. Gaps
+        mean no worker was running.
+      parameters:
+        - { name: start, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Health samples, oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthHistory' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/system/doctor:
     get:
@@ -1700,6 +3022,21 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/AdminSessionID' }
+    InvitationID:
+      name: invitationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/InvitationID' }
+    AdminPasskeyID:
+      name: adminPasskeyId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AdminPasskeyID' }
+    OrganizationIDPath:
+      name: organizationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/OrganizationID' }
     UserID:
       name: userId
       in: path
@@ -1795,6 +3132,12 @@ components:
     AdminSessionID:
       type: string
       pattern: '^asn_[A-Za-z0-9_-]{16,128}$'
+    AdminPasskeyID:
+      type: string
+      pattern: '^apk_[A-Za-z0-9_-]{16,128}$'
+    InvitationID:
+      type: string
+      pattern: '^ain_[A-Za-z0-9_-]{16,128}$'
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
@@ -1857,17 +3200,38 @@ components:
     AdminSession:
       type: object
       additionalProperties: false
-      required: [administrator, organization_id, memberships, capabilities, expires_at]
+      required: [administrator, organization_id, memberships, capabilities, expires_at, password_reset_required, two_factor_enrollment_required]
       properties:
         administrator:
           type: object
           additionalProperties: false
-          required: [id, email, enabled]
+          required: [id, email, enabled, display_name]
           properties:
             id: { type: string, pattern: '^adm_[A-Za-z0-9_-]{16,128}$' }
             email: { type: string, format: email }
             enabled: { type: boolean }
+            display_name: { type: string, minLength: 1, maxLength: 200 }
         organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        password_reset_required:
+          type: boolean
+          description: True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes.
+        two_factor_enrollment_required:
+          type: boolean
+          description: True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. Never true for single sign-on sessions.
+        sign_in_method:
+          type: string
+          enum: [password, passkey, sso]
+          description: How a console session was signed in; absent for API tokens.
+        application_roles:
+          type: array
+          description: Roles that raise this administrator's organization role in single applications. `capabilities` reflects the organization role; an application's capabilities follow the higher of the two.
+          items:
+            type: object
+            additionalProperties: false
+            required: [application_id, role]
+            properties:
+              application_id: { $ref: '#/components/schemas/ApplicationID' }
+              role: { type: string, enum: [admin, operator] }
         memberships:
           type: array
           items:
@@ -1897,6 +3261,81 @@ components:
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string, minLength: 1, maxLength: 256 }
         kind: { type: string, enum: [development, staging, production] }
+    RenameRequest:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 200, description: One line; surrounding spaces are trimmed. }
+    HealthHistory:
+      type: object
+      additionalProperties: false
+      required: [start, end, interval_seconds, samples]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        interval_seconds: { type: integer, const: 300 }
+        samples:
+          type: array
+          maxItems: 2016
+          items:
+            type: object
+            additionalProperties: false
+            required: [sampled_at, overall_state, failed_checks, warning_checks]
+            properties:
+              sampled_at: { type: string, format: date-time }
+              overall_state: { type: string, enum: [healthy, degraded, unhealthy] }
+              failed_checks: { type: array, maxItems: 64, items: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' } }
+              warning_checks: { type: array, maxItems: 64, items: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' } }
+    ConnectionHealth:
+      type: object
+      additionalProperties: false
+      required: [environment_id, start, end, connections, truncated]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        interval: { type: string, enum: [hour, day] }
+        truncated: { type: boolean, description: More than 200 connections had attempts; the busiest 200 are listed. }
+        connections:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [upstream, attempts, succeeded, failed, canceled, rate_limited, server_errors, fell_back, failures, first_byte, duration, usage]
+            properties:
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              attempts: { type: integer, minimum: 0 }
+              succeeded: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              canceled: { type: integer, minimum: 0 }
+              rate_limited: { type: integer, minimum: 0, description: Attempts answered with HTTP 429. }
+              server_errors: { type: integer, minimum: 0, description: Attempts answered with HTTP 5xx. }
+              fell_back: { type: integer, minimum: 0, description: Failed attempts followed by another attempt. }
+              failures:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [code, count]
+                  properties:
+                    code: { type: string, pattern: '^[a-z][a-z0-9_]{0,99}$' }
+                    count: { type: integer, minimum: 1 }
+              first_byte: { $ref: '#/components/schemas/UsageDistribution' }
+              duration: { $ref: '#/components/schemas/UsageDistribution' }
+              usage: { $ref: '#/components/schemas/UsageValues' }
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [upstream, timestamp, attempts, failed]
+            properties:
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              timestamp: { type: string, format: date-time }
+              attempts: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
     Organization:
       type: object
       additionalProperties: false
@@ -1953,6 +3392,9 @@ components:
         page: { $ref: '#/components/schemas/PageInfo' }
     Environment:
       type: object
+      description: >-
+        An environment. `active_revision_id` names the live configuration revision and appears only in environment
+        lists, for environments with one; responses to environment mutations omit it.
       additionalProperties: false
       required: [id, application_id, slug, display_name, kind, status, created_at]
       properties:
@@ -1978,17 +3420,101 @@ components:
     ConfigurationRevision:
       type: object
       additionalProperties: false
-      required: [id, environment_id, state, version, document, created_at, created_by]
+      required: [id, environment_id, state, version, document, created_at, created_by, updated_at, updated_by]
       properties:
         id: { $ref: '#/components/schemas/RevisionID' }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
-        state: { type: string, enum: [draft, valid, active, superseded, invalid] }
+        state: { type: string, enum: [draft, valid, active, superseded, invalid, discarded] }
         version: { type: integer, minimum: 1 }
         document: { $ref: './config.schema.json' }
         validation: { $ref: '#/components/schemas/ValidationReport' }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
+        updated_at: { type: string, format: date-time, description: Time of the latest recorded edit, or creation. }
+        updated_by: { type: string, description: Author of the latest recorded edit, or the creator. }
+        base_revision_id: { $ref: '#/components/schemas/RevisionID', description: The live revision this draft started from. }
+        description: { type: string, maxLength: 512 }
         activated_at: { type: string, format: date-time }
+        activation_note: { type: string, minLength: 1, maxLength: 500, description: Publish note recorded at activation. }
+        discarded_at: { type: string, format: date-time }
+        discarded_by: { type: string }
+    ConfigurationChange:
+      type: object
+      additionalProperties: false
+      required: [operation, path]
+      properties:
+        operation: { type: string, enum: [add, remove, replace] }
+        path: { type: string, maxLength: 1024 }
+        summary: { type: string, maxLength: 1024 }
+    ConfigurationRevisionEdit:
+      type: object
+      additionalProperties: false
+      required: [version, kind, edited_at, edited_by, change_count, changes]
+      properties:
+        version: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [created, edited, rebased, promoted] }
+        edited_at: { type: string, format: date-time }
+        edited_by: { type: string }
+        change_count: { type: integer, minimum: 0, description: 'Every changed path; `changes` lists at most 100.' }
+        changes: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+    ConfigurationRevisionEdits:
+      type: object
+      additionalProperties: false
+      required: [revision_id, items, truncated]
+      properties:
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ConfigurationRevisionEdit' } }
+        truncated: { type: boolean }
+    ConfigurationMergePreview:
+      type: object
+      additionalProperties: false
+      required: [revision_id, live_revision_id, up_to_date, draft_changes, live_changes, conflicts]
+      properties:
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        base_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        live_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        up_to_date: { type: boolean }
+        draft_changes: { type: array, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+        live_changes: { type: array, items: { $ref: '#/components/schemas/ConfigurationChange' } }
+        conflicts: { type: array, items: { type: string, maxLength: 1024 } }
+    RebaseConfigurationRequest:
+      type: object
+      additionalProperties: false
+      required: [live_revision_id]
+      properties:
+        live_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        resolutions:
+          type: object
+          maxProperties: 1000
+          additionalProperties: { type: string, enum: [draft, live] }
+    ActivateConfigurationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 500, description: Publish note; empty means none. }
+    PromoteConfigurationRequest:
+      type: object
+      additionalProperties: false
+      required: [source_environment_id]
+      properties:
+        source_environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        description: { type: string, maxLength: 512 }
+    ConfigurationPromotion:
+      type: object
+      additionalProperties: false
+      required: [revision, promotion]
+      properties:
+        revision: { $ref: '#/components/schemas/ConfigurationRevision' }
+        promotion:
+          type: object
+          additionalProperties: false
+          required: [source_environment_id, source_revision_id, copied, kept, review]
+          properties:
+            source_environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+            source_revision_id: { $ref: '#/components/schemas/RevisionID' }
+            copied: { type: array, items: { type: string }, description: Spec sections taken from the source. }
+            kept: { type: array, items: { type: string }, description: Paths kept from this environment. }
+            review: { type: array, items: { type: string }, description: Entries copied from the source that may point at its infrastructure. }
     ConfigurationRevisionPage:
       type: object
       additionalProperties: false
@@ -2050,11 +3576,23 @@ components:
         trust_level:
           type: string
           enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+        failures:
+          type: array
+          maxItems: 16
+          description: |
+            Makes attempts on a route fail, to see what the data plane does next: retry on the same
+            route when its retry policy names the condition, fall back when its fallback policy does,
+            otherwise stop. Routes must be in the request's route plan and appear once.
+          items: { $ref: '#/components/schemas/RouteSimulationFailure' }
         request:
           type: object
           additionalProperties: false
           properties:
             streaming: { type: boolean, default: false }
+            http_method:
+              type: string
+              enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+              description: For opaque HTTP features, the request method. Only GET is replayed on routes that don't allow unsafe-method retries; omitted means not GET.
             app_version: { type: string, maxLength: 128 }
             requested_input_tokens:
               type: integer
@@ -2234,8 +3772,157 @@ components:
                   units: { type: integer, minimum: 0 }
                   applicable: { type: boolean }
                   durable: { type: boolean }
+        attempt_plan: { $ref: '#/components/schemas/RouteSimulationAttemptPlan' }
         warnings: { type: array, maxItems: 16, items: { type: string, maxLength: 1024 } }
         explanation: { type: array, items: { type: string, maxLength: 1024 } }
+    RouteSimulationFailure:
+      type: object
+      additionalProperties: false
+      required: [route, condition]
+      properties:
+        route: { $ref: '#/components/schemas/Identifier' }
+        condition:
+          type: string
+          enum: [connect_error, timeout_before_headers, first_byte_timeout, status_408, status_429, status_500, status_502, status_503, status_504, non_retryable]
+          description: An attempt outcome a retry or fallback policy can name, or `non_retryable` for any other failure.
+        attempts: { type: integer, minimum: 0, maximum: 32, description: Fail only the first this many attempts on the route; omitted or zero fails every attempt. }
+    RouteSimulationAttemptPlan:
+      type: object
+      additionalProperties: false
+      required: [attempts, outcome, assumptions]
+      properties:
+        attempts:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [number, route, upstream, model, outcome]
+            properties:
+              number: { type: integer, minimum: 1, maximum: 32 }
+              route: { $ref: '#/components/schemas/Identifier' }
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              model: { $ref: '#/components/schemas/Identifier' }
+              outcome: { type: string, enum: [succeeded, failed] }
+              condition: { type: string, maxLength: 64 }
+              next: { type: string, enum: [retry, fallback, stop] }
+              retry_delay_max_ms: { type: integer, minimum: 0, maximum: 60000, description: Exponential backoff before the retry; runtime jitter only lowers it. }
+        outcome: { type: string, enum: [served, failed] }
+        served_by_route: { $ref: '#/components/schemas/Identifier' }
+        failure_condition: { type: string, maxLength: 64 }
+        assumptions: { type: array, maxItems: 8, items: { type: string, maxLength: 512 } }
+    RouteSimulationBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [requests]
+      properties:
+        requests: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/RouteSimulationRequest' } }
+    RouteSimulationBatchResult:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [index]
+            properties:
+              index: { type: integer, minimum: 0, maximum: 49 }
+              result: { $ref: '#/components/schemas/RouteSimulationResult' }
+              problem:
+                type: object
+                additionalProperties: false
+                required: [code, detail]
+                properties:
+                  code: { type: string, pattern: '^[a-z][a-z0-9_]{0,99}$' }
+                  detail: { type: string, maxLength: 1024 }
+    SimulationScenario:
+      type: object
+      additionalProperties: false
+      required: [id, application_id, name, input, version, created_by, created_at, updated_by, updated_at]
+      properties:
+        id: { type: string, pattern: '^ssc_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        input: { $ref: '#/components/schemas/RouteSimulationRequest' }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_by: { type: string }
+        updated_at: { type: string, format: date-time }
+    SimulationScenarioRequest:
+      type: object
+      additionalProperties: false
+      required: [name, input]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: Unique in the application; no leading or trailing spaces or line breaks. }
+        input: { $ref: '#/components/schemas/RouteSimulationRequest' }
+        version: { type: integer, minimum: 1, description: Required when replacing; the version that was loaded. }
+    UserOverride:
+      type: object
+      additionalProperties: false
+      required: [id, user_id, limit_plan, reason, status, created_by, created_at]
+      properties:
+        id: { type: string, pattern: '^uov_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        status: { type: string, enum: [active, expired, revoked] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    UserOverridePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/UserOverride' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    UserUsageDistribution:
+      type: object
+      additionalProperties: false
+      required: [environment_id, metric, window, timezone, start, end, scope, periods, subjects, users, peaks, histogram]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        metric: { type: string, enum: [logical_requests, upstream_attempts, input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, cache_write_tokens, cost_nano_usd] }
+        window: { type: string, pattern: '^[1-9][0-9]*(m|h|d|w|mo)$' }
+        timezone: { type: string, maxLength: 64 }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        scope: { type: array, minItems: 1, maxItems: 3, items: { type: string, enum: [user, feature, installation] } }
+        periods: { type: integer, minimum: 1, maximum: 2000 }
+        subjects: { type: integer, minimum: 0, description: Distinct scope values with usage in the range. }
+        users: { type: integer, minimum: 0 }
+        peaks:
+          type: object
+          additionalProperties: false
+          required: [p50, p90, p99, max]
+          description: Each subject's busiest window, summarized.
+          properties:
+            p50: { type: integer, minimum: 0 }
+            p90: { type: integer, minimum: 0 }
+            p99: { type: integer, minimum: 0 }
+            max: { type: integer, minimum: 0 }
+        histogram:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, subjects]
+            properties:
+              from: { type: integer, minimum: 0 }
+              to: { type: integer, minimum: 1, description: Exclusive upper bound; omitted for the last bucket. }
+              subjects: { type: integer, minimum: 1 }
+        maximum: { type: integer, minimum: 0 }
+        over_subjects: { type: integer, minimum: 0, description: Subjects whose busiest window exceeded maximum. }
+        over_users: { type: integer, minimum: 0 }
     WriteSecretRequest:
       type: object
       additionalProperties: false
@@ -2297,7 +3984,16 @@ components:
         scopes: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
         revoked: { type: boolean }
+        administrator:
+          description: The token's owner; present only in the organization-wide listing.
+          type: object
+          additionalProperties: false
+          required: [id, email]
+          properties:
+            id: { $ref: '#/components/schemas/AdminUserID' }
+            email: { type: string, format: email, maxLength: 320 }
     CreatedApiToken:
       type: object
       additionalProperties: false
@@ -2320,6 +4016,8 @@ components:
         - role
         - status
         - password_reset_required
+        - two_factor_enabled
+        - sso_linked
         - created_at
         - updated_at
       properties:
@@ -2331,6 +4029,8 @@ components:
         role: { $ref: '#/components/schemas/AdministratorRole' }
         status: { type: string, enum: [active, disabled] }
         password_reset_required: { type: boolean }
+        two_factor_enabled: { type: boolean, description: True when the account has a confirmed authenticator app or a passkey. }
+        sso_linked: { type: boolean, description: True when the administrator has signed in to this organization with its identity provider. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         disabled_at: { type: string, format: date-time }
@@ -2354,11 +4054,479 @@ components:
           properties:
             id: { $ref: '#/components/schemas/AdminUserID' }
             email: { type: string, format: email, maxLength: 320 }
+        device_summary: { $ref: '#/components/schemas/DeviceSummary' }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         status: { type: string, enum: [active, expired, revoked] }
         current: { type: boolean }
+    DeviceSummary:
+      type: string
+      description: Coarse "Browser on OS" phrase derived by the server; never a raw User-Agent or network address.
+      pattern: '^[A-Za-z0-9 .()/-]{1,80}$'
+    SessionEndReason:
+      type: string
+      enum: [expired, signed_out, signed_out_elsewhere, revoked_by_owner, password_reset, password_changed, organization_switch, access_disabled, two_factor_reset, sso_changed, other]
+    OwnAdminSession:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, created_at, last_seen_at, expires_at, status, current]
+      properties:
+        id: { $ref: '#/components/schemas/AdminSessionID' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        device_summary: { $ref: '#/components/schemas/DeviceSummary' }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, expired, revoked] }
+        end_reason: { $ref: '#/components/schemas/SessionEndReason' }
+        current: { type: boolean }
+    OwnAdminSessionList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/OwnAdminSession' } }
+    SignedOutSessions:
+      type: object
+      additionalProperties: false
+      required: [signed_out_sessions]
+      properties:
+        signed_out_sessions: { type: integer, minimum: 0 }
+    ChangeOwnPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        new_password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    SwitchOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [organization_id]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    SecondFactorChallenge:
+      type: object
+      additionalProperties: false
+      required: [status, challenge, expires_at, methods]
+      properties:
+        status: { type: string, const: two_factor_required }
+        challenge: { type: string, pattern: '^lwsic_[A-Za-z0-9_-]{43}$', writeOnly: false }
+        expires_at: { type: string, format: date-time }
+        methods:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [totp, passkey, recovery_code] }
+    SecondFactorRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge]
+      properties:
+        challenge: { type: string, minLength: 16, maxLength: 128 }
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+        recovery_code: { type: string, minLength: 1, maxLength: 64, writeOnly: true }
+        passkey: { $ref: '#/components/schemas/PasskeyAssertion' }
+    TwoFactorStatus:
+      type: object
+      additionalProperties: false
+      required: [enabled, totp_enabled, passkeys, recovery_codes_remaining, required_by_organization]
+      properties:
+        enabled: { type: boolean, description: True when an authenticator app or a passkey is set up. }
+        totp_enabled: { type: boolean }
+        totp_enabled_at: { type: string, format: date-time }
+        passkeys: { type: integer, minimum: 0 }
+        recovery_codes_remaining: { type: integer, minimum: 0, maximum: 10 }
+        required_by_organization: { type: boolean }
+    TotpEnrollment:
+      type: object
+      additionalProperties: false
+      required: [secret, uri]
+      properties:
+        secret: { type: string, pattern: '^[A-Z2-7]{32}$', description: Base32 key for manual entry; shown once. }
+        uri: { type: string, pattern: '^otpauth://totp/', description: otpauth link with the same key; shown once. }
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+    RecoveryCodes:
+      type: object
+      additionalProperties: false
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items: { type: string, pattern: '^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$' }
+    RecoveryCodesRequest:
+      type: object
+      additionalProperties: false
+      description: Exactly one of `code` or `password`.
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    PasswordConfirmation:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    Passkey:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, synced]
+      properties:
+        id: { $ref: '#/components/schemas/AdminPasskeyID' }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        synced: { type: boolean, description: True when the authenticator reports the passkey is backed up, as synced passkeys are. }
+    PasskeyList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Passkey' } }
+    AddedPasskey:
+      type: object
+      additionalProperties: false
+      required: [passkey]
+      properties:
+        passkey: { $ref: '#/components/schemas/Passkey' }
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          description: Present when this passkey is the first second factor; shown once.
+          items: { type: string, pattern: '^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$' }
+    Base64URL:
+      type: string
+      pattern: '^[A-Za-z0-9_-]*$'
+    PasskeyDescriptor:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: { type: string, const: public-key }
+        id: { $ref: '#/components/schemas/Base64URL' }
+    PasskeyCreationOptions:
+      type: object
+      additionalProperties: false
+      required: [public_key]
+      properties:
+        public_key:
+          type: object
+          description: PublicKeyCredentialCreationOptions in the WebAuthn Level 3 JSON encoding.
+          additionalProperties: false
+          required: [rp, user, challenge, pubKeyCredParams, timeout, excludeCredentials, authenticatorSelection, attestation]
+          properties:
+            rp:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id: { type: string }
+                name: { type: string }
+            user:
+              type: object
+              additionalProperties: false
+              required: [id, name, displayName]
+              properties:
+                id: { $ref: '#/components/schemas/Base64URL' }
+                name: { type: string }
+                displayName: { type: string }
+            challenge: { $ref: '#/components/schemas/Base64URL' }
+            pubKeyCredParams:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [type, alg]
+                properties:
+                  type: { type: string, const: public-key }
+                  alg: { type: integer, const: -7 }
+            timeout: { type: integer, minimum: 1 }
+            excludeCredentials: { type: array, items: { $ref: '#/components/schemas/PasskeyDescriptor' } }
+            authenticatorSelection:
+              type: object
+              additionalProperties: false
+              required: [residentKey, requireResidentKey, userVerification]
+              properties:
+                residentKey: { type: string, const: required }
+                requireResidentKey: { type: boolean, const: true }
+                userVerification: { type: string, const: required }
+            attestation: { type: string, const: none }
+    PasskeyRequestOptions:
+      type: object
+      additionalProperties: false
+      required: [public_key]
+      properties:
+        public_key:
+          type: object
+          description: PublicKeyCredentialRequestOptions in the WebAuthn Level 3 JSON encoding.
+          additionalProperties: false
+          required: [challenge, rpId, timeout, userVerification, allowCredentials]
+          properties:
+            challenge: { $ref: '#/components/schemas/Base64URL' }
+            rpId: { type: string }
+            timeout: { type: integer, minimum: 1 }
+            userVerification: { type: string, const: required }
+            allowCredentials: { type: array, items: { $ref: '#/components/schemas/PasskeyDescriptor' } }
+    PasskeyRegistration:
+      type: object
+      description: RegistrationResponseJSON from the WebAuthn Level 3 JSON encoding.
+      additionalProperties: false
+      required: [id, rawId, type, response]
+      properties:
+        id: { $ref: '#/components/schemas/Base64URL' }
+        rawId: { $ref: '#/components/schemas/Base64URL' }
+        type: { type: string, const: public-key }
+        authenticatorAttachment: { type: string }
+        clientExtensionResults: { type: object }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, attestationObject]
+          properties:
+            clientDataJSON: { $ref: '#/components/schemas/Base64URL' }
+            attestationObject: { $ref: '#/components/schemas/Base64URL' }
+            authenticatorData: { $ref: '#/components/schemas/Base64URL' }
+            transports: { type: array, items: { type: string } }
+            publicKey: { $ref: '#/components/schemas/Base64URL' }
+            publicKeyAlgorithm: { type: integer }
+    PasskeyAssertion:
+      type: object
+      description: AuthenticationResponseJSON from the WebAuthn Level 3 JSON encoding.
+      additionalProperties: false
+      required: [id, rawId, type, response]
+      properties:
+        id: { $ref: '#/components/schemas/Base64URL' }
+        rawId: { $ref: '#/components/schemas/Base64URL' }
+        type: { type: string, const: public-key }
+        authenticatorAttachment: { type: string }
+        clientExtensionResults: { type: object }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, authenticatorData, signature]
+          properties:
+            clientDataJSON: { $ref: '#/components/schemas/Base64URL' }
+            authenticatorData: { $ref: '#/components/schemas/Base64URL' }
+            signature: { $ref: '#/components/schemas/Base64URL' }
+            userHandle: { $ref: '#/components/schemas/Base64URL' }
+    AddPasskeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, credential]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        credential: { $ref: '#/components/schemas/PasskeyRegistration' }
+    PasskeySignInRequest:
+      type: object
+      additionalProperties: false
+      required: [credential]
+      properties:
+        credential: { $ref: '#/components/schemas/PasskeyAssertion' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    Invitation:
+      type: object
+      additionalProperties: false
+      required: [id, email, role, status, invited_by, created_at, expires_at, email_status]
+      properties:
+        id: { $ref: '#/components/schemas/InvitationID' }
+        email: { type: string, maxLength: 320 }
+        display_name: { type: string, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        invited_by: { type: string, maxLength: 200 }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        email_status: { type: string, enum: [not_requested, sent, failed] }
+        email_sent_at: { type: string, format: date-time }
+    InvitationList:
+      type: object
+      additionalProperties: false
+      required: [items, email_delivery]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Invitation' } }
+        email_delivery: { type: boolean, description: True when the server has an SMTP relay for invitation emails. }
+    InvitationLink:
+      type: object
+      additionalProperties: false
+      required: [invitation, url]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        url: { type: string, maxLength: 2200, description: 'The invitation link, shown once; the token is in the fragment.' }
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        display_name: { type: string, maxLength: 200 }
+        send_email: { type: boolean }
+    RenewInvitationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        send_email: { type: boolean }
+    InvitationTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, pattern: '^lwinv_[A-Za-z0-9_-]{43}$', writeOnly: true }
+    InvitationPreview:
+      type: object
+      additionalProperties: false
+      required: [organization_id, organization_name, email, role, invited_by, expires_at, account_exists]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        organization_name: { type: string, maxLength: 200 }
+        email: { type: string, maxLength: 320 }
+        display_name: { type: string, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        invited_by: { type: string, maxLength: 200 }
+        expires_at: { type: string, format: date-time }
+        account_exists: { type: boolean, description: True when the address already has an account, which claims the invitation after signing in. }
+    AcceptInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [token, display_name, password]
+      properties:
+        token: { type: string, pattern: '^lwinv_[A-Za-z0-9_-]{43}$', writeOnly: true }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    ClaimedInvitation:
+      type: object
+      additionalProperties: false
+      required: [organization_id, role]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+    ApplicationRoleGrant:
+      type: object
+      additionalProperties: false
+      required: [admin_user_id, application_id, role, granted_by, created_at, updated_at]
+      properties:
+        admin_user_id: { $ref: '#/components/schemas/AdminUserID' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        role: { type: string, enum: [admin, operator] }
+        granted_by: { type: string, maxLength: 200 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ApplicationRoleList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/ApplicationRoleGrant' } }
+    ApplicationRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [admin, operator] }
+    SSOStartRequest:
+      type: object
+      additionalProperties: false
+      required: [organization_slug]
+      properties:
+        organization_slug: { type: string, minLength: 1, maxLength: 128 }
+    SSOStart:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url: { type: string, pattern: '^https://', maxLength: 8192 }
+    SSOProvider:
+      type: object
+      additionalProperties: false
+      required: [issuer, client_id, authorization_endpoint, token_endpoint, jwks_uri, allowed_email_domains, provision_role, enabled, require_sso, created_at, updated_at]
+      properties:
+        issuer: { type: string, pattern: '^https://', maxLength: 2048 }
+        client_id: { type: string, minLength: 1, maxLength: 512 }
+        authorization_endpoint: { type: string, pattern: '^https://', maxLength: 2048 }
+        token_endpoint: { type: string, pattern: '^https://', maxLength: 2048 }
+        jwks_uri: { type: string, pattern: '^https://', maxLength: 2048 }
+        allowed_email_domains: { type: array, maxItems: 20, items: { type: string, maxLength: 253 } }
+        provision_role:
+          description: Role for accounts created at first sign-in; null when accounts aren't created.
+          oneOf:
+            - { type: string, enum: [admin, operator, viewer] }
+            - { type: 'null' }
+        enabled: { type: boolean }
+        require_sso: { type: boolean, description: Members other than owners must sign in with single sign-on. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SSOConfiguration:
+      type: object
+      additionalProperties: false
+      required: [redirect_uri, provider]
+      properties:
+        redirect_uri: { type: string, description: The callback URL to register with the identity provider. }
+        provider:
+          oneOf:
+            - { $ref: '#/components/schemas/SSOProvider' }
+            - { type: 'null' }
+    SSOProviderRequest:
+      type: object
+      additionalProperties: false
+      required: [issuer, client_id, enabled, require_sso]
+      properties:
+        issuer: { type: string, pattern: '^https://', maxLength: 2048 }
+        client_id: { type: string, minLength: 1, maxLength: 512 }
+        client_secret: { type: string, minLength: 1, maxLength: 1024, writeOnly: true, description: Required the first time; omit to keep the stored secret. }
+        allowed_email_domains: { type: array, maxItems: 20, items: { type: string, maxLength: 253 } }
+        provision_role:
+          oneOf:
+            - { type: string, enum: [admin, operator, viewer] }
+            - { type: 'null' }
+        enabled: { type: boolean }
+        require_sso: { type: boolean }
+    PasskeyOptionsForSignInRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge]
+      properties:
+        challenge: { type: string, minLength: 16, maxLength: 128 }
+    DisableTwoFactorRequest:
+      type: object
+      additionalProperties: false
+      required: [password, code]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+    TwoFactorRequirement:
+      type: object
+      additionalProperties: false
+      required: [required]
+      properties:
+        required: { type: boolean }
+    AdminSignInInfo:
+      type: object
+      additionalProperties: false
+      required: [contract_version, protocol_versions, setup_open, sign_in_methods]
+      properties:
+        contract_version: { type: string, const: 1.1.0 }
+        protocol_versions:
+          type: array
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        setup_open:
+          type: boolean
+          description: True while a bootstrap token is installed and unconsumed and no owner exists.
+        sign_in_methods:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [password, passkey, sso] }
+          description: Includes `passkey` when the console is served from a domain name over HTTPS, and `sso` when any organization has single sign-on enabled.
     AdminSessionMetadataPage:
       type: object
       additionalProperties: false
@@ -2421,6 +4589,109 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ApplicationUser' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+        total: { $ref: '#/components/schemas/ListTotal' }
+    ListTotal:
+      type: object
+      additionalProperties: false
+      required: [count, capped]
+      properties:
+        count: { type: integer, minimum: 0, maximum: 100000 }
+        capped: { type: boolean, description: True when there are more than 100,000 matches. }
+    ApplicationUserUsage:
+      type: object
+      additionalProperties: false
+      required: [user_id, start, end, request_count, values, provenance]
+      properties:
+        user_id: { $ref: '#/components/schemas/UserID' }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        request_count: { type: integer, minimum: 0 }
+        values: { $ref: '#/components/schemas/UsageValues' }
+        provenance: { type: array, items: { type: string } }
+    UserBatchImpactRequest:
+      type: object
+      additionalProperties: false
+      required: [action, user_ids]
+      properties:
+        action: { type: string, enum: [block, unblock, require_reauthentication, require_app_reverification] }
+        user_ids: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { $ref: '#/components/schemas/UserID' } }
+    UserBatchImpact:
+      type: object
+      additionalProperties: false
+      required: [action, items, applicable, totals]
+      properties:
+        action: { type: string, enum: [block, unblock, require_reauthentication, require_app_reverification] }
+        applicable: { type: integer, minimum: 0 }
+        totals: { $ref: '#/components/schemas/UserOperationCounts' }
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [user_id]
+            properties:
+              user_id: { $ref: '#/components/schemas/UserID' }
+              impact: { $ref: '#/components/schemas/UserOperationImpact' }
+              outcome: { type: string, enum: [not_found], description: Set instead of impact when the user can't be previewed. }
+    UserBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [action, reason, acknowledge_immediate_effect, items]
+      properties:
+        action: { type: string, enum: [block, unblock, require_reauthentication, require_app_reverification] }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        acknowledge_immediate_effect: { type: boolean, const: true }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [user_id, impact_token]
+            properties:
+              user_id: { $ref: '#/components/schemas/UserID' }
+              impact_token: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+    UserBatchResult:
+      type: object
+      additionalProperties: false
+      required: [action, done, results]
+      properties:
+        action: { type: string, enum: [block, unblock, require_reauthentication, require_app_reverification] }
+        done: { type: integer, minimum: 0 }
+        results:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [user_id, outcome]
+            properties:
+              user_id: { $ref: '#/components/schemas/UserID' }
+              outcome: { type: string, enum: [done, changed, not_found, forbidden, failed] }
+              operation_id: { type: string, pattern: '^arq_[A-Za-z0-9_-]{16,128}$' }
+    OperationImpact:
+      type: object
+      additionalProperties: false
+      required: [action, applicable, current_status, summary, counts]
+      properties:
+        action: { type: string, enum: [revoke, require_renewal, require_reattestation] }
+        applicable: { type: boolean }
+        current_status: { type: string }
+        summary: { type: string, maxLength: 300 }
+        counts:
+          type: object
+          additionalProperties: false
+          required: [active_components, active_sessions, active_refresh_tokens, delegated_components, requests_last_24_hours, requests_last_24_hours_capped]
+          properties:
+            active_components: { type: integer, minimum: 0 }
+            active_sessions: { type: integer, minimum: 0 }
+            active_refresh_tokens: { type: integer, minimum: 0 }
+            delegated_components: { type: integer, minimum: 0 }
+            requests_last_24_hours: { type: integer, minimum: 0, maximum: 10000 }
+            requests_last_24_hours_capped: { type: boolean }
+            last_seen_at: { type: string, format: date-time }
     ConfirmedUserOperationRequest:
       type: object
       additionalProperties: false
@@ -2522,6 +4793,18 @@ components:
         cost_retry_treatment: { type: string, enum: [actual_attempts, initial_attempt_only] }
         hard: { type: boolean, const: true }
         source: { type: string, minLength: 1, maxLength: 512 }
+        usage:
+          type: object
+          additionalProperties: false
+          required: [observed_at]
+          description: Current quota state for the user's current installation; omitted when a limit depends on the route.
+          properties:
+            maximum: { type: integer, minimum: 0 }
+            used: { type: integer, minimum: 0 }
+            reserved: { type: integer, minimum: 0 }
+            remaining: { type: integer, minimum: 0 }
+            resets_at: { type: string, format: date-time }
+            observed_at: { type: string, format: date-time }
     EffectiveRoute:
       type: object
       additionalProperties: false
@@ -2751,7 +5034,7 @@ components:
     InstallationFamily:
       type: object
       additionalProperties: false
-      required: [id, user_id, environment_id, platform, status, root_component_id, root_trust_source, component_count, request_count, usage, created_at, updated_at, last_seen_at]
+      required: [id, user_id, environment_id, platform, status, root_component_id, root_trust_source, component_count, request_count, usage, created_at, updated_at, last_seen_at, signals]
       properties:
         id: { $ref: '#/components/schemas/InstallationFamilyID' }
         user_id: { $ref: '#/components/schemas/UserID' }
@@ -2769,6 +5052,17 @@ components:
         last_seen_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
         revocation_reason: { type: string, minLength: 1, maxLength: 100 }
+        signals:
+          type: array
+          uniqueItems: true
+          description: |
+            Conditions worth a look; revoked installations have none.
+            `debug_trust` is debug attestation outside Development,
+            `trust_expiring` root trust expiring within seven days,
+            `token_reuse` a reused refresh token, `weak_key_storage` a native
+            part keeping its key in software or memory, and `failed_sessions`
+            a part with three or more sessions that ended uncleanly.
+          items: { type: string, enum: [debug_trust, trust_expiring, token_reuse, weak_key_storage, failed_sessions] }
         components:
           type: array
           minItems: 1
@@ -2792,6 +5086,7 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/InstallationFamily' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+        total: { $ref: '#/components/schemas/ListTotal' }
     UsageValues:
       type: object
       additionalProperties: false
@@ -2974,6 +5269,11 @@ components:
         component_kind: { $ref: '#/components/schemas/ClientComponentKind' }
         trust_source: { $ref: '#/components/schemas/ComponentTrustSource' }
         framework: { $ref: '#/components/schemas/Identifier' }
+        platform:
+          type: string
+          enum: [ios, android, web, react_native_ios, react_native_android, node]
+          description: Platform of the installation that sent the request.
+        client_request_id: { $ref: '#/components/schemas/ClientRequestID' }
         caller_sdk:
           type: string
           enum: [ios, android, react-native, javascript]
@@ -3030,6 +5330,52 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LogicalRequest' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+        total: { $ref: '#/components/schemas/ListTotal' }
+    ClientRequestID:
+      type: string
+      minLength: 8
+      maxLength: 128
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$'
+      description: Correlation identifier chosen by the client. Never used for lookup by the runtime, authorization, quota or routing.
+    RequestFacetValue:
+      type: object
+      additionalProperties: false
+      required: [value, count]
+      properties:
+        value: { type: string, minLength: 1, maxLength: 512, pattern: '^[^\r\n\x00]+$' }
+        count: { type: integer, minimum: 1 }
+    RequestFacet:
+      type: object
+      additionalProperties: false
+      required: [values, truncated]
+      properties:
+        values: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/RequestFacetValue' } }
+        truncated: { type: boolean, description: True when more values exist than were returned. }
+    RequestFacets:
+      type: object
+      additionalProperties: false
+      required: [environment_id, start, end, requests, facets]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        requests: { type: integer, minimum: 0, description: Requests started in the range. }
+        facets:
+          type: object
+          additionalProperties: false
+          required: [status, feature, error_code, upstream, model, route, platform, component_kind, trust_source, limit_plan]
+          properties:
+            status: { $ref: '#/components/schemas/RequestFacet' }
+            feature: { $ref: '#/components/schemas/RequestFacet' }
+            error_code: { $ref: '#/components/schemas/RequestFacet' }
+            upstream: { $ref: '#/components/schemas/RequestFacet' }
+            model: { $ref: '#/components/schemas/RequestFacet' }
+            route: { $ref: '#/components/schemas/RequestFacet' }
+            platform: { $ref: '#/components/schemas/RequestFacet' }
+            component_kind: { $ref: '#/components/schemas/RequestFacet' }
+            trust_source: { $ref: '#/components/schemas/RequestFacet' }
+            limit_plan: { $ref: '#/components/schemas/RequestFacet' }
     UsageFraction:
       type: object
       additionalProperties: false
@@ -3309,12 +5655,13 @@ components:
         contract_version: { type: string, const: 1.1.0 }
         protocol_versions:
           type: array
-          minItems: 2
-          maxItems: 2
+          minItems: 3
+          maxItems: 3
           uniqueItems: true
           prefixItems:
             - { const: 1 }
             - { const: 2 }
+            - { const: 3 }
           items: false
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
@@ -3323,8 +5670,8 @@ components:
         server_capabilities:
           type: array
           description: Exact ordered binary capabilities implemented by this server build; these are not administrator authorization grants.
-          minItems: 14
-          maxItems: 14
+          minItems: 25
+          maxItems: 25
           uniqueItems: true
           prefixItems:
             - { const: app_attest }
@@ -3341,6 +5688,17 @@ components:
             - { const: configuration_import_export }
             - { const: admin_session_management }
             - { const: admin_event_stream }
+            - { const: admin_account_self_service }
+            - { const: admin_two_factor }
+            - { const: admin_passkeys }
+            - { const: admin_sso }
+            - { const: admin_invitations }
+            - { const: admin_application_roles }
+            - { const: admin_user_insights }
+            - { const: admin_request_search }
+            - { const: admin_configuration_drafts }
+            - { const: admin_policy_insights }
+            - { const: admin_operations_history }
           items: false
     DoctorCheck:
       type: object

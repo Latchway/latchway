@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCapabilities } from "../../app/permissions";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
@@ -37,7 +38,8 @@ import { formatCount, formatMoney, recorded } from "../analytics/usage-model";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { capitalize, formatClock, formatUtc, PLATFORM_LABEL, shortId, TRUST_LABEL, words } from "../requests/request-format";
 import { GoToForm } from "./go-to-form";
-import { COMPONENT_STATUS_WORDS, componentSignals, DAY_MS, familySignals, KEY_STORAGE_LABEL, orderedParts, type Signal, signalBadgeColor } from "./users-model";
+import { getComponentImpact, getInstallationImpact } from "../../api/user-insights";
+import { COMPONENT_STATUS_WORDS, componentSignals, DAY_MS, familySignals, KEY_STORAGE_LABEL, orderedParts, rowSignals, SERVER_SIGNAL, type Signal, signalBadgeColor } from "./users-model";
 
 class FamilyContextMismatch extends Error {}
 
@@ -116,13 +118,18 @@ function PartCard({ canMutate, component, depth, familyActive, highlighted, now,
 interface ReviewProps {
   environmentID: string;
   family: InstallationFamily;
+  /** The server previews installation actions. */
+  insights: boolean;
   onClose: () => void;
   onDone: (family: InstallationFamily, message: string) => void;
   operation: Operation;
 }
 
-/** Installation and component actions have no server preview, so the counts come from the record as loaded. */
-function OperationReview({ environmentID, family, onClose, onDone, operation }: ReviewProps) {
+/**
+ * Reviews an installation or component action. Newer servers preview it with live counts; otherwise the counts come
+ * from the record as loaded.
+ */
+function OperationReview({ environmentID, family, insights, onClose, onDone, operation }: ReviewProps) {
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<AdminProblem>();
   const components = family.components ?? [];
@@ -142,6 +149,15 @@ function OperationReview({ environmentID, family, onClose, onDone, operation }: 
     "family-revoke": { ack: "I understand this permanently revokes the whole installation and every part of it.", confirm: "Revoke Installation", description: "Revokes the root, every delegated part, and every session and refresh token in this installation.", title: "Revoke this installation", undo: "None. The app must start a new installation." }
   }[target.kind];
   const targetID = "component" in target ? target.component.id : family.id;
+  const preview = useQuery({
+    enabled: insights,
+    queryFn: ({ signal }) => "component" in target
+      ? getComponentImpact(target.component.id, target.kind === "component-revoke" ? "revoke" : "require_reattestation", signal)
+      : getInstallationImpact(family.id, target.kind === "family-revoke" ? "revoke" : "require_renewal", signal),
+    queryKey: ["operation-impact", targetID, target.kind],
+    retry: false
+  });
+  const previewed = preview.data;
 
   async function confirm(reason: string): Promise<void> {
     setPending(true);
@@ -174,7 +190,9 @@ function OperationReview({ environmentID, family, onClose, onDone, operation }: 
       confirmLabel={copy.confirm}
       description={copy.description}
       facts={[["Takes effect", "Immediately after the server accepts it"], ["Undo", copy.undo]]}
-      impacts={[{ count: reach.length, label: "parts" }, { count: live.length, label: "active parts" }, { count: sessions, label: "active sessions" }]}
+      impacts={previewed
+        ? [{ count: previewed.counts.active_components, label: "active parts" }, { count: previewed.counts.active_sessions, label: "active sessions" }, { count: previewed.counts.active_refresh_tokens, label: "refresh tokens" }, { count: previewed.counts.requests_last_24_hours, label: previewed.counts.requests_last_24_hours_capped ? "requests in 24 h (10,000+)" : "requests in 24 h" }]
+        : [{ count: reach.length, label: "parts" }, { count: live.length, label: "active parts" }, { count: sessions, label: "active sessions" }]}
       maxReason={100}
       minReason={1}
       onCancel={onClose}
@@ -186,7 +204,9 @@ function OperationReview({ environmentID, family, onClose, onDone, operation }: 
       targetId={targetID}
       title={`${copy.title}?`}
     >
-      <Notice title="Counts are from this installation as loaded" tone="info">The server has no preview for installation actions, so they aren't checked again before it runs.</Notice>
+      {insights ? (
+        previewed ? <p className="lw-secondary lw-note">{previewed.summary}</p> : preview.error ? <ProblemNotice problem={problemFromError(preview.error)} /> : <p className="lw-secondary lw-note" role="status">Counting what this ends…</p>
+      ) : <Notice title="Counts are from this installation as loaded" tone="info">This server has no preview for installation actions, so they aren&apos;t checked again before it runs.</Notice>}
       {problem ? <ProblemNotice problem={problem} /> : null}
     </ImpactDialog>
   );
@@ -260,7 +280,6 @@ function FamilyDrawer({ canMutate, componentID, environmentKind, family, linkSea
 }
 
 function InstallationsView() {
-  const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
   const workspace = useWorkspace();
   const queryClient = useQueryClient();
@@ -268,7 +287,11 @@ function InstallationsView() {
   const environmentID = environment?.id ?? "";
   const search = InstallationFamilyRouteSearchSchema.parse(workspace.search);
   const linkSearch = { application: search.application, environment: search.environment, organization: search.organization };
-  const canMutate = compatibility.mutationAllowed && (session.data?.session?.capabilities.includes("revoke_installations") ?? false);
+  const { can } = useCapabilities();
+  const canMutate = compatibility.mutationAllowed && can("revoke_installations");
+  const insights = compatibility.status?.server_capabilities.includes("admin_user_insights") ?? false;
+  const filters = insights ? { platform: search.platform, signal: search.signal, sort: search.install_sort, status: search.install_status } : {};
+  const filtered = insights && Boolean(search.platform || search.signal || search.install_status);
   const [view, setView] = useState<"all" | "signals">("all");
   const [operation, setOperation] = useState<Operation>();
   const [outcome, setOutcome] = useState<{ familyID: string; message: string }>();
@@ -280,14 +303,16 @@ function InstallationsView() {
     getNextPageParam: (last: { page: { has_more: boolean; next_cursor?: string } }) => (last.page.has_more ? last.page.next_cursor : undefined),
     initialPageParam: search.cursor as string | undefined,
     queryFn: async ({ pageParam }) => {
-      const page = (await adminRequest(queryPath("/admin/v1/installation-families", { cursor: pageParam, environment_id: environmentID, page_size: "50", user_id: search.user_id }), InstallationFamilyPageSchema)).data;
+      const page = (await adminRequest(queryPath("/admin/v1/installation-families", { ...filters, cursor: pageParam, environment_id: environmentID, include_total: insights && !pageParam ? "true" : undefined, page_size: "50", user_id: search.user_id }), InstallationFamilyPageSchema)).data;
       if (page.items.some((item) => item.environment_id !== environmentID || (search.user_id && item.user_id !== search.user_id))) throw new FamilyContextMismatch("family_context");
       return page;
     },
-    queryKey: ["families", environmentID, search.user_id ?? "", search.cursor ?? ""],
+    queryKey: ["families", environmentID, search.user_id ?? "", search.cursor ?? "", filters],
     refetchOnWindowFocus: false
   });
   const families = list.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = list.data?.pages[0]?.total;
+  const filter = (change: Record<string, string | undefined>) => workspace.updateSearch({ ...change, cursor: undefined, family_id: undefined, component_id: undefined }, { replace: false });
   const detail = useQuery({
     enabled: Boolean(environmentID && search.family_id) && !scopeMismatch,
     queryFn: async () => {
@@ -305,8 +330,9 @@ function InstallationsView() {
     ? { ...FAMILY_MISMATCH, detail: "This link names a different environment than the one selected. Choose that environment in the header." }
     : list.error ? (list.error instanceof FamilyContextMismatch ? FAMILY_MISMATCH : problemFromError(list.error)) : undefined;
 
-  const withSignals = families.filter((item) => familySignals(item, environment?.kind, now).length > 0);
-  const shown = view === "signals" ? withSignals : families;
+  // Newer servers filter by signal themselves; otherwise the loaded rows are filtered here.
+  const withSignals = families.filter((item) => rowSignals(item, environment?.kind, now).length > 0);
+  const shown = !insights && view === "signals" ? withSignals : families;
 
   function open(familyID: string | undefined, componentID?: string): void {
     setOutcome(undefined);
@@ -329,7 +355,7 @@ function InstallationsView() {
           <span>{PLATFORM_LABEL[item.platform] ?? words(item.platform)} · {item.component_count} part{item.component_count === 1 ? "" : "s"}</span>
           <span className="lw-row lw-row--tight">
             <span className="lw-faint lw-mono" title={item.id}>{shortId(item.id)}</span>
-            {familySignals(item, environment?.kind, now).map((signal) => <Badge color={signalBadgeColor(signal.severity)} key={signal.id} variant="soft">{signal.label}</Badge>)}
+            {rowSignals(item, environment?.kind, now).map((signal) => <Badge color={signalBadgeColor(signal.severity)} key={signal.id} variant="soft">{signal.label}</Badge>)}
           </span>
         </span>
       )
@@ -346,18 +372,42 @@ function InstallationsView() {
     <div className="lw-page lw-installations">
       <PageHeader description="Each installation is one app on one device: its root app and the widgets or extensions it delegated to. They appear when the app first verifies; change them through reviewed actions." title="Installations" />
       <Toolbar className="lw-toolbar--wrap" search={<GoToForm />}>
-        <Segmented items={[{ id: "all", label: "All" }, { id: "signals", label: "With signals" }]} label="View" onChange={setView} value={view} />
+        {insights ? <>
+          <div className="lw-input-box">
+            <select aria-label="Signal" className="lw-input" onChange={(event) => filter({ signal: event.target.value || undefined })} value={search.signal ?? ""}>
+              <option value="">Any or no signal</option>
+              <option value="any">With any signal</option>
+              {(Object.keys(SERVER_SIGNAL) as Array<keyof typeof SERVER_SIGNAL>).map((signal) => <option key={signal} value={signal}>{SERVER_SIGNAL[signal].label}</option>)}
+            </select>
+          </div>
+          <Segmented items={[{ id: "all", label: "Any status" }, { id: "active", label: "Active" }, { id: "revoked", label: "Revoked" }]} label="Status" onChange={(next) => filter({ install_status: next === "all" ? undefined : next })} value={search.install_status ?? "all"} />
+          <div className="lw-input-box">
+            <select aria-label="Platform" className="lw-input" onChange={(event) => filter({ platform: event.target.value || undefined })} value={search.platform ?? ""}>
+              <option value="">Every platform</option>
+              {Object.entries(PLATFORM_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>
+          <div className="lw-input-box">
+            <select aria-label="Sort installations" className="lw-input" onChange={(event) => filter({ install_sort: event.target.value === "oldest" ? undefined : event.target.value })} value={search.install_sort ?? "oldest"}>
+              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest first</option>
+              <option value="recently_seen">Recently seen</option>
+            </select>
+          </div>
+        </> : <Segmented items={[{ id: "all", label: "All" }, { id: "signals", label: "With signals" }]} label="View" onChange={setView} value={view} />}
         {search.user_id ? <FilterChip label="User" onClear={() => workspace.updateSearch({ cursor: undefined, environment_id: search.family_id ? environmentID : undefined, user_id: undefined })} value={shortId(search.user_id)} /> : null}
       </Toolbar>
-      {view === "signals" ? <div className="lw-page-notice"><Notice tone="info">Showing signals in the {families.length} loaded installations. Load more to check more; the server can't filter by them yet. Token reuse, weak key storage and failed sessions are per part, so they show once an installation is opened.</Notice></div> : null}
+      {!insights && view === "signals" ? <div className="lw-page-notice"><Notice tone="info">Showing signals in the {families.length} loaded installations. Load more to check more; this server can&apos;t filter by them. Token reuse, weak key storage and failed sessions are per part, so they show once an installation is opened.</Notice></div> : null}
       {problem ? <div className="lw-page-notice"><ProblemNotice problem={problem} /></div> : null}
       {list.isPending && !scopeMismatch ? <p className="lw-page-status" role="status">Loading installations…</p> : shown.length ? (
         <DataTable caption="Installations" columns={columns} onSelect={(item) => open(item.id)} rowKey={(item) => item.id} rows={shown} selectedKey={search.family_id} />
       ) : list.isSuccess ? (
-        <div className="lw-page-empty"><EmptyState icon="mobile" orientation="horizontal" title={view === "signals" ? "No signals in the loaded installations" : "No installations yet"}>{view === "signals" ? "Load more installations to check them too." : "Installations appear the first time an app verifies through Latchway."}</EmptyState></div>
+        <div className="lw-page-empty">{filtered
+          ? <EmptyState icon="mobile" orientation="horizontal" title="No installations match">Change or clear the filters.</EmptyState>
+          : <EmptyState icon="mobile" orientation="horizontal" title={view === "signals" ? "No signals in the loaded installations" : "No installations yet"}>{view === "signals" ? "Load more installations to check them too." : "Installations appear the first time an app verifies through Latchway."}</EmptyState>}</div>
       ) : null}
       <div className="lw-rq-foot">
-        <span>{families.length ? `${families.length} shown${list.hasNextPage ? " · more available" : " · that's all"}` : ""}</span>
+        <span>{families.length ? `${families.length} shown${list.hasNextPage ? " · more available" : " · that's all"}` : ""}{total ? ` · ${total.capped ? "more than 100,000" : formatCount(total.count)} ${filtered ? "matching" : "in all"}` : ""}</span>
         {list.hasNextPage ? <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} size="sm">Load More</Button> : null}
         <span className="lw-spacer" />
         <span className="lw-faint">Older installs from before installation families are under <Link className="lw-link" search={linkSearch} to="/installations">Older installs</Link>.</span>
@@ -374,7 +424,7 @@ function InstallationsView() {
           )}
         </div>
       ) : null}
-      {operation && family ? <OperationReview environmentID={environmentID} family={family} key={JSON.stringify("component" in operation ? [operation.kind, operation.component.id] : [operation.kind])} onClose={() => setOperation(undefined)} onDone={done} operation={operation} /> : null}
+      {operation && family ? <OperationReview environmentID={environmentID} family={family} insights={insights} key={JSON.stringify("component" in operation ? [operation.kind, operation.component.id] : [operation.kind])} onClose={() => setOperation(undefined)} onDone={done} operation={operation} /> : null}
     </div>
   );
 }

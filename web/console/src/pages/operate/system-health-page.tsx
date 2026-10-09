@@ -5,12 +5,16 @@ import { type ReactNode, useState } from "react";
 import { adminRequest, type DoctorReport, DoctorReportSchema, type SupportBundle, SupportBundleSchema, SystemStatusSchema } from "../../api/admin";
 import { problemFromError } from "../../api/auth";
 import { useConsoleSession } from "../../api/session";
+import { OPERATIONS_HISTORY } from "../../api/operations-history";
+import { useConsoleCompatibility } from "../../app/console-compatibility-context";
+import { useOptionalWorkspace } from "../../app/workspace-context-value";
 import { useAdminRefreshTopic } from "../../app/use-admin-refresh";
 import { downloadText } from "../../components/download";
 import { Badge, Button, buttonClass, Card, ConfirmDialog, Icon, Notice, PageHeader, Properties, Segmented } from "../../ui";
 import { AccessRequired, ProblemNotice } from "../control-plane-pages";
 import { CopyButton } from "../requests/request-detail";
 import { ago, ALERT_CRON, bySeverity, CHECK_INFO, checkName, formatBytes, type HealthCard, needsAttention, overdue, STATE_LABEL, statusSentence } from "./health-model";
+import { ConnectionHealthTable, HealthTimeline } from "./operations-history";
 
 const wallClock = (): number => Date.now();
 
@@ -139,6 +143,9 @@ function HealthView() {
   const doctor = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/system/doctor", DoctorReportSchema)).data, queryKey: ["system", "doctor"], refetchInterval: 30_000, retry: false });
   const status = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/system", SystemStatusSchema)).data, queryKey: ["system", "status"], retry: false });
   const report = doctor.data;
+  const compatibility = useConsoleCompatibility();
+  const workspace = useOptionalWorkspace();
+  const history = compatibility.status?.server_capabilities.includes(OPERATIONS_HISTORY) ?? false;
   const refresh = async () => { await Promise.all([doctor.refetch(), status.refetch()]); setNow(wallClock()); };
   useAdminRefreshTopic("health", refresh);
   const attention = report ? needsAttention(report) : [];
@@ -166,6 +173,7 @@ function HealthView() {
             </div>
           </div>
         ) : doctor.isPending ? <p role="status">Running the server&apos;s self-check…</p> : null}
+        {history ? <Card icon="history" title="History"><HealthTimeline checkName={checkName} /></Card> : null}
         {attention.length ? (
           <Card icon="alert" meta={`${attention.length}`} title="Needs attention">
             <ul className="lw-issues">
@@ -190,7 +198,8 @@ function HealthView() {
         ) : null}
         {report ? <><h2 className="lw-section-title">Gateway <span className="lw-faint lw-note">From the server&apos;s self-check</span></h2><Gateway now={now} report={report} server={status.data} /></> : null}
         <Card icon="connections" title="AI providers">
-          <p className="lw-note">Latchway doesn&apos;t ping providers. Their health comes from the attempts your requests made: see errors, timeouts and latency per model on <Link className="lw-link" search={scoped} to="/analytics/reliability">Analytics › Reliability</Link>{report?.checks.some((check) => check.id === "ai_connection_health") ? <>, and the server&apos;s <code className="lw-code-inline">ai_connection_health</code> check below</> : null}.</p>
+          {history && workspace?.environment ? <ConnectionHealthTable environmentID={workspace.environment.id} environmentName={workspace.environment.display_name} /> : null}
+          <p className="lw-note">Latchway doesn&apos;t ping providers. Their health comes from the attempts your requests made: see errors, timeouts and latency per model on <Link className="lw-link" search={scoped} to="/reliability">Analytics › Reliability</Link>{report?.checks.some((check) => check.id === "ai_connection_health") ? <>, and the server&apos;s <code className="lw-code-inline">ai_connection_health</code> check below</> : null}.</p>
         </Card>
         {report ? (
           <Card actions={<Segmented items={[{ id: "open", label: "Not passed" }, { id: "all", label: "All" }]} label="Checks" onChange={setFilter} value={filter} />} icon="check" meta={`${report.checks.length}`} title="All checks">
@@ -211,7 +220,7 @@ function HealthView() {
           <pre className="lw-code-block">{ALERT_CRON}</pre>
           <div className="lw-row"><CopyButton className={buttonClass({ size: "sm" })} label="Copy cron line" value={ALERT_CRON}>Copy</CopyButton></div>
         </Card>
-        <Notice tone="info">Health history isn&apos;t kept: each report is a snapshot of now.</Notice>
+        {!history ? <Notice tone="info">This server keeps no health history: each report is a snapshot of now.</Notice> : null}
       </div>
       {bundle ? <SupportBundleDialog onClose={() => setBundle(false)} /> : null}
     </div>

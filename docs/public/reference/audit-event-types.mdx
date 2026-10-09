@@ -43,6 +43,27 @@ admin.administrator_role_change
 admin.administrator_disable
 admin.administrator_enable
 admin.administrator_password_reset
+admin.password_change
+admin.session_switch
+admin.login_second_factor
+admin.two_factor_enable
+admin.two_factor_disable
+admin.two_factor_reset
+admin.recovery_codes_replace
+admin.recovery_code_use
+admin.passkey_add
+admin.passkey_remove
+admin.sso_configure
+admin.sso_remove
+admin.sso_link
+admin.sso_provision
+admin.invitation_create
+admin.invitation_renew
+admin.invitation_revoke
+admin.invitation_accept
+admin.application_role_set
+admin.application_role_remove
+admin.organization_security_update
 admin.api_token_create
 admin.api_token_revoke
 ```
@@ -56,19 +77,35 @@ routes.
 
 ```text
 admin.organization_create
+admin.organization_rename
 admin.application_create
+admin.application_rename
 admin.environment_create
+admin.environment_rename
 admin.configuration_revision_create
 admin.configuration_revision_update
 admin.configuration_revision_validate
 admin.configuration_plan
 admin.configuration_activate
 admin.configuration_rollback
+admin.configuration_revision_discard
+admin.configuration_revision_rebase
+admin.configuration_promote
+admin.simulation_scenario_create
+admin.simulation_scenario_update
+admin.simulation_scenario_delete
 ```
 
 Planning is non-dispatching and redaction-safe. Its action name can appear for
 a rejected mutation; activation and rollback name the effective pointer
-change.
+change. Discard marks a never-activated draft as discarded without deleting
+it, rebase records that a draft moved onto the live revision, and promotion
+names the draft created from another environment's live revision. A publish
+note is marked as a sensitive `activation_note` field; its text is kept on the
+revision, never in the audit event. Saved simulation scenarios mark their input as
+sensitive; scenario names and test claim values stay on the scenario.
+A rename records a public `display_name` change marker; slugs never change,
+and organizations, applications and environments are never deleted.
 
 ## Secret and user actions
 
@@ -82,7 +119,11 @@ admin.user_block
 admin.user_unblock
 admin.user_require_reauthentication
 admin.user_require_app_reverification
+admin.user_batch
 ```
+
+A batch of user actions records each user's own event above; `admin.user_batch`
+appears only when a whole batch request is refused.
 
 Secret events classify secret-bearing fields as sensitive and never include
 plaintext. User actions target opaque application-user IDs and record

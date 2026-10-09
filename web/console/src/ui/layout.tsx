@@ -95,15 +95,17 @@ interface EmptyStateProps {
   className?: string;
   icon?: IconName;
   orientation?: "vertical" | "horizontal";
+  /** Page-level states use a heading so the page keeps one. */
+  titleAs?: "h1" | "h2" | "p";
   title: ReactNode;
 }
 
-export function EmptyState({ action, children, className, icon = "search", orientation = "vertical", title }: EmptyStateProps) {
+export function EmptyState({ action, children, className, icon = "search", orientation = "vertical", title, titleAs: Title = "p" }: EmptyStateProps) {
   return (
     <div className={cx("lw-empty", orientation === "horizontal" && "lw-empty--horizontal", className)}>
       <span className="lw-empty__art lw-empty__art--icon"><Icon name={icon} /></span>
       <div className="lw-empty__text">
-        <div><p className="lw-empty__title">{title}</p>{children ? <p className="lw-empty__desc">{children}</p> : null}</div>
+        <div><Title className="lw-empty__title">{title}</Title>{children ? <p className="lw-empty__desc">{children}</p> : null}</div>
         {action ? <div className="lw-row">{action}</div> : null}
       </div>
     </div>

@@ -34,6 +34,17 @@ type AdminApiToken struct {
 	RevokeReason         *string            `db:"revoke_reason" json:"revoke_reason"`
 }
 
+// Per-application roles that raise, never lower, a member's organization role.
+type AdminApplicationRole struct {
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	AdminUserID          string             `db:"admin_user_id" json:"admin_user_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	Role                 string             `db:"role" json:"role"`
+	GrantedByAdminUserID string             `db:"granted_by_admin_user_id" json:"granted_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type AdminBootstrapToken struct {
 	AdminBootstrapTokenID string             `db:"admin_bootstrap_token_id" json:"admin_bootstrap_token_id"`
 	Generation            int16              `db:"generation" json:"generation"`
@@ -42,6 +53,25 @@ type AdminBootstrapToken struct {
 	ExpiresAt             pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
 	ConsumedAt            pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
 	ConsumedByAdminUserID *string            `db:"consumed_by_admin_user_id" json:"consumed_by_admin_user_id"`
+}
+
+// Invitations to join an organization; link tokens are stored only as hashes.
+type AdminInvitation struct {
+	AdminInvitationID    string             `db:"admin_invitation_id" json:"admin_invitation_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	Email                string             `db:"email" json:"email"`
+	EmailNormalized      string             `db:"email_normalized" json:"email_normalized"`
+	DisplayName          *string            `db:"display_name" json:"display_name"`
+	Role                 string             `db:"role" json:"role"`
+	TokenHash            []byte             `db:"token_hash" json:"token_hash"`
+	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt            pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	AcceptedAt           pgtype.Timestamptz `db:"accepted_at" json:"accepted_at"`
+	AcceptedAdminUserID  *string            `db:"accepted_admin_user_id" json:"accepted_admin_user_id"`
+	RevokedAt            pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	EmailStatus          string             `db:"email_status" json:"email_status"`
+	EmailSentAt          pgtype.Timestamptz `db:"email_sent_at" json:"email_sent_at"`
 }
 
 type AdminMembership struct {
@@ -56,12 +86,36 @@ type AdminMembership struct {
 	DisabledAt           pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 }
 
+// Administrator WebAuthn credentials: public keys only, never private material.
+type AdminPasskey struct {
+	AdminPasskeyID string             `db:"admin_passkey_id" json:"admin_passkey_id"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	CredentialID   []byte             `db:"credential_id" json:"credential_id"`
+	PublicKeyX     []byte             `db:"public_key_x" json:"public_key_x"`
+	PublicKeyY     []byte             `db:"public_key_y" json:"public_key_y"`
+	SignCount      int64              `db:"sign_count" json:"sign_count"`
+	Aaguid         []byte             `db:"aaguid" json:"aaguid"`
+	BackupEligible bool               `db:"backup_eligible" json:"backup_eligible"`
+	BackupState    bool               `db:"backup_state" json:"backup_state"`
+	Name           string             `db:"name" json:"name"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastUsedAt     pgtype.Timestamptz `db:"last_used_at" json:"last_used_at"`
+}
+
 type AdminPasswordCredential struct {
 	AdminUserID        string             `db:"admin_user_id" json:"admin_user_id"`
 	PasswordHash       string             `db:"password_hash" json:"password_hash"`
 	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	ChangedAt          pgtype.Timestamptz `db:"changed_at" json:"changed_at"`
 	ResetByAdminUserID *string            `db:"reset_by_admin_user_id" json:"reset_by_admin_user_id"`
+}
+
+// Hashed single-use administrator recovery codes.
+type AdminRecoveryCode struct {
+	AdminUserID string             `db:"admin_user_id" json:"admin_user_id"`
+	CodeHash    []byte             `db:"code_hash" json:"code_hash"`
+	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UsedAt      pgtype.Timestamptz `db:"used_at" json:"used_at"`
 }
 
 type AdminSession struct {
@@ -76,6 +130,55 @@ type AdminSession struct {
 	LastSeenAt     pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
 	RevokedAt      pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
 	RevokeReason   *string            `db:"revoke_reason" json:"revoke_reason"`
+	// Coarse browser and operating-system summary for the session owner and owners; never a raw User-Agent or network address.
+	DeviceSummary *string `db:"device_summary" json:"device_summary"`
+	// How the session was signed in; single sign-on sessions rely on the identity provider for further factors.
+	SignInMethod string `db:"sign_in_method" json:"sign_in_method"`
+}
+
+// Pending second-factor sign-ins after a correct password; hashed, short-lived and attempt-bounded.
+type AdminSignInChallenge struct {
+	ChallengeHash  []byte             `db:"challenge_hash" json:"challenge_hash"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	DeviceSummary  *string            `db:"device_summary" json:"device_summary"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	FailedAttempts int16              `db:"failed_attempts" json:"failed_attempts"`
+	ConsumedAt     pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+}
+
+// Links an identity provider subject to an administrator within one organization.
+type AdminSsoIdentity struct {
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	Issuer         string             `db:"issuer" json:"issuer"`
+	Subject        string             `db:"subject" json:"subject"`
+	AdminUserID    string             `db:"admin_user_id" json:"admin_user_id"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastUsedAt     pgtype.Timestamptz `db:"last_used_at" json:"last_used_at"`
+}
+
+// Pending single sign-on logins between the redirect and the callback; single use and short-lived.
+type AdminSsoState struct {
+	StateHash      []byte             `db:"state_hash" json:"state_hash"`
+	BrowserHash    []byte             `db:"browser_hash" json:"browser_hash"`
+	OrganizationID string             `db:"organization_id" json:"organization_id"`
+	Nonce          string             `db:"nonce" json:"nonce"`
+	CodeVerifier   string             `db:"code_verifier" json:"code_verifier"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+}
+
+// Sealed administrator authenticator keys; plaintext keys are never stored.
+type AdminTotpFactor struct {
+	AdminUserID  string             `db:"admin_user_id" json:"admin_user_id"`
+	KeyID        string             `db:"key_id" json:"key_id"`
+	Nonce        []byte             `db:"nonce" json:"nonce"`
+	Ciphertext   []byte             `db:"ciphertext" json:"ciphertext"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ConfirmedAt  pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
+	LastUsedStep *int64             `db:"last_used_step" json:"last_used_step"`
 }
 
 type AdminUser struct {
@@ -88,6 +191,20 @@ type AdminUser struct {
 	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DisabledAt            pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
 	PasswordResetRequired bool               `db:"password_reset_required" json:"password_reset_required"`
+	// Organization of the administrator's most recent session; used only when a sign-in names no organization.
+	LastOrganizationID *string `db:"last_organization_id" json:"last_organization_id"`
+	WebauthnUserHandle []byte  `db:"webauthn_user_handle" json:"webauthn_user_handle"`
+}
+
+// Hashed, short-lived WebAuthn challenges for registration, passwordless sign-in and second factors.
+type AdminWebauthnChallenge struct {
+	ChallengeHash       []byte             `db:"challenge_hash" json:"challenge_hash"`
+	Purpose             string             `db:"purpose" json:"purpose"`
+	AdminUserID         *string            `db:"admin_user_id" json:"admin_user_id"`
+	SignInChallengeHash []byte             `db:"sign_in_challenge_hash" json:"sign_in_challenge_hash"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt           pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	ConsumedAt          pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
 }
 
 type AppAttestKeyCommitReceipt struct {
@@ -362,24 +479,38 @@ type ConcurrencyLease struct {
 }
 
 type ConfigRevision struct {
-	ConfigRevisionID     string             `db:"config_revision_id" json:"config_revision_id"`
-	OrganizationID       string             `db:"organization_id" json:"organization_id"`
-	ApplicationID        string             `db:"application_id" json:"application_id"`
-	EnvironmentID        string             `db:"environment_id" json:"environment_id"`
-	RevisionNumber       int64              `db:"revision_number" json:"revision_number"`
-	Etag                 string             `db:"etag" json:"etag"`
-	Status               string             `db:"status" json:"status"`
-	Document             []byte             `db:"document" json:"document"`
-	CompiledDocument     []byte             `db:"compiled_document" json:"compiled_document"`
-	ValidationErrors     []byte             `db:"validation_errors" json:"validation_errors"`
-	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	ValidatedAt          pgtype.Timestamptz `db:"validated_at" json:"validated_at"`
-	BaseConfigRevisionID *string            `db:"base_config_revision_id" json:"base_config_revision_id"`
-	Description          *string            `db:"description" json:"description"`
-	EditVersion          int64              `db:"edit_version" json:"edit_version"`
-	ValidationReport     []byte             `db:"validation_report" json:"validation_report"`
-	ActivatedAt          pgtype.Timestamptz `db:"activated_at" json:"activated_at"`
+	ConfigRevisionID       string             `db:"config_revision_id" json:"config_revision_id"`
+	OrganizationID         string             `db:"organization_id" json:"organization_id"`
+	ApplicationID          string             `db:"application_id" json:"application_id"`
+	EnvironmentID          string             `db:"environment_id" json:"environment_id"`
+	RevisionNumber         int64              `db:"revision_number" json:"revision_number"`
+	Etag                   string             `db:"etag" json:"etag"`
+	Status                 string             `db:"status" json:"status"`
+	Document               []byte             `db:"document" json:"document"`
+	CompiledDocument       []byte             `db:"compiled_document" json:"compiled_document"`
+	ValidationErrors       []byte             `db:"validation_errors" json:"validation_errors"`
+	CreatedByAdminUserID   string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt              pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ValidatedAt            pgtype.Timestamptz `db:"validated_at" json:"validated_at"`
+	BaseConfigRevisionID   *string            `db:"base_config_revision_id" json:"base_config_revision_id"`
+	Description            *string            `db:"description" json:"description"`
+	EditVersion            int64              `db:"edit_version" json:"edit_version"`
+	ValidationReport       []byte             `db:"validation_report" json:"validation_report"`
+	ActivatedAt            pgtype.Timestamptz `db:"activated_at" json:"activated_at"`
+	DiscardedAt            pgtype.Timestamptz `db:"discarded_at" json:"discarded_at"`
+	DiscardedByAdminUserID *string            `db:"discarded_by_admin_user_id" json:"discarded_by_admin_user_id"`
+	ActivationNote         *string            `db:"activation_note" json:"activation_note"`
+}
+
+type ConfigRevisionEdit struct {
+	OrganizationID   string             `db:"organization_id" json:"organization_id"`
+	ConfigRevisionID string             `db:"config_revision_id" json:"config_revision_id"`
+	EditVersion      int64              `db:"edit_version" json:"edit_version"`
+	Kind             string             `db:"kind" json:"kind"`
+	AdminUserID      string             `db:"admin_user_id" json:"admin_user_id"`
+	EditedAt         pgtype.Timestamptz `db:"edited_at" json:"edited_at"`
+	ChangeCount      int32              `db:"change_count" json:"change_count"`
+	Changes          []byte             `db:"changes" json:"changes"`
 }
 
 type DpopReplayEntry struct {
@@ -594,6 +725,27 @@ type Organization struct {
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
+	// When true, members without a confirmed second factor may only enroll one after signing in.
+	RequireTwoFactor bool `db:"require_two_factor" json:"require_two_factor"`
+}
+
+// One OpenID Connect provider per organization; the client secret is sealed and never returned.
+type OrganizationSsoProvider struct {
+	OrganizationID        string             `db:"organization_id" json:"organization_id"`
+	Issuer                string             `db:"issuer" json:"issuer"`
+	AuthorizationEndpoint string             `db:"authorization_endpoint" json:"authorization_endpoint"`
+	TokenEndpoint         string             `db:"token_endpoint" json:"token_endpoint"`
+	JwksUri               string             `db:"jwks_uri" json:"jwks_uri"`
+	ClientID              string             `db:"client_id" json:"client_id"`
+	SecretKeyID           string             `db:"secret_key_id" json:"secret_key_id"`
+	SecretNonce           []byte             `db:"secret_nonce" json:"secret_nonce"`
+	SecretCiphertext      []byte             `db:"secret_ciphertext" json:"secret_ciphertext"`
+	AllowedEmailDomains   []string           `db:"allowed_email_domains" json:"allowed_email_domains"`
+	ProvisionRole         *string            `db:"provision_role" json:"provision_role"`
+	Enabled               bool               `db:"enabled" json:"enabled"`
+	RequireSso            bool               `db:"require_sso" json:"require_sso"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 type QuotaBucket struct {
@@ -838,6 +990,28 @@ type SessionGrant struct {
 	ComponentIsRoot          *bool              `db:"component_is_root" json:"component_is_root"`
 	TrustSource              *string            `db:"trust_source" json:"trust_source"`
 	ComponentSessionFamilyID *string            `db:"component_session_family_id" json:"component_session_family_id"`
+}
+
+type SimulationScenario struct {
+	SimulationScenarioID string             `db:"simulation_scenario_id" json:"simulation_scenario_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	Name                 string             `db:"name" json:"name"`
+	Input                []byte             `db:"input" json:"input"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedByAdminUserID string             `db:"updated_by_admin_user_id" json:"updated_by_admin_user_id"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type SystemHealthSample struct {
+	SampledAt      pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	OverallState   string             `db:"overall_state" json:"overall_state"`
+	FailedChecks   []string           `db:"failed_checks" json:"failed_checks"`
+	WarningChecks  []string           `db:"warning_checks" json:"warning_checks"`
+	RecordedByRole string             `db:"recorded_by_role" json:"recorded_by_role"`
+	RecordedAt     pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
 }
 
 type UpstreamAttempt struct {

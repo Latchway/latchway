@@ -62,6 +62,12 @@ type OperationalJobs interface {
 	EnforceRetention(context.Context, time.Time, int) (int64, error)
 }
 
+// HealthSampler records one self-check summary for the sampling slot that
+// contains the scheduled time.
+type HealthSampler interface {
+	RecordHealthSample(context.Context, time.Time) error
+}
+
 // ScheduledSelfTests executes one already-claimed, persistently authorized
 // self-test job. The implementation owns target/config/credential revalidation
 // and the durable dispatch marker; Runtime never receives secret material.
@@ -90,9 +96,12 @@ type Config struct {
 	IdentityKeys IdentityKeyMaintainer
 	Operations   OperationalJobs
 	SelfTests    ScheduledSelfTests
-	Queue        *Queue
-	Telemetry    *telemetry.Registry
-	Logger       *slog.Logger
+	// HealthSamples is optional: without it the runtime doesn't schedule
+	// health samples.
+	HealthSamples HealthSampler
+	Queue         *Queue
+	Telemetry     *telemetry.Registry
+	Logger        *slog.Logger
 
 	Interval             time.Duration
 	RunTimeout           time.Duration
@@ -119,6 +128,7 @@ type Runtime struct {
 	identityKeys IdentityKeyMaintainer
 	operations   OperationalJobs
 	selfTests    ScheduledSelfTests
+	health       HealthSampler
 	queue        *Queue
 	telemetry    *telemetry.Registry
 	logger       *slog.Logger
@@ -189,8 +199,8 @@ func New(config Config) (*Runtime, error) {
 		quotas: config.Quotas, replays: config.Replays,
 		attestations: config.Attestations, challenges: config.Challenges,
 		signingKeys: config.SigningKeys, identityKeys: config.IdentityKeys, operations: config.Operations,
-		selfTests: config.SelfTests,
-		queue:     config.Queue, telemetry: config.Telemetry, logger: config.Logger,
+		selfTests: config.SelfTests, health: config.HealthSamples,
+		queue: config.Queue, telemetry: config.Telemetry, logger: config.Logger,
 		interval: config.Interval, runTimeout: config.RunTimeout,
 		quotaBatchSize: config.QuotaBatchSize, replayBatchSize: config.ReplayBatchSize,
 		attestationBatchSize: config.AttestationBatchSize,
@@ -275,6 +285,9 @@ func (runtime *Runtime) runDurablePass(ctx context.Context) {
 		return
 	}
 	jobTypes := scheduledDurableJobTypes()
+	if runtime.health != nil {
+		jobTypes = append(jobTypes, "record_health_sample")
+	}
 	scheduleCtx, scheduleCancel := context.WithTimeout(ctx, runtime.runTimeout)
 	err = runtime.queue.Schedule(scheduleCtx, now, jobTypes)
 	scheduleCancel()
@@ -413,6 +426,14 @@ func (runtime *Runtime) executeJob(ctx context.Context, job Job) (int64, error) 
 		return processed + attestation, err
 	case "run_scheduled_self_test":
 		return runtime.selfTests.ExecuteScheduled(ctx, job.ID)
+	case "record_health_sample":
+		if runtime.health == nil {
+			return 0, errors.New("worker health sampler is not configured")
+		}
+		if err := runtime.health.RecordHealthSample(ctx, job.ScheduledAt); err != nil {
+			return 0, err
+		}
+		return 1, nil
 	default:
 		return 0, errors.New("unsupported durable worker job")
 	}
@@ -543,7 +564,7 @@ func maintenanceFailureStageOf(err error) string {
 		return ""
 	}
 	switch stage := staged.maintenanceFailureStage(); stage {
-	case "invalid_input", "begin_transaction", "delete_admin_sessions", "delete_job_history",
+	case "invalid_input", "begin_transaction", "delete_admin_sessions", "delete_job_history", "delete_health_samples",
 		"delete_runtime_instances", "delete_jwks_cache", "expire_refresh_tokens", "commit_operational",
 		"expire_component_refresh_tokens", "delete_component_rotation_results", "begin_component_families",
 		"select_component_families", "scan_component_families", "iterate_component_families",

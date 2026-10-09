@@ -34,12 +34,12 @@ func TestTokenModeAndAPITokenCommandsUseCanonicalAPIWithoutPersistingOrPrintingC
 			if request.Method != http.MethodGet || request.URL.Path != "/admin/v1/auth/session" {
 				t.Fatalf("login request = %s %s", request.Method, request.URL.Path)
 			}
-			return tokenCommandResponse(request, http.StatusOK, `{"administrator":{"id":"`+tokenCommandAdministratorID+`","email":"owner@example.test","enabled":true},"organization_id":"`+tokenCommandOrganizationID+`","memberships":[{"organization_id":"`+tokenCommandOrganizationID+`","role":"owner"}],"capabilities":["inspect_users"],"expires_at":null}`), nil
+			return tokenCommandResponse(request, http.StatusOK, `{"administrator":{"id":"`+tokenCommandAdministratorID+`","email":"owner@example.test","enabled":true,"display_name":"Owner"},"organization_id":"`+tokenCommandOrganizationID+`","memberships":[{"organization_id":"`+tokenCommandOrganizationID+`","role":"owner"}],"capabilities":["inspect_users"],"expires_at":null,"password_reset_required":false,"two_factor_enrollment_required":false,"application_roles":[{"application_id":"app_0123456789abcdefghjkmnpqrs","role":"admin"}]}`), nil
 		case 2:
 			if request.Method != http.MethodGet || request.URL.Path != "/admin/v1/api-tokens" {
 				t.Fatalf("list request = %s %s", request.Method, request.URL.Path)
 			}
-			return tokenCommandResponse(request, http.StatusOK, `{"items":[{"id":"`+tokenCommandTokenID+`","name":"existing","scopes":["inspect_users"],"created_at":"2026-08-29T12:00:00Z","revoked":false}]}`), nil
+			return tokenCommandResponse(request, http.StatusOK, `{"items":[{"id":"`+tokenCommandTokenID+`","name":"existing","scopes":["inspect_users"],"created_at":"2026-08-29T12:00:00Z","last_used_at":"2026-08-29T12:30:00Z","revoked":false}]}`), nil
 		case 3:
 			if request.Method != http.MethodPost || request.URL.Path != "/admin/v1/api-tokens" {
 				t.Fatalf("create request = %s %s", request.Method, request.URL.Path)

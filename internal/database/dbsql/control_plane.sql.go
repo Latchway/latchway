@@ -283,24 +283,30 @@ func (q *Queries) ListApplications(ctx context.Context, organizationID string, c
 }
 
 const listEnvironments = `-- name: ListEnvironments :many
-SELECT environment_id, organization_id, application_id, slug, display_name, kind, status, disabled_at, created_at, updated_at
-FROM environments
-WHERE organization_id = $1
-  AND application_id = $2
-ORDER BY created_at, environment_id
+SELECT environment.environment_id, environment.organization_id, environment.application_id, environment.slug,
+       environment.display_name, environment.kind, environment.status, environment.disabled_at, environment.created_at,
+       environment.updated_at, active.config_revision_id AS active_revision_id
+FROM environments AS environment
+LEFT JOIN active_config_revisions AS active
+  ON active.organization_id = environment.organization_id
+ AND active.environment_id = environment.environment_id
+WHERE environment.organization_id = $1
+  AND environment.application_id = $2
+ORDER BY environment.created_at, environment.environment_id
 `
 
 type ListEnvironmentsRow struct {
-	EnvironmentID  string             `db:"environment_id" json:"environment_id"`
-	OrganizationID string             `db:"organization_id" json:"organization_id"`
-	ApplicationID  string             `db:"application_id" json:"application_id"`
-	Slug           string             `db:"slug" json:"slug"`
-	DisplayName    string             `db:"display_name" json:"display_name"`
-	Kind           string             `db:"kind" json:"kind"`
-	Status         string             `db:"status" json:"status"`
-	DisabledAt     pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
-	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	EnvironmentID    string             `db:"environment_id" json:"environment_id"`
+	OrganizationID   string             `db:"organization_id" json:"organization_id"`
+	ApplicationID    string             `db:"application_id" json:"application_id"`
+	Slug             string             `db:"slug" json:"slug"`
+	DisplayName      string             `db:"display_name" json:"display_name"`
+	Kind             string             `db:"kind" json:"kind"`
+	Status           string             `db:"status" json:"status"`
+	DisabledAt       pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ActiveRevisionID *string            `db:"active_revision_id" json:"active_revision_id"`
 }
 
 func (q *Queries) ListEnvironments(ctx context.Context, organizationID string, applicationID string) ([]ListEnvironmentsRow, error) {
@@ -323,6 +329,7 @@ func (q *Queries) ListEnvironments(ctx context.Context, organizationID string, a
 			&i.DisabledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ActiveRevisionID,
 		); err != nil {
 			return nil, err
 		}

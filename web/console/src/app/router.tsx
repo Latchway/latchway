@@ -3,42 +3,13 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect
 } from "@tanstack/react-router";
 
 import { AppShell } from "./app-shell";
 import { NotFoundPage } from "../pages/not-found-page";
 import { OverviewPage } from "../pages/overview-page";
-import { SystemHealthPage } from "../pages/operate/system-health-page";
-import { SelfTestsPage } from "../pages/operate/self-tests-page";
-import { ApplicationsSettingsPage, GeneralSettingsPage } from "../pages/settings/settings-pages";
-import { AuditLogPage } from "../pages/audit/audit-page";
-import { SecretsPage } from "../pages/build/secrets-page";
-import { MembersPage, RolesPage, SessionsPage, TokensPage } from "../pages/team/team-pages";
-import { ComparePage, DraftChangesPage, JsonEditorPage, RevisionHistoryPage } from "../pages/changes/changes-pages";
-import { LimitPlansPage, OverridesPage, PlanByFeaturePage, ProtectionsPage } from "../pages/policies/policies-pages";
-import { SimulatorPage } from "../pages/simulator/simulator-page";
-import { RequestsPage } from "../pages/requests/requests-page";
-import { SessionsPolicyPage } from "../pages/build/client-trust-pages";
-import { InstallationFamiliesPage } from "../pages/users/installations-page";
-import { InstallationsPage } from "../pages/users/older-installs-page";
-import { UsersPage } from "../pages/users/users-page";
-import {
-  CostAnalyticsPage,
-  PerformanceAnalyticsPage,
-  ReliabilityAnalyticsPage,
-  UsageAnalyticsPage
-} from "../pages/analytics/analytics-page";
-import { SetupWizardPage } from "../pages/configuration-pages";
-import {
-  AttestationConfigurationPage,
-  AuthenticationProvidersPage,
-  ComponentDefinitionsConfigurationPage,
-  FeaturesConfigurationPage,
-  ModelsPricingConfigurationPage,
-  RoutesConfigurationPage,
-  UpstreamsConfigurationPage
-} from "../pages/configuration-area-pages";
 import {
   AnalyticsRouteSearchSchema,
   parseAnalyticsRouteSearch,
@@ -59,6 +30,45 @@ import {
   parseUserRouteSearch
 } from "./route-search";
 
+// Pages load on first visit so the sign-in screen and shell stay small.
+const AccountPage = lazyRouteComponent(() => import("../pages/account/account-page"), "AccountPage");
+const SystemHealthPage = lazyRouteComponent(() => import("../pages/operate/system-health-page"), "SystemHealthPage");
+const SelfTestsPage = lazyRouteComponent(() => import("../pages/operate/self-tests-page"), "SelfTestsPage");
+const ApplicationsSettingsPage = lazyRouteComponent(() => import("../pages/settings/settings-pages"), "ApplicationsSettingsPage");
+const GeneralSettingsPage = lazyRouteComponent(() => import("../pages/settings/settings-pages"), "GeneralSettingsPage");
+const AuditLogPage = lazyRouteComponent(() => import("../pages/audit/audit-page"), "AuditLogPage");
+const SecretsPage = lazyRouteComponent(() => import("../pages/build/secrets-page"), "SecretsPage");
+const MembersPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "MembersPage");
+const RolesPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "RolesPage");
+const SessionsPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "SessionsPage");
+const TokensPage = lazyRouteComponent(() => import("../pages/team/team-pages"), "TokensPage");
+const ComparePage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "ComparePage");
+const DraftChangesPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "DraftChangesPage");
+const JsonEditorPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "JsonEditorPage");
+const RevisionHistoryPage = lazyRouteComponent(() => import("../pages/changes/changes-pages"), "RevisionHistoryPage");
+const LimitPlansPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "LimitPlansPage");
+const OverridesPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "OverridesPage");
+const PlanByFeaturePage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "PlanByFeaturePage");
+const ProtectionsPage = lazyRouteComponent(() => import("../pages/policies/policies-pages"), "ProtectionsPage");
+const SimulatorPage = lazyRouteComponent(() => import("../pages/simulator/simulator-page"), "SimulatorPage");
+const RequestsPage = lazyRouteComponent(() => import("../pages/requests/requests-page"), "RequestsPage");
+const SessionsPolicyPage = lazyRouteComponent(() => import("../pages/build/client-trust-pages"), "SessionsPolicyPage");
+const InstallationFamiliesPage = lazyRouteComponent(() => import("../pages/users/installations-page"), "InstallationFamiliesPage");
+const InstallationsPage = lazyRouteComponent(() => import("../pages/users/older-installs-page"), "InstallationsPage");
+const UsersPage = lazyRouteComponent(() => import("../pages/users/users-page"), "UsersPage");
+const CostAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "CostAnalyticsPage");
+const PerformanceAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "PerformanceAnalyticsPage");
+const ReliabilityAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "ReliabilityAnalyticsPage");
+const UsageAnalyticsPage = lazyRouteComponent(() => import("../pages/analytics/analytics-page"), "UsageAnalyticsPage");
+const SetupWizardPage = lazyRouteComponent(() => import("../pages/configuration-pages"), "SetupWizardPage");
+const AttestationConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "AttestationConfigurationPage");
+const AuthenticationProvidersPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "AuthenticationProvidersPage");
+const ComponentDefinitionsConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "ComponentDefinitionsConfigurationPage");
+const FeaturesConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "FeaturesConfigurationPage");
+const ModelsPricingConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "ModelsPricingConfigurationPage");
+const RoutesConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "RoutesConfigurationPage");
+const UpstreamsConfigurationPage = lazyRouteComponent(() => import("../pages/configuration-area-pages"), "UpstreamsConfigurationPage");
+
 const rootRoute = createRootRoute({
   component: AppShell,
   notFoundComponent: NotFoundPage
@@ -69,6 +79,8 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/"
 });
+
+const accountRoute = createRoute({ component: AccountPage, getParentRoute: () => rootRoute, path: "/account" });
 
 const systemHealthRoute = createRoute({
   component: SystemHealthPage,
@@ -127,16 +139,17 @@ const requestsRoute = createRoute({
   path: "/requests",
   validateSearch: parseRequestRouteSearch
 });
-const usageRoute = createRoute({ component: UsageAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/usage", validateSearch: parseAnalyticsRouteSearch });
-const costRoute = createRoute({ component: CostAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/cost", validateSearch: parseAnalyticsRouteSearch });
-const performanceRoute = createRoute({ component: PerformanceAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/performance", validateSearch: parseAnalyticsRouteSearch });
-const reliabilityRoute = createRoute({ component: ReliabilityAnalyticsPage, getParentRoute: () => rootRoute, path: "/analytics/reliability", validateSearch: parseAnalyticsRouteSearch });
+const usageRoute = createRoute({ component: UsageAnalyticsPage, getParentRoute: () => rootRoute, path: "/usage", validateSearch: parseAnalyticsRouteSearch });
+const costRoute = createRoute({ component: CostAnalyticsPage, getParentRoute: () => rootRoute, path: "/cost", validateSearch: parseAnalyticsRouteSearch });
+const performanceRoute = createRoute({ component: PerformanceAnalyticsPage, getParentRoute: () => rootRoute, path: "/performance", validateSearch: parseAnalyticsRouteSearch });
+const reliabilityRoute = createRoute({ component: ReliabilityAnalyticsPage, getParentRoute: () => rootRoute, path: "/reliability", validateSearch: parseAnalyticsRouteSearch });
 
 /**
- * The five pre-redesign analytics pages became tabs of one Analytics page. Old links keep working: the workspace
- * selection carries over, and a period carries over only when it was a whole-day range the new page can show.
+ * The five pre-redesign analytics pages became tabs of one Analytics page; Usage and Cost kept their paths. Old links
+ * to the others keep working: the workspace selection carries over, and a period carries over only when it was a
+ * whole-day range the new page can show.
  */
-function legacyAnalyticsRoute(path: string, to: "/analytics/usage" | "/analytics/cost" | "/analytics/performance" | "/analytics/reliability") {
+function legacyAnalyticsRoute(path: string, to: "/usage" | "/cost" | "/performance" | "/reliability") {
   return createRoute({
     beforeLoad: ({ search }) => {
       const previous = search as Record<string, unknown>;
@@ -154,11 +167,9 @@ function legacyAnalyticsRoute(path: string, to: "/analytics/usage" | "/analytics
 }
 
 const legacyAnalyticsRoutes = [
-  legacyAnalyticsRoute("/usage", "/analytics/usage"),
-  legacyAnalyticsRoute("/cost", "/analytics/cost"),
-  legacyAnalyticsRoute("/latency", "/analytics/performance"),
-  legacyAnalyticsRoute("/errors", "/analytics/reliability"),
-  legacyAnalyticsRoute("/attestation-failures", "/analytics/reliability")
+  legacyAnalyticsRoute("/latency", "/performance"),
+  legacyAnalyticsRoute("/errors", "/reliability"),
+  legacyAnalyticsRoute("/attestation-failures", "/reliability")
 ];
 const changesRoute = createRoute({ component: DraftChangesPage, getParentRoute: () => rootRoute, path: "/changes" });
 const configurationRevisionsRoute = createRoute({ component: RevisionHistoryPage, getParentRoute: () => rootRoute, path: "/configuration-revisions", validateSearch: parseRevisionRouteSearch });
@@ -173,6 +184,7 @@ const auditRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
+  accountRoute,
   indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute, adminSessionsRoute, rolesRoute,
   authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
   componentDefinitionsRoute, clientSessionsRoute,

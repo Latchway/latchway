@@ -20,10 +20,15 @@ import {
 import { type AdminProblem, problemFromError } from "../../api/auth";
 import { useConsoleSession } from "../../api/session";
 import { useConsoleCompatibility } from "../../app/console-compatibility-context";
+import { capabilitiesAnywhere, useCapabilities } from "../../app/permissions";
 import { TeamRouteSearchSchema } from "../../app/route-search";
 import { useOptionalWorkspace } from "../../app/workspace-context-value";
 import { PasswordField } from "../../components/password-field";
 import { takePassword } from "../../components/password-value";
+import { resetMemberTwoFactor } from "../../api/account";
+import { applicationRolesQueryOptions, removeApplicationRole, setApplicationRole } from "../../api/application-roles";
+import { applicationsQueryOptions } from "../../api/workspace";
+import { createInvitation, type Invitation, type InvitationLink, invitationsQueryOptions, renewInvitation, revokeInvitation } from "../../api/invitations";
 import {
   Badge,
   Button,
@@ -67,11 +72,14 @@ function when(value: string | undefined): string {
 function useMe() {
   const session = useConsoleSession();
   const compatibility = useConsoleCompatibility();
+  const { can, previewRole } = useCapabilities();
   const me = session.data?.session;
   const role = me?.memberships.find((membership) => membership.organization_id === me.organization_id)?.role as Role | undefined;
-  const capabilities = me?.capabilities ?? [];
+  // Tokens may carry any capability held in some application; each use is checked per application.
+  const capabilities = capabilitiesAnywhere(me, previewRole);
   return {
-    canManageOwners: capabilities.includes("manage_owners"),
+    applicationRolesSupported: compatibility.status?.server_capabilities.includes("admin_application_roles") ?? false,
+    canManageOwners: can("manage_owners"),
     capabilities,
     id: me?.administrator.id,
     mutationAllowed: compatibility.mutationAllowed,
@@ -200,7 +208,192 @@ function AddMemberDrawer({ existing, onClose, onCreated }: { existing: readonly 
   );
 }
 
-type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "signout"; session: AdminSessionMetadata };
+const INVITATION_STATUS: Readonly<Record<Invitation["status"], ReactNode>> = {
+  accepted: <Badge color="success" variant="soft">Accepted</Badge>,
+  expired: <Badge variant="soft">Expired</Badge>,
+  pending: <Badge color="accent" variant="soft">Pending</Badge>,
+  revoked: <Badge variant="soft">Revoked</Badge>
+};
+
+/** Shows an invitation link once; it can't be read back later, only replaced. */
+function InvitationLinkReveal({ link, onDone }: { link: InvitationLink; onDone: () => void }) {
+  const emailed = link.invitation.email_status === "sent" ? `It was also emailed to ${link.invitation.email}.` : link.invitation.email_status === "failed" ? "Emailing it failed, so share it yourself." : "Share it with them privately.";
+  return (
+    <ConfirmDialog confirmLabel="Done" description={`Anyone with this link can join as ${ROLE_LABEL[link.invitation.role]} until ${new Date(link.invitation.expires_at).toLocaleString()} or until it's used. ${emailed} It won't be shown again.`} hideCancel onCancel={onDone} onConfirm={onDone} size="wide" title={`Invitation for ${link.invitation.email}`}>
+      <div className="lw-row lw-row--wrap"><code className="lw-code-inline lw-break">{link.url}</code><CopyButton label="Copy invitation link" value={link.url} /></div>
+      {link.invitation.email_status === "failed" ? <Notice tone="warning">The server couldn&apos;t send the email. Check its SMTP settings.</Notice> : null}
+    </ConfirmDialog>
+  );
+}
+
+function InviteMemberDrawer({ emailDelivery, existing, onClose, onInvited, organizationID }: { emailDelivery: boolean; existing: readonly Administrator[]; onClose: () => void; onInvited: (link: InvitationLink) => void; organizationID: string }) {
+  const [role, setRole] = useState<Role>("viewer");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [send, setSend] = useState(emailDelivery);
+  const [problem, setProblem] = useState<AdminProblem>();
+  const [busy, setBusy] = useState(false);
+  const duplicate = existing.some((member) => member.email.toLowerCase() === email.trim().toLowerCase());
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (duplicate) return;
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      onInvited(await createInvitation(organizationID, { ...(name.trim() ? { display_name: name.trim() } : {}), email: email.trim(), role, send_email: emailDelivery && send }));
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <DetailPanel className="lw-request-drawer" onClose={onClose} subtitle={<span className="lw-faint">They choose their own password, or sign in to an account they already have</span>} title="Invite member">
+      <form autoComplete="off" className="lw-stack" onSubmit={(event) => void submit(event)}>
+        <Field error={duplicate ? "Someone on the team already uses this email." : undefined} id="invite-email" label="Email"><Input id="invite-email" maxLength={320} onChange={(event) => setEmail(event.target.value)} required type="email" value={email} /></Field>
+        <Field hint="Optional; they can change it when they accept." id="invite-name" label="Name"><Input id="invite-name" maxLength={200} onChange={(event) => setName(event.target.value)} value={name} /></Field>
+        <div><strong className="lw-note">Role</strong><RoleCards name="invite-role" onChange={setRole} value={role} /></div>
+        <CapabilityList to={role} />
+        {emailDelivery ? <label className="lw-check"><input checked={send} onChange={(event) => setSend(event.target.checked)} type="checkbox" /><span>Email the invitation link</span></label> : <p className="lw-secondary lw-note">This server doesn&apos;t send email; you&apos;ll get a link to share.</p>}
+        <p className="lw-secondary lw-note">The link works once and expires in seven days. Inviting the same address again replaces the earlier link.</p>
+        {problem ? <ProblemNotice problem={problem} /> : null}
+        <div className="lw-row"><Button onClick={onClose}>Cancel</Button><Button disabled={duplicate} loading={busy} type="submit" variant="primary">Create Invitation</Button></div>
+      </form>
+    </DetailPanel>
+  );
+}
+
+function InvitationsCard({ enabled, onLink, organizationID }: { enabled: boolean; onLink: (link: InvitationLink) => void; organizationID: string }) {
+  const queryClient = useQueryClient();
+  const invitations = useQuery(invitationsQueryOptions(organizationID));
+  const [busy, setBusy] = useState<string>();
+  const [revoking, setRevoking] = useState<Invitation>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const items = invitations.data?.items ?? [];
+  const open = items.filter((item) => item.status === "pending" || item.status === "expired");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: invitationsQueryOptions(organizationID).queryKey });
+
+  async function renew(item: Invitation): Promise<void> {
+    setBusy(item.id);
+    setProblem(undefined);
+    try {
+      onLink(await renewInvitation(organizationID, item.id, false));
+      await refresh();
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function revoke(item: Invitation): Promise<void> {
+    setBusy(item.id);
+    setProblem(undefined);
+    try {
+      await revokeInvitation(organizationID, item.id);
+      setRevoking(undefined);
+      await refresh();
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  if (!invitations.data && !invitations.error) return null;
+  return (
+    <Card description={open.length ? `${open.length} open ${open.length === 1 ? "invitation" : "invitations"}. Links can't be shown again; New Link replaces one.` : "Invitations you send appear here until they're used, revoked or replaced."} flush icon="users" title="Invitations">
+      {invitations.error ? <div className="lw-card__body"><ProblemNotice problem={problemFromError(invitations.error)} /></div> : null}
+      {problem ? <div className="lw-card__body"><ProblemNotice problem={problem} /></div> : null}
+      {items.length ? (
+        <div className="lw-table-wrap">
+          <table className="lw-table lw-table--dense">
+            <thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Invited by</th><th scope="col">Expires</th><th scope="col"><span className="lw-sr">Actions</span></th></tr></thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.email}{item.email_status === "failed" ? <> <Badge color="warning" variant="soft">Email failed</Badge></> : null}</td>
+                  <td>{ROLE_LABEL[item.role]}</td>
+                  <td>{INVITATION_STATUS[item.status]}</td>
+                  <td>{item.invited_by}</td>
+                  <td className="lw-num">{item.status === "pending" || item.status === "expired" ? when(item.expires_at) : "—"}</td>
+                  <td>{enabled && (item.status === "pending" || item.status === "expired") ? (
+                    <span className="lw-row lw-row--wrap">
+                      <Button disabled={Boolean(busy)} loading={busy === item.id && !revoking} onClick={() => void renew(item)} size="sm">New Link</Button>
+                      {item.status === "pending" ? <Button destructive disabled={Boolean(busy)} onClick={() => setRevoking(item)} size="sm" variant="ghost">Revoke</Button> : null}
+                    </span>
+                  ) : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {revoking ? <ConfirmDialog confirmLabel="Revoke" description={`The link sent to ${revoking.email} stops working.`} destructive onCancel={() => setRevoking(undefined)} onConfirm={() => void revoke(revoking)} pending={busy === revoking.id} title="Revoke this invitation?" /> : null}
+    </Card>
+  );
+}
+
+const RAISED_ROLES: readonly Role[] = ["operator", "admin"];
+
+/**
+ * Roles that raise a member's organization role in single applications. They never lower it, so only roles above the
+ * organization role are offered, and owners have none.
+ */
+function ApplicationRolesSection({ canEdit, member }: { canEdit: boolean; member: Administrator }) {
+  const queryClient = useQueryClient();
+  const organizationID = member.organization_id;
+  const applications = useQuery(applicationsQueryOptions(organizationID));
+  const grants = useQuery(applicationRolesQueryOptions);
+  const [busy, setBusy] = useState<string>();
+  const [problem, setProblem] = useState<AdminProblem>();
+  const offered = RAISED_ROLES.filter((candidate) => ROLES.indexOf(candidate) < ROLES.indexOf(member.role));
+  const mine = new Map((grants.data ?? []).filter((grant) => grant.admin_user_id === member.id).map((grant) => [grant.application_id, grant.role]));
+  if (member.role === "owner" || !offered.length) {
+    return <p className="lw-secondary lw-note">{member.role === "owner" ? "Owners have every role in every application." : `${ROLE_LABEL[member.role]} is the highest role an application can grant, so there's nothing to raise.`}</p>;
+  }
+
+  async function change(applicationID: string, next: string): Promise<void> {
+    setBusy(applicationID);
+    setProblem(undefined);
+    try {
+      if (next === "") await removeApplicationRole(member.id, applicationID);
+      else await setApplicationRole(member.id, applicationID, next as "admin" | "operator");
+      await queryClient.invalidateQueries({ queryKey: applicationRolesQueryOptions.queryKey });
+    } catch (failure) {
+      setProblem(problemFromError(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  const items = applications.data?.items ?? [];
+  return (
+    <div className="lw-stack">
+      <p className="lw-secondary lw-note">Raise {member.display_name}&apos;s role in one application without changing it elsewhere.</p>
+      {problem ? <ProblemNotice problem={problem} /> : null}
+      {items.length ? (
+        <ul className="lw-session-list">
+          {items.map((application) => (
+            <li key={application.id}>
+              <label className="lw-note" htmlFor={`app-role-${member.id}-${application.id}`}>{application.display_name}</label>
+              <div className="lw-input-box">
+                <select aria-label={`Role in ${application.display_name}`} className="lw-input" disabled={!canEdit || busy === application.id} id={`app-role-${member.id}-${application.id}`} onChange={(event) => void change(application.id, event.target.value)} value={mine.get(application.id) ?? ""}>
+                  <option value="">{ROLE_LABEL[member.role]} (organization role)</option>
+                  {offered.map((candidate) => <option key={candidate} value={candidate}>{ROLE_LABEL[candidate]}</option>)}
+                </select>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="lw-secondary lw-note">{applications.isPending ? "Loading applications…" : "No applications yet."}</p>}
+    </div>
+  );
+}
+
+type MemberAction = { kind: "role"; role: Role } | { kind: "disable" } | { kind: "enable" } | { kind: "reset" } | { kind: "reset2fa" } | { kind: "signout"; session: AdminSessionMetadata };
 
 function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { activeOwners: number; member: Administrator; onClose: () => void; onUpdated: () => Promise<void>; sessions: readonly AdminSessionMetadata[] }) {
   const me = useMe();
@@ -245,8 +438,9 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
         if (secret.length < 12) throw new Error("The new password needs at least 12 characters.");
         await adminRequest(`/admin/v1/administrators/${member.id}/reset-password`, AdministratorSchema, { body: { password: secret }, method: "POST" });
       }
+      if (action.kind === "reset2fa") await resetMemberTwoFactor(member.id);
       if (action.kind === "signout") await adminRequest(`/admin/v1/admin-sessions/${action.session.id}/revoke`, z.undefined(), { method: "POST" });
-      setNotice(action.kind === "role" ? `${member.display_name} is now ${ROLE_LABEL[action.role]}.` : action.kind === "disable" ? `${member.display_name} is disabled; their sessions and API tokens were revoked.` : action.kind === "enable" ? `${member.display_name} can sign in again. Revoked sessions and tokens stay revoked.` : action.kind === "reset" ? "Password replaced. Share it privately; their sessions and API tokens were revoked." : "Session signed out.");
+      setNotice(action.kind === "reset2fa" ? `${member.display_name}'s two-factor sign-in was removed and their sessions here ended.` : action.kind === "role" ? `${member.display_name} is now ${ROLE_LABEL[action.role]}.` : action.kind === "disable" ? `${member.display_name} is disabled; their sessions and API tokens were revoked.` : action.kind === "enable" ? `${member.display_name} can sign in again. Revoked sessions and tokens stay revoked.` : action.kind === "reset" ? "Password replaced. Share it privately; their sessions and API tokens were revoked." : "Session signed out.");
       setAction(undefined);
       await onUpdated();
     } catch (failure) {
@@ -269,6 +463,7 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
         actions={canEdit ? <>
           {disabled ? <Button onClick={() => open({ kind: "enable" })} size="sm">Enable</Button> : <Button destructive disabled={lastOwner} onClick={() => open({ kind: "disable" })} size="sm" title={lastOwner ? "The last active owner can't be disabled" : undefined}>Disable</Button>}
           <Button disabled={disabled} onClick={() => open({ kind: "reset" })} size="sm">Reset Password</Button>
+          {member.two_factor_enabled ? <Button onClick={() => open({ kind: "reset2fa" })} size="sm">Reset Two-Factor</Button> : null}
         </> : undefined}
         className="lw-request-drawer"
         onClose={onClose}
@@ -283,6 +478,8 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
           <Properties columns={2} items={[
             { label: "Email", value: member.email },
             { label: "Role", value: ROLE_LABEL[member.role] },
+            ...(member.two_factor_enabled === undefined ? [] : [{ label: "Two-factor", value: member.two_factor_enabled ? "On" : "Off" }]),
+            ...(member.sso_linked === undefined ? [] : [{ label: "Single sign-on", value: member.sso_linked ? "Linked" : "Not linked" }]),
             { label: "Added", value: when(member.created_at) },
             { label: "Updated", value: when(member.updated_at) },
             { label: "Member ID", value: <span className="lw-mono lw-mono--sm">{member.id}</span> }
@@ -295,6 +492,12 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
           {self && role !== member.role ? <Notice tone="warning">This is your own role. {change.loses.length ? "You'll lose access to some pages as soon as you save." : ""}</Notice> : null}
           {change.loses.length ? <Notice tone="info">Their API tokens stop using what the new role doesn&apos;t allow: tokens never exceed their owner&apos;s role.</Notice> : null}
           {canEdit && role !== member.role ? <div className="lw-row"><Button onClick={() => setRole(member.role)}>Cancel</Button><Button onClick={() => open({ kind: "role", role })} variant="primary">Change to {ROLE_LABEL[role]}</Button></div> : null}
+          {me.canManageOwners && me.applicationRolesSupported ? (
+            <div>
+              <strong className="lw-note">Application roles</strong>
+              <ApplicationRolesSection canEdit={canEdit && !disabled} member={member} />
+            </div>
+          ) : null}
           <div>
             <strong className="lw-note">Console sessions</strong>
             {!me.canManageOwners ? <p className="lw-secondary lw-note">Only owners can see console sessions.</p> : theirSessions.length ? (
@@ -308,20 +511,20 @@ function MemberDrawer({ activeOwners, member, onClose, onUpdated, sessions }: { 
               </ul>
             ) : <p className="lw-secondary lw-note">No active console sessions.</p>}
           </div>
-          <p className="lw-secondary lw-note">API tokens are listed only to the member who created them; the Admin API has no team-wide token list.</p>
+          <p className="lw-secondary lw-note">Their API tokens are under Team › API tokens › Everyone.</p>
         </div>
       </DetailPanel>
       {action && canEdit ? (
         <ConfirmDialog
           confirmDisabled={(action.kind === "disable" || (action.kind === "role" && change.loses.length > 0)) ? typed !== member.email || !acknowledged : action.kind === "reset" ? !acknowledged : false}
-          confirmLabel={action.kind === "role" ? `Change to ${ROLE_LABEL[action.role]}` : action.kind === "disable" ? "Disable" : action.kind === "enable" ? "Enable" : action.kind === "reset" ? "Reset Password" : "Sign Out"}
-          description={action.kind === "role" ? "It applies at once, in every application and environment." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
+          confirmLabel={action.kind === "role" ? `Change to ${ROLE_LABEL[action.role]}` : action.kind === "disable" ? "Disable" : action.kind === "enable" ? "Enable" : action.kind === "reset" ? "Reset Password" : action.kind === "reset2fa" ? "Reset Two-Factor" : "Sign Out"}
+          description={action.kind === "role" ? "It applies at once, in every application and environment. Application roles the new role already covers are removed." : action.kind === "disable" ? "They're signed out of every console session and their API tokens stop working. There's no delete; Enable lets them sign in again, but ended sessions and revoked tokens aren't restored." : action.kind === "enable" ? "They can sign in again with their current password. Revoked sessions and tokens stay revoked." : action.kind === "reset" ? "Their console sessions end and their API tokens are revoked. They choose a new password when they next sign in." : action.kind === "reset2fa" ? "Their authenticator and recovery codes are removed and their console sessions here end. They sign in with just their password, and set it up again if this organization requires it. Do this only after confirming who's asking." : action.session.current ? "This is your current session: you'll be signed out." : "They'll need to sign in again on that device."}
           destructive={action.kind !== "enable"}
           onCancel={() => setAction(undefined)}
           onConfirm={() => void run()}
           pending={busy}
           size="wide"
-          title={action.kind === "role" ? `Change ${member.display_name} to ${ROLE_LABEL[action.role]}?` : action.kind === "disable" ? `Disable ${member.display_name}?` : action.kind === "enable" ? `Enable ${member.display_name}?` : action.kind === "reset" ? `Reset ${member.display_name}'s password?` : "Sign out this session?"}
+          title={action.kind === "role" ? `Change ${member.display_name} to ${ROLE_LABEL[action.role]}?` : action.kind === "disable" ? `Disable ${member.display_name}?` : action.kind === "enable" ? `Enable ${member.display_name}?` : action.kind === "reset" ? `Reset ${member.display_name}'s password?` : action.kind === "reset2fa" ? `Reset ${member.display_name}'s two-factor sign-in?` : "Sign out this session?"}
         >
           {action.kind === "role" ? <CapabilityList from={member.role} to={action.role} /> : null}
           {action.kind === "disable" ? <p className="lw-note">Active console sessions: <strong>{theirSessions.length}</strong>.</p> : null}
@@ -352,6 +555,12 @@ function MembersView() {
   const members = useMembers(me.canManageOwners);
   const sessions = useSessions(me.canManageOwners);
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [link, setLink] = useState<InvitationLink>();
+  const compatibility = useConsoleCompatibility();
+  const invitationsSupported = compatibility.status?.server_capabilities.includes("admin_invitations") ?? false;
+  const organizationID = useConsoleSession().data?.session?.organization_id;
+  const delivery = useQuery({ ...invitationsQueryOptions(organizationID ?? ""), enabled: invitationsSupported && me.canManageOwners && Boolean(organizationID) });
   const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "password" | "disabled">("all");
   const [added, setAdded] = useState<string>();
@@ -366,6 +575,12 @@ function MembersView() {
     { header: "Member", key: "member", render: (member) => <span className="lw-rq-model"><span>{member.display_name}{member.id === me.id ? <span className="lw-faint"> (you)</span> : null}</span><span className="lw-faint">{member.email}</span></span> },
     { header: "Role", key: "role", render: (member) => <Badge color={member.role === "owner" ? "accent" : undefined} variant="soft">{ROLE_LABEL[member.role]}</Badge> },
     { header: "Status", key: "status", render: statusBadge },
+    { header: "Two-factor", key: "two-factor", render: (member) => (
+      <span className="lw-row lw-row--wrap">
+        {member.two_factor_enabled === undefined ? <span className="lw-faint">—</span> : member.two_factor_enabled ? <Badge color="success" variant="soft">On</Badge> : <span className="lw-note lw-secondary">Off</span>}
+        {member.sso_linked ? <Badge title="Signs in with the organization's identity provider" variant="soft">SSO</Badge> : null}
+      </span>
+    ) },
     { header: "Added", key: "added", render: (member) => <span className="lw-note">{new Date(member.created_at).toLocaleDateString()}</span> }
   ];
 
@@ -374,7 +589,10 @@ function MembersView() {
   }
   return (
     <div className="lw-page lw-collection">
-      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => { setAdding(true); open(undefined); }} variant="primary">Add Member</Button>} description="People who can sign in to this console. Roles apply to the whole organization: every application and environment." title="Members" />
+      <PageHeader actions={<>
+        {invitationsSupported ? <Button disabled={!me.mutationAllowed} icon="plus" onClick={() => { setInviting(true); setAdding(false); open(undefined); }} variant="primary">Invite Member</Button> : null}
+        <Button disabled={!me.mutationAllowed} icon={invitationsSupported ? undefined : "plus"} onClick={() => { setAdding(true); setInviting(false); open(undefined); }} variant={invitationsSupported ? "secondary" : "primary"}>Add Member</Button>
+      </>} description="People who can sign in to this console. Roles apply to the whole organization: every application and environment." title="Members" />
       {added ? <div className="lw-page-notice"><Notice tone="success">{added}</Notice></div> : null}
       {members.error ? <div className="lw-page-notice"><ProblemNotice problem={problemFromError(members.error)} /></div> : null}
       <div className="lw-toolbar lw-toolbar--wrap">
@@ -388,6 +606,9 @@ function MembersView() {
         <span className="lw-secondary lw-note">{activeOwners} active owner{activeOwners === 1 ? "" : "s"}. {activeOwners <= 1 ? "Add a second owner so the team isn't locked out if one account is lost." : ""}</span>
         {members.hasNextPage ? <Button loading={members.isFetchingNextPage} onClick={() => void members.fetchNextPage()} size="sm">Load More</Button> : null}
       </div>
+      {invitationsSupported && organizationID ? <div className="lw-body"><InvitationsCard enabled={me.mutationAllowed} onLink={setLink} organizationID={organizationID} /></div> : null}
+      {inviting && me.mutationAllowed && organizationID ? <div className="lw-drawer-dock lw-drawer-dock--wide"><InviteMemberDrawer emailDelivery={delivery.data?.email_delivery ?? false} existing={items} onClose={() => setInviting(false)} onInvited={(created) => { setInviting(false); setLink(created); void queryClient.invalidateQueries({ queryKey: invitationsQueryOptions(organizationID).queryKey }); }} organizationID={organizationID} /></div> : null}
+      {link ? <InvitationLinkReveal link={link} onDone={() => setLink(undefined)} /> : null}
       {adding && me.mutationAllowed ? <div className="lw-drawer-dock lw-drawer-dock--wide"><AddMemberDrawer existing={items} onClose={() => setAdding(false)} onCreated={(member) => { setAdding(false); setAdded(`${member.display_name} was added as ${ROLE_LABEL[member.role]}. Share their first password privately; they'll choose their own when they sign in.`); void queryClient.invalidateQueries({ queryKey: ["team", "members"] }); open(member.id); }} /></div> : null}
       {selected ? <div className="lw-drawer-dock lw-drawer-dock--wide"><MemberDrawer activeOwners={activeOwners} key={selected.id} member={selected} onClose={() => open(undefined)} onUpdated={async () => { await Promise.all([members.refetch(), sessions.refetch()]); }} sessions={sessionItems} /></div> : null}
       {search.member && !members.isPending && !selected && !members.hasNextPage ? <div className="lw-page-notice"><Notice title="Member not found" tone="danger">No member has the ID <code className="lw-code-inline">{search.member}</code>. No one else was opened instead.</Notice></div> : null}
@@ -488,7 +709,10 @@ function TokenReveal({ created, onDone }: { created: CreatedAPIToken; onDone: ()
 
 function TokensView() {
   const me = useMe();
-  const tokens = useQuery({ queryFn: async () => (await adminRequest("/admin/v1/api-tokens", APITokenPageSchema)).data.items, queryKey: ["team", "tokens"], retry: false });
+  // Owners can also see everyone's tokens; the server checks manage_owners for that listing.
+  const [scope, setScope] = useState<"mine" | "everyone">("mine");
+  const everyone = scope === "everyone" && me.canManageOwners;
+  const tokens = useQuery({ queryFn: async () => (await adminRequest(everyone ? "/admin/v1/api-tokens?scope=organization" : "/admin/v1/api-tokens", APITokenPageSchema)).data.items, queryKey: ["team", "tokens", everyone ? "everyone" : "mine"], retry: false });
   const [creating, setCreating] = useState(false);
   const [revealed, setRevealed] = useState<{ created: CreatedAPIToken; replaces?: APITokenMetadata }>();
   const [askRevoke, setAskRevoke] = useState<APITokenMetadata>();
@@ -563,14 +787,26 @@ function TokensView() {
         );
       }
     },
+    ...(everyone ? [{ header: "Owner", key: "owner", render: (token: APITokenMetadata) => <span className="lw-note">{token.administrator?.email ?? "—"}{token.administrator?.id === me.id ? <span className="lw-faint"> (you)</span> : null}</span> }] : []),
     { header: "Created", key: "created", render: (token) => <span className="lw-note">{new Date(token.created_at).toLocaleDateString()}</span> },
+    { header: "Last used", key: "used", render: (token) => <span className="lw-note">{token.last_used_at ? when(token.last_used_at) : "Never"}</span> },
     { header: "Expires", key: "expires", render: expiresBadge },
-    { align: "right", header: "", key: "actions", render: (token) => <span className="lw-row lw-row--tight"><Button disabled={!me.mutationAllowed || busy} onClick={() => void replace(token)} size="sm" variant="ghost">Replace</Button><Button destructive disabled={!me.mutationAllowed} onClick={() => { setRevoking(token); setTyped(""); }} size="sm" variant="ghost">Revoke</Button></span> }
+    {
+      align: "right",
+      header: "",
+      key: "actions",
+      render: (token) => {
+        // Replacing creates a token for you, so it's offered only on your own tokens.
+        const mine = !token.administrator || token.administrator.id === me.id;
+        return <span className="lw-row lw-row--tight">{mine ? <Button disabled={!me.mutationAllowed || busy} onClick={() => void replace(token)} size="sm" variant="ghost">Replace</Button> : null}<Button destructive disabled={!me.mutationAllowed} onClick={() => { setRevoking(token); setTyped(""); }} size="sm" variant="ghost">Revoke</Button></span>;
+      }
+    }
   ];
 
   return (
     <div className="lw-page lw-collection">
-      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => setCreating(true)} variant="primary">Create Token</Button>} description="Your tokens for scripts and the CLI. Each acts as you, with only the capabilities you pick, and never more than your role allows." title="API tokens" />
+      <PageHeader actions={<Button disabled={!me.mutationAllowed} icon="plus" onClick={() => setCreating(true)} variant="primary">Create Token</Button>} description={everyone ? "Every administrator's tokens in this organization. Revoking one stops its scripts at once." : "Your tokens for scripts and the CLI. Each acts as you, with only the capabilities you pick, and never more than your role allows."} title="API tokens" />
+      {me.canManageOwners ? <div className="lw-toolbar"><Segmented items={[{ id: "mine", label: "Mine" }, { id: "everyone", label: "Everyone" }]} label="Whose tokens" onChange={setScope} value={scope} /></div> : null}
       {expiring.map((token) => <div className="lw-page-notice" key={token.id}><Notice action={<Button onClick={() => void replace(token)} size="sm">Replace {token.name}</Button>} tone="warning">{token.name} expires {daysUntil(token.expires_at, now)! <= 0 ? "now" : `in ${daysUntil(token.expires_at, now)} days`}.</Notice></div>)}
       {problem ? <div className="lw-page-notice"><ProblemNotice problem={problem} /></div> : null}
       {tokens.error ? <div className="lw-page-notice"><ProblemNotice problem={problemFromError(tokens.error)} /></div> : null}
@@ -578,7 +814,6 @@ function TokensView() {
         <DataTable caption="API tokens" columns={columns} rowKey={(token) => token.id} rows={active} />
       ) : <div className="lw-page-empty"><EmptyState icon="key" orientation="horizontal" title="No active tokens">Create one for CI, monitoring or the CLI. It&apos;s shown once.</EmptyState></div>}
       {revoked.length ? <div className="lw-body"><Card icon="ban" meta={`${revoked.length}`} title="Revoked"><ul className="lw-session-list">{revoked.map((token) => <li key={token.id}><span className="lw-mono lw-mono--sm">{token.name}</span><span className="lw-faint lw-note">{token.id}</span></li>)}</ul></Card></div> : null}
-      <p className="lw-secondary lw-note lw-page-foot">When a token was last used isn&apos;t recorded by the server yet.</p>
       {creating && me.mutationAllowed ? <div className="lw-drawer-dock lw-drawer-dock--wide"><CreateTokenDrawer onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); setRevealed({ created }); void tokens.refetch(); }} taken={active.map((token) => token.name)} /></div> : null}
       {revealed && me.mutationAllowed ? <TokenReveal created={revealed.created} onDone={() => { const old = revealed.replaces; setRevealed(undefined); if (old) setAskRevoke(old); }} /> : null}
       {askRevoke ? (
@@ -634,6 +869,7 @@ function SessionsView() {
 
   const columns: Array<Column<AdminSessionMetadata>> = [
     { header: "Member", key: "who", render: (session) => <span>{session.administrator.email}{session.current ? <> <Badge color="accent" variant="soft">This session</Badge></> : null}</span> },
+    { header: "Device", key: "device", render: (session) => <span className="lw-note">{session.device_summary ?? "—"}</span> },
     { header: "Signed in", key: "created", render: (session) => <span className="lw-note">{when(session.created_at)}</span> },
     { header: "Last seen", key: "seen", render: (session) => <span className="lw-note">{when(session.last_seen_at)}</span> },
     { header: "Expires", key: "expires", render: (session) => <span className="lw-note">{when(session.expires_at)}</span> },

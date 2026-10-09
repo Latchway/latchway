@@ -10,8 +10,9 @@ export interface paths {
         };
         /**
          * List redaction-safe administrator sessions in the active organization.
-         * @description Requires `manage_owners`. Returns administrator identity and lifecycle
-         *     metadata only. Token hints, hashes, CSRF material, network metadata, and
+         * @description Requires `manage_owners`. Returns administrator identity, lifecycle
+         *     metadata and a coarse server-derived device summary only. Token hints,
+         *     hashes, CSRF material, raw User-Agent strings, network addresses and
          *     revocation reasons are never returned. `current` is true only when the
          *     request itself authenticated with that cookie session; bearer-token
          *     requests report false for every item.
@@ -69,6 +70,32 @@ export interface paths {
          */
         post: operations["createAdministrator"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/administrators/{adminUserId}/application-roles/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Raise a member's role in one application.
+         * @description Requires `manage_owners`. The role must be higher than the member's
+         *     organization role (`conflict` otherwise, and always for owners).
+         *     Application-scoped actions (configuration, environments, secrets,
+         *     self-tests, installation and user actions) use the higher role for
+         *     that application; organization-wide actions keep the organization
+         *     role. Raising the organization role later drops grants it supersedes.
+         */
+        put: operations["setApplicationRole"];
+        post?: never;
+        /** Return a member to their organization role in one application. */
+        delete: operations["removeApplicationRole"];
         options?: never;
         head?: never;
         patch?: never;
@@ -134,6 +161,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/administrators/{adminUserId}/reset-two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a member's authenticator app, passkeys and recovery codes and end their sessions.
+         * @description Requires `manage_owners`. Like a password reset it is refused when the
+         *     member also belongs to another organization, because the second
+         *     factor is global to the account.
+         */
+        post: operations["resetAdministratorTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/administrators/{adminUserId}/role": {
         parameters: {
             query?: never;
@@ -161,7 +210,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List token metadata without token hashes or plaintext. */
+        /**
+         * List token metadata without token hashes or plaintext.
+         * @description Lists the caller's own tokens. With `scope=organization` it lists every
+         *     administrator's tokens in the organization with their owner; that
+         *     requires `manage_owners`.
+         */
         get: operations["listAdminApiTokens"];
         put?: never;
         /** Create a scoped API token shown exactly once. */
@@ -189,6 +243,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/application-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every application role in the organization.
+         * @description Requires `manage_owners`. An application role raises a member's organization role in one application; it never lowers it.
+         */
+        get: operations["listApplicationRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/applications": {
         parameters: {
             query?: never;
@@ -205,6 +279,28 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/applications/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change an application's display name.
+         * @description The slug never changes: configuration metadata, URLs and CLI flags name applications by slug.
+         *     Applications can't be deleted, because their audit and request history must stay intact; disable
+         *     one instead.
+         */
+        patch: operations["renameApplication"];
         trace?: never;
     };
     "/admin/v1/applications/{applicationId}/disable": {
@@ -265,6 +361,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/applications/{applicationId}/simulation-scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an application's saved simulator inputs.
+         * @description Newest first, at most 200. Needs activate_configuration in the application.
+         */
+        get: operations["listSimulationScenarios"];
+        put?: never;
+        /**
+         * Save a simulator input under a name.
+         * @description The input is validated like a simulation and stored without application or environment. The audit event records that it was set, not its values.
+         */
+        post: operations["createSimulationScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/audit-events": {
         parameters: {
             query?: never;
@@ -319,6 +439,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return what the sign-in screen needs before authentication.
+         * @description Public. Reports the advertised client contract and protocols so a
+         *     console can detect a version mismatch before sign-in, whether
+         *     first-owner setup can still be completed, and the enabled sign-in
+         *     methods. It never reports server build versions or account data.
+         */
+        get: operations["getAdminSignInInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation by creating the invited account, and sign in.
+         * @description Public, for addresses without an account: creates it with the chosen
+         *     name and password and its membership, then opens a console session.
+         *     An address that already has an account gets `conflict` and claims the
+         *     invitation after signing in.
+         */
+        post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/invitations/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the signed-in administrator to the organization they were invited to.
+         * @description Console sessions only, and only for the invited address. The session stays where it is; switch organization to use the new membership.
+         */
+        post: operations["claimInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/invitations/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show the holder of an invitation link what they're invited to.
+         * @description Public. Unknown, used, revoked, replaced and expired tokens all answer `resource_not_found`.
+         */
+        post: operations["previewInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/login": {
         parameters: {
             query?: never;
@@ -328,8 +534,61 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a secure administrator cookie session. */
+        /**
+         * Create a secure administrator cookie session.
+         * @description When the administrator has a second factor (an authenticator app or a
+         *     passkey), a correct password returns `202` with a short-lived
+         *     challenge and no cookie; the session is issued by
+         *     `POST /auth/login/two-factor`.
+         */
         post: operations["adminLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/login/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish a sign-in with an authenticator code, a passkey or a recovery code.
+         * @description Send exactly one of `code`, `passkey` or `recovery_code`. A challenge
+         *     lasts five minutes and ends after five failed attempts; failures are
+         *     also limited per administrator across challenges. Authenticator codes
+         *     work once. A passkey answers the prompt from
+         *     `POST /auth/login/two-factor/passkey-options` for the same challenge.
+         */
+        post: operations["adminLoginSecondFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/login/two-factor/passkey-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a passkey prompt for a sign-in whose password was correct.
+         * @description Returns WebAuthn request options limited to the administrator's
+         *     passkeys and tied to the sign-in challenge. Each prompt works once and
+         *     lasts five minutes. Returns `server_not_ready` when the console isn't
+         *     served from a domain name over HTTPS.
+         */
+        post: operations["adminLoginPasskeyOptions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -353,6 +612,170 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/auth/organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the console session with one for another organization.
+         * @description Console sessions only. The administrator must be an active member of
+         *     the target organization. The current session is revoked and a new
+         *     session cookie is issued in the same transaction.
+         */
+        post: operations["switchAdminOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the signed-in administrator's passkeys. */
+        get: operations["listOwnPasskeys"];
+        put?: never;
+        /**
+         * Register a passkey from the browser's response to the registration prompt.
+         * @description Console sessions only. Accepts ES256 credentials with user
+         *     verification; attestation statements are not evaluated. The first
+         *     second factor also issues ten recovery codes, returned once.
+         */
+        post: operations["addOwnPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/{adminPasskeyId}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove one of the signed-in administrator's passkeys.
+         * @description Console sessions only; requires the current password. Refused with
+         *     `conflict` when it is the last second factor and an organization the
+         *     administrator belongs to requires one. Removing the last second
+         *     factor also removes the recovery codes.
+         */
+        post: operations["removeOwnPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/registration-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check the password and start a passkey registration prompt.
+         * @description Console sessions only. Requires the current password (rate limited)
+         *     because a passkey can sign in on its own. Returns WebAuthn creation
+         *     options that require a discoverable credential, user verification and
+         *     ES256, and exclude passkeys already registered. Returns
+         *     `server_not_ready` when the console isn't served from a domain name
+         *     over HTTPS.
+         */
+        post: operations["startPasskeyRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a console session with a passkey.
+         * @description Verifies the passkey's signature, user verification and counter, then
+         *     signs in to `organization_id`, the last organization used, or the
+         *     first active membership. User verification on the authenticator stands
+         *     in for both the password and the second factor.
+         */
+        post: operations["adminPasskeySignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/passkeys/sign-in-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a passwordless sign-in with a passkey.
+         * @description Public; any body is ignored. Returns WebAuthn request options with no
+         *     allowed-credential list, so the browser offers any of this site's
+         *     passkeys. Each prompt works once and lasts five minutes; a bounded
+         *     number may be pending at once (`rate_limited` beyond it).
+         */
+        post: operations["adminPasskeySignInOptions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the signed-in administrator's own password.
+         * @description Console sessions only. Verifies the current password (rate limited),
+         *     refuses reuse, clears a pending forced change, and signs out every
+         *     other console session of the administrator in every organization. API
+         *     tokens are unaffected. A session whose password was set by an owner may
+         *     call only this operation, `GET /auth/session`, `GET /system` and logout
+         *     until it succeeds; anything else returns `permission_denied`.
+         */
+        post: operations["changeOwnAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/session": {
         parameters: {
             query?: never;
@@ -360,10 +783,220 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return the current administrator and capabilities. */
+        /**
+         * Return the current administrator and capabilities.
+         * @description A cookie that belonged to a session that has ended returns 401 with
+         *     `session_expired` or `session_revoked` and a detail naming the reason
+         *     (signed out, signed out from another session, revoked by an owner,
+         *     password reset by an owner, password changed, organization switch, or
+         *     access disabled). Unknown credentials keep `authentication_required`.
+         */
         get: operations["getAdminSession"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in administrator's own console sessions.
+         * @description Covers every organization. Includes active sessions and sessions that
+         *     ended in the last 30 days, newest activity first, at most 100.
+         */
+        get: operations["listOwnAdminSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions/{adminSessionId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out one of the signed-in administrator's own sessions. */
+        post: operations["revokeOwnAdminSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out every other console session of the signed-in administrator. */
+        post: operations["revokeOtherOwnAdminSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sso/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The identity provider's redirect back; signs in and returns the browser to the console.
+         * @description Public; reached by the browser, not called by clients. It needs the
+         *     binding cookie from `POST /auth/sso/start`, redeems the code with the
+         *     PKCE verifier, and verifies the ID token's signature, issuer,
+         *     audience, expiry and nonce. A linked identity signs in as its
+         *     administrator; otherwise a provider-verified email in an allowed
+         *     domain links to the matching member, or, when the organization
+         *     provisions accounts, creates a membership. Success sets the session
+         *     cookies and redirects to `/`; failure redirects to `/?sso_error=`
+         *     with one of `expired`, `denied`, `unavailable`, `failed`,
+         *     `no_account`, `unverified_email`, `domain` or `conflict`.
+         */
+        get: operations["finishAdminSSO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/sso/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a single sign-on at the organization's identity provider.
+         * @description Public. Returns the provider's authorization URL for the browser to
+         *     navigate to, and sets a short-lived HttpOnly cookie that binds the
+         *     sign-in to this browser. The sign-in carries a random state, nonce
+         *     and PKCE verifier and lasts ten minutes; a bounded number may be
+         *     pending per organization (`rate_limited` beyond it).
+         */
+        post: operations["startAdminSSO"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report the signed-in administrator's second factor. */
+        get: operations["getOwnTwoFactorStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove the authenticator app with the password and a current code.
+         * @description Passkeys stay. Refused with `conflict` when no passkey remains and an
+         *     organization the administrator belongs to requires two-factor sign-in.
+         */
+        post: operations["disableOwnTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace every recovery code after checking a current authenticator code or the password. */
+        post: operations["replaceRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start setting up an authenticator app.
+         * @description Console sessions only. Returns a new key and its `otpauth://` link
+         *     once; the key is sealed server-side and unusable until confirmed.
+         *     Replaces an earlier unconfirmed key; refuses while a confirmed one
+         *     exists.
+         */
+        post: operations["startTotpEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/auth/two-factor/totp/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm the authenticator with a current code and receive recovery codes. */
+        post: operations["confirmTotpEnrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -396,6 +1029,26 @@ export interface paths {
         };
         /** Inspect one component's key identity, trust provenance, feature grants, session state, reuse events, usage, and cost. */
         get: operations["getClientComponent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/client-components/{componentId}/operation-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what revoking or re-verifying a part ends now.
+         * @description Counts the part and every part it delegated to, directly or not. Revoking a root part isn't applicable; revoke its installation.
+         */
+        get: operations["getClientComponentImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -458,7 +1111,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Replace the document of a mutable draft using optimistic concurrency. */
+        /**
+         * Replace the document of a never-activated draft using optimistic concurrency.
+         * @description A validated revision that was never activated returns to draft; activated and discarded revisions are immutable. Each replacement is recorded in the edit history.
+         */
         patch: operations["replaceDraftConfiguration"];
         trace?: never;
     };
@@ -471,8 +1127,51 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Atomically activate a fully valid immutable revision. */
+        /**
+         * Atomically activate a fully valid immutable revision.
+         * @description An optional body records a publish note on the revision. Without a body the revision activates without one.
+         */
         post: operations["activateConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a never-activated draft, keeping it in history.
+         * @description The revision becomes `discarded`; its document stays readable, and it can no longer be edited, validated, simulated or activated.
+         */
+        post: operations["discardConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List who changed a revision, when, and which paths.
+         * @description Newest first, at most 200 edits. Paths only; values are never recorded. Edits made before the server recorded history are absent.
+         */
+        get: operations["listConfigurationRevisionEdits"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -496,6 +1195,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/config-revisions/{revisionId}/rebase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring a draft up to date with the live revision.
+         * @description Merges the live revision's changes into the draft and moves its base to `live_revision_id`,
+         *     which must still be live. Objects merge by key and lists of identified entries by `id`;
+         *     reordered lists, sensitive values and other values are taken whole. `resolutions` must name
+         *     `draft` or `live` for every conflicting path and nothing else. The draft returns to `draft`.
+         */
+        post: operations["rebaseConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/rebase-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview bringing a draft up to date with the live revision.
+         * @description Compares the draft and the live revision with the revision the draft started from. Lists the
+         *     paths each side changed and the paths both changed differently. Paths only; read the three
+         *     revisions to show values.
+         */
+        get: operations["previewConfigurationRebase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/config-revisions/{revisionId}/simulate": {
         parameters: {
             query?: never;
@@ -507,6 +1251,26 @@ export interface paths {
         put?: never;
         /** Explain feature policy, limit and route selection without dispatch. */
         post: operations["simulateConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/config-revisions/{revisionId}/simulate-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run up to 50 simulations against one revision.
+         * @description Each item succeeds or fails on its own; a failed item carries a problem code and detail.
+         */
+        post: operations["simulateConfigurationRevisionBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -528,6 +1292,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/environments/{environmentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change an environment's display name.
+         * @description The slug never changes. Environments can't be deleted, because their audit and request history must stay intact; disable one instead.
+         */
+        patch: operations["renameEnvironment"];
         trace?: never;
     };
     "/admin/v1/environments/{environmentId}/config": {
@@ -559,6 +1343,33 @@ export interface paths {
         put?: never;
         /** Create a draft revision from an explicit document or active revision. */
         post: operations["createConfigurationRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/environments/{environmentId}/config-revisions/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a draft from another environment's live configuration.
+         * @description Creates a draft in this environment from the live revision of another environment of the
+         *     same application. Features, models, input accounting, pricing, limit plans, session and
+         *     privacy settings come from the source. Sign-in providers, attestation policies, component
+         *     definitions and AI connections this environment already has are kept; entries only the
+         *     source has are copied and listed under `review`, because they may point at the source's
+         *     projects, app identifiers, origins, base URLs or secret references. Metadata always names
+         *     this environment. Refused with `conflict` while this environment has an unpublished,
+         *     undiscarded draft.
+         */
+        post: operations["promoteConfiguration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -660,7 +1471,11 @@ export interface paths {
         };
         /**
          * List redaction-safe Installation Family trust and usage summaries.
-         * @description Returns root trust, component counts, aggregate usage, cost, and revocation state without private keys, refresh grants, raw attestation evidence, or provider bodies.
+         * @description Returns root trust, component counts, aggregate usage, cost, signals,
+         *     and revocation state without private keys, refresh grants, raw
+         *     attestation evidence, or provider bodies. `signal=any` keeps
+         *     installations with at least one signal. Cursors belong to their sort;
+         *     `include_total=true` adds a capped count of every match.
          */
         get: operations["listInstallationFamilies"];
         put?: never;
@@ -680,6 +1495,23 @@ export interface paths {
         };
         /** Inspect one Installation Family and its complete bounded component trust graph. */
         get: operations["getInstallationFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/installation-families/{familyId}/operation-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview what revoking or renewing an installation ends now. */
+        get: operations["getInstallationFamilyImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -794,6 +1626,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/organizations/{organizationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the organization's display name.
+         * @description Owners only. The slug never changes.
+         */
+        patch: operations["renameOrganization"];
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's recent invitations.
+         * @description Requires `manage_owners`. Newest first, at most 200. Tokens and links are never listed.
+         */
+        get: operations["listInvitations"];
+        put?: never;
+        /**
+         * Invite an email address to the organization.
+         * @description Requires `manage_owners`. Returns the invitation link once; its token
+         *     is stored only as a hash, sits in the URL fragment, works once and
+         *     expires after seven days. A new invitation replaces any open one for
+         *     the same address. With `send_email`, the server also emails the link
+         *     through its configured relay (`conflict` when none is configured); a
+         *     failed delivery is recorded and the link is still returned. Refused
+         *     for members other than owners while the organization requires single
+         *     sign-on.
+         */
+        post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/invitations/{invitationId}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an open or expired invitation a new link and seven more days.
+         * @description The earlier link stops working. Optionally emails the new link.
+         */
+        post: operations["renewInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/invitations/{invitationId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop an open invitation from being used. */
+        post: operations["revokeInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization's single sign-on provider and the redirect URI to register.
+         * @description Requires `manage_owners`. The client secret is never returned.
+         */
+        get: operations["getOrganizationSSO"];
+        /**
+         * Set up or change the organization's OpenID Connect provider.
+         * @description Requires `manage_owners`. The server reads the issuer's discovery
+         *     document over the public internet and refuses issuers without the
+         *     authorization code flow, PKCE S256, and RS256 or ES256 ID tokens
+         *     (`configuration_invalid`). The client secret is sealed with the master
+         *     key; omit it to keep the stored one. Disabling ends single sign-on
+         *     sessions; requiring single sign-on ends members' other console
+         *     sessions, and owners keep their other sign-in methods.
+         */
+        put: operations["putOrganizationSSO"];
+        post?: never;
+        /**
+         * Remove the organization's single sign-on provider and linked identities.
+         * @description Requires `manage_owners`. Ends every single sign-on session in the organization except the caller's.
+         */
+        delete: operations["removeOrganizationSSO"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/organizations/{organizationId}/two-factor-requirement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Require, or stop requiring, a second factor for every member.
+         * @description Requires `manage_owners` in that organization. While required, a
+         *     member's console session without a confirmed second factor may only
+         *     set one up, change its password, read its session and system status,
+         *     and sign out. API tokens are not affected.
+         */
+        put: operations["setOrganizationTwoFactorRequirement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/requests": {
         parameters: {
             query?: never;
@@ -803,7 +1780,10 @@ export interface paths {
         };
         /**
          * List redaction-safe logical request metadata.
-         * @description Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned.
+         * @description Returns authenticated logical requests using deterministic server-side filtering, sorting, and
+         *     cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider
+         *     error text are never returned. `client_request_id` matches the correlation identifier a client
+         *     sent, exactly. `include_total=true` adds a count of every match, capped at 100,000.
          */
         get: operations["listLogicalRequests"];
         put?: never;
@@ -846,6 +1826,30 @@ export interface paths {
          *     headers, and bodies are excluded.
          */
         get: operations["getRequestEffectiveConfiguration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/requests/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count requests by each filterable value.
+         * @description Counts the requests started in the half-open `[start, end)` range (at most 90 days) by
+         *     outcome, feature, failure code, AI connection, model, route, platform, component kind, trust
+         *     source and selected limit plan, most common first. Every value is one the matching request-list filter accepts.
+         *     Connection, model and route count the selected values; the list filters also match retried
+         *     attempts, so a filter can return more requests than its count. Facets ignore other filters.
+         */
+        get: operations["getRequestFacets"];
         put?: never;
         post?: never;
         delete?: never;
@@ -970,7 +1974,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List an environment's recent self-test runs, newest first.
+         * @description Runs are kept for the job-history retention window. Needs run_self_tests in the application.
+         */
+        get: operations["listSelfTests"];
         put?: never;
         /**
          * Start a bounded diagnostic or conformance test.
@@ -1007,6 +2015,24 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/simulation-scenarios/{scenarioId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a saved scenario's name and input. */
+        put: operations["replaceSimulationScenario"];
+        post?: never;
+        /** Delete a saved scenario. */
+        delete: operations["deleteSimulationScenario"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1049,6 +2075,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/system/health-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the server self-check sampled every five minutes.
+         * @description A worker records the overall state and the identifiers of failed and warning checks every five
+         *     minutes and keeps 30 days. A range is at most 7 days and defaults to the last 24 hours. Gaps
+         *     mean no worker was running.
+         */
+        get: operations["getSystemHealthHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/system/support-bundle": {
         parameters: {
             query?: never;
@@ -1061,6 +2109,54 @@ export interface paths {
          * @description Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key.
          */
         get: operations["downloadSystemSupportBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/usage/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Summarize upstream attempts per AI connection.
+         * @description Outcomes, public failure categories, rate limits and server errors, how many failed attempts were
+         *     followed by another attempt, time to first byte, duration, and recorded usage for each AI
+         *     connection, from attempts that started in `[start, end)` (at most 90 days). `interval=hour`
+         *     (at most 14 days) or `day` adds attempt and failure counts per bucket. Nothing probes the
+         *     providers; this is what your requests recorded.
+         */
+        get: operations["getConnectionHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/usage/distribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-user usage in each limit window, summarized, and how many would exceed a maximum.
+         * @description Sums one metric per subject (the scope's dimensions) in each calendar window of `window` and
+         *     `timezone`, aligned exactly as quota enforcement aligns them, over a range of at most 90 days
+         *     and 2,000 windows. Each subject's busiest window feeds the percentiles, a 1-2-5 histogram and,
+         *     with `maximum`, the count of subjects and users that would have exceeded it. No user or
+         *     subject identifiers are returned.
+         */
+        get: operations["getUsageDistribution"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1109,6 +2205,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/user-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List limit-plan overrides, current and ended.
+         * @description Newest first. `active` is unrevoked and unexpired; `ended` is revoked or expired.
+         */
+        get: operations["listUserOverrides"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users": {
         parameters: {
             query?: never;
@@ -1116,7 +2232,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List pseudonymous application users. */
+        /**
+         * List pseudonymous application users.
+         * @description Filters combine. `claim` matches one configured normalized claim
+         *     exactly, as `name:value`. Cursors belong to the sort they came from.
+         *     `include_total=true` adds a count of every match, capped at 100,000.
+         */
         get: operations["listApplicationUsers"];
         put?: never;
         post?: never;
@@ -1278,10 +2399,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{userId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sum one user's usage for requests started in a time range. */
+        get: operations["getApplicationUserUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply one confirmed user action to up to 100 users.
+         * @description Each user needs the impact token from the batch preview. Every user is
+         *     changed in its own transaction with its own audit event and operation
+         *     ID; a user whose state changed since the preview is skipped as
+         *     `changed` instead of acted on.
+         */
+        post: operations["applyApplicationUserBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/batch-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview one user action for up to 100 users.
+         * @description Returns each user's impact and token, as the single-user preview does, plus summed counts. Unknown users are reported, not failed.
+         */
+        post: operations["previewApplicationUserBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptInvitationRequest: {
+            display_name: string;
+            password: string;
+            token: string;
+        };
+        ActivateConfigurationRequest: {
+            /** @description Publish note; empty means none. */
+            note?: string;
+        };
+        AddedPasskey: {
+            passkey: components["schemas"]["Passkey"];
+            /** @description Present when this passkey is the first second factor; shown once. */
+            recovery_codes?: string[];
+        };
+        AddPasskeyRequest: {
+            credential: components["schemas"]["PasskeyRegistration"];
+            name: string;
+        };
         Administrator: {
             /** Format: date-time */
             created_at: string;
@@ -1295,8 +2494,12 @@ export interface components {
             organization_id: components["schemas"]["OrganizationID"];
             password_reset_required: boolean;
             role: components["schemas"]["AdministratorRole"];
+            /** @description True when the administrator has signed in to this organization with its identity provider. */
+            sso_linked: boolean;
             /** @enum {string} */
             status: "active" | "disabled";
+            /** @description True when the account has a confirmed authenticator app or a passkey. */
+            two_factor_enabled: boolean;
             /** Format: date-time */
             updated_at: string;
         };
@@ -1306,13 +2509,21 @@ export interface components {
         };
         /** @enum {string} */
         AdministratorRole: "owner" | "admin" | "operator" | "viewer";
+        AdminPasskeyID: string;
         AdminSession: {
             administrator: {
+                display_name: string;
                 /** Format: email */
                 email: string;
                 enabled: boolean;
                 id: string;
             };
+            /** @description Roles that raise this administrator's organization role in single applications. `capabilities` reflects the organization role; an application's capabilities follow the higher of the two. */
+            application_roles?: {
+                application_id: components["schemas"]["ApplicationID"];
+                /** @enum {string} */
+                role: "admin" | "operator";
+            }[];
             capabilities: string[];
             /** Format: date-time */
             expires_at: string | null;
@@ -1322,6 +2533,15 @@ export interface components {
                 role: "owner" | "admin" | "operator" | "viewer";
             }[];
             organization_id: components["schemas"]["OrganizationID"];
+            /** @description True when an owner set this administrator's password; only the password change, session read, system status and logout are allowed until it changes. */
+            password_reset_required: boolean;
+            /**
+             * @description How a console session was signed in; absent for API tokens.
+             * @enum {string}
+             */
+            sign_in_method?: "password" | "passkey" | "sso";
+            /** @description True when the organization requires a second factor this administrator hasn't set up; only enrollment, the password change, session read, system status and logout are allowed. Never true for single sign-on sessions. */
+            two_factor_enrollment_required: boolean;
         };
         AdminSessionID: string;
         AdminSessionMetadata: {
@@ -1333,6 +2553,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             current: boolean;
+            device_summary?: components["schemas"]["DeviceSummary"];
             /** Format: date-time */
             expires_at: string;
             id: components["schemas"]["AdminSessionID"];
@@ -1345,13 +2566,30 @@ export interface components {
             items: components["schemas"]["AdminSessionMetadata"][];
             page: components["schemas"]["PageInfo"];
         };
+        AdminSignInInfo: {
+            /** @constant */
+            contract_version: "1.1.0";
+            protocol_versions: number[];
+            /** @description True while a bootstrap token is installed and unconsumed and no owner exists. */
+            setup_open: boolean;
+            /** @description Includes `passkey` when the console is served from a domain name over HTTPS, and `sso` when any organization has single sign-on enabled. */
+            sign_in_methods: ("password" | "passkey" | "sso")[];
+        };
         AdminUserID: string;
         ApiTokenMetadata: {
+            /** @description The token's owner; present only in the organization-wide listing. */
+            administrator?: {
+                /** Format: email */
+                email: string;
+                id: components["schemas"]["AdminUserID"];
+            };
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             expires_at?: string;
             id: components["schemas"]["TokenID"];
+            /** Format: date-time */
+            last_used_at?: string;
             name: string;
             revoked: boolean;
             scopes: string[];
@@ -1386,6 +2624,24 @@ export interface components {
             items: components["schemas"]["Application"][];
             page: components["schemas"]["PageInfo"];
         };
+        ApplicationRoleGrant: {
+            admin_user_id: components["schemas"]["AdminUserID"];
+            application_id: components["schemas"]["ApplicationID"];
+            /** Format: date-time */
+            created_at: string;
+            granted_by: string;
+            /** @enum {string} */
+            role: "admin" | "operator";
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ApplicationRoleList: {
+            items: components["schemas"]["ApplicationRoleGrant"][];
+        };
+        ApplicationRoleRequest: {
+            /** @enum {string} */
+            role: "admin" | "operator";
+        };
         ApplicationUser: {
             /** Format: date-time */
             created_at: string;
@@ -1400,6 +2656,16 @@ export interface components {
             };
             /** @enum {string} */
             status: "active" | "blocked";
+        };
+        ApplicationUserUsage: {
+            /** Format: date-time */
+            end: string;
+            provenance: string[];
+            request_count: number;
+            /** Format: date-time */
+            start: string;
+            user_id: components["schemas"]["UserID"];
+            values: components["schemas"]["UsageValues"];
         };
         AttestationPolicy: {
             id: components["schemas"]["Identifier"];
@@ -1459,6 +2725,7 @@ export interface components {
         };
         /** @description Stable operational reason code. Free-form user text and secret-bearing labels are never copied into the audit ledger. */
         AuditReason: string;
+        Base64URL: string;
         BootstrapRequest: {
             bootstrap_token: string;
             display_name: string;
@@ -1470,6 +2737,14 @@ export interface components {
         };
         CELExpression: string;
         ChangeAdministratorRoleRequest: {
+            role: components["schemas"]["AdministratorRole"];
+        };
+        ChangeOwnPasswordRequest: {
+            current_password: string;
+            new_password: string;
+        };
+        ClaimedInvitation: {
+            organization_id: components["schemas"]["OrganizationID"];
             role: components["schemas"]["AdministratorRole"];
         };
         ClaimMapping: {
@@ -1531,6 +2806,8 @@ export interface components {
         };
         /** @enum {string} */
         ClientPlatform: "ios" | "android" | "web" | "node" | "react_native_ios" | "react_native_android" | "watchos" | "wearos";
+        /** @description Correlation identifier chosen by the client. Never used for lookup by the runtime, authorization, quota or routing. */
+        ClientRequestID: string;
         /** @enum {string} */
         code: "request_invalid" | "identity_token_missing" | "identity_token_invalid" | "identity_token_expired" | "identity_reauthentication_required" | "attestation_required" | "attestation_unsupported" | "attestation_invalid" | "attestation_stale" | "attestation_step_up_required" | "dpop_missing" | "dpop_invalid" | "dpop_replayed" | "dpop_nonce_required" | "session_expired" | "session_revoked" | "refresh_token_reused" | "installation_revoked" | "installation_family_revoked" | "installation_family_not_found" | "component_definition_not_found" | "component_not_configured" | "component_not_provisioned" | "component_revoked" | "component_key_invalid" | "component_key_replaced" | "component_delegation_expired" | "component_feature_not_granted" | "component_parent_trust_expired" | "component_direct_attestation_required" | "containing_app_setup_required" | "framework_integration_unsupported" | "framework_version_unsupported" | "transport_destination_not_allowed" | "transport_request_not_replayable" | "feature_not_found" | "feature_not_allowed" | "model_not_allowed" | "quota_exceeded" | "concurrency_exceeded" | "output_limit_exceeded" | "pricing_unavailable" | "route_not_found" | "upstream_unavailable" | "upstream_timeout" | "upstream_protocol_error" | "configuration_invalid" | "server_not_ready" | "protocol_version_unsupported" | "authentication_required" | "permission_denied" | "resource_not_found" | "conflict" | "etag_required" | "etag_mismatch" | "bootstrap_disabled" | "rate_limited" | "operation_indeterminate" | "internal_error";
         ComponentAttestationPolicy: {
@@ -2161,6 +3438,21 @@ export interface components {
                 };
             };
         };
+        ConfigurationChange: {
+            /** @enum {string} */
+            operation: "add" | "remove" | "replace";
+            path: string;
+            summary?: string;
+        };
+        ConfigurationMergePreview: {
+            base_revision_id?: components["schemas"]["RevisionID"];
+            conflicts: string[];
+            draft_changes: components["schemas"]["ConfigurationChange"][];
+            live_changes: components["schemas"]["ConfigurationChange"][];
+            live_revision_id: components["schemas"]["RevisionID"];
+            revision_id: components["schemas"]["RevisionID"];
+            up_to_date: boolean;
+        };
         ConfigurationPlan: {
             changes: {
                 /** @enum {string} */
@@ -2172,19 +3464,63 @@ export interface components {
             to_revision_id: components["schemas"]["RevisionID"];
             warnings: components["schemas"]["ValidationIssue"][];
         };
+        ConfigurationPromotion: {
+            promotion: {
+                /** @description Spec sections taken from the source. */
+                copied: string[];
+                /** @description Paths kept from this environment. */
+                kept: string[];
+                /** @description Entries copied from the source that may point at its infrastructure. */
+                review: string[];
+                source_environment_id: components["schemas"]["EnvironmentID"];
+                source_revision_id: components["schemas"]["RevisionID"];
+            };
+            revision: components["schemas"]["ConfigurationRevision"];
+        };
         ConfigurationRevision: {
             /** Format: date-time */
             activated_at?: string;
+            /** @description Publish note recorded at activation. */
+            activation_note?: string;
+            /** @description The live revision this draft started from. */
+            base_revision_id?: components["schemas"]["RevisionID"];
             /** Format: date-time */
             created_at: string;
             created_by: string;
+            description?: string;
+            /** Format: date-time */
+            discarded_at?: string;
+            discarded_by?: string;
             document: components["schemas"]["config.schema"];
             environment_id: components["schemas"]["EnvironmentID"];
             id: components["schemas"]["RevisionID"];
             /** @enum {string} */
-            state: "draft" | "valid" | "active" | "superseded" | "invalid";
+            state: "draft" | "valid" | "active" | "superseded" | "invalid" | "discarded";
+            /**
+             * Format: date-time
+             * @description Time of the latest recorded edit
+             */
+            updated_at: string;
+            /** @description Author of the latest recorded edit */
+            updated_by: string;
             validation?: components["schemas"]["ValidationReport"];
             version: number;
+        };
+        ConfigurationRevisionEdit: {
+            /** @description Every changed path; `changes` lists at most 100. */
+            change_count: number;
+            changes: components["schemas"]["ConfigurationChange"][];
+            /** Format: date-time */
+            edited_at: string;
+            edited_by: string;
+            /** @enum {string} */
+            kind: "created" | "edited" | "rebased" | "promoted";
+            version: number;
+        };
+        ConfigurationRevisionEdits: {
+            items: components["schemas"]["ConfigurationRevisionEdit"][];
+            revision_id: components["schemas"]["RevisionID"];
+            truncated: boolean;
         };
         ConfigurationRevisionPage: {
             items: components["schemas"]["ConfigurationRevision"][];
@@ -2197,6 +3533,44 @@ export interface components {
             impact_token: string;
             /** @description Required operator justification. Only a reason-present audit marker is persisted; free-form text is not copied into audit metadata. */
             reason: string;
+        };
+        ConnectionHealth: {
+            connections: {
+                attempts: number;
+                canceled: number;
+                duration: components["schemas"]["UsageDistribution"];
+                failed: number;
+                failures: {
+                    code: string;
+                    count: number;
+                }[];
+                /** @description Failed attempts followed by another attempt. */
+                fell_back: number;
+                first_byte: components["schemas"]["UsageDistribution"];
+                /** @description Attempts answered with HTTP 429. */
+                rate_limited: number;
+                /** @description Attempts answered with HTTP 5xx. */
+                server_errors: number;
+                succeeded: number;
+                upstream: components["schemas"]["Identifier"];
+                usage: components["schemas"]["UsageValues"];
+            }[];
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            /** @enum {string} */
+            interval?: "hour" | "day";
+            series?: {
+                attempts: number;
+                failed: number;
+                /** Format: date-time */
+                timestamp: string;
+                upstream: components["schemas"]["Identifier"];
+            }[];
+            /** Format: date-time */
+            start: string;
+            /** @description More than 200 connections had attempts; the busiest 200 are listed. */
+            truncated: boolean;
         };
         CreateAdministratorRequest: {
             display_name: string;
@@ -2231,6 +3605,13 @@ export interface components {
             kind: "development" | "staging" | "production";
             slug: components["schemas"]["Identifier"];
         };
+        CreateInvitationRequest: {
+            display_name?: string;
+            /** Format: email */
+            email: string;
+            role: components["schemas"]["AdministratorRole"];
+            send_email?: boolean;
+        };
         CreateNamedResource: {
             display_name: string;
             slug: components["schemas"]["Identifier"];
@@ -2263,9 +3644,15 @@ export interface components {
             /** @default true */
             dnsPinning: boolean;
         } & unknown;
+        /** @description Coarse "Browser on OS" phrase derived by the server; never a raw User-Agent or network address. */
+        DeviceSummary: string;
         DisableResourceRequest: {
             /** @description Bounded operator explanation used only to establish that a reason was supplied; its value is never persisted in audit data. */
             reason: string;
+        };
+        DisableTwoFactorRequest: {
+            code: string;
+            password: string;
         };
         DoctorCheck: {
             id: string;
@@ -2490,6 +3877,17 @@ export interface components {
             scope: components["schemas"]["Identifier"][];
             source: string;
             timezone?: string;
+            /** @description Current quota state for the user's current installation; omitted when a limit depends on the route. */
+            usage?: {
+                maximum?: number;
+                /** Format: date-time */
+                observed_at: string;
+                remaining?: number;
+                reserved?: number;
+                /** Format: date-time */
+                resets_at?: string;
+                used?: number;
+            };
             window?: string;
         };
         EffectiveOutput: {
@@ -2516,6 +3914,7 @@ export interface components {
             sticky_by?: string;
             upstream: components["schemas"]["Identifier"];
         };
+        /** @description An environment. `active_revision_id` names the live configuration revision and appears only in environment lists, for environments with one; responses to environment mutations omit it. */
         Environment: {
             active_revision_id?: components["schemas"]["RevisionID"];
             application_id: components["schemas"]["ApplicationID"];
@@ -2550,6 +3949,22 @@ export interface components {
         FirebaseAppCheckConfiguration: {
             allowedAppIds: string[];
             projectNumber: string;
+        };
+        HealthHistory: {
+            /** Format: date-time */
+            end: string;
+            /** @constant */
+            interval_seconds: 300;
+            samples: {
+                failed_checks: string[];
+                /** @enum {string} */
+                overall_state: "healthy" | "degraded" | "unhealthy";
+                /** Format: date-time */
+                sampled_at: string;
+                warning_checks: string[];
+            }[];
+            /** Format: date-time */
+            start: string;
         };
         Identifier: string;
         IdentityProvider: {
@@ -2638,6 +4053,15 @@ export interface components {
             /** Format: date-time */
             root_trust_expires_at?: string;
             root_trust_source: components["schemas"]["ComponentTrustSource"];
+            /**
+             * @description Conditions worth a look; revoked installations have none.
+             *     `debug_trust` is debug attestation outside Development,
+             *     `trust_expiring` root trust expiring within seven days,
+             *     `token_reuse` a reused refresh token, `weak_key_storage` a native
+             *     part keeping its key in software or memory, and `failed_sessions`
+             *     a part with three or more sessions that ended uncleanly.
+             */
+            signals: ("debug_trust" | "trust_expiring" | "token_reuse" | "weak_key_storage" | "failed_sessions")[];
             /** @enum {string} */
             status: "active" | "suspended" | "revoked";
             /** Format: date-time */
@@ -2649,11 +4073,59 @@ export interface components {
         InstallationFamilyPage: {
             items: components["schemas"]["InstallationFamily"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
         };
         InstallationID: string;
         InstallationPage: {
             items: components["schemas"]["Installation"][];
             page: components["schemas"]["PageInfo"];
+        };
+        Invitation: {
+            /** Format: date-time */
+            accepted_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            display_name?: string;
+            email: string;
+            /** Format: date-time */
+            email_sent_at?: string;
+            /** @enum {string} */
+            email_status: "not_requested" | "sent" | "failed";
+            /** Format: date-time */
+            expires_at: string;
+            id: components["schemas"]["InvitationID"];
+            invited_by: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            role: components["schemas"]["AdministratorRole"];
+            /** @enum {string} */
+            status: "pending" | "accepted" | "revoked" | "expired";
+        };
+        InvitationID: string;
+        InvitationLink: {
+            invitation: components["schemas"]["Invitation"];
+            /** @description The invitation link, shown once; the token is in the fragment. */
+            url: string;
+        };
+        InvitationList: {
+            /** @description True when the server has an SMTP relay for invitation emails. */
+            email_delivery: boolean;
+            items: components["schemas"]["Invitation"][];
+        };
+        InvitationPreview: {
+            /** @description True when the address already has an account */
+            account_exists: boolean;
+            display_name?: string;
+            email: string;
+            /** Format: date-time */
+            expires_at: string;
+            invited_by: string;
+            organization_id: components["schemas"]["OrganizationID"];
+            organization_name: string;
+            role: components["schemas"]["AdministratorRole"];
+        };
+        InvitationTokenRequest: {
+            token: string;
         };
         Limit: ({
             /** @enum {unknown} */
@@ -2686,6 +4158,11 @@ export interface components {
             id: components["schemas"]["Identifier"];
             limits: components["schemas"]["Limit"][];
         };
+        ListTotal: {
+            /** @description True when there are more than 100 */
+            capped: boolean;
+            count: number;
+        };
         LogicalRequest: {
             /** @description Ordered by contiguous attempt_number beginning at one. */
             attempts: components["schemas"]["UpstreamAttempt"][];
@@ -2695,6 +4172,7 @@ export interface components {
              */
             caller_sdk?: "ios" | "android" | "react-native" | "javascript";
             client_component_id?: components["schemas"]["ClientComponentID"];
+            client_request_id?: components["schemas"]["ClientRequestID"];
             /** Format: date-time */
             completed_at?: string;
             component_definition_id?: components["schemas"]["Identifier"];
@@ -2711,6 +4189,11 @@ export interface components {
             id: components["schemas"]["RequestID"];
             installation_family_id?: components["schemas"]["InstallationFamilyID"];
             installation_id: components["schemas"]["InstallationID"];
+            /**
+             * @description Platform of the installation that sent the request.
+             * @enum {string}
+             */
+            platform?: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
             /** @enum {string} */
             protocol: "openai_responses" | "openai_chat" | "openai_embeddings" | "anthropic_messages" | "opaque_http";
             selected_limit_plan: components["schemas"]["Identifier"];
@@ -2766,6 +4249,23 @@ export interface components {
         OperationalRevocationRequest: {
             reason?: string;
         };
+        OperationImpact: {
+            /** @enum {string} */
+            action: "revoke" | "require_renewal" | "require_reattestation";
+            applicable: boolean;
+            counts: {
+                active_components: number;
+                active_refresh_tokens: number;
+                active_sessions: number;
+                delegated_components: number;
+                /** Format: date-time */
+                last_seen_at?: string;
+                requests_last_24_hours: number;
+                requests_last_24_hours_capped: boolean;
+            };
+            current_status: string;
+            summary: string;
+        };
         Organization: {
             /** Format: date-time */
             created_at: string;
@@ -2782,9 +4282,131 @@ export interface components {
             absoluteMaximumTokens: number;
             defaultMaximumTokens: number;
         };
+        OwnAdminSession: {
+            /** Format: date-time */
+            created_at: string;
+            current: boolean;
+            device_summary?: components["schemas"]["DeviceSummary"];
+            end_reason?: components["schemas"]["SessionEndReason"];
+            /** Format: date-time */
+            expires_at: string;
+            id: components["schemas"]["AdminSessionID"];
+            /** Format: date-time */
+            last_seen_at: string;
+            organization_id: components["schemas"]["OrganizationID"];
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+        };
+        OwnAdminSessionList: {
+            items: components["schemas"]["OwnAdminSession"][];
+        };
         PageInfo: {
             has_more: boolean;
             next_cursor?: string;
+        };
+        Passkey: {
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["AdminPasskeyID"];
+            /** Format: date-time */
+            last_used_at?: string;
+            name: string;
+            /** @description True when the authenticator reports the passkey is backed up */
+            synced: boolean;
+        };
+        /** @description AuthenticationResponseJSON from the WebAuthn Level 3 JSON encoding. */
+        PasskeyAssertion: {
+            authenticatorAttachment?: string;
+            clientExtensionResults?: Record<string, never>;
+            id: components["schemas"]["Base64URL"];
+            rawId: components["schemas"]["Base64URL"];
+            response: {
+                authenticatorData: components["schemas"]["Base64URL"];
+                clientDataJSON: components["schemas"]["Base64URL"];
+                signature: components["schemas"]["Base64URL"];
+                userHandle?: components["schemas"]["Base64URL"];
+            };
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyCreationOptions: {
+            /** @description PublicKeyCredentialCreationOptions in the WebAuthn Level 3 JSON encoding. */
+            public_key: {
+                /** @constant */
+                attestation: "none";
+                authenticatorSelection: {
+                    /** @constant */
+                    requireResidentKey: true;
+                    /** @constant */
+                    residentKey: "required";
+                    /** @constant */
+                    userVerification: "required";
+                };
+                challenge: components["schemas"]["Base64URL"];
+                excludeCredentials: components["schemas"]["PasskeyDescriptor"][];
+                pubKeyCredParams: {
+                    /** @constant */
+                    alg: -7;
+                    /** @constant */
+                    type: "public-key";
+                }[];
+                rp: {
+                    id: string;
+                    name: string;
+                };
+                timeout: number;
+                user: {
+                    displayName: string;
+                    id: components["schemas"]["Base64URL"];
+                    name: string;
+                };
+            };
+        };
+        PasskeyDescriptor: {
+            id: components["schemas"]["Base64URL"];
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyList: {
+            items: components["schemas"]["Passkey"][];
+        };
+        PasskeyOptionsForSignInRequest: {
+            challenge: string;
+        };
+        /** @description RegistrationResponseJSON from the WebAuthn Level 3 JSON encoding. */
+        PasskeyRegistration: {
+            authenticatorAttachment?: string;
+            clientExtensionResults?: Record<string, never>;
+            id: components["schemas"]["Base64URL"];
+            rawId: components["schemas"]["Base64URL"];
+            response: {
+                attestationObject: components["schemas"]["Base64URL"];
+                authenticatorData?: components["schemas"]["Base64URL"];
+                clientDataJSON: components["schemas"]["Base64URL"];
+                publicKey?: components["schemas"]["Base64URL"];
+                publicKeyAlgorithm?: number;
+                transports?: string[];
+            };
+            /** @constant */
+            type: "public-key";
+        };
+        PasskeyRequestOptions: {
+            /** @description PublicKeyCredentialRequestOptions in the WebAuthn Level 3 JSON encoding. */
+            public_key: {
+                allowCredentials: components["schemas"]["PasskeyDescriptor"][];
+                challenge: components["schemas"]["Base64URL"];
+                rpId: string;
+                timeout: number;
+                /** @constant */
+                userVerification: "required";
+            };
+        };
+        PasskeySignInRequest: {
+            credential: components["schemas"]["PasskeyAssertion"];
+            organization_id?: components["schemas"]["OrganizationID"];
+        };
+        PasswordConfirmation: {
+            password: string;
         };
         PlatformAttestation: {
             allowedOrigins?: string[];
@@ -2869,6 +4491,10 @@ export interface components {
             /** Format: uri */
             type: string;
         } & unknown;
+        PromoteConfigurationRequest: {
+            description?: string;
+            source_environment_id: components["schemas"]["EnvironmentID"];
+        };
         /** @description Allowlisted bounded provider metadata only; never raw messages, prompts, response bodies or credentials. */
         ProviderErrorDiagnostics: {
             /** @enum {string} */
@@ -2886,6 +4512,27 @@ export interface components {
             currency: "USD";
             /** @constant */
             source: "openrouter_usage_cost";
+        };
+        RebaseConfigurationRequest: {
+            live_revision_id: components["schemas"]["RevisionID"];
+            resolutions?: {
+                [key: string]: "draft" | "live";
+            };
+        };
+        RecoveryCodes: {
+            recovery_codes: string[];
+        };
+        /** @description Exactly one of `code` or `password`. */
+        RecoveryCodesRequest: {
+            code?: string;
+            password?: string;
+        };
+        RenameRequest: {
+            /** @description One line; surrounding spaces are trimmed. */
+            display_name: string;
+        };
+        RenewInvitationRequest: {
+            send_email?: boolean;
         };
         RequestDecisionStage: {
             /** Format: date-time */
@@ -2915,10 +4562,42 @@ export interface components {
             started_at: string;
             upstream?: components["schemas"]["Identifier"];
         };
+        RequestFacet: {
+            /** @description True when more values exist than were returned. */
+            truncated: boolean;
+            values: components["schemas"]["RequestFacetValue"][];
+        };
+        RequestFacets: {
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            facets: {
+                component_kind: components["schemas"]["RequestFacet"];
+                error_code: components["schemas"]["RequestFacet"];
+                feature: components["schemas"]["RequestFacet"];
+                limit_plan: components["schemas"]["RequestFacet"];
+                model: components["schemas"]["RequestFacet"];
+                platform: components["schemas"]["RequestFacet"];
+                route: components["schemas"]["RequestFacet"];
+                status: components["schemas"]["RequestFacet"];
+                trust_source: components["schemas"]["RequestFacet"];
+                upstream: components["schemas"]["RequestFacet"];
+            };
+            feature?: components["schemas"]["Identifier"];
+            /** @description Requests started in the range. */
+            requests: number;
+            /** Format: date-time */
+            start: string;
+        };
+        RequestFacetValue: {
+            count: number;
+            value: string;
+        };
         RequestID: string;
         RequestPage: {
             items: components["schemas"]["LogicalRequest"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
         };
         ResetAdministratorPasswordRequest: {
             password: string;
@@ -2972,9 +4651,58 @@ export interface components {
             weight: number;
             when: components["schemas"]["CELExpression"];
         };
+        RouteSimulationAttemptPlan: {
+            assumptions: string[];
+            attempts: {
+                condition?: string;
+                model: components["schemas"]["Identifier"];
+                /** @enum {string} */
+                next?: "retry" | "fallback" | "stop";
+                number: number;
+                /** @enum {string} */
+                outcome: "succeeded" | "failed";
+                /** @description Exponential backoff before the retry; runtime jitter only lowers it. */
+                retry_delay_max_ms?: number;
+                route: components["schemas"]["Identifier"];
+                upstream: components["schemas"]["Identifier"];
+            }[];
+            failure_condition?: string;
+            /** @enum {string} */
+            outcome: "served" | "failed";
+            served_by_route?: components["schemas"]["Identifier"];
+        };
+        RouteSimulationBatchRequest: {
+            requests: components["schemas"]["RouteSimulationRequest"][];
+        };
+        RouteSimulationBatchResult: {
+            items: {
+                index: number;
+                problem?: {
+                    code: string;
+                    detail: string;
+                };
+                result?: components["schemas"]["RouteSimulationResult"];
+            }[];
+        };
+        RouteSimulationFailure: {
+            /** @description Fail only the first this many attempts on the route; omitted or zero fails every attempt. */
+            attempts?: number;
+            /**
+             * @description An attempt outcome a retry or fallback policy can name, or `non_retryable` for any other failure.
+             * @enum {string}
+             */
+            condition: "connect_error" | "timeout_before_headers" | "first_byte_timeout" | "status_408" | "status_429" | "status_500" | "status_502" | "status_503" | "status_504" | "non_retryable";
+            route: components["schemas"]["Identifier"];
+        };
         RouteSimulationRequest: {
             application_id?: components["schemas"]["ApplicationID"];
             environment_id?: components["schemas"]["EnvironmentID"];
+            /**
+             * @description Makes attempts on a route fail, to see what the data plane does next: retry on the same
+             *     route when its retry policy names the condition, fall back when its fallback policy does,
+             *     otherwise stop. Routes must be in the request's route plan and appear once.
+             */
+            failures?: components["schemas"]["RouteSimulationFailure"][];
             feature: components["schemas"]["Identifier"];
             /** @enum {string} */
             platform: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
@@ -2993,6 +4721,11 @@ export interface components {
                 expanded_schema_bytes: number;
                 /** @description Hypothetical exact adapter framing-unit count used for conservative trusted-input projection. */
                 framing_unit_count?: number;
+                /**
+                 * @description For opaque HTTP features, the request method. Only GET is replayed on routes that don't allow unsafe-method retries; omitted means not GET.
+                 * @enum {string}
+                 */
+                http_method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
                 /** @description Hypothetical exact structured image count used by a hard per-request guard. */
                 image_units?: number;
                 /** @description Bounded untrusted simulation value exposed to CEL as request.estimated_input_tokens; never reservation, quota, accounting, pricing, or context-window authority. */
@@ -3012,6 +4745,7 @@ export interface components {
         RouteSimulationResult: {
             allowed: boolean;
             application_id: components["schemas"]["ApplicationID"];
+            attempt_plan?: components["schemas"]["RouteSimulationAttemptPlan"];
             environment_id: components["schemas"]["EnvironmentID"];
             /** @enum {string} */
             environment_kind: "development" | "staging" | "production";
@@ -3129,6 +4863,20 @@ export interface components {
             responseHeader?: components["schemas"]["Duration"];
             total?: components["schemas"]["Duration"];
         };
+        SecondFactorChallenge: {
+            challenge: string;
+            /** Format: date-time */
+            expires_at: string;
+            methods: ("totp" | "passkey" | "recovery_code")[];
+            /** @constant */
+            status: "two_factor_required";
+        };
+        SecondFactorRequest: {
+            challenge: string;
+            code?: string;
+            passkey?: components["schemas"]["PasskeyAssertion"];
+            recovery_code?: string;
+        };
         SecretID: string;
         SecretMetadata: {
             algorithm: string;
@@ -3222,11 +4970,36 @@ export interface components {
             items: components["schemas"]["SelfTestSchedule"][];
             page: components["schemas"]["PageInfo"];
         };
+        /** @enum {string} */
+        SessionEndReason: "expired" | "signed_out" | "signed_out_elsewhere" | "revoked_by_owner" | "password_reset" | "password_changed" | "organization_switch" | "access_disabled" | "two_factor_reset" | "sso_changed" | "other";
         SessionPolicy: {
             accessTokenTtl?: components["schemas"]["Duration"];
             challengeTtl?: components["schemas"]["Duration"];
             maximumClockSkewSeconds?: number;
             refreshTokenTtl?: components["schemas"]["Duration"];
+        };
+        SignedOutSessions: {
+            signed_out_sessions: number;
+        };
+        SimulationScenario: {
+            application_id: components["schemas"]["ApplicationID"];
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            id: string;
+            input: components["schemas"]["RouteSimulationRequest"];
+            name: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
+            version: number;
+        };
+        SimulationScenarioRequest: {
+            input: components["schemas"]["RouteSimulationRequest"];
+            /** @description Unique in the application; no leading or trailing spaces or line breaks. */
+            name: string;
+            /** @description Required when replacing; the version that was loaded. */
+            version?: number;
         };
         Spec: {
             attestationPolicies: components["schemas"]["AttestationPolicy"][];
@@ -3243,6 +5016,44 @@ export interface components {
             privacy?: components["schemas"]["PrivacyPolicy"];
             session?: components["schemas"]["SessionPolicy"];
             upstreams: components["schemas"]["Upstream"][];
+        };
+        SSOConfiguration: {
+            provider: components["schemas"]["SSOProvider"] | null;
+            /** @description The callback URL to register with the identity provider. */
+            redirect_uri: string;
+        };
+        SSOProvider: {
+            allowed_email_domains: string[];
+            authorization_endpoint: string;
+            client_id: string;
+            /** Format: date-time */
+            created_at: string;
+            enabled: boolean;
+            issuer: string;
+            jwks_uri: string;
+            /** @description Role for accounts created at first sign-in; null when accounts aren't created. */
+            provision_role: ("admin" | "operator" | "viewer") | null;
+            /** @description Members other than owners must sign in with single sign-on. */
+            require_sso: boolean;
+            token_endpoint: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SSOProviderRequest: {
+            allowed_email_domains?: string[];
+            client_id: string;
+            /** @description Required the first time; omit to keep the stored secret. */
+            client_secret?: string;
+            enabled: boolean;
+            issuer: string;
+            provision_role?: ("admin" | "operator" | "viewer") | null;
+            require_sso: boolean;
+        };
+        SSOStart: {
+            authorization_url: string;
+        };
+        SSOStartRequest: {
+            organization_slug: string;
         };
         StartSelfTestRequest: {
             /** @description Exact immutable active revision the server must bind before any provider dispatch. */
@@ -3277,6 +5088,9 @@ export interface components {
             /** @enum {string} */
             source: "admin_api" | "local_cli" | "unknown";
         };
+        SwitchOrganizationRequest: {
+            organization_id: components["schemas"]["OrganizationID"];
+        };
         SystemStatus: {
             /** @constant */
             contract_version: "1.1.0";
@@ -3285,7 +5099,8 @@ export interface components {
             mutation_ready: boolean;
             protocol_versions: [
                 1,
-                2
+                2,
+                3
             ];
             /** @description Full traffic readiness using the exact same dependency evaluation as /readyz. */
             ready: boolean;
@@ -3306,7 +5121,18 @@ export interface components {
                 "opaque_http",
                 "configuration_import_export",
                 "admin_session_management",
-                "admin_event_stream"
+                "admin_event_stream",
+                "admin_account_self_service",
+                "admin_two_factor",
+                "admin_passkeys",
+                "admin_sso",
+                "admin_invitations",
+                "admin_application_roles",
+                "admin_user_insights",
+                "admin_request_search",
+                "admin_configuration_drafts",
+                "admin_policy_insights",
+                "admin_operations_history"
             ];
             server_version: string;
         };
@@ -3318,11 +5144,33 @@ export interface components {
             total?: components["schemas"]["Duration"];
         };
         TokenID: string;
+        TotpCodeRequest: {
+            code: string;
+        };
+        TotpEnrollment: {
+            /** @description Base32 key for manual entry; shown once. */
+            secret: string;
+            /** @description otpauth link with the same key; shown once. */
+            uri: string;
+        };
         /** @enum {string} */
         TrustLevel: "none" | "identity_only" | "web_risk_verified" | "app_verified" | "device_verified" | "strong_device_verified" | "debug";
         TurnstileConfiguration: {
             allowedHostnames: string[];
             expectedAction: string;
+        };
+        TwoFactorRequirement: {
+            required: boolean;
+        };
+        TwoFactorStatus: {
+            /** @description True when an authenticator app or a passkey is set up. */
+            enabled: boolean;
+            passkeys: number;
+            recovery_codes_remaining: number;
+            required_by_organization: boolean;
+            totp_enabled: boolean;
+            /** Format: date-time */
+            totp_enabled_at?: string;
         };
         Upstream: {
             authentication: components["schemas"]["UpstreamAuthentication"];
@@ -3509,6 +5357,48 @@ export interface components {
             output_tokens: number;
             total_tokens: number;
         };
+        UserBatchImpact: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            applicable: number;
+            items: {
+                impact?: components["schemas"]["UserOperationImpact"];
+                /**
+                 * @description Set instead of impact when the user can't be previewed.
+                 * @enum {string}
+                 */
+                outcome?: "not_found";
+                user_id: components["schemas"]["UserID"];
+            }[];
+            totals: components["schemas"]["UserOperationCounts"];
+        };
+        UserBatchImpactRequest: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            user_ids: components["schemas"]["UserID"][];
+        };
+        UserBatchRequest: {
+            /** @constant */
+            acknowledge_immediate_effect: true;
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            items: {
+                impact_token: string;
+                user_id: components["schemas"]["UserID"];
+            }[];
+            reason: string;
+        };
+        UserBatchResult: {
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            done: number;
+            results: {
+                operation_id?: string;
+                /** @enum {string} */
+                outcome: "done" | "changed" | "not_found" | "forbidden" | "failed";
+                user_id: components["schemas"]["UserID"];
+            }[];
+        };
         UserID: string;
         UserLimitOverride: {
             /** Format: date-time */
@@ -3545,10 +5435,65 @@ export interface components {
             operation_id: string;
             user: components["schemas"]["ApplicationUser"];
         };
+        UserOverride: {
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: date-time */
+            expires_at?: string;
+            id: string;
+            limit_plan: components["schemas"]["Identifier"];
+            reason: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+            user_id: components["schemas"]["UserID"];
+        };
         UserOverrideID: string;
+        UserOverridePage: {
+            items: components["schemas"]["UserOverride"][];
+            page: components["schemas"]["PageInfo"];
+        };
         UserPage: {
             items: components["schemas"]["ApplicationUser"][];
             page: components["schemas"]["PageInfo"];
+            total?: components["schemas"]["ListTotal"];
+        };
+        UserUsageDistribution: {
+            /** Format: date-time */
+            end: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            feature?: components["schemas"]["Identifier"];
+            histogram: {
+                from: number;
+                subjects: number;
+                /** @description Exclusive upper bound; omitted for the last bucket. */
+                to?: number;
+            }[];
+            limit_plan?: components["schemas"]["Identifier"];
+            maximum?: number;
+            /** @enum {string} */
+            metric: "logical_requests" | "upstream_attempts" | "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens" | "cache_write_tokens" | "cost_nano_usd";
+            /** @description Subjects whose busiest window exceeded maximum. */
+            over_subjects?: number;
+            over_users?: number;
+            /** @description Each subject's busiest window, summarized. */
+            peaks: {
+                max: number;
+                p50: number;
+                p90: number;
+                p99: number;
+            };
+            periods: number;
+            scope: ("user" | "feature" | "installation")[];
+            /** Format: date-time */
+            start: string;
+            /** @description Distinct scope values with usage in the range. */
+            subjects: number;
+            timezone: string;
+            users: number;
+            window: string;
         };
         ValidationIssue: {
             code: string;
@@ -3583,6 +5528,7 @@ export interface components {
         };
     };
     parameters: {
+        AdminPasskeyID: components["schemas"]["AdminPasskeyID"];
         AdminSessionID: components["schemas"]["AdminSessionID"];
         AdminUserID: components["schemas"]["AdminUserID"];
         ApplicationID: components["schemas"]["ApplicationID"];
@@ -3599,7 +5545,9 @@ export interface components {
         InstallationFamilyFilter: components["schemas"]["InstallationFamilyID"];
         InstallationFamilyID: components["schemas"]["InstallationFamilyID"];
         InstallationID: components["schemas"]["InstallationID"];
+        InvitationID: components["schemas"]["InvitationID"];
         OrganizationFilter: components["schemas"]["OrganizationID"];
+        OrganizationIDPath: components["schemas"]["OrganizationID"];
         PageSize: number;
         RequestResourceID: components["schemas"]["RequestID"];
         RevisionID: components["schemas"]["RevisionID"];
@@ -3724,6 +5672,63 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    setApplicationRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description The application role. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRoleGrant"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeApplicationRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     disableAdministrator: {
         parameters: {
             query?: never;
@@ -3808,6 +5813,32 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    resetAdministratorTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminUserId: components["parameters"]["AdminUserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Second factor removed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Administrator"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     changeAdministratorRole: {
         parameters: {
             query?: never;
@@ -3841,7 +5872,9 @@ export interface operations {
     };
     listAdminApiTokens: {
         parameters: {
-            query?: never;
+            query?: {
+                scope?: "organization";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3915,6 +5948,27 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    listApplicationRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Application roles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRoleList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     listApplications: {
         parameters: {
             query?: {
@@ -3958,6 +6012,36 @@ export interface operations {
         responses: {
             /** @description Application created. */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renameApplication: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed application. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4079,6 +6163,62 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    listSimulationScenarios: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved scenarios. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SimulationScenario"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createSimulationScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                applicationId: components["parameters"]["ApplicationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved scenario. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationScenario"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     listAuditEvents: {
         parameters: {
             query?: {
@@ -4170,6 +6310,110 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getAdminSignInInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pre-authentication sign-in information. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInInfo"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    claimInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The joined organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimedInvitation"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreview"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     adminLogin: {
         parameters: {
             query?: never;
@@ -4194,8 +6438,73 @@ export interface operations {
                     "application/json": components["schemas"]["AdminSession"];
                 };
             };
+            /** @description Password accepted; a second factor is required. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecondFactorChallenge"];
+                };
+            };
             401: components["responses"]["Problem"];
             429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminLoginSecondFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecondFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminLoginPasskeyOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyOptionsForSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description WebAuthn request options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyRequestOptions"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -4221,6 +6530,223 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    switchAdminOrganization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Session for the chosen organization. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listOwnPasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Passkeys, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    addOwnPasskey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Passkey registered. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedPasskey"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeOwnPasskey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminPasskeyId: components["parameters"]["AdminPasskeyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordConfirmation"];
+            };
+        };
+        responses: {
+            /** @description Passkey removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    startPasskeyRegistration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordConfirmation"];
+            };
+        };
+        responses: {
+            /** @description WebAuthn creation options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyCreationOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminPasskeySignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeySignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated administrator session. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    "X-CSRF-Token": components["headers"]["CSRFToken"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    adminPasskeySignInOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebAuthn request options. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyRequestOptions"];
+                };
+            };
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    changeOwnAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeOwnPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Password changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getAdminSession: {
         parameters: {
             query?: never;
@@ -4237,6 +6763,259 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSession"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listOwnAdminSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Own sessions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnAdminSessionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeOwnAdminSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                adminSessionId: components["parameters"]["AdminSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session signed out; signing out the current session also clears its cookie. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeOtherOwnAdminSessions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions signed out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedOutSessions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    finishAdminSSO: {
+        parameters: {
+            query?: {
+                code?: string;
+                error?: string;
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Back to the console, signed in or with a reason. */
+            303: {
+                headers: {
+                    Location?: string;
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    startAdminSSO: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Where to send the browser. */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOStart"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getOwnTwoFactorStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Second-factor status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    disableOwnTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisableTwoFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticator removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    replaceRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryCodesRequest"];
+            };
+        };
+        responses: {
+            /** @description New recovery codes, shown once; earlier codes stop working. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startTotpEnrollment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment key, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TotpEnrollment"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmTotpEnrollment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Two-factor sign-in is on; ten single-use recovery codes, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4286,6 +7065,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientComponent"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getClientComponentImpact: {
+        parameters: {
+            query: {
+                action: "revoke" | "require_reattestation";
+            };
+            header?: never;
+            path: {
+                componentId: components["parameters"]["ClientComponentID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The impact; nothing changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationImpact"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4422,7 +7226,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ActivateConfigurationRequest"];
+            };
+        };
         responses: {
             /** @description Activated revision. */
             200: {
@@ -4435,6 +7243,59 @@ export interface operations {
             };
             412: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    discardConfigurationRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discarded revision. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevision"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listConfigurationRevisionEdits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Edit history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevisionEdits"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };
@@ -4459,6 +7320,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigurationPlan"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    rebaseConfigurationRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebaseConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description Rebased draft. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationRevision"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewConfigurationRebase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merge preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationMergePreview"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4494,6 +7413,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    simulateConfigurationRevisionBatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                revisionId: components["parameters"]["RevisionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteSimulationBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description One item per request, in order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteSimulationBatchResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     validateConfigurationRevision: {
         parameters: {
             query?: never;
@@ -4515,6 +7464,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidationReport"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renameEnvironment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                environmentId: components["parameters"]["EnvironmentID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed environment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Environment"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4599,6 +7578,39 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigurationRevision"];
                 };
             };
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    promoteConfiguration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                environmentId: components["parameters"]["EnvironmentID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description Promoted draft and where each part came from. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationPromotion"];
+                };
+            };
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
@@ -4723,7 +7735,12 @@ export interface operations {
             query: {
                 cursor?: components["parameters"]["Cursor"];
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                include_total?: "true";
                 page_size?: components["parameters"]["PageSize"];
+                platform?: components["schemas"]["ClientPlatform"];
+                signal?: "any" | "debug_trust" | "trust_expiring" | "token_reuse" | "weak_key_storage" | "failed_sessions";
+                sort?: "oldest" | "newest" | "recently_seen";
+                status?: "active" | "suspended" | "revoked";
                 user_id?: components["parameters"]["ApplicationUserFilter"];
             };
             header?: never;
@@ -4762,6 +7779,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstallationFamily"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getInstallationFamilyImpact: {
+        parameters: {
+            query: {
+                action: "revoke" | "require_renewal";
+            };
+            header?: never;
+            path: {
+                familyId: components["parameters"]["InstallationFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The impact; nothing changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationImpact"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4959,9 +8001,260 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    renameOrganization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["schemas"]["OrganizationID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitations and whether this server can email them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation and its link, shown once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationLink"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    renewInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                invitationId: components["parameters"]["InvitationID"];
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenewInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description The invitation and its new link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationLink"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeInvitation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                invitationId: components["parameters"]["InvitationID"];
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked invitation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Single sign-on configuration; `provider` is null until one is set up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOConfiguration"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    putOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOConfiguration"];
+                };
+            };
+            422: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    removeOrganizationSSO: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setOrganizationTwoFactorRequirement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                organizationId: components["parameters"]["OrganizationIDPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorRequirement"];
+            };
+        };
+        responses: {
+            /** @description Requirement saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorRequirement"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     listLogicalRequests: {
         parameters: {
             query: {
+                client_request_id?: components["schemas"]["ClientRequestID"];
                 component_kind?: components["schemas"]["Identifier"];
                 cost_max_nano_usd?: number;
                 cost_min_nano_usd?: number;
@@ -4972,6 +8265,7 @@ export interface operations {
                 /** @description Matches a stable registered problem code, a public upstream-failure category, or `unknown`. */
                 error_code?: string;
                 feature?: components["schemas"]["Identifier"];
+                include_total?: "true";
                 latency_max_ms?: number;
                 latency_min_ms?: number;
                 /** @description Matches the configured model key or exact redaction-safe physical-model identifier. */
@@ -5049,6 +8343,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EffectiveConfiguration"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getRequestFacets: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                /** @description Count only requests for this feature, for example to see how its limit-plan rules split traffic. */
+                feature?: components["schemas"]["Identifier"];
+                limit?: number;
+                start: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request counts by value. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestFacets"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -5264,6 +8586,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    listSelfTests: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                page_size?: components["parameters"]["PageSize"];
+                schedule_id?: string;
+                state?: "queued" | "running" | "passed" | "failed" | "canceled";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Self-test run page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SelfTestRun"][];
+                        page: components["schemas"]["PageInfo"];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     startSelfTest: {
         parameters: {
             query?: never;
@@ -5317,6 +8669,64 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    replaceSimulationScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Replaced scenario with the next version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationScenario"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteSimulationScenario: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getSystemStatus: {
         parameters: {
             query?: never;
@@ -5359,6 +8769,30 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getSystemHealthHistory: {
+        parameters: {
+            query?: {
+                end?: string;
+                start?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Health samples, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthHistory"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     downloadSystemSupportBundle: {
         parameters: {
             query?: never;
@@ -5376,6 +8810,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SupportBundle"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getConnectionHealth: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                interval?: "hour" | "day";
+                start: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-connection health. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionHealth"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getUsageDistribution: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                feature?: components["schemas"]["Identifier"];
+                /** @description Only requests that selected this limit plan. */
+                limit_plan?: components["schemas"]["Identifier"];
+                maximum?: number;
+                metric: "logical_requests" | "upstream_attempts" | "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens" | "cache_write_tokens" | "cost_nano_usd";
+                /** @description Comma-separated, from user, feature and installation. Defaults to user. */
+                scope?: string;
+                start: string;
+                timezone?: string;
+                window: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage distribution. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserUsageDistribution"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -5434,12 +8928,48 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    listApplicationUsers: {
+    listUserOverrides: {
         parameters: {
             query: {
                 cursor?: components["parameters"]["Cursor"];
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                limit_plan?: components["schemas"]["Identifier"];
                 page_size?: components["parameters"]["PageSize"];
+                status?: "active" | "ended";
+                user_id?: components["schemas"]["UserID"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOverridePage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listApplicationUsers: {
+        parameters: {
+            query: {
+                claim?: string;
+                cursor?: components["parameters"]["Cursor"];
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                /** @description Only users with an active limit-plan override. */
+                has_override?: "true";
+                include_total?: "true";
+                page_size?: components["parameters"]["PageSize"];
+                /** @description Only users linked through this identity provider. */
+                provider?: string;
+                sort?: "oldest" | "newest" | "recently_seen";
+                status?: "active" | "blocked";
             };
             header?: never;
             path?: never;
@@ -5734,6 +9264,93 @@ export interface operations {
                 };
             };
             409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getApplicationUserUsage: {
+        parameters: {
+            query: {
+                end: string;
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                start: string;
+            };
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user's usage. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationUserUsage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    applyApplicationUserBatch: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-user outcomes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBatchResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewApplicationUserBatch: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserBatchImpactRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-user impacts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBatchImpact"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };
