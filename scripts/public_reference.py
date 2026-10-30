@@ -1193,7 +1193,7 @@ def render_all() -> Mapping[Path, str]:
                 ) + "</Warning>\n" + body
             documents[path] = content
     # Admin bundle editions ship with a server release while the client contract stays 1.1.0.
-    admin_edition_servers = {"1.1.2": ("1.1.3", "2026-09-10"), "1.1.3": ("1.2.0", "2026-10-08")}
+    admin_edition_servers = {"1.1.2": ("1.1.3", "2026-09-10"), "1.1.3": ("1.2.0", "2026-10-30")}
     if protocol["contract_version"] in admin_edition_servers and client_contract_version == "1.1.0":
         server_version, verified = admin_edition_servers[protocol["contract_version"]]
         for path in (ADMIN_OUTPUT, CONFIG_OUTPUT):

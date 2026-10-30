@@ -4,6 +4,8 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-30
+
 ### Added
 
 - Administrator account self-service (ADR 0040, Admin bundle edition 1.1.3,
@@ -68,6 +70,15 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Changed
 
+- Database schema 42 (forward-only migrations 34 to 42) and Admin contract
+  bundle edition 1.1.3. A 1.1.x server can't start on schema 42; rolling back
+  means restoring the pre-upgrade backup. Client contract 1.1.0, wire 1/2/3 and
+  the SDKs are unchanged.
+- Upgrade the CLI together with the server: 1.1.x CLIs reject the response
+  fields 1.2.0 adds to configuration revisions, the session check, and
+  requests that recorded a platform or client request ID.
+- Analytics moved to `/usage`, `/cost`, `/performance` and `/reliability`;
+  links to `/latency`, `/errors` and `/attestation-failures` still redirect.
 - The CLI's session check accepts the `two_factor_enrollment_required`,
   `sign_in_method` and `application_roles` fields the server sends.
 - An owner's password reset now also works for accounts created by single
