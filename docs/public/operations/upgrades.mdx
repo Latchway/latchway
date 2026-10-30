@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-09-08"
+lastVerified: "2026-10-30"
 owner: "core-operations"
 ---
 
@@ -126,6 +126,36 @@ Recovering schema `29` requires a pre-30 backup/PITR restore into a fresh databa
 with the matching old image and master key. This affects every application in
 the database and may lose writes after the recovery point. Never delete migration
 ledger rows, manually drop the new column, or relax readiness to fake compatibility.
+
+## Schema 42: Server 1.2.0
+
+Server 1.2.0 bundles migrations `34` through `42`. They add administrator
+sign-in, invitation and role tables, configuration draft history, saved
+simulation scenarios and health samples, and widen two status checks. They
+don't touch request, usage or quota tables, so they finish quickly.
+
+<Warning>
+  A 1.1.x binary becomes unready as soon as migration `34` commits. Keeping the
+  1.1.7 image is not enough to roll back; recovering needs the pre-upgrade
+  backup.
+</Warning>
+
+For this transition:
+
+1. Back up PostgreSQL and preserve the 1.1.7 image, master key, public origin
+   and database URL.
+2. Remove application traffic and stop the old gateway and workers.
+3. Run the 1.2.0 image's migration once with `LATCHWAY_MIGRATE_ON_START=false`
+   on the app, then check `latchway --output json migrate status` reports
+   current and available schema `42` with `up_to_date: true`.
+4. Start the 1.2.0 application and at least one worker, check doctor and
+   readiness, then restore traffic.
+5. Replace operator CLIs with 1.2.0. CLIs from 1.1.x reject the new response
+   fields on configuration revisions, the session check and requests.
+
+Invitation email is optional and needs `LATCHWAY_SMTP_*`; without it, owners
+copy invitation links. Recovering schema `33` requires restoring the
+pre-upgrade backup into a fresh database with the 1.1.7 image.
 
 ## Schema recovery
 

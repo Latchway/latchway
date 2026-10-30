@@ -6,6 +6,23 @@ public packages, live providers, physical devices, or production support.
 
 ## Contract boundary
 
+### Server 1.2.0 redesigned console and Admin edition 1.1.3
+
+Admin contract bundle edition 1.1.3 is released with server 1.2.0. Client
+contract 1.1.0, wire versions 1/2/3 and the SDKs' frozen 1.1.0 bundles are
+unchanged. Schema 42 is required; migrations 34 to 42 are forward-only, so a
+1.1.x binary is unready on a migrated database and rollback means restoring the
+pre-upgrade backup. The eleven new Admin capabilities are optional: the
+embedded console labels what an older server lacks rather than failing.
+
+The Admin additions are additive in the contract, but CLIs released before 1.2.0
+decode responses strictly and reject unknown fields. Against a 1.2.0 server,
+1.1.x CLIs fail on configuration revisions, the session check, and requests
+that recorded a platform or client request ID; upgrade the CLI with the server.
+Environment mutation responses deliberately omit `active_revision_id` so that
+1.1.x environment enable and disable commands keep working. See
+[the release notes](../release/v1.2.0.md).
+
 ### Server 1.1.7 redaction-safe failure visibility
 
 Every Client API problem response now has a matching structured diagnostic with

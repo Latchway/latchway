@@ -1,6 +1,15 @@
 # Implementation status
 
-Status date: 2026-10-08
+Status date: 2026-10-30
+
+## Server 1.2.0 release preparation (branch `release-1.2.0`)
+
+The console redesign (#34) and Admin API completion (#35) are merged to `main`.
+Server version 1.2.0 is set in the build metadata, `Dockerfile`, `Makefile` and
+release workflow; Admin contract bundle edition 1.1.3 is marked released; the
+changelog, release notes, compatibility ledger and upgrade guide cover schema 42
+and the requirement to upgrade the CLI with the server. Publishing the image and
+GitHub release, the rollout and the release-status page follow.
 
 ## Console completion: public console guide (branch `console-api-completion`, unreleased)
 
