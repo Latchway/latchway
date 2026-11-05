@@ -10,7 +10,7 @@ COPY api/admin.openapi.yaml api/client.openapi.yaml api/config.schema.json /src/
 COPY web/console/ ./
 RUN pnpm exec vite build
 
-FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS go-build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS go-build
 RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.mod go.sum ./
